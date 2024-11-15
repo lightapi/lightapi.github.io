@@ -1,0 +1,348 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Light Portal Documentation</title>
+        <meta name="robots" content="noindex">
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Light Portal Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="introduction"><a class="header" href="#introduction">Introduction</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="architecture"><a class="header" href="#architecture">Architecture</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="design"><a class="header" href="#design">Design</a></h1>
+<p>Light Portal is an application that connect the providers to the consumers, and it contains many components or applications. Each component will have some API endpoints and a user interface in the portal view single page application.</p>
+<p>To allow the users to understand each component in detail in term of design, we have collected all the design documents in this section.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="authentication--authorization"><a class="header" href="#authentication--authorization">Authentication &amp; Authorization</a></h1>
+<p>Light-Portal is an single page application and it uses both OAuth 2.0 Authorization Code and Client Credentials flows.</p>
+<p>The below pattern depicts the end-to-end flow recommended by the Light Platform when SPA calls downstream APIs.</p>
+<h3 id="sequence-diagram"><a class="header" href="#sequence-diagram">Sequence Diagram</a></h3>
+<pre><code>@startuml
+participant "Portal View" as PortalView
+participant "Login View" as LoginView
+participant "Light Gateway" as Gateway
+participant "OAuth-Kafka" as OAuthKafka
+participant "Auth Service" as AuthService
+participant "Backend API" as BackendAPI
+
+PortalView -&gt; LoginView: 1. Signin redirect
+LoginView -&gt; OAuthKafka: 2. Authenticate user
+OAuthKafka -&gt; AuthService: 3. Authenticate User\n(Active Directory\nfor Employees)\n(CIF System\nfor Customers)
+AuthService -&gt; OAuthKafka: 4. Authenticated
+OAuthKafka -&gt; OAuthKafka: 5. Generate auth code
+OAuthKafka -&gt; PortalView: 6. Redirect with code
+PortalView -&gt; Gateway: 7. Authorization URL \nwith code param
+Gateway -&gt; OAuthKafka: 8. Create JWT access \ntoken with code
+OAuthKafka -&gt; OAuthKafka: 9. Generate JWT \naccess token \nwith user claims
+OAuthKafka -&gt; Gateway: 10. Token returns \nto Gateway
+Gateway -&gt; PortalView: 11. Token returns \nto Portal View \nin Secure Cookie
+PortalView -&gt; Gateway: 12. Call Backend API
+Gateway -&gt; Gateway: 13. Verify the token
+Gateway -&gt; OAuthKafka: 14. Create Client \nCredentials token
+OAuthKafka -&gt; OAuthKafka: 15. Generate Token \nwith Scopes
+OAuthKafka -&gt; Gateway: 16. Return the \scope token
+Gateway -&gt; Gateway: 17. Add scope \ntoken to \nX-Scope-Token \nHeader
+Gateway -&gt; BackendAPI: 18. Invoke API
+BackendAPI -&gt; BackendAPI: 19. Verify \nAuthorization \ntoken
+BackendAPI -&gt; BackendAPI: 20. Verify \nX-Scope-Token
+BackendAPI -&gt; Gateway: 21. Return response
+Gateway -&gt; PortalView: 22. Return response
+
+@enduml
+</code></pre>
+<p><img src="design/authentication-sequence.png" alt="Sequence Diagram" /></p>
+<ol>
+<li>
+<p>When a user hit the website to access the single page application, the Light Gateway will serve the single page application on users browser. By default, the user is not logged in and he/she can only access limited features on the site. If the user want to access more features, he/she can click the user button on the header and click sign in menu. This will allow the browser to redirect from the Portal View to Login View which is served by the same instance of Light Gateway.</p>
+</li>
+<li>
+<p>On the Login View site, he/she can input the username/password or choose Google/Facebook for authentication. Once the Signin form is submitted, the request goes to the Light Gateway with user credentials. The Light Gateway will route the request to the OAuth Kafka service.</p>
+</li>
+<li>
+<p>OAuth Kafka has many Authenticator implementations that can be used to authenticate the user credential. For example, use the Light Portal user database to authenticate, use Active Directory to authenticate employees or use CIF service to authenticate customers.</p>
+</li>
+<li>
+<p>Once authentication is completed successfully, it will response to the OAuth Kafka with the authentication result.</p>
+</li>
+<li>
+<p>Upon successful authentication, OAuth Kafka will generate an authorization code which is a UUID associated to the user profile.</p>
+</li>
+<li>
+<p>OAuth Kafka redirect the authorization code to the Portal View browser through Gateway.</p>
+</li>
+<li>
+<p>The Portal View single page application doesn't have this redirct route, so that request will be sent to the Gateway with the code as a query parameter.</p>
+</li>
+<li>
+<p>The StatelessAuthHandler on the Gateway will handle the request and send a token request to the OAuth Kafka to get a JWT access token.</p>
+</li>
+<li>
+<p>OAuth Kafka will generate an access token with user claims in the JWT custom claims and drop the code as it is used only once.</p>
+</li>
+<li>
+<p>The authorization code token is returned to the Gateway.</p>
+</li>
+<li>
+<p>The StatelessAuthHandler on the Gateway will put the token into a secure cookie and send to the Portal View.</p>
+</li>
+<li>
+<p>When Portal View access one of the Backend APIs, it sends the API request to the Gateway with the cookies.</p>
+</li>
+<li>
+<p>The StatelessAuthHandler on the Gateway will verify the token in the secure cookie and put it into the Authorization header of the request.</p>
+</li>
+<li>
+<p>Once the token is verified successfully, the TokenHandler on the Gateway will issue a token request to get a client credentials token to the OAuth Kafka based on the path prefix of the API endpoint.</p>
+</li>
+<li>
+<p>OAuth Kafka generate a client credentials token with the scope that can access the downstream service.</p>
+</li>
+<li>
+<p>The client credentials token is returned to the Gateway.</p>
+</li>
+<li>
+<p>The TokenHandler on the Gateway will put this token into X-Scope-Token header of the original request.</p>
+</li>
+<li>
+<p>The Gateway router the original request to the downstream Backend API.</p>
+</li>
+<li>
+<p>The Backend API will verify the Authorization token for the signature and expiration etc.</p>
+</li>
+<li>
+<p>The Backend API will verify the X-Scope-Token for signature, expiration and scope etc.</p>
+</li>
+<li>
+<p>The Backend API retuns the response once both tokens are verified.</p>
+</li>
+<li>
+<p>The response returns to the Portal View to render the page.</p>
+</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="fine-grained-authorization"><a class="header" href="#fine-grained-authorization">Fine-Grained Authorization</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="json-schema-registry"><a class="header" href="#json-schema-registry">JSON Schema Registry</a></h1>
+<p>JSON Schema is a declarative language that provides a standardized way to describe and validate JSON data.</p>
+<h3 id="what-it-does"><a class="header" href="#what-it-does">What it does</a></h3>
+<p>JSON Schema defines the structure, content, data types, and constraints of JSON documents. It's an IETF standard that helps ensure the consistency and integrity of JSON data across applications.</p>
+<h3 id="how-it-works"><a class="header" href="#how-it-works">How it works</a></h3>
+<p>JSON Schema uses keywords to define data properties. A JSON Schema validator checks if JSON documents conform to the schema.</p>
+<h3 id="what-its-useful-for"><a class="header" href="#what-its-useful-for">What it's useful for</a></h3>
+<ul>
+<li>Describing existing data formats</li>
+<li>Validating data as part of automated testing</li>
+<li>Submitting client data</li>
+<li>Defining how a record should be organized</li>
+</ul>
+<h3 id="what-is-a-json-schema-registry"><a class="header" href="#what-is-a-json-schema-registry">What is a JSON Schema Registry</a></h3>
+<p>The JSON Schema Registry provides a centralized service for your JSON schemas with RESTful endpoints for storing and retrieving JSON schemas.</p>
+<p>When using data in a distributed application with many RESTful APIs, it is important to ensure that it is well-formed and structured. If data is sent without prior validation, errors may occur on the services. A schema registry provides a way to ensure that the data is validated before it is sent and validated after it is received.</p>
+<p>A schema registry is a service used to define and confirm the structure of data that is sent between consumers and providers. In a schema registry, developers can define what the data should look like and how it should be validated. The schemas can be utilized in the OpenAPI specifications to ensure that schemas can be externalized.</p>
+<p>Schema records can also help ensure forward and backward compatibility when changes are made to the data structure. When a schema record is used, the data transfered with more schema information that can be used to ensure that applications reading the data can interpret it.</p>
+<p>Given the API consumers and providers can belong to different groups or organizations, it is necessary to have a centralized service to manage the schemas so that they can be shared between them. This is why we have implemented this service as part of the light-portal.</p>
+<h3 id="schema-specification-version"><a class="header" href="#schema-specification-version">Schema Specification Version</a></h3>
+<p>The registry is heterogeneous registry as it can store schemas of different schema draft versions. By default the registry is configured to store schemas of Draft 2020-12. When a schema is added, the version which is currently is set, is what the schema is saved as.</p>
+<p>The following list contains all supported specification versions.</p>
+<ul>
+<li>Draft 4</li>
+<li>Draft 6</li>
+<li>Draft 7</li>
+<li>2019-09</li>
+<li>2020-12</li>
+</ul>
+<h3 id="schema-version"><a class="header" href="#schema-version">Schema Version</a></h3>
+<p>Once a schema is registed into the registry, it will be assigned as version 1. Each time it is updated, the version number will increase 1. When the schema is retrieve, the version number can be part of the URL to indicate that exact version will be retrieved. If version number is not in the URL, the latest version will be retrieved.</p>
+<h3 id="access-endpoint"><a class="header" href="#access-endpoint">Access Endpoint</a></h3>
+<h3 id="table-structure"><a class="header" href="#table-structure">Table Structure</a></h3>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="light-controller"><a class="header" href="#light-controller">Light Controller</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="yaml-rule-registry"><a class="header" href="#yaml-rule-registry">YAML Rule Registry</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="chapter-1"><a class="header" href="#chapter-1">Chapter 1</a></h1>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+        <script>
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+
+    </div>
+    </body>
+</html>
