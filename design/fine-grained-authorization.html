@@ -181,7 +181,74 @@
 </ul>
 <h2 id="fine-grained-authorization-in-api-access-control"><a class="header" href="#fine-grained-authorization-in-api-access-control">Fine-Grained Authorization in API Access Control</a></h2>
 <p>In API access control, fine-grained authorization governs how users or systems interact with specific API endpoints, actions, and data. This approach ensures that access permissions are precisely tailored to attributes, roles, and contextual factors, enabling a secure and customized API experience. As the Light Portal is a platform centered on APIs, the remainder of the design will focus on the API access control context.</p>
-<h2 id="requirements"><a class="header" href="#requirements">Requirements</a></h2>
+<h2 id="early-approaches-to-fine-grained-authorization"><a class="header" href="#early-approaches-to-fine-grained-authorization">Early Approaches to Fine Grained Authorization</a></h2>
+<p>Early approaches to fine grained authorization primarily involved Access Control Lists (ACLs) and Role-Based Access Control (RBAC). These methods laid the foundation for more sophisticated access control mechanisms that followed. Here's an overview of these primary approaches:</p>
+<h3 id="access-control-lists-acls"><a class="header" href="#access-control-lists-acls">Access Control Lists (ACLs):</a></h3>
+<ul>
+<li>
+<p>ACLs were one of the earliest forms of fine grained authorization, allowing administrators to specify access permissions on individual resources for each user or group of users.</p>
+</li>
+<li>
+<p>In ACLs, permissions are directly assigned to users or groups, granting or denying access to specific resources based on their identities.</p>
+</li>
+<li>
+<p>While effective for small-scale environments with limited resources and users, ACLs became cumbersome as organizations grew. Maintenance issues arose, such as the time required to manage access to an increasing number of resources for numerous users.</p>
+</li>
+</ul>
+<h3 id="role-based-access-control-rbac"><a class="header" href="#role-based-access-control-rbac">Role-Based Access Control (RBAC):</a></h3>
+<ul>
+<li>
+<p>RBAC emerged as a solution to the scalability and maintenance challenges posed by ACLs. It introduced the concept of roles, which represent sets of permissions associated with particular job functions or responsibilities.</p>
+</li>
+<li>
+<p>Users are assigned one or more roles, and their access permissions are determined by the roles they possess rather than their individual identities.</p>
+</li>
+<li>
+<p>RBAC can be implemented with varying degrees of granularity. Roles can be coarse-grained, providing broad access privileges, or fine-grained, offering more specific and nuanced permissions based on organizational needs.</p>
+</li>
+<li>
+<p>Initially, RBAC appeared to address the limitations of ACLs by providing a more scalable and manageable approach to access control.</p>
+</li>
+</ul>
+<h3 id="both-acls-and-rbac-have-their-shortcomings"><a class="header" href="#both-acls-and-rbac-have-their-shortcomings">Both ACLs and RBAC have their shortcomings:</a></h3>
+<ul>
+<li>
+<p>Maintenance Challenges: While RBAC offered improved scalability compared to ACLs, it still faced challenges with role management as organizations expanded. The proliferation of roles, especially fine grained ones, led to a phenomenon known as <strong>role explosion</strong> where the number of roles grew rapidly, making them difficult to manage effectively.</p>
+</li>
+<li>
+<p>Security Risks: RBAC's flexibility also posed security risks. Over time, users might accumulate permissions beyond what they need for their current roles, leading to a phenomenon known as <strong>permission creep</strong>. This weakened overall security controls and increased the risk of unauthorized access or privilege misuse.</p>
+</li>
+</ul>
+<p>Following the discussion of early approaches to fine grained authorization, it's crucial to acknowledge that different applications have varying needs for authorization.</p>
+<p>Whether to use fine grained or coarse-grained controls depends on the specific project. Controlling access becomes trickier due to the spread-out nature of resources and differing levels of detail needed across components. Let’s delve into the differentiating factors:</p>
+<h2 id="standard-models-for-implementing-fga"><a class="header" href="#standard-models-for-implementing-fga">Standard Models for Implementing FGA</a></h2>
+<p>There are several standard models for implementing FGA:</p>
+<ul>
+<li>
+<p><code>Attribute-Based Access Control (ABAC)</code>: In <a href="https://en.wikipedia.org/wiki/Attribute-based_access_control">ABAC</a>, access control decisions are made by evaluating attributes such as user roles, resource attributes (e.g., type, size, status), requested action, current date and time, and any other relevant contextual information. ABAC allows for very granular control over access based on a wide range of attributes.</p>
+</li>
+<li>
+<p><code>Policy-Based Access Control (PBAC)</code>: <a href="https://www.nextlabs.com/what-is-policy-based-access-control/">PBAC</a> is similar to ABAC but focuses more on defining policies than directly evaluating attributes. Policies in PBAC typically consist of rules or logic that dictate access control decisions based on various contextual factors. While ABAC relies heavily on data (attributes), PBAC emphasizes using logic to determine access.</p>
+</li>
+<li>
+<p>Relationship-Based Access Control (ReBAC): <a href="https://en.wikipedia.org/wiki/Relationship-based_access_control">ReBAC</a> emphasizes the relationships between users and resources, as well as relationships between different resources. By considering these relationships, ReBAC provides a powerful and expressive model for describing complex authorization contexts. This can involve the attributes of users and resources and their interactions and dependencies.</p>
+</li>
+</ul>
+<p>Each of these models offers different strengths and may be more suitable for different scenarios. FGA allows for fine grained control over access, enabling organizations to enforce highly specific access policies tailored to their requirements.</p>
+<h2 id="streamlining-fga-by-implementing-rule-based-access-control"><a class="header" href="#streamlining-fga-by-implementing-rule-based-access-control">Streamlining FGA by Implementing Rule-Based Access Control:</a></h2>
+<p>ABAC (Attribute-Based Access Control) focuses on data attributes, PBAC (Policy-Based Access Control) centers on logic, and ReBAC (Relationship-Based Access Control) emphasizes relationships between users and resources. But what if we combined all three to leverage the strengths of each? This is the idea behind <strong>Rule-Based Access Control (RBAC)</strong>.</p>
+<p>By embedding a lightweight rule engine, we can integrate multiple rules and actions to achieve the following:</p>
+<ul>
+<li>
+<p><strong>Optimize ABAC</strong>: Reduce the number of required attributes since not all rules depend on them. For example, a standard rule like <em>"Customer data can only be accessed during working hours"</em> can be shared across policies.</p>
+</li>
+<li>
+<p><strong>Flexible Policy Enforcement</strong>: Using a rule engine makes access policies more dynamic and simpler to manage.</p>
+</li>
+<li>
+<p><strong>Infer Relationships</strong>: Automatically deduce relationships between entities. For instance, the rule engine could grant a user access to a file if they already have permission for the containing folder.</p>
+</li>
+</ul>
 
                     </main>
 
@@ -229,6 +296,8 @@
         <script src="../book.js"></script>
 
         <!-- Custom JS scripts -->
+        <script src="../mermaid.min.js"></script>
+        <script src="../mermaid-init.js"></script>
 
 
     </div>

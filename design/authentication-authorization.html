@@ -157,7 +157,7 @@
 <p>The following pattern illustrates the end-to-end process recommended by the Light Platform for an SPA interacting with downstream APIs.</p>
 <h3 id="sequence-diagram"><a class="header" href="#sequence-diagram">Sequence Diagram</a></h3>
 <p>The following is the raw data that can be used to render the diagram in http://www.plantuml.com</p>
-<pre><code>@startuml
+<pre><code class="language-plantuml">@startuml
 participant "Portal View" as PortalView
 participant "Login View" as LoginView
 participant "Light Gateway" as Gateway
@@ -195,10 +195,48 @@ Gateway -&gt; PortalView: 26. Return response
 
 @enduml
 </code></pre>
+<p>Mermaid</p>
+<pre class="mermaid">sequenceDiagram
+    participant PortalView as Portal View
+    participant LoginView as Login View
+    participant Gateway as Light Gateway
+    participant OAuthKafka as OAuth-Kafka
+    participant AuthService as Auth Service
+    participant ProxySidecar as Proxy Sidecar
+    participant BackendAPI as Backend API
+
+    PortalView -&gt;&gt; LoginView: 1. Signin redirect
+    LoginView -&gt;&gt; OAuthKafka: 2. Authenticate user
+    OAuthKafka -&gt;&gt; AuthService: 3. Authenticate User&lt;br/&gt;(Active Directory&lt;br/&gt;for Employees)&lt;br/&gt;(CIF System&lt;br/&gt;for Customers)
+    AuthService -&gt;&gt; OAuthKafka: 4. Authenticated
+    OAuthKafka -&gt;&gt; OAuthKafka: 5. Generate auth code
+    OAuthKafka -&gt;&gt; PortalView: 6. Redirect with code
+    PortalView -&gt;&gt; Gateway: 7. Authorization URL&lt;br/&gt;with code param
+    Gateway -&gt;&gt; OAuthKafka: 8. Create JWT access&lt;br/&gt;token with code
+    OAuthKafka -&gt;&gt; OAuthKafka: 9. Generate JWT&lt;br/&gt;access token&lt;br/&gt;with user claims
+    OAuthKafka -&gt;&gt; Gateway: 10. Token returns&lt;br/&gt;to Gateway
+    Gateway -&gt;&gt; PortalView: 11. Token returns&lt;br/&gt;to Portal View&lt;br/&gt;in Secure Cookie
+    PortalView -&gt;&gt; Gateway: 12. Call Backend API
+    Gateway -&gt;&gt; Gateway: 13. Verify the token
+    Gateway -&gt;&gt; OAuthKafka: 14. Create Client&lt;br/&gt;Credentials token
+    OAuthKafka -&gt;&gt; OAuthKafka: 15. Generate Token&lt;br/&gt;with Scopes
+    OAuthKafka -&gt;&gt; Gateway: 16. Return the&lt;br/&gt;scope token
+    Gateway -&gt;&gt; Gateway: 17. Add scope&lt;br/&gt;token to&lt;br/&gt;X-Scope-Token&lt;br/&gt;Header
+    Gateway -&gt;&gt; ProxySidecar: 18. Invoke API
+    ProxySidecar -&gt;&gt; ProxySidecar: 19. Verify&lt;br/&gt;Authorization&lt;br/&gt;token
+    ProxySidecar -&gt;&gt; ProxySidecar: 20. Verify&lt;br/&gt;X-Scope-Token
+    ProxySidecar -&gt;&gt; ProxySidecar: 21. Fine-Grained&lt;br/&gt;Authorization
+    ProxySidecar -&gt;&gt; BackendAPI: 22. Invoke&lt;br/&gt;business API
+    BackendAPI -&gt;&gt; ProxySidecar: 23. Business API&lt;br/&gt;response
+    ProxySidecar -&gt;&gt; ProxySidecar: 24. Fine-Grained&lt;br/&gt;response filter
+    ProxySidecar -&gt;&gt; Gateway: 25. Return response
+    Gateway -&gt;&gt; PortalView: 26. Return response
+
+</pre>
 <p><img src="authentication-sequence.png" alt="Sequence Diagram" /></p>
 <ol>
 <li>
-<p>When a user visits the website to access the single-page application (SPA), the Light Gateway serves the SPA to the user's browser. By default, the user is not logged in and can only access limited site features. To unlock additional features, the user can click the <strong>User</strong> button in the header and select the <strong>Sign In</strong> menu. This action redirects the browser from the Portal View to the Login View, both served by the same Light Gateway instance.</p>
+<p>When a user visits the website to access the single-page application (SPA), the Light Gateway serves the SPA to the user's browser. Each single page application will have a dedicated Light Gateway instance acts as a BFF. By default, the user is not logged in and can only access limited site features. To unlock additional features, the user can click the <code>User</code> button in the header and select the <code>Sign In</code> menu. This action redirects the browser from the Portal View to the Login View, both served by the same Light Gateway instance.</p>
 </li>
 <li>
 <p>On the Login View page, the user can either input a username and password or choose Google/Facebook for authentication. When the login form is submitted, the request is sent to the Light Gateway with the user's credentials. The Gateway forwards this request to the OAuth Kafka service.</p>
@@ -323,6 +361,8 @@ Gateway -&gt; PortalView: 26. Return response
         <script src="../book.js"></script>
 
         <!-- Custom JS scripts -->
+        <script src="../mermaid.min.js"></script>
+        <script src="../mermaid-init.js"></script>
 
 
     </div>
