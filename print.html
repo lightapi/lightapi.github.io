@@ -158,6 +158,278 @@
 <div style="break-before: page; page-break-before: always;"></div><h1 id="design"><a class="header" href="#design">Design</a></h1>
 <p>Light Portal is an application that connect the providers to the consumers, and it contains many components or applications. Each component will have some API endpoints and a user interface in the portal view single page application.</p>
 <p>To allow the users to understand each component in detail in term of design, we have collected all the design documents in this section.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="multi-tenant"><a class="header" href="#multi-tenant">Multi-Tenant</a></h1>
+<h2 id="database-schema"><a class="header" href="#database-schema">Database Schema</a></h2>
+<p>We're facing a classic multi-tenancy database design decision. Adding a host_id to every table is one approach, but it does lead to composite primary keys and can impact performance. Using UUIDs as primary keys, even in a multi-tenant environment, is another viable option with its own set of trade-offs. Let's examine both strategies:</p>
+<ol>
+<li>Host ID on Every Table (Composite Primary Keys)</li>
+</ol>
+<p>Schema: Each table would have a host_id column, and the primary key would be a combination of host_id and another unique identifier (e.g., user_id, endpoint_id).</p>
+<pre><code>CREATE TABLE user_t (
+    host_id UUID NOT NULL,  -- References hosts table
+    user_id INT NOT NULL, 
+    -- ... other columns
+    PRIMARY KEY (host_id, user_id),
+    FOREIGN KEY (host_id) REFERENCES hosts_t(host_id)
+);
+</code></pre>
+<p>Pros:</p>
+<ul>
+<li>
+<p>Data Isolation: Clear separation of data at the database level. Easy to query data for a specific tenant.</p>
+</li>
+<li>
+<p>Backup/Restore: Simplified backup and restore procedures for individual tenants.</p>
+</li>
+</ul>
+<p>Cons:</p>
+<ul>
+<li>
+<p>Composite Primary Keys: Can lead to more complex queries, especially joins, as you always need to include the host_id. Can affect query optimizer performance.</p>
+</li>
+<li>
+<p>Storage Overhead: host_id is repeated in every row of every table, adding storage overhead.</p>
+</li>
+<li>
+<p>Index Impact: Composite indexes can sometimes be less efficient than single-column indexes.</p>
+</li>
+</ul>
+<ol start="2">
+<li>UUIDs as Primary Keys (Shared Tables)</li>
+</ol>
+<p>Schema: Tables use UUIDs as primary keys. A separate table (tenant_resources_t) maps UUIDs to tenants.</p>
+<pre><code>CREATE TABLE user_t (
+    user_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    -- ... other columns
+);
+
+
+CREATE TABLE tenant_resource_t(
+    host_id UUID NOT NULL,
+    resource_type varchar(255) NOT NULL, --e.g., 'user', 'api_endpoint'
+    resource_id UUID NOT NULL,
+    PRIMARY KEY(host_id, resource_type, resource_id),
+    FOREIGN KEY (host_id) REFERENCES hosts_t(host_id)
+);
+</code></pre>
+<p>Pros:</p>
+<ul>
+<li>
+<p>Simplified Primary Keys: Easier to manage single-column UUID primary keys. Simpler joins.</p>
+</li>
+<li>
+<p>Reduced Storage Overhead: No need to repeat host_id in every table.</p>
+</li>
+<li>
+<p>Application Logic: Multi-tenancy is handled mostly in the application logic by querying tenant_resources_t to ensure a user belongs to the correct tenant, adding a layer of flexibility. (This is also a con if not carefully implemented.)</p>
+</li>
+</ul>
+<p>Cons:</p>
+<ul>
+<li>
+<p>Data Isolation (slightly reduced): Data is logically separated but resides in shared tables. Robust application logic is essential to prevent data leakage between tenants.</p>
+</li>
+<li>
+<p>Backup/Restore (more complex): Backing up/restoring for a single tenant requires filtering based on the tenant_resources_t table.</p>
+</li>
+<li>
+<p>Query Performance (potential issue): Queries might require joining with tenant_resources_t table which will add a bit overhead. Proper indexing and query optimization become crucial.</p>
+</li>
+</ul>
+<ol start="3">
+<li>Hybrid Approach (Recommended in many cases)</li>
+</ol>
+<ul>
+<li>
+<p>Combine the strengths of both approaches.</p>
+</li>
+<li>
+<p>Use UUIDs as primary keys for most tables for simplicity.</p>
+</li>
+<li>
+<p>Add host_id to tables where data isolation is paramount (e.g., tables containing sensitive financial or personal data) or where frequent tenant-specific queries are performed. This provides a more granular level of control and allows for optimized queries when needed.</p>
+</li>
+<li>
+<p>Use the tenant_resources_t table to maintain an overview of which resources belong to which tenant, supporting the application logic's multi-tenancy enforcement.</p>
+</li>
+</ul>
+<p>Choosing the Right Strategy:</p>
+<ul>
+<li>
+<p>Small Number of Tenants, Low Data Volume: UUIDs might be sufficient.</p>
+</li>
+<li>
+<p>Strict Data Isolation Requirements, Frequent Tenant-Specific Queries, High Data Volume: host_id on every relevant table or a hybrid approach is often preferable.</p>
+</li>
+<li>
+<p>Flexibility in Multi-Tenancy Implementation: Favors the UUID approach or Hybrid approach, with logic predominantly handled in the application layer.</p>
+</li>
+</ul>
+<p>Additional Considerations:</p>
+<ul>
+<li>
+<p>Database Support: Check if your database (PostgreSQL) has specific features for multi-tenancy.</p>
+</li>
+<li>
+<p>Indexing: Carefully plan your indexes for optimal performance in any multi-tenant scenario.</p>
+</li>
+<li>
+<p>Schema Design: Consider creating views for tenant-specific data access to simplify queries in the application layer.</p>
+</li>
+<li>
+<p>Security: Implement robust security measures to prevent data leakage between tenants, regardless of the chosen approach.</p>
+</li>
+</ul>
+<p>The hybrid approach usually provides the best balance between performance, data isolation, and development complexity in real-world multi-tenant applications. You have more direct control where strict isolation is required and can maintain the simplicity of UUIDs where it's beneficial. Using tenant_resources_t for application logic enforcement offers flexibility and a central point of management for tenant resource association. This approach also prepares you for potential future expansion and different multi-tenancy demands as your application grows.</p>
+<h2 id="citus-postgresql-extension"><a class="header" href="#citus-postgresql-extension">Citus PostgreSQL Extension</a></h2>
+<p>Citus, now fully integrated into PostgreSQL as a distributed database extension, can be very helpful in scaling your multi-tenant application, especially if you anticipate significant data growth and high query loads. Here's how Citus can fit into your use case and the factors to consider:</p>
+<h4 id="how-citus-helps"><a class="header" href="#how-citus-helps">How Citus Helps:</a></h4>
+<ul>
+<li>
+<p>Horizontal Scalability: Citus allows you to distribute your data across multiple PostgreSQL nodes (servers), enabling horizontal scaling. This is crucial for handling increasing data volumes and query loads in a multi-tenant environment.</p>
+</li>
+<li>
+<p>Improved Query Performance: By distributing data and queries, Citus can significantly improve the performance of many types of queries, especially analytical queries that operate on large datasets. This is particularly beneficial if you have tenants with substantially different data volumes or query patterns.</p>
+</li>
+<li>
+<p>Shard Placement by Tenant: One of the most effective ways to use Citus for multi-tenancy is to shard your data by host_id (or a tenant ID). This means that all data for a given tenant resides on the same shard (a subset of the distributed database). This allows for efficient tenant isolation and simplifies queries for tenant-specific data.</p>
+</li>
+<li>
+<p>Simplified Multi-Tenant Queries: When sharding by tenant, queries that filter by host_id become very efficient because Citus can route them directly to the appropriate shard. This eliminates the need for expensive scans across the entire database.</p>
+</li>
+<li>
+<p>Flexibility: Citus supports various sharding strategies, allowing you to choose the best approach for your data and query patterns. You can even use a hybrid approach, distributing some tables while keeping others replicated across all nodes for faster access to shared data.</p>
+</li>
+</ul>
+<p>Example (Sharding by Tenant):</p>
+<p>Create a distributed table: When creating your tables (e.g., user_t, api_endpoint_t, etc.), you would declare them as distributed tables in Citus, using the host_id as the distribution column:</p>
+<pre><code>CREATE TABLE user_t (
+    host_id UUID NOT NULL,
+    user_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    -- ... other columns
+) DISTRIBUTE BY HASH (host_id);
+</code></pre>
+<p>Querying: When querying data for a specific tenant, include the host_id in your WHERE clause:</p>
+<pre><code>SELECT * FROM users_t WHERE host_id = 'your-tenant-id';
+</code></pre>
+<p>Citus will automatically route this query to the shard containing the data for that tenant, resulting in much faster query execution.</p>
+<h4 id="citus-cost"><a class="header" href="#citus-cost">Citus Cost:</a></h4>
+<ul>
+<li>
+<p>Citus Open Source: The Citus open-source extension is free to use and is included in the PostgreSQL distribution. You can self-host and manage it.</p>
+</li>
+<li>
+<p>Azure CosmosDB for PostgreSQL (Managed Citus): Microsoft offers a fully managed cloud service called Azure CosmosDB for PostgreSQL, which is built on Citus. This service has usage-based pricing, and the cost depends on factors like the number of nodes, storage, and compute resources used. This managed option reduces the operational overhead of managing Citus yourself.</p>
+</li>
+</ul>
+<h4 id="recommendation"><a class="header" href="#recommendation">Recommendation:</a></h4>
+<p>Don't automatically add host_id to every table just because you're using Citus. Carefully analyze your data model, query patterns, and multi-tenancy requirements.</p>
+<ul>
+<li>
+<p>Distribute tables by host_id (tenant ID) when data locality and isolation are paramount, and you want to optimize tenant-specific queries.</p>
+</li>
+<li>
+<p>Consider replicating smaller, frequently joined tables to avoid unnecessary joins and host_id overhead.</p>
+</li>
+<li>
+<p>Use a central mapping table (tenant_resources_t) to manage tenant-resource associations and enforce multi-tenancy rules in your application logic where appropriate.</p>
+</li>
+</ul>
+<p>This more nuanced approach provides a balance between the benefits of distributed data with Citus and avoiding unnecessary complexity or performance overhead from overusing host_id. Choose the Citus deployment model (self-hosted open source or managed cloud service) that best suits your needs and budget.</p>
+<h4 id="primary-key-considerations-in-a-distributed-citus-environment"><a class="header" href="#primary-key-considerations-in-a-distributed-citus-environment">Primary Key Considerations in a Distributed Citus Environment</a></h4>
+<p>When a table includes <code>host_id</code> (due to sharding requirements), it is important to include <code>host_id</code> as part of the primary key. This ensures proper functioning and optimization within the Citus distributed database.</p>
+<ol>
+<li>
+<p><strong>Distribution Column Requirement</strong><br />
+In Citus, the distribution column (e.g., <code>host_id</code>) must be part of the primary key. This is essential for routing queries and distributing data correctly across shards.</p>
+</li>
+<li>
+<p><strong>Uniqueness Enforcement</strong></p>
+<ul>
+<li>The primary key enforces uniqueness across the entire distributed database.</li>
+<li>For example, if <code>user_id</code> is unique only within a tenant (host), then <code>(host_id, user_id)</code> is required as the primary key to ensure uniqueness across all shards.</li>
+</ul>
+</li>
+<li>
+<p><strong>Data Locality and Co-location</strong><br />
+Including <code>host_id</code> in the primary key ensures that all rows for the same tenant (identified by the same <code>host_id</code>) are stored together on a single shard. This provides:</p>
+<ul>
+<li><strong>Efficient Joins</strong>: Joins between tables related to the same tenant can be performed locally on a single shard, avoiding expensive cross-shard data transfers.</li>
+<li><strong>Optimized Queries</strong>: Queries filtering by <code>host_id</code> are efficiently routed to the appropriate shard.</li>
+</ul>
+</li>
+<li>
+<p><strong>Referential Integrity</strong><br />
+If other tables reference the <code>users_t</code> table and are also distributed by <code>host_id</code>, including <code>host_id</code> in the primary key of <code>users_t</code> is essential to maintain referential integrity across shards.</p>
+</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="reference-table"><a class="header" href="#reference-table">Reference Table</a></h1>
+<p>When building a web application, there would be a lot of dropdown selects in forms. The form itself only cares about the <code>id</code> and <code>label</code> list to render the form and only the <code>id</code> will be submitted to the backend API for single select and several <code>ids</code> for multiple select.</p>
+<p>To save the effort to create many similar tables, we can craete a set of tables for all dropdowns. For some of the reference tables, dropdown should be the same across all hosts and we can set common flag to 'Y' so that they are shared by all hosts. If the dropdown values might be different between hosts, we can create a reference table per host and link the reference table with host in a separate table that support sharding.</p>
+<h2 id="reference-schema"><a class="header" href="#reference-schema">Reference Schema</a></h2>
+<pre><code>CREATE TABLE ref_host_t (
+  table_id             VARCHAR(22) NOT NULL,
+  host_id              VARCHAR(22) NOT NULL,
+  PRIMARY KEY (table_id, host_id),
+  FOREIGN KEY (table_id) REFERENCES ref_table_t (table_id) ON DELETE CASCADE,
+  FOREIGN KEY (host_id) REFERENCES host (host_id) ON DELETE CASCADE
+);
+
+CREATE TABLE ref_table_t (
+  table_id             VARCHAR(22) NOT NULL, -- UUID genereated by Util
+  table_name           VARCHAR(80) NOT NULL, -- Name of the ref table for lookup.
+  table_desc           VARCHAR(1024) NULL,
+  active               CHAR(1) NOT NULL DEFAULT 'Y', -- Only active table returns values
+  editable             CHAR(1) NOT NULL DEFAULT 'Y', -- Table value and locale can be updated via ref admin
+  common               CHAR(1) NOT NULL DEFAULT 'Y', -- The drop down shared across hosts
+  PRIMARY KEY(table_id)
+);
+
+
+CREATE TABLE ref_value_t (
+  value_id              VARCHAR(22) NOT NULL,
+  table_id              VARCHAR(22) NOT NULL,
+  value_code            VARCHAR(80) NOT NULL, -- The dropdown value
+  start_time            TIMESTAMP NULL,       
+  end_time              TIMESTAMP NULL,
+  display_order         INT,                  -- for editor and dropdown list.
+  active                VARCHAR(1) NOT NULL DEFAULT 'Y',
+  PRIMARY KEY(value_id),
+  FOREIGN KEY table_id REFERENCES ref_table_t (table_id) ON DELETE CASCADE
+);
+
+
+CREATE TABLE value_locale_t (
+  value_id              VARCHAR(22) NOT NULL,
+  language              VARCHAR(2) NOT NULL,
+  value_desc            VARCHAR(256) NULL, -- The drop label in language.
+  PRIMARY KEY(value_id,language),
+  FOREIGN KEY value_id REFERENCES ref_value_t (value_id) ON DELETE CASCADE
+);
+
+
+
+CREATE TABLE relation_type_t (
+  relation_id           VARCHAR(22) NOT NULL,
+  relation_name         VARCHAR(32) NOT NULL, -- The lookup keyword for the relation.
+  relation_desc         VARCHAR(1024) NOT NULL,
+  PRIMARY KEY(relation_id)
+);
+
+
+
+CREATE TABLE relation_t (
+  relation_id           VARCHAR(22) NOT NULL,
+  value_id_from         VARCHAR(22) NOT NULL,
+  value_id_to           VARCHAR(22) NOT NULL,
+  active                VARCHAR(1) NOT NULL DEFAULT 'Y',
+  PRIMARY KEY(relation_id, value_id_from, value_id_to)
+  FOREIGN KEY relation_id REFERENCES relation_type_t (relation_id) ON DELETE CASCADE,
+  FOREIGN KEY value_id_from REFERENCES ref_value_t (value_id) ON DELETE CASCADE,
+  FOREIGN KEY value_id_to REFERENCES ref_table_t (value_id) ON DELETE CASCADE
+);
+
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="authentication--authorization"><a class="header" href="#authentication--authorization">Authentication &amp; Authorization</a></h1>
 <p>Light-Portal is a single-page application (SPA) that utilizes both the OAuth 2.0 Authorization Code and Client Credentials flows.</p>
 <p>The following pattern illustrates the end-to-end process recommended by the Light Platform for an SPA interacting with downstream APIs.</p>
@@ -432,6 +704,52 @@
         - "account.r"
 
 </code></pre>
+<h2 id="fga-rules-for-accesscontrolhandler"><a class="header" href="#fga-rules-for-accesscontrolhandler">FGA Rules for AccessControlHandler</a></h2>
+<p>With the above specification loaded during the runtime, the rules will be loaded during the server startup for the service as well. In the Rule Registry on the light-portal, we have a set of built-in rules that can be picked as fine-grained policies for each API. Here is an example of rule for the above specification in the x-request-access.</p>
+<pre><code>account-cc-group-role-auth:
+  ruleId: account-cc-group-role-auth
+  host: lightapi.net
+  description: Role-based authorization rule for account service and allow cc token and transform group to role.
+  conditions:
+    - conditionId: allow-cc
+      variableName: auditInfo
+      propertyPath: subject_claims.ClaimsMap.user_id
+      operatorCode: NIL
+      joinCode: OR
+      index: 1
+    - conditionId: manager
+      variableName: auditInfo
+      propertyPath: subject_claims.ClaimsMap.groups
+      operatorCode: CS
+      joinCode: OR
+      index: 2
+      conditionValues:
+        - conditionValueId: manager
+          conditionValue: admin
+    - conditionId: teller
+      variableName: auditInfo
+      propertyPath: subject_claims.ClaimsMap.groups
+      operatorCode: CS
+      joinCode: OR
+      index: 3
+      conditionValues:
+        - conditionValueId: teller
+          conditionValue: frontOffice
+    - conditionId: allow-role-jwt
+      variableName: auditInfo
+      propertyPath: subject_claims.ClaimsMap.roles
+      operatorCode: NNIL
+      joinCode: OR
+      index: 4
+  actions:
+    - actionId: match-role
+      actionClassName: com.networknt.rule.FineGrainedAuthAction
+      actionValues:
+        - actionValueId: roles
+          value: $roles
+
+</code></pre>
+<p>All rules are managed by the light-portal and shared by all the services. In addition, developers can create their customized rules for their own services.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="json-schema-registry"><a class="header" href="#json-schema-registry">JSON Schema Registry</a></h1>
 <p>JSON Schema is a declarative language that provides a standardized way to describe and validate JSON data.</p>
 <h3 id="what-it-does"><a class="header" href="#what-it-does">What it does</a></h3>
@@ -467,6 +785,1129 @@
 <h3 id="table-structure"><a class="header" href="#table-structure">Table Structure</a></h3>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="light-controller"><a class="header" href="#light-controller">Light Controller</a></h1>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="yaml-rule-registry"><a class="header" href="#yaml-rule-registry">YAML Rule Registry</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="react-schema-form"><a class="header" href="#react-schema-form">React Schema Form</a></h1>
+<p><strong>React Schema Form</strong> is a form generator based on JSON Schema and form definitions from Light Portal. It renders UI forms to manipulate database entities, and form submissions are automatically hooked into an API endpoint.</p>
+<h2 id="debugging-a-component"><a class="header" href="#debugging-a-component">Debugging a Component</a></h2>
+<p>Encountering a bug in a <code>react-schema-form</code> component can be challenging since the source code may not be directly visible. To debug:</p>
+<ol>
+<li>Set up the Light Portal server if dropdowns are loaded from the server.</li>
+<li>Use the example app in the same project to debug.</li>
+</ol>
+<h3 id="use-a-local-alias-with-vite"><a class="header" href="#use-a-local-alias-with-vite">Use a Local Alias with Vite</a></h3>
+<p>Vite allows creating an alias to point to your library's <code>src</code> folder. Update the <code>vite.config.ts</code> in your example app:</p>
+<pre><code class="language-javascript">import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import path from 'path';
+
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      'react-schema-form': path.resolve(__dirname, '../src'), // Adjust the path to point to the library's `src` folder
+    },
+  },
+});
+</code></pre>
+<h3 id="use-a-link-script-in-packagejson"><a class="header" href="#use-a-link-script-in-packagejson">Use a Link Script in <code>package.json</code></a></h3>
+<p>Update the example app's <code>package.json</code> file. In the <code>dependencies</code> section, replace the library's version with a local path:</p>
+<pre><code class="language-json">{
+  "dependencies": {
+    "react-schema-form": "file:../src"
+  }
+}
+</code></pre>
+<h3 id="library-entry-point"><a class="header" href="#library-entry-point">Library Entry Point</a></h3>
+<p>Vite requires an entry point file, typically named <code>index.js</code> or <code>index.ts</code>, in your library's <code>src</code> folder. Ensure that your library's <code>src</code> folder includes a properly configured <code>index.js</code> file, like this:</p>
+<pre><code class="language-javascript">export { default as SchemaForm } from './SchemaForm'
+export { default as ComposedComponent } from './ComposedComponent'
+export { default as utils } from './utils'
+export { default as Array } from './Array'
+
+</code></pre>
+<p>Without a correctly named and configured entry file, components like <code>SchemaForm</code> may not be imported properly.</p>
+<h3 id="update-indexhtml"><a class="header" href="#update-indexhtml">Update <code>index.html</code></a></h3>
+<p>If you change the entry point file from <code>main.js</code> to <code>index.js</code>, ensure you update the reference in the <code>index.html</code> file located in the root folder. For example:</p>
+<pre><code class="language-html">&lt;!doctype html&gt;
+&lt;html lang="en"&gt;
+  &lt;head&gt;
+    &lt;meta charset="UTF-8" /&gt;
+    &lt;link rel="icon" type="image/svg+xml" href="/vite.svg" /&gt;
+    &lt;meta name="viewport" content="width=device-width, initial-scale=1.0" /&gt;
+    &lt;title&gt;Vite + React&lt;/title&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;div id="root"&gt;&lt;/div&gt;
+    &lt;script type="module" src="/src/index.js"&gt;&lt;/script&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+
+</code></pre>
+<h3 id="sync-devdependencies-from-peerdependencies"><a class="header" href="#sync-devdependencies-from-peerdependencies">Sync <code>devDependencies</code> from <code>peerDependencies</code></a></h3>
+<p>When the source code in <code>src</code> is used directly by the example app, the <code>peerDependencies</code> in the example app won't work for <code>react-schema-form</code> components. To address this, copy the <code>peerDependencies</code> into the <code>devDependencies</code> section of <code>react-schema-form</code>'s <code>package.json</code>. For example:</p>
+<pre><code class="language-json">  "devDependencies": {
+    "@babel/runtime": "^7.26.0",
+    "@codemirror/autocomplete": "^6.18.2",
+    "@codemirror/language": "^6.10.6",
+    "@codemirror/lint": "^6.8.2",
+    "@codemirror/search": "^6.5.7",
+    "@codemirror/state": "^6.4.1",
+    "@codemirror/theme-one-dark": "^6.1.2",
+    "@codemirror/view": "^6.34.2",
+    "@emotion/react": "^11.13.5",
+    "@emotion/styled": "^11.13.5",
+    "@eslint/js": "^9.13.0",
+    "@lezer/common": "^1.2.3",
+    "@mui/icons-material": "^6.1.6",
+    "@mui/material": "^6.1.6",
+    "@mui/styles": "^6.1.6",
+    "@types/react": "^18.3.1",
+    "@uiw/react-markdown-editor": "^6.1.2",
+    "@vitejs/plugin-react": "^4.3.3",
+    "codemirror": "^6.0.1",
+    "eslint": "^9.13.0",
+    "eslint-plugin-react": "^7.37.2",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "eslint-plugin-react-refresh": "^0.4.14",
+    "gh-pages": "^6.2.0",
+    "globals": "^15.11.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vite": "^6.0.3"
+  },
+  "peerDependencies": {
+    "@babel/runtime": "^7.26.0",
+    "@codemirror/autocomplete": "^6.18.2",
+    "@codemirror/language": "^6.10.6",
+    "@codemirror/lint": "^6.8.2",
+    "@codemirror/search": "^6.5.7",
+    "@codemirror/state": "^6.4.1",
+    "@codemirror/theme-one-dark": "^6.1.2",
+    "@codemirror/view": "^6.34.2",
+    "@emotion/react": "^11.13.5",
+    "@emotion/styled": "^11.13.5",
+    "@lezer/common": "^1.2.3",
+    "@mui/icons-material": "^6.1.6",
+    "@mui/material": "^6.1.6",
+    "@mui/styles": "^6.1.6",
+    "@types/react": "^18.3.1",
+    "@uiw/react-markdown-editor": "^6.1.2",
+    "codemirror": "^6.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+
+</code></pre>
+<p>Additionally, ensure the <code>peerDependencies</code> are also synced with the <code>dependencies</code> section of the example app's <code>package.json</code>. This step allows <code>react-schema-form</code> components to load independently and work seamlessly during development.</p>
+<h3 id="update-source-code"><a class="header" href="#update-source-code">Update Source Code</a></h3>
+<p>After completing all the updates, perform a clean install for both <code>react-schema-form</code> and the example app. Then, start the server from the example folder using the following command:</p>
+<pre><code class="language-bash">yarn dev
+</code></pre>
+<p>Whenever you modify a <code>react-schema-form</code> component, simply refresh the browser to reload the example application and see the updated component in action.</p>
+<h3 id="debug-with-visual-studio-code"><a class="header" href="#debug-with-visual-studio-code">Debug with Visual Studio Code</a></h3>
+<p>You can debug the component using Visual Studio Code. There are many tutorials available online that explain how to debug React applications built with Vite, which can help you set up breakpoints, inspect components, and track down issues effectively.</p>
+<h2 id="component-dynaselect"><a class="header" href="#component-dynaselect">Component dynaselect</a></h2>
+<p><code>dynaselect</code> is a component that renders a dropdown select, either from static options or options loaded dynamically from a server via an API endpoint. It is a wrapper of material ui Autocomplete component. Below is an example form from the example app that demonstrates how to use this component.</p>
+<pre><code class="language-json">{
+  "schema": {
+    "type": "object",
+    "title": "React Component Autocomplete Demo Static Single",
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string",
+        "default": "Steve"
+      },
+      "host": {
+        "title": "Host",
+        "type": "string"
+      },
+      "environment": {
+        "type": "string",
+        "title": "Environment",
+        "default": "LOCAL",
+        "enum": [
+          "LOCAL",
+          "SIT1",
+          "SIT2",
+          "SIT3",
+          "UAT1",
+          "UAT2"
+        ]
+      },
+      "stringarraysingle": {
+        "type": "array",
+        "title": "Single String Array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "stringcat": {
+        "type": "string",
+        "title": "Joined Strings"
+      },
+      "stringarraymultiple": {
+        "type": "array",
+        "title": "Multiple String Array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "required": [
+      "name",
+      "environment"
+    ]
+  },
+  "form": [
+    "name",
+    {
+      "key": "host",
+      "type": "dynaselect",
+      "multiple": false,
+      "action": {
+        "url": "https://localhost/portal/query?cmd=%7B%22host%22%3A%22lightapi.net%22%2C%22service%22%3A%22user%22%2C%22action%22%3A%22listHost%22%2C%22version%22%3A%220.1.0%22%7D"
+      }
+    },
+    {
+      "key": "environment",
+      "type": "dynaselect",
+      "multiple": false,
+      "options": [
+        {
+          "id": "LOCAL",
+          "label": "Local"
+        },
+        {
+          "id": "SIT1",
+          "label": "SIT1"
+        },
+        {
+          "id": "SIT2",
+          "label": "SIT2"
+        },
+        {
+          "id": "SIT3",
+          "label": "SIT3"
+        },
+        {
+          "id": "UAT1",
+          "label": "UAT1"
+        },
+        {
+          "id": "UAT2",
+          "label": "UAT2"
+        }
+      ]
+    },
+    {
+      "key": "stringarraysingle",
+      "type": "dynaselect",
+      "multiple": false,
+      "options": [
+        {
+          "id": "id1",
+          "label": "label1"
+        },
+        {
+          "id": "id2",
+          "label": "label2"
+        },
+        {
+          "id": "id3",
+          "label": "label3"
+        },
+        {
+          "id": "id4",
+          "label": "label4"
+        },
+        {
+          "id": "id5",
+          "label": "label5"
+        },
+        {
+          "id": "id6",
+          "label": "label6"
+        }
+      ]
+    },
+    {
+      "key": "stringcat",
+      "type": "dynaselect",
+      "multiple": true,
+      "options": [
+        {
+          "id": "id1",
+          "label": "label1"
+        },
+        {
+          "id": "id2",
+          "label": "label2"
+        },
+        {
+          "id": "id3",
+          "label": "label3"
+        },
+        {
+          "id": "id4",
+          "label": "label4"
+        },
+        {
+          "id": "id5",
+          "label": "label5"
+        },
+        {
+          "id": "id6",
+          "label": "label6"
+        }
+      ]
+    },
+    {
+      "key": "stringarraymultiple",
+      "type": "dynaselect",
+      "multiple": true,
+      "options": [
+        {
+          "id": "id1",
+          "label": "label1"
+        },
+        {
+          "id": "id2",
+          "label": "label2"
+        },
+        {
+          "id": "id3",
+          "label": "label3"
+        },
+        {
+          "id": "id4",
+          "label": "label4"
+        },
+        {
+          "id": "id5",
+          "label": "label5"
+        },
+        {
+          "id": "id6",
+          "label": "label6"
+        }
+      ]
+    }
+  ]
+}
+</code></pre>
+<h3 id="dynamic-options-from-apis"><a class="header" href="#dynamic-options-from-apis">Dynamic Options from APIs</a></h3>
+<p>The <code>host</code> is a string type field rendered as a <code>dynaselect</code> with <code>multiple</code> set to <code>false</code>. The options for the select are loaded via an API endpoint, with the action URL provided. Note that the <code>cmd</code> query parameter value is encoded because it contains curly brackets <code>{}</code>.</p>
+<p>To encode and decode the query parameter value, you can use the following tool:</p>
+<p><a href="https://meyerweb.com/eric/tools/dencoder/">Encoder/Decoder Tool</a></p>
+<p>Encoded:</p>
+<pre><code>%7B%22host%22%3A%22lightapi.net%22%2C%22service%22%3A%22user%22%2C%22action%22%3A%22listHost%22%2C%22version%22%3A%220.1.0%22%7D
+</code></pre>
+<p>Decoded:</p>
+<pre><code>{"host":"lightapi.net","service":"user","action":"listHost","version":"0.1.0"}
+</code></pre>
+<p>When using the example app to test the <code>react-schema-form</code> with APIs, you need to configure CORS on the <code>light-gateway</code>. Ensure that CORS is enabled only on the <code>light-gateway</code> and not on the backend API, such as <code>hybrid-query</code>.</p>
+<p>Here is the example in values.yml for the light-gateway.</p>
+<pre><code class="language-yaml"># cors.yml
+cors.enabled: true
+cors.allowedOrigins:
+  - https://devsignin.lightapi.net
+  - https://dev.lightapi.net
+  - https://localhost:3000
+  - http://localhost:5173
+cors.allowedMethods:
+  - GET
+  - POST
+  - PUT
+  - DELETE
+
+</code></pre>
+<h3 id="single-string-type"><a class="header" href="#single-string-type">Single string type</a></h3>
+<p>For the <code>environment</code> field, the schema defines the type as <code>string</code>, and the form definition specifies <code>multiple: false</code> to indicate it is a single select.</p>
+<p>The select result in the model looks like the following:</p>
+<pre><code class="language-json">{
+  "environment": "SIT1",
+}
+</code></pre>
+<h3 id="single-string-array-type"><a class="header" href="#single-string-array-type">Single string array type</a></h3>
+<p>For the <code>stringarraysingle</code> field, the schema defines the type as a string array, and the form definition specifies <code>multiple: false</code> to indicate it is a single select.</p>
+<p>The select result in the model looks like the following:</p>
+<pre><code class="language-json">{
+  "stringarraysingle": [
+    "id3"
+  ],	
+}
+
+</code></pre>
+<h3 id="multiple-string-type"><a class="header" href="#multiple-string-type">Multiple string type</a></h3>
+<p>For the <code>stringcat</code> field, the schema defines the type as a <code>string</code>, and the form definition specifies <code>multiple: true</code> to indicate it is a multiple select.</p>
+<p>The select result in the model looks like the following:</p>
+<pre><code class="language-json">{
+	"stringcat": "id2,id4"
+}
+
+</code></pre>
+<h3 id="multiple-string-array-type"><a class="header" href="#multiple-string-array-type">Multiple string array type</a></h3>
+<p>For the <code>stringarraymultiple</code> field, the schema defines the type as a string array, and the form definition specifies <code>multiple: true</code> to indicate it is a multiple select.</p>
+<p>The select result in the model looks like the following:</p>
+<pre><code class="language-json">{
+  "stringarraymultiple": [
+    "id2",
+    "id5",
+    "id3"
+  ],	
+}
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="user-management"><a class="header" href="#user-management">User Management</a></h1>
+<h2 id="user-type"><a class="header" href="#user-type">User Type</a></h2>
+<p>The <code>user_type</code> field is a critical part of the user security profile in the JWT token and can be leveraged for fine-grained authorization. In a multi-tenant environment, <code>user_type</code> is presented as a dropdown populated from the reference table configured for the organization. It can be dynamically selected based on the <code>host</code> chosen during the user registration process.</p>
+<h4 id="supported-standard-dropdown-models"><a class="header" href="#supported-standard-dropdown-models">Supported Standard Dropdown Models</a></h4>
+<ol>
+<li>
+<p><strong>Employee and Customer</strong></p>
+<ul>
+<li>Dropdown values: <code>E</code> (Employee), <code>C</code> (Customer)</li>
+<li>Default model for <code>lightapi.net</code> host.</li>
+<li>Suitable for most organizations.</li>
+</ul>
+</li>
+<li>
+<p><strong>Employee, Personal, and Business</strong></p>
+<ul>
+<li>Dropdown values:
+<ul>
+<li><code>E</code> (Employee)</li>
+<li><code>P</code> (Personal)</li>
+<li><code>B</code> (Business)</li>
+</ul>
+</li>
+<li>Commonly used for banks where personal and business banking are separated.</li>
+</ul>
+</li>
+</ol>
+<h4 id="database-configuration"><a class="header" href="#database-configuration">Database Configuration</a></h4>
+<ul>
+<li>The <code>user_type</code> field is nullable in the <code>user_t</code> table by default.</li>
+<li>However, you can enforce this field as mandatory in your application via the schema and UI configuration.</li>
+</ul>
+<h4 id="on-prem-deployment"><a class="header" href="#on-prem-deployment">On-Prem Deployment</a></h4>
+<p>In on-premise environments, the <code>user_type</code> can determine the authentication method:</p>
+<ul>
+<li><strong>Employees</strong>: Authenticated via Active Directory.</li>
+<li><strong>Customers</strong>: Authenticated via a customer database.</li>
+</ul>
+<p>This flexibility allows organizations to tailor the authentication process based on their specific needs and user classifications.</p>
+<h2 id="handling-users-with-multi-host-access"><a class="header" href="#handling-users-with-multi-host-access">Handling Users with Multi-Host Access</a></h2>
+<h4 id="there-are-two-primary-ways-to-handle-users-who-belong-to-multiple-hosts"><a class="header" href="#there-are-two-primary-ways-to-handle-users-who-belong-to-multiple-hosts">There are two primary ways to handle users who belong to multiple hosts:</a></h4>
+<ol>
+<li>User-Host Mapping Table:</li>
+</ol>
+<p>user_t: This table would not have a host_id and would store core user information that is host-independent. The user_id would be unique across all hosts.</p>
+<p>user_host_t (or user_tenant_t): This would be a mapping table to represent the many-to-many relationship between users and hosts.</p>
+<pre><code>-- user_t (no host_id, globally unique user_id)
+CREATE TABLE user_t (
+    user_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), -- UUID is recommended
+    -- ... other user attributes (e.g., name, email) 
+);
+
+-- user_host_t (mapping table)
+CREATE TABLE user_host_t (
+    user_id UUID NOT NULL,
+    host_id UUID NOT NULL,
+    -- ... other relationship-specific attributes (e.g., roles within the host)
+    PRIMARY KEY (user_id, host_id),
+    FOREIGN KEY (user_id) REFERENCES user_t (user_id) ON DELETE CASCADE,
+    FOREIGN KEY (host_id) REFERENCES host_t (host_id) ON DELETE CASCADE -- Assuming you have a hosts_t
+);
+</code></pre>
+<ol start="2">
+<li>Duplicating User Records (Less Recommended):</li>
+</ol>
+<p>user_t: You would keep host_id in this table, and the primary key would be (host_id, user_id).</p>
+<p>User Duplication: If a user needs access to multiple hosts, you would duplicate their user record in users_t for each host they belong to, each with a different host_id.</p>
+<h4 id="why-user-host-mapping-is-generally-preferred"><a class="header" href="#why-user-host-mapping-is-generally-preferred">Why User-Host Mapping is Generally Preferred:</a></h4>
+<ul>
+<li>
+<p>Data Integrity: Avoids data duplication and the potential for inconsistencies that come with it. If a user's core information (e.g., name, email) changes, you only need to update it in one place in user_t.</p>
+</li>
+<li>
+<p>Flexibility: Easier to add or remove a user's access to hosts without affecting their core user data.</p>
+</li>
+<li>
+<p>Querying: While you'll need joins to get a user's hosts or a host's users, these joins are straightforward using the mapping table.</p>
+</li>
+<li>
+<p>Scalability: Better scalability as your user base and the number of hosts they can access grow.</p>
+</li>
+</ul>
+<h4 id="distributing-tables-in-a-multi-host-user-scenario"><a class="header" href="#distributing-tables-in-a-multi-host-user-scenario">Distributing Tables in a Multi-Host User Scenario:</a></h4>
+<p>With the user-host mapping approach:</p>
+<ul>
+<li>
+<p>user_t: This table would likely be a reference table in Citus (replicated to all nodes) since it does not have a host_id for distribution.</p>
+</li>
+<li>
+<p>user_host_t: This table would be distributed by host_id.</p>
+</li>
+<li>
+<p>Other tables (e.g., employees_t, api_endpoints_t, etc.): These would be distributed by host_id as before.</p>
+</li>
+</ul>
+<p>When querying, you would typically:</p>
+<ul>
+<li>
+<p>Start with the user_hosts_t table to find the hosts a user has access to.</p>
+</li>
+<li>
+<p>Join with other tables (distributed by host_id) based on the host_id to retrieve tenant-specific data.</p>
+</li>
+</ul>
+<h2 id="choosing-the-right-user_id-primary-key"><a class="header" href="#choosing-the-right-user_id-primary-key">Choosing the Right user_id Primary Key:</a></h2>
+<p>Here's a comparison of the options for the user_id primary key in user_t:</p>
+<h4 id="1-uuid-user_id"><a class="header" href="#1-uuid-user_id"><strong>1. UUID (<code>user_id</code>)</strong></a></h4>
+<ul>
+<li><strong>Pros</strong>:
+<ul>
+<li><strong>Globally Unique</strong>: Avoids collisions across hosts or when scaling beyond the current setup.</li>
+<li><strong>Security</strong>: Difficult to guess or enumerate.</li>
+<li><strong>Scalability</strong>: Well-suited for distributed environments like Citus.</li>
+</ul>
+</li>
+<li><strong>Cons</strong>:
+<ul>
+<li><strong>Storage</strong>: Slightly larger storage size compared to integers.</li>
+<li><strong>Readability</strong>: Not human-readable, which can be inconvenient for debugging.</li>
+</ul>
+</li>
+<li><strong>Recommendation</strong>:<br />
+This is generally the <strong>best option</strong> for a <code>user_id</code> in a multi-tenant, distributed environment.</li>
+</ul>
+<hr />
+<h4 id="2-email-email"><a class="header" href="#2-email-email"><strong>2. Email (<code>email</code>)</strong></a></h4>
+<ul>
+<li><strong>Pros</strong>:
+<ul>
+<li><strong>Human-Readable</strong>: Easy to identify and manage.</li>
+<li><strong>Login Identifier</strong>: Often used as a natural login credential.</li>
+</ul>
+</li>
+<li><strong>Cons</strong>:
+<ul>
+<li><strong>Uniqueness Challenges</strong>: Enforcing global uniqueness across all hosts may require complex constraints or application logic.</li>
+<li><strong>Changeability</strong>: If emails change, cascading updates can complicate the database.</li>
+<li><strong>Security</strong>: Using emails as primary keys can expose sensitive user data if not handled securely.</li>
+<li><strong>Performance</strong>: String comparisons are slower than those for integers or UUIDs.</li>
+</ul>
+</li>
+<li><strong>Recommendation</strong>:<br />
+<strong>Not recommended</strong> as a primary key, especially in a multi-tenant or distributed setup.</li>
+</ul>
+<hr />
+<h4 id="3-user-chosen-unique-id-eg-username"><a class="header" href="#3-user-chosen-unique-id-eg-username"><strong>3. User-Chosen Unique ID (e.g., <code>username</code>)</strong></a></h4>
+<ul>
+<li><strong>Pros</strong>:
+<ul>
+<li><strong>Human-Readable</strong>: Intuitive and user-friendly.</li>
+</ul>
+</li>
+<li><strong>Cons</strong>:
+<ul>
+<li><strong>Uniqueness Challenges</strong>: Enforcing global uniqueness is challenging and may require complex constraints.</li>
+<li><strong>Changeability</strong>: Users may request username changes, causing cascading update issues.</li>
+<li><strong>Security</strong>: Usernames are easier to guess or enumerate compared to UUIDs.</li>
+</ul>
+</li>
+<li><strong>Recommendation</strong>:<br />
+<strong>Not recommended</strong> as a primary key in a multi-tenant, distributed environment.</li>
+</ul>
+<h4 id="in-conclusion"><a class="header" href="#in-conclusion">In Conclusion:</a></h4>
+<ul>
+<li>
+<p><strong>Use a User-Host Mapping Table</strong>:<br />
+This is the best approach to handle users who belong to multiple hosts in a multi-tenant Citus environment.</p>
+</li>
+<li>
+<p><strong>Use UUID for <code>user_id</code></strong>:<br />
+UUIDs are the most suitable option for the <code>user_id</code> primary key in <code>user_t</code> due to their global uniqueness, security, and scalability.</p>
+</li>
+<li>
+<p><strong>Distribute by <code>host_id</code></strong>:<br />
+Distribute tables that need sharding by <code>host_id</code>, and ensure that foreign keys to distributed tables include <code>host_id</code>.</p>
+</li>
+<li>
+<p><strong>Use Reference Tables</strong>:<br />
+For tables like <code>user_t</code> that don't have a <code>host_id</code>, designate them as reference tables in Citus.</p>
+</li>
+</ul>
+<p>This approach provides a flexible and scalable foundation for managing users with multi-host access in your Citus-based multi-tenant application.</p>
+<h2 id="user-tables"><a class="header" href="#user-tables">User Tables</a></h2>
+<p>Using a single <code>user_t</code> table with a <code>user_type</code> discriminator is a good approach for managing both employees and customers in a unified way. Adding optional referral relationships for customers adds a nice dimension as well. Here's a suggested table schema in PostgreSQL, along with explanations and some considerations:</p>
+<p>user_t (User Table): This table will store basic information common to both employees and customers.</p>
+<pre><code>CREATE TABLE user_t (
+    user_id                   VARCHAR(24) NOT NULL,
+    email                     VARCHAR(255) NOT NULL,
+    password                  VARCHAR(1024) NOT NULL,
+    language                  CHAR(2) NOT NULL,
+    first_name                VARCHAR(32) NULL,
+    last_name                 VARCHAR(32) NULL,
+    user_type                 CHAR(1) NULL, -- E employee C customer or E employee P personal B business
+    phone_number              VARCHAR(20) NULL,
+    gender                    CHAR(1) NULL,
+    birthday                  DATE NULL,
+    country                   VARCHAR(3) NULL,
+    province                  VARCHAR(32) NULL,
+    city                      VARCHAR(32) NULL,
+    address                   VARCHAR(128) NULL,
+    post_code                 VARCHAR(16) NULL,
+    verified                  BOOLEAN NOT NULL DEFAULT false,
+    token                     VARCHAR(64) NULL,
+    locked                    BOOLEAN NOT NULL DEFAULT false,
+    nonce                     BIGINT NOT NULL DEFAULT 0,
+    update_user               VARCHAR (255) DEFAULT SESSION_USER NOT NULL,
+    update_timestamp          TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+ALTER TABLE user_t ADD CONSTRAINT user_pk PRIMARY KEY ( user_id );
+
+ALTER TABLE user_t ADD CONSTRAINT user_email_uk UNIQUE ( email );
+</code></pre>
+<p>user_host_t (User to host relationship or mapping):</p>
+<pre><code>CREATE TABLE user_host_t (
+    host_id                   VARCHAR(24) NOT NULL,
+    user_id                   VARCHAR(24) NOT NULL,
+    -- other relationship-specific attributes (e.g., roles within the host)
+    PRIMARY KEY (host_id, user_id),
+    FOREIGN KEY (user_id) REFERENCES user_t (user_id) ON DELETE CASCADE,
+    FOREIGN KEY (host_id) REFERENCES host_t (host_id) ON DELETE CASCADE
+);
+
+</code></pre>
+<p>employee_t (Employee Table): This table will store employee-specific attributes.</p>
+<pre><code>CREATE TABLE employee_t (
+    host_id                   VARCHAR(22) NOT NULL,
+    employee_id               VARCHAR(50) NOT NULL,  -- Employee ID or number or ACF2 ID. Unique within the host. 
+    user_id                   VARCHAR(22) NOT NULL,
+    title                     VARCHAR(255) NOT NULL,
+    manager_id                VARCHAR(50), -- manager's employee_id if there is one.
+    hire_date                 DATE,
+    update_user               VARCHAR (255) DEFAULT SESSION_USER NOT NULL,
+    update_timestamp          TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    PRIMARY KEY (host_id, employee_id),
+    FOREIGN KEY (host_id, user_id) REFERENCES user_host_t(host_id, user_id) ON DELETE CASCADE,
+    FOREIGN KEY (host_id, manager_id) REFERENCES employee_t(host_id, employee_id) ON DELETE CASCADE
+);
+</code></pre>
+<p>customer_t (Customer Table): This table will store customer-specific attributes.</p>
+<pre><code>CREATE TABLE customer_t (
+    host_id                   VARCHAR(24) NOT NULL,
+    customer_id               VARCHAR(50) NOT NULL,
+    user_id                   VARCHAR(24) NOT NULL,
+    -- Other customer-specific attributes
+    referral_id               VARCHAR(22), -- the customer_id who refers this customer. 
+    update_user               VARCHAR (255) DEFAULT SESSION_USER NOT NULL,
+    update_timestamp          TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    PRIMARY KEY (host_id, customer_id),
+    FOREIGN KEY (host_id, user_id) REFERENCES user_host_t(host_id, user_id) ON DELETE CASCADE,
+    FOREIGN KEY (host_id, referral_id) REFERENCES customer_t(host_id, customer_id) ON DELETE CASCADE
+);
+</code></pre>
+<p>position_t (Position Table): Defines different positions within the organization for employees.</p>
+<pre><code>CREATE TABLE position_t (
+    host_id                   VARCHAR(22) NOT NULL,
+    position_id               VARCHAR(22) NOT NULL,
+    position_name             VARCHAR(255) UNIQUE NOT NULL,
+    description               TEXT,
+    inherit_to_ancestor       BOOLEAN DEFAULT FALSE,
+    inherit_to_sibling        BOOLEAN DEFAULT FALSE,
+    update_user               VARCHAR (255) DEFAULT SESSION_USER NOT NULL,
+    update_timestamp          TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    PRIMARY KEY (host_id, position_id)
+);
+</code></pre>
+<p>employee_position_t (Employee Position Table): Links employees to their positions with effective dates.</p>
+<pre><code>CREATE TABLE employee_position_t (
+    host_id                   VARCHAR(22) NOT NULL,
+    employee_id               VARCHAR(50) NOT NULL,
+    position_id               VARCHAR(22) NOT NULL,
+    position_type             CHAR(1) NOT NULL, -- P position of own, D inherited from a decendant, S inherited from a sibling.
+    start_date                DATE NOT NULL,
+    end_date                  DATE,
+    update_user               VARCHAR (255) DEFAULT SESSION_USER NOT NULL,
+    update_timestamp          TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    PRIMARY KEY (host_id, employee_id, position_id),
+    FOREIGN KEY (host_id, position_id) REFERENCES position_t(host_id, position_id) ON DELETE CASCADE
+);
+</code></pre>
+<h2 id="authorization-strategies"><a class="header" href="#authorization-strategies">Authorization Strategies</a></h2>
+<p>In order to link users to API endpoints for authorization, we will adpot the following approaches with a rule engine to enforce the policies in the sidecar of the API with access-control middleware handler.</p>
+<p>A. Role-Based Access Control (RBAC)</p>
+<p>This is a common and relatively simple approach. You define roles (e.g., "admin," "editor," "viewer") and assign permissions to those roles. Users are then assigned to one or more roles.</p>
+<p>Role Table:</p>
+<pre><code>CREATE TABLE role_t (
+    host_id                   VARCHAR(22) NOT NULL,
+    role_id                   VARCHAR(22) NOT NULL,
+    role_name                 VARCHAR(255) UNIQUE NOT NULL,
+    description               TEXT,
+    update_user               VARCHAR (255) DEFAULT SESSION_USER NOT NULL,
+    update_timestamp          TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    PRIMARY KEY (host_id, role_id)
+);
+
+</code></pre>
+<p>Role-Endpoint Permission Table:</p>
+<pre><code>CREATE TABLE role_permission_t (
+    host_id                   VARCHAR(32) NOT NULL,
+    role_id                   VARCHAR(32) NOT NULL,
+    endpoint_id               VARCHAR(64) NOT NULL,
+    update_user               VARCHAR (255) DEFAULT SESSION_USER NOT NULL,
+    update_timestamp          TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    PRIMARY KEY (host_id, role_id, endpoint_id),
+    FOREIGN KEY (host_id, role_id) REFERENCES role_t(host_id, role_id) ON DELETE CASCADE,
+    FOREIGN KEY (endpoint_id) REFERENCES api_endpoint_t(endpoint_id) ON DELETE CASCADE
+);
+
+</code></pre>
+<p>Role-User Assignment Table:</p>
+<pre><code>CREATE TABLE role_user_t (
+    host_id                   VARCHAR(22) NOT NULL,
+    role_id                   VARCHAR(22) NOT NULL,
+    user_id                   VARCHAR(22) NOT NULL,
+    start_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    end_date DATE,
+    update_user               VARCHAR (255) DEFAULT SESSION_USER NOT NULL,
+    update_timestamp          TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    PRIMARY KEY (host_id, role_id, user_id, start_date),
+    FOREIGN KEY (user_id) REFERENCES user_t(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (host_id, role_id) REFERENCES role_t(host_id, role_id) ON DELETE CASCADE
+);
+</code></pre>
+<p>B. User-Based Access Control (UBAC)</p>
+<p>This approach assigns permissions directly to users, allowing for very fine-grained control. It's more flexible but can become complex to manage if you have a lot of users and endpoints. It should only be used for temporary access.</p>
+<p>User-Endpoint Permissions Table:</p>
+<pre><code>CREATE TABLE user_permission_t (
+    user_id                   VARCHAR(22) NOT NULL,
+    host_id                   VARCHAR(22) NOT NULL,
+    endpoint_id               VARCHAR(22) NOT NULL,
+    start_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    end_date DATE,
+    update_user               VARCHAR (255) DEFAULT SESSION_USER NOT NULL,
+    update_timestamp          TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    PRIMARY KEY (user_id, host_id, endpoint_id),
+    FOREIGN KEY (user_id) REFERENCES user_t(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (endpoint_id) REFERENCES api_endpoint_t(endpoint_id) ON DELETE CASCADE
+);
+
+</code></pre>
+<p>C. Group-Based Access Control (GBAC)</p>
+<p>You can group users into teams or departments and assign permissions to those groups. This is useful when you want to manage permissions for sets of users with similar access needs.</p>
+<p>Groups Table:</p>
+<pre><code>CREATE TABLE group_t (
+    host_id                   VARCHAR(32) NOT NULL,
+    group_id                  VARCHAR(32) NOT NULL,
+    group_name                VARCHAR(255) UNIQUE NOT NULL,
+    description               TEXT,
+    update_user               VARCHAR (255) DEFAULT SESSION_USER NOT NULL,
+    update_timestamp          TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    PRIMARY KEY (host_id, group_id)
+);
+</code></pre>
+<p>Group-Endpoint Permission Table:</p>
+<pre><code>CREATE TABLE group_permission_t (
+    host_id                   VARCHAR(32) NOT NULL,
+    group_id                  VARCHAR(32) NOT NULL,
+    endpoint_id               VARCHAR(32) NOT NULL,
+    update_user               VARCHAR (255) DEFAULT SESSION_USER NOT NULL,
+    update_timestamp          TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    PRIMARY KEY (host_id, group_id, endpoint_id),
+    FOREIGN KEY (host_id, group_id) REFERENCES group_t(host_id, group_id) ON DELETE CASCADE,
+    FOREIGN KEY (endpoint_id) REFERENCES api_endpoint_t(endpoint_id) ON DELETE CASCADE
+);
+
+</code></pre>
+<p>Group-User Membership Table:</p>
+<pre><code>CREATE TABLE group_user_t (
+    host_id                   VARCHAR(22) NOT NULL,
+    group_id                  VARCHAR(22) NOT NULL,
+    user_id                   VARCHAR(22) NOT NULL,
+    start_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    end_date DATE,
+    update_user               VARCHAR (255) DEFAULT SESSION_USER NOT NULL,
+    update_timestamp          TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    PRIMARY KEY (host_id, group_id, user_id, start_date),
+    FOREIGN KEY (user_id) REFERENCES user_t(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (host_id, group_id) REFERENCES group_t(host_id, group_id) ON DELETE CASCADE
+);
+
+</code></pre>
+<p>D. Attribute-Based Access Control (ABAC)</p>
+<p>Attribute Table:</p>
+<pre><code>CREATE TABLE attribute_t (
+    host_id                   VARCHAR(22) NOT NULL,
+    attribute_id              VARCHAR(22) NOT NULL,
+    attribute_name            VARCHAR(255) UNIQUE NOT NULL, -- The name of the attribute (e.g., "department," "job_title," "project," "clearance_level," "location").
+    attribute_type            VARCHAR(50) CHECK (attribute_type IN ('string', 'integer', 'boolean', 'date', 'float', 'list')), -- Define allowed data types
+    description               TEXT,
+    update_user               VARCHAR (255) DEFAULT SESSION_USER NOT NULL,
+    update_timestamp          TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    PRIMARY KEY (host_id, attribute_id)
+);
+
+</code></pre>
+<ol start="2">
+<li>Attribute User Table:</li>
+</ol>
+<pre><code>CREATE TABLE attribute_user_t (
+    host_id                   VARCHAR(22) NOT NULL,
+    attribute_id              VARCHAR(22) NOT NULL,
+    user_id                   VARCHAR(22) NOT NULL, -- References users_t
+    attribute_value           TEXT, -- Store values as strings; you can cast later
+    start_date                DATE NOT NULL DEFAULT CURRENT_DATE,
+    end_date                  DATE,
+    update_user               VARCHAR (255) DEFAULT SESSION_USER NOT NULL,
+    update_timestamp          TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    PRIMARY KEY (host_id, attribute_id, user_id, start_date),
+    FOREIGN KEY (user_id) REFERENCES user_t(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (host_id, attribute_id) REFERENCES attribute_t(host_id, attribute_id) ON DELETE CASCADE
+);
+
+
+</code></pre>
+<ol start="3">
+<li>Attribute Permission Table:</li>
+</ol>
+<pre><code>CREATE TABLE attribute_permission_t (
+    host_id                   VARCHAR(32) NOT NULL,
+    attribute_id              VARCHAR(32) NOT NULL,
+    endpoint_id               VARCHAR(32) NOT NULL, -- References api_endpoints_t
+    attribute_value           TEXT,
+    update_user               VARCHAR (255) DEFAULT SESSION_USER NOT NULL,
+    update_timestamp          TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    PRIMARY KEY (host_id, attribute_id, endpoint_id),
+    FOREIGN KEY (endpoint_id) REFERENCES api_endpoint_t(endpoint_id) ON DELETE CASCADE,
+    FOREIGN KEY (host_id, attribute_id) REFERENCES attribute_t(host_id, attribute_id) ON DELETE CASCADE
+);
+</code></pre>
+<p>How it Works:</p>
+<ol>
+<li>
+<p>Define Attributes: Define all relevant attributes in attribute_t. Think about all the properties of your users, resources, and environment that might be used in access control decisions.</p>
+</li>
+<li>
+<p>Assign Attributes to Users: Populate user_attribute_t to associate attribute values with users.</p>
+</li>
+<li>
+<p>Assign Attributes to Endpoints: Populate attribute_permission_t to associate attribute values with API endpoints.</p>
+</li>
+<li>
+<p>Write Policies: Create policy rules in rule engine. These rules should use the attribute names defined in attribute_t.</p>
+</li>
+<li>
+<p>Policy Evaluation (at runtime):</p>
+</li>
+</ol>
+<ul>
+<li>
+<p>The policy engine receives the subject (user), resource (API endpoint), and action (HTTP method) of the request.</p>
+</li>
+<li>
+<p>The engine retrieves the relevant attributes from the user_attribute_t and attribute_permission_t tables.</p>
+</li>
+<li>
+<p>The engine evaluates the policy rule from the relevant policies against the attributes.</p>
+</li>
+<li>
+<p>Based on the policy evaluation result, access is either granted or denied.</p>
+</li>
+</ul>
+<p>Key Advantages of ABAC:</p>
+<ul>
+<li>
+<p>Fine-Grained Control: Express very specific access rules.</p>
+</li>
+<li>
+<p>Centralized Policy Management: Policies are stored centrally and can be easily updated.</p>
+</li>
+<li>
+<p>Flexibility and Scalability: Adapts easily to changing requirements.</p>
+</li>
+<li>
+<p>Auditing and Compliance: Easier to audit and demonstrate compliance.</p>
+</li>
+</ul>
+<h2 id="jwt-security-claims"><a class="header" href="#jwt-security-claims">JWT Security Claims</a></h2>
+<p>Using the tables defined above, follow these steps to create an authorization code token with user security claims:</p>
+<ol>
+<li>
+<p><strong><code>uid</code></strong><br />
+Assign the <code>user_id</code> to the <code>uid</code> claim in the JWT.</p>
+</li>
+<li>
+<p><strong><code>role</code></strong><br />
+Include a list of roles associated with the user.</p>
+</li>
+<li>
+<p><strong><code>grp</code></strong><br />
+Add a list of groups the user belongs to.</p>
+</li>
+<li>
+<p><strong><code>att</code></strong><br />
+Include a list of key-value pairs representing user attributes.</p>
+</li>
+</ol>
+<h2 id="group-management-and-dynamic-membership"><a class="header" href="#group-management-and-dynamic-membership">Group Management and Dynamic Membership</a></h2>
+<h4 id="1-define-groups-related-to-the-organizational-structure"><a class="header" href="#1-define-groups-related-to-the-organizational-structure">1. Define Groups Related to the Organizational Structure</a></h4>
+<p>You can create groups that align with teams, departments, or other organizational units. These groups are relatively static and reflect the overall organizational structure. Use a separate table, <code>group_t</code>, as described above to store these groups.</p>
+<h4 id="2-use-the-reporting-structure-to-derive-dynamic-group-memberships"><a class="header" href="#2-use-the-reporting-structure-to-derive-dynamic-group-memberships">2. Use the Reporting Structure to Derive Dynamic Group Memberships</a></h4>
+<p>Instead of directly assigning all users to groups, you can:</p>
+<ul>
+<li>Assign base group memberships to individual users (e.g., only non-managers initially).</li>
+<li>Use the reporting relationships stored in the <code>report_relationship_t</code> table to infer additional group memberships based on the organizational hierarchy.</li>
+</ul>
+<h4 id="3-retrieval-logic"><a class="header" href="#3-retrieval-logic">3. Retrieval Logic</a></h4>
+<ol>
+<li>
+<p><strong>Get User's Direct Groups</strong>:<br />
+Retrieve the groups a user is explicitly assigned to from the <code>user_group_t</code> table.</p>
+</li>
+<li>
+<p><strong>Traverse Up the Reporting Hierarchy</strong>:<br />
+Use the <code>report_relationship_t</code> table to find all the user's ancestors (managers) in the reporting structure.</p>
+</li>
+<li>
+<p><strong>Inherit Subordinate Group Memberships</strong>:<br />
+For each ancestor (manager), retrieve the direct reports' group memberships. Add these groups to the manager's effective group memberships. You can control the depth of inheritance (e.g., only inherit from direct reports or up to a certain level in the hierarchy).</p>
+</li>
+<li>
+<p><strong>Combine and Deduplicate</strong>:<br />
+Combine the user's direct group memberships with the inherited memberships, removing any duplicates.</p>
+</li>
+</ol>
+<h4 id="example"><a class="header" href="#example">Example</a></h4>
+<p>Let's say:</p>
+<ul>
+<li>
+<p>Alice is a manager and belongs to the "Management" group.</p>
+</li>
+<li>
+<p>Bob reports to Alice and belongs to the "Engineering" group.</p>
+</li>
+<li>
+<p>Charlie reports to Bob and belongs to the "Engineering" and "Testing" groups.</p>
+</li>
+</ul>
+<p>When Bob's request comes in:</p>
+<ul>
+<li>
+<p>Query result contains Bob's direct group: "Engineering".</p>
+</li>
+<li>
+<p>Check reporting structure: Bob reports to Alice.</p>
+</li>
+<li>
+<p>Get group memberships of Bob's direct reports: "Engineering", "Testing". (These are inherited since Bob is Charlie's manager)</p>
+</li>
+<li>
+<p>Bob's effective groups are now "Engineering", "Testing".</p>
+</li>
+</ul>
+<p>When Alice's request comes in:</p>
+<ul>
+<li>
+<p>Query result contains Alice's direct group: "Management".</p>
+</li>
+<li>
+<p>Check reporting structure: Bob and Charlie report to Alice.</p>
+</li>
+<li>
+<p>Get group memberships of Alice's direct reports: "Engineering", "Testing" (inherited from Bob and Charlie).</p>
+</li>
+<li>
+<p>Alice's effective groups are now "Management", "Engineering", "Testing".</p>
+</li>
+</ul>
+<p>Advantages:</p>
+<ul>
+<li>
+<p>Reduced Administrative Overhead: You don't have to manually manage group memberships for managers as their teams change.</p>
+</li>
+<li>
+<p>Dynamic Access Control: Permissions adapt automatically as the reporting structure evolves.</p>
+</li>
+<li>
+<p>Centralized Logic: The inheritance logic is encapsulated in the logic, making it easier to maintain and update.</p>
+</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="implementation"><a class="header" href="#implementation">Implementation</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="sign-in"><a class="header" href="#sign-in">Sign In</a></h1>
+<h2 id="portal-dashboard"><a class="header" href="#portal-dashboard">Portal Dashboard</a></h2>
+<p>The <strong>Portal Dashboard</strong> is served by the <code>portal-view</code> single-page application.</p>
+<ul>
+<li>
+<p><strong>Guest User Access</strong>:<br />
+Upon landing on the dashboard, a guest user can:</p>
+<ul>
+<li>View certain menus.</li>
+<li>Perform limited actions within the application.</li>
+</ul>
+</li>
+<li>
+<p><strong>Accessing Privileged Features</strong>:<br />
+To access additional features:</p>
+<ol>
+<li>Click the <strong>User</strong> button.</li>
+<li>Select the <strong>Sign In</strong> menu item.</li>
+</ol>
+</li>
+</ul>
+<h2 id="login-view"><a class="header" href="#login-view">Login View</a></h2>
+<ul>
+<li>
+<p><strong>Redirection to Login View</strong>:<br />
+When the <strong>Sign In</strong> menu item is clicked, the browser is redirected to the <strong>Login View</strong> single-page application. This application is served by the same instance of <code>light-gateway</code> and handles user authentication against the OAuth 2.0 server (<strong>OAuth Kafka</strong>) to initiate the Authorization Code grant flow.</p>
+</li>
+<li>
+<p><strong>OAuth 2.0 Client ID</strong>:<br />
+The <code>client_id</code> is included in the redirect URL as a query parameter. This ensures that the <code>client_id</code> is sent to the OAuth 2.0 server to obtain the authorization code. In this context, the <code>client_id</code> is associated with the <code>portal-view</code> application.</p>
+</li>
+<li>
+<p><strong>Login View Responsibilities</strong>:<br />
+The <strong>Login View</strong> is a shared single-page application used by all other SPAs across various hosts. It is responsible for:</p>
+<ul>
+<li>Authenticating users.</li>
+<li>Ensuring that user credentials are not passed to any other single-page applications or business APIs.</li>
+</ul>
+</li>
+<li>
+<p><strong>SaaS Deployment in the Cloud</strong>:<br />
+In a SaaS environment, all users are authenticated by the OAuth 2.0 server using the <code>light-portal</code> user database. As a result, the user type does not need to be passed from the <strong>Login View</strong>.</p>
+</li>
+<li>
+<p><strong>On-Premise Deployment</strong>:<br />
+For on-premise deployments, a customized <strong>Login View</strong> should include a radio button for selecting the user type. Typical options for most organizations are:</p>
+<ul>
+<li><strong>Employee (E)</strong></li>
+<li><strong>Customer (C)</strong></li>
+</ul>
+</li>
+<li>
+<p><strong>Customized Authentication</strong>:<br />
+Based on the selected user type:</p>
+<ul>
+<li>Employees are authenticated via <strong>Active Directory</strong>.</li>
+<li>Customers are authenticated using the <strong>customer database</strong>.</li>
+</ul>
+<p>A customized authenticator implementation should handle this logic, ensuring the correct authentication method is invoked for each user type.</p>
+</li>
+</ul>
+<h2 id="login-form-submission"><a class="header" href="#login-form-submission">Login Form Submission</a></h2>
+<ul>
+<li>
+<p><strong>Form Submission Endpoint</strong>:<br />
+<code>/oauth2/N2CMw0HGQXeLvC1wBfln2A/code</code></p>
+</li>
+<li>
+<p><strong>Request Details</strong>:</p>
+<ul>
+<li><strong>Headers</strong>:
+<ul>
+<li><code>Content-Type</code>: <code>application/x-www-form-urlencoded</code></li>
+</ul>
+</li>
+<li><strong>Method</strong>:
+<ul>
+<li><code>POST</code></li>
+</ul>
+</li>
+<li><strong>Body Parameters</strong>:
+<ul>
+<li><code>j_username</code>: The user's username.</li>
+<li><code>j_password</code>: The user's password.</li>
+<li><code>remember</code>: Indicates whether the session should persist.</li>
+<li><code>client_id</code>: The OAuth 2.0 client identifier.</li>
+<li><code>state</code>: A hardcoded value (requires additional work for dynamic handling).</li>
+<li><code>user_type</code>: (Optional) Specifies the type of user (e.g., employee or customer).</li>
+<li><code>redirect_uri</code>: (Optional) The URI to redirect after authentication.</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<h2 id="light-gateway"><a class="header" href="#light-gateway">Light Gateway</a></h2>
+<p>The light-gateway instance acts as a BFF and it has a routing rule to route any request with prefix /oauth2 to kafka-oauth server.</p>
+<h2 id="oauth-kafka"><a class="header" href="#oauth-kafka">OAuth Kafka</a></h2>
+<ul>
+<li>
+<p><strong>LightPortalAuthenticator</strong></p>
+<p>A request to hybrid-query:</p>
+<pre><code>{"host":"lightapi.net","service":"user","action":"loginUser","version":"0.1.0","data":{"email":"%s","password":"%s"}}
+</code></pre>
+</li>
+</ul>
+<h2 id="user-query"><a class="header" href="#user-query">User Query</a></h2>
+<ul>
+<li><strong>LoginUser</strong></li>
+</ul>
+<p>This handler calls loginUserByEmail method from PortalDbProviderImpl.</p>
+<h2 id="portaldbproviderimpl"><a class="header" href="#portaldbproviderimpl">PortalDbProviderImpl</a></h2>
+<p>The input for this method is email, password and userType.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="configuration"><a class="header" href="#configuration">Configuration</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="light-gateway-1"><a class="header" href="#light-gateway-1">light-gateway</a></h1>
+<h2 id="client-credentials-token"><a class="header" href="#client-credentials-token">Client Credentials Token</a></h2>
+<p>All the accesses from the light-gateway to the downstream APIs should have at least one token in the Authorization header. If there is an authorization code token in the Authorization header, then a client credentials token will be added to the X-Scope-Token header by the TokenHandler.</p>
+<p>Since all light portal services have the same scopes (portal.r and portal.w), one token should be enough for accessing all APIs.</p>
+<p>Add the client credentials token config in client.yml section.</p>
+<pre><code class="language-yaml"># Client Credential
+client.tokenCcUri: /oauth2/N2CMw0HGQXeLvC1wBfln2A/token
+client.tokenCcClientId: f7d42348-c647-4efb-a52d-4c5787421e72
+client.tokenCcClientSecret: f6h1FTI8Q3-7UScPZDzfXA
+client.tokenCcScope:
+  - portal.r
+  - portal.w
+  - ref.r
+  - ref.w
+</code></pre>
+<p>Add TokenHandler to the handler.yml section.</p>
+<pre><code class="language-yaml"># handler.yml
+handler.handlers:
+  .
+  .
+  .
+  - com.networknt.router.middleware.TokenHandler@token
+  .
+  .
+  .
+handler.chains.default:
+  .
+  .
+  .
+  - prefix
+  - token
+  - router
+
+</code></pre>
+<p>Add the TokenHandler configuration token.yml section.</p>
+<pre><code class="language-yaml"># token.yml
+token.enabled: true
+token.appliedPathPrefixes:
+  - /r
+  
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="light-reference"><a class="header" href="#light-reference">light-reference</a></h1>
+<h2 id="cors-configuration"><a class="header" href="#cors-configuration">Cors Configuration</a></h2>
+<p>As the light-gateway is handling the SPA interaction and cors, we don't need to enable the cors on the reference API. However, the cors handler is still registered in the default handler.yml in case the reference API is used as a standalone service.</p>
+<p>In the light-portal configuration, we need to disable the cors.</p>
+<pre><code class="language-yaml"># cors.yml
+cors.enabled: false
+</code></pre>
+<h2 id="client-configuration"><a class="header" href="#client-configuration">Client Configuration</a></h2>
+<p>We need to load the jwk from the oauth-kafka service to validate the incoming jwk tokens. To set up the jwk, add the following lines to the values.yml file.</p>
+<pre><code class="language-yaml"># client.yml
+client.tokenKeyServerUrl: https://localhost:6881
+client.tokenKeyUri: /oauth2/N2CMw0HGQXeLvC1wBfln2A/keys
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="license"><a class="header" href="#license">License</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="bronze"><a class="header" href="#bronze">Bronze</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="silver"><a class="header" href="#silver">Silver</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="gold"><a class="header" href="#gold">Gold</a></h1>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="chapter-1"><a class="header" href="#chapter-1">Chapter 1</a></h1>
 
                     </main>
@@ -486,6 +1927,22 @@
 
         </div>
 
+        <!-- Livereload script (if served using the cli tool) -->
+        <script>
+            const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsAddress = wsProtocol + "//" + location.host + "/" + "__livereload";
+            const socket = new WebSocket(wsAddress);
+            socket.onmessage = function (event) {
+                if (event.data === "reload") {
+                    socket.close();
+                    location.reload();
+                }
+            };
+
+            window.onbeforeunload = function() {
+                socket.close();
+            }
+        </script>
 
 
 
