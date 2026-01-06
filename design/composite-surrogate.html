@@ -1,0 +1,451 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Composit key vs Surrogate UUID key - Light Portal Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "../";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Light Portal Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="composit-key-vs-surrogate-uuid-key"><a class="header" href="#composit-key-vs-surrogate-uuid-key">Composit key vs Surrogate UUID key</a></h1>
+<h3 id="composite-key-with-5-or-more-columns"><a class="header" href="#composite-key-with-5-or-more-columns">Composite key with 5 or more columns</a></h3>
+<p>User the following three tables as examples. We have composite key with 5 columns and some of them are varchar types in product version_property_t table. Is is a good idea to create UUID keys for config_property_t and product_version_t?</p>
+<pre><code>-- each config file will have a config_id reference and this table contains all the properties including default. 
+CREATE TABLE config_property_t (
+    config_id                 UUID NOT NULL,
+    property_name             VARCHAR(64) NOT NULL,
+    property_type             VARCHAR(32) DEFAULT 'Config' NOT NULL,
+    light4j_version           VARCHAR(12), -- only newly introduced property has a version.
+    display_order             INTEGER,
+    required                  BOOLEAN DEFAULT false NOT NULL,
+    property_desc             VARCHAR(4096),
+    property_value            TEXT,
+    value_type                VARCHAR(32),
+    property_file             TEXT,
+    resource_type             VARCHAR(30) DEFAULT 'none',
+    update_user               VARCHAR(255) DEFAULT SESSION_USER NOT NULL,
+    update_ts                 TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+ALTER TABLE config_property_t
+    ADD CHECK ( property_type IN ( 'Cert', 'Config', 'File') );
+
+
+COMMENT ON COLUMN config_property_t.property_value IS
+    'Property Default Value';
+
+COMMENT ON COLUMN config_property_t.value_type IS
+    'One of string, boolean, integer, float, map, list';
+
+COMMENT ON COLUMN config_property_t.resource_type IS
+  'One of none, api, app, app_api, api|app_api, app|app_api, all';
+
+ALTER TABLE config_property_t ADD CONSTRAINT config_property_pk PRIMARY KEY ( config_id, property_name );
+
+
+
+CREATE TABLE product_version_t (
+    host_id                     UUID NOT NULL,
+    product_id                  VARCHAR(8) NOT NULL,
+    product_version             VARCHAR(12) NOT NULL, -- internal product version 
+    light4j_version             VARCHAR(12) NOT NULL, -- open source release version
+    break_code                  BOOLEAN DEFAULT false, -- breaking code change to upgrade to this version.
+    break_config                BOOLEAN DEFAULT false, -- config server need this to decide if clone is allowed for this version. 
+    release_note                TEXT,
+    version_desc                VARCHAR(1024),
+    release_type                VARCHAR(24) NOT NULL, -- Alpha Version, Beta Version, Release Candidate, General Availability, Production Release
+    current                     BOOLEAN DEFAULT false,
+    version_status              VARCHAR(16) NOT NULL, 
+    update_user                 VARCHAR (255) DEFAULT SESSION_USER NOT NULL,
+    update_ts                   TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    PRIMARY KEY(host_id, product_id, product_version)
+);
+
+
+-- customized property for product version within the host.
+CREATE TABLE product_version_property_t (
+    host_id          UUID NOT NULL,
+    product_id       VARCHAR(8) NOT NULL,
+    product_version  VARCHAR(12) NOT NULL,
+    config_id        UUID NOT NULL,
+    property_name    VARCHAR(64) NOT NULL,
+    property_value   TEXT,
+    property_file    TEXT,
+    update_user      VARCHAR (126) DEFAULT SESSION_USER NOT NULL,
+    update_ts        TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+ALTER TABLE product_version_property_t
+    ADD CONSTRAINT product_version_property_pk PRIMARY KEY ( host_id, 
+                                                             product_id,
+                                                             product_version,
+                                                             config_id,
+                                                             property_name);
+</code></pre>
+<p>Replacing the wide, multi-column composite primary key in <code>product_version_property_t</code> with one based on surrogate UUID keys from the parent tables is <strong>generally a very good idea</strong> for several reasons, primarily related to performance and maintainability.</p>
+<p>Let's break down the pros and cons:</p>
+<p><strong>Current Situation (Composite Keys):</strong></p>
+<ul>
+<li><strong><code>config_property_t</code> PK:</strong> (<code>config_id</code> UUID, <code>property_name</code> VARCHAR(64)) - Size: 16 + (up to 64 + overhead) bytes. Reasonably sized.</li>
+<li><strong><code>product_version_t</code> PK:</strong> (<code>host_id</code> UUID, <code>product_id</code> VARCHAR(8), <code>product_version</code> VARCHAR(12)) - Size: 16 + (8 + overhead) + (12 + overhead) bytes. Getting wider.</li>
+<li><strong><code>product_version_property_t</code> PK:</strong> (<code>host_id</code> UUID, <code>product_id</code> VARCHAR(8), <code>product_version</code> VARCHAR(12), <code>config_id</code> UUID, <code>property_name</code> VARCHAR(64)) - Size: 16 + (8+oh) + (12+oh) + 16 + (64+oh) bytes. <strong>This is quite wide.</strong></li>
+</ul>
+<p><strong>Problems with the Wide Composite Key in <code>product_version_property_t</code>:</strong></p>
+<ol>
+<li><strong>Large Primary Key Index:</strong> The B-tree index for this 5-column PK will be large. Larger indexes consume more disk space, more memory (reducing cache efficiency), and take longer to scan during queries, updates, and deletes.</li>
+<li><strong>Large Foreign Keys (Implicit):</strong> If any other table were to reference <code>product_version_property_t</code> (unlikely given its nature, but possible), the foreign key would also need all 5 columns.</li>
+<li><strong>Larger Secondary Indexes:</strong> Any <em>other</em> indexes you create on <code>product_version_property_t</code> will typically include the primary key columns implicitly (in PostgreSQL leaf nodes). A wide PK bloats <em>all</em> other indexes on the table, magnifying the performance impact.</li>
+<li><strong>Update Overhead:</strong> Updating any of the PK columns (though generally discouraged) is very expensive. More importantly, index maintenance during INSERTs and DELETEs is heavier with wider keys.</li>
+<li><strong>Join Complexity:</strong> Joining on 5 columns is syntactically more verbose.</li>
+</ol>
+<p><strong>Proposed Solution (Surrogate UUID Keys):</strong></p>
+<ol>
+<li>
+<p><strong>Add Surrogate Key to <code>config_property_t</code>:</strong></p>
+<ul>
+<li>Add a new column: <code>cp_id UUID PRIMARY KEY DEFAULT gen_random_uuid()</code> (or use UUIDv7 generator).</li>
+<li>Add a <code>UNIQUE</code> constraint on the <em>original</em> natural key: <code>ALTER TABLE config_property_t ADD CONSTRAINT config_property_nat_key UNIQUE (config_id, property_name);</code> (This is CRITICAL to maintain data integrity).</li>
+<li>Size of new PK: 16 bytes.</li>
+</ul>
+</li>
+<li>
+<p><strong>Add Surrogate Key to <code>product_version_t</code>:</strong></p>
+<ul>
+<li>Add a new column: <code>pv_id UUID PRIMARY KEY DEFAULT gen_random_uuid()</code> (or UUIDv7).</li>
+<li>Add a <code>UNIQUE</code> constraint on the original natural key: <code>ALTER TABLE product_version_t ADD CONSTRAINT product_version_nat_key UNIQUE (host_id, product_id, product_version);</code> (CRITICAL).</li>
+<li>Size of new PK: 16 bytes.</li>
+</ul>
+</li>
+<li>
+<p><strong>Modify <code>product_version_property_t</code>:</strong></p>
+<ul>
+<li>Remove the existing 5-column PK.</li>
+<li>Replace the 5 individual columns used for the PK/FK relationship with two new columns: <code>pv_id UUID</code> and <code>cp_id UUID</code>.</li>
+<li>Create the new Primary Key: <code>ALTER TABLE product_version_property_t ADD CONSTRAINT product_version_property_pk PRIMARY KEY (pv_id, cp_id);</code></li>
+<li>Add Foreign Key constraints:
+<pre><code class="language-sql">ALTER TABLE product_version_property_t
+    ADD CONSTRAINT product_version_property_fk_pv
+    FOREIGN KEY (pv_id) REFERENCES product_version_t(pv_id) ON DELETE CASCADE; -- Or appropriate action
+
+ALTER TABLE product_version_property_t
+    ADD CONSTRAINT product_version_property_fk_cp
+    FOREIGN KEY (cp_id) REFERENCES config_property_t(cp_id) ON DELETE CASCADE; -- Or appropriate action
+</code></pre>
+</li>
+<li>Size of new PK: 16 + 16 = 32 bytes.</li>
+</ul>
+</li>
+</ol>
+<p><strong>Advantages of the Proposed Solution:</strong></p>
+<ol>
+<li><strong>Significantly Smaller PK Index:</strong> The PK index on <code>product_version_property_t</code> shrinks from potentially &gt;100 bytes wide to just 32 bytes. This is the biggest win.</li>
+<li><strong>Smaller Secondary Indexes:</strong> All other indexes on <code>product_version_property_t</code> will also be smaller.</li>
+<li><strong>Improved Query Performance:</strong> Smaller indexes mean faster scans, better cache utilization, and quicker lookups, updates, and deletes involving the PK or indexes on <code>product_version_property_t</code>.</li>
+<li><strong>Simpler Joins:</strong> Joining <code>product_version_property_t</code> to its parent tables now only requires joining on the single <code>pv_id</code> or <code>cp_id</code> columns.</li>
+<li><strong>Simpler Foreign Keys:</strong> The FK definitions are simpler.</li>
+</ol>
+<p><strong>Disadvantages/Considerations:</strong></p>
+<ol>
+<li><strong>Need for <code>UNIQUE</code> Constraints:</strong> You <em>absolutely must</em> add the <code>UNIQUE</code> constraints on the original natural keys in the parent tables (<code>config_property_t</code>, <code>product_version_t</code>) to prevent duplicate entries based on business logic. This adds two new indexes.</li>
+<li><strong>Storage Overhead (Parent Tables):</strong> You add 16 bytes per row to <code>config_property_t</code> and <code>product_version_t</code> for the new UUID PKs.</li>
+<li><strong>Migration Effort:</strong> You need to:
+<ul>
+<li>Add the new UUID columns to the parent tables.</li>
+<li>Populate them with unique UUIDs for all existing rows.</li>
+<li>Add the new FK columns (<code>pv_id</code>, <code>cp_id</code>) to <code>product_version_property_t</code>.</li>
+<li>Update <code>product_version_property_t</code> to populate these new columns by joining back to the parent tables based on the <em>original</em> composite keys.</li>
+<li>Drop the old PK and FK constraints (or the old columns if they are no longer needed besides the value overrides).</li>
+<li>Add the new PK and FK constraints.</li>
+<li>Add the <code>UNIQUE</code> constraints on the parent tables.</li>
+</ul>
+</li>
+<li><strong>Lookups by Natural Key:</strong> Queries that previously used the composite PK directly on the parent tables (e.g., <code>SELECT ... FROM product_version_t WHERE host_id = ? AND product_id = ? AND product_version = ?</code>) will now use the new <code>UNIQUE</code> index instead of the PK index. Performance should still be very good, but it's technically hitting a different index.</li>
+</ol>
+<p><strong>Conclusion:</strong></p>
+<p><strong>Yes, it is a good idea.</strong> The performance benefits gained from dramatically reducing the size of the primary (and consequently, secondary) indexes on the frequently accessed <code>product_version_property_t</code> table likely outweigh the disadvantages (extra storage on parent tables, migration effort, extra unique indexes). The simplification of joins and foreign keys is also a significant maintainability improvement.</p>
+<p><strong>Recommendation:</strong></p>
+<p>Proceed with the plan to introduce surrogate UUID keys (preferably UUIDv7 for generation if using a library) on <code>config_property_t</code> and <code>product_version_t</code>, and change <code>product_version_property_t</code> to use these two UUIDs as its composite primary key. <strong>Do not forget to add the <code>UNIQUE</code> constraints on the original natural keys in the parent tables.</strong></p>
+<h3 id="composite-key-with-3-or-4-columns"><a class="header" href="#composite-key-with-3-or-4-columns">Composite key with 3 or 4 columns</a></h3>
+<p>If a composite key with 3 or 4 columns, it is less definitive than the 5-column case. It moves into a "it depends" territory, requiring weighing the pros and cons more carefully based on specifics.</p>
+<p>Here's a breakdown of factors to consider for 3 or 4 column composite primary keys:</p>
+<p><strong>Arguments for Sticking with the Composite Natural Key (CNK):</strong></p>
+<ol>
+<li><strong>Simplicity (Potentially):</strong> No need for an extra surrogate key column and an extra <code>UNIQUE</code> index on the natural key columns. The schema might feel slightly less cluttered <em>if</em> the natural key is intuitive and stable.</li>
+<li><strong>Reduced Storage (Parent Table):</strong> Avoids adding 16 bytes per row for the UUID PK in the table itself.</li>
+<li><strong>Meaningful Key:</strong> The PK components have inherent business meaning, which can sometimes be useful for direct queries or understanding relationships without extra joins (though the <code>UNIQUE</code> index on the SUK approach provides this lookup too).</li>
+<li><strong>Migration Cost:</strong> Avoids the effort of adding columns, backfilling data, and changing referencing tables.</li>
+</ol>
+<p><strong>Arguments for Refactoring to a Surrogate UUID Key (SUK):</strong></p>
+<ol>
+<li><strong>Index Size (Still Relevant):</strong> This is the biggest factor.
+<ul>
+<li><strong>Calculate the Width:</strong> Add up the <em>maximum</em> potential size of the 3 or 4 columns in the CNK.
+<ul>
+<li><code>UUID</code>: 16 bytes</li>
+<li><code>INT</code>: 4 bytes</li>
+<li><code>BIGINT</code>: 8 bytes</li>
+<li><code>VARCHAR(N)</code>: N bytes + 1 or 4 bytes overhead (depending on length)</li>
+<li><code>TIMESTAMP</code>: 8 bytes</li>
+<li><code>BOOLEAN</code>: 1 byte</li>
+</ul>
+</li>
+<li><strong>Compare:</strong> Compare the calculated width to the typical width of a surrogate key reference (16 bytes for one UUID, or 32 bytes if the child table needs two UUIDs like in your <code>product_version_property_t</code> example).</li>
+<li><strong>Threshold:</strong> If the CNK width starts exceeding ~32-40 bytes, the performance benefits of a narrower SUK (especially for secondary indexes and joins) become increasingly attractive. Even a 3-column key like <code>(UUID, VARCHAR(8), VARCHAR(12))</code> is already <code>16 + (8+1) + (12+1) = 38</code> bytes. A 4-column key is almost certainly wider.</li>
+</ul>
+</li>
+<li><strong>Secondary Index Bloat:</strong> Remember, <em>all</em> other indexes on the table implicitly include the PK columns. A wide CNK makes <em>every</em> index larger, impacting cache efficiency and scan speed across the board. This effect is magnified if you have many secondary indexes.</li>
+<li><strong>Join Performance/Simplicity:</strong> Joining on a single UUID column is generally faster and syntactically simpler than joining on 3 or 4 columns, especially if some are strings.</li>
+<li><strong>Foreign Key Simplicity:</strong> Tables referencing this table only need to store a single UUID column as the foreign key, rather than 3 or 4 columns. This significantly reduces storage and complexity in child tables.</li>
+<li><strong>Immutability/Stability:</strong> Surrogate keys are inherently stable. If there's <em>any</em> chance the values in the natural key columns might need to change (which is generally bad practice for PKs but sometimes unavoidable), using a SUK provides crucial insulation.</li>
+</ol>
+<p><strong>Decision Rubric (Heuristics):</strong></p>
+<ul>
+<li><strong>Scenario 1: Key is mostly small, fixed-width types (e.g., 3 INTs, 2 INTs + UUID). Total width &lt; ~32 bytes.</strong>
+<ul>
+<li><em>Lean towards:</em> Keeping the CNK might be acceptable, especially if the table isn't heavily referenced or doesn't have many secondary indexes. The benefits of SUK are less pronounced.</li>
+</ul>
+</li>
+<li><strong>Scenario 2: Key includes even one moderately sized VARCHAR (e.g., VARCHAR(20+)) or multiple smaller VARCHARs. Total width &gt; ~32-40 bytes.</strong>
+<ul>
+<li><em>Lean towards:</em> Refactoring to SUK. The performance benefits from reduced index sizes (primary and secondary) and simpler joins/FKs likely start to outweigh the costs.</li>
+</ul>
+</li>
+<li><strong>Scenario 3: Key includes wide VARCHARs (VARCHAR(50+)).</strong>
+<ul>
+<li><em>Lean towards:</em> Strongly consider refactoring to SUK. Benefits are significant.</li>
+</ul>
+</li>
+<li><strong>Scenario 4: The table is frequently referenced by other tables via FK.</strong>
+<ul>
+<li><em>Lean towards:</em> Refactoring to SUK to simplify the child tables.</li>
+</ul>
+</li>
+<li><strong>Scenario 5: The table has many secondary indexes.</strong>
+<ul>
+<li><em>Lean towards:</em> Refactoring to SUK to keep those indexes smaller.</li>
+</ul>
+</li>
+<li><strong>Scenario 6: Any component of the natural key is potentially volatile.</strong>
+<ul>
+<li><em>Lean towards:</em> Refactoring to SUK for stability.</li>
+</ul>
+</li>
+</ul>
+<p><strong>Conclusion:</strong></p>
+<p>For 3 or 4 columns, it's less of a slam dunk than for 5 columns, but <strong>refactoring to a surrogate UUID key is still often beneficial, especially if VARCHARs are involved or the total key width exceeds roughly 32-40 bytes.</strong> The key drivers are the reduction in primary and secondary index size and the simplification of foreign keys and joins.</p>
+<p>Carefully calculate the width of your specific 3 or 4 column composite keys and consider the usage patterns of the table before deciding.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../design/uuid.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../design/atomic-composite.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../design/uuid.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../design/atomic-composite.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+        <!-- Livereload script (if served using the cli tool) -->
+        <script>
+            const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsAddress = wsProtocol + "//" + location.host + "/" + "__livereload";
+            const socket = new WebSocket(wsAddress);
+            socket.onmessage = function (event) {
+                if (event.data === "reload") {
+                    socket.close();
+                    location.reload();
+                }
+            };
+
+            window.onbeforeunload = function() {
+                socket.close();
+            }
+        </script>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../mermaid.min.js"></script>
+        <script src="../mermaid-init.js"></script>
+
+
+    </div>
+    </body>
+</html>

@@ -1,0 +1,555 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Multi-Tenant - Light Portal Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "../";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Light Portal Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="multi-tenant"><a class="header" href="#multi-tenant">Multi-Tenant</a></h1>
+<h2 id="database-schema"><a class="header" href="#database-schema">Database Schema</a></h2>
+<p>Adding a host_id to every table is one approach, but it does lead to composite primary keys and can impact performance. Using UUIDs as primary keys, even in a multi-tenant environment, is another viable option with its own set of trade-offs. Let's examine both strategies:</p>
+<ol>
+<li>Host ID on Every Table (Composite Primary Keys)</li>
+</ol>
+<p>Schema: Each table would have a host_id column, and the primary key would be a combination of host_id and another unique identifier (e.g., user_id, endpoint_id).</p>
+<pre><code>CREATE TABLE user_t (
+    host_id UUID NOT NULL,  -- References hosts table
+    user_id INT NOT NULL, 
+    -- ... other columns
+    PRIMARY KEY (host_id, user_id),
+    FOREIGN KEY (host_id) REFERENCES hosts_t(host_id)
+);
+</code></pre>
+<p>Pros:</p>
+<ul>
+<li>
+<p>Data Isolation: Clear separation of data at the database level. Easy to query data for a specific tenant.</p>
+</li>
+<li>
+<p>Backup/Restore: Simplified backup and restore procedures for individual tenants.</p>
+</li>
+</ul>
+<p>Cons:</p>
+<ul>
+<li>
+<p>Composite Primary Keys: Can lead to more complex queries, especially joins, as you always need to include the host_id. Can affect query optimizer performance.</p>
+</li>
+<li>
+<p>Storage Overhead: host_id is repeated in every row of every table, adding storage overhead.</p>
+</li>
+<li>
+<p>Index Impact: Composite indexes can sometimes be less efficient than single-column indexes.</p>
+</li>
+</ul>
+<ol start="2">
+<li>UUIDs as Primary Keys (Shared Tables)</li>
+</ol>
+<p>Schema: Tables use UUIDs as primary keys. A separate table (tenant_resources_t) maps UUIDs to tenants.</p>
+<pre><code>CREATE TABLE user_t (
+    user_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    -- ... other columns
+);
+
+
+CREATE TABLE tenant_resource_t(
+    host_id UUID NOT NULL,
+    resource_type varchar(255) NOT NULL, --e.g., 'user', 'api_endpoint'
+    resource_id UUID NOT NULL,
+    PRIMARY KEY(host_id, resource_type, resource_id),
+    FOREIGN KEY (host_id) REFERENCES hosts_t(host_id)
+);
+</code></pre>
+<p>Pros:</p>
+<ul>
+<li>
+<p>Simplified Primary Keys: Easier to manage single-column UUID primary keys. Simpler joins.</p>
+</li>
+<li>
+<p>Reduced Storage Overhead: No need to repeat host_id in every table.</p>
+</li>
+<li>
+<p>Application Logic: Multi-tenancy is handled mostly in the application logic by querying tenant_resources_t to ensure a user belongs to the correct tenant, adding a layer of flexibility. (This is also a con if not carefully implemented.)</p>
+</li>
+</ul>
+<p>Cons:</p>
+<ul>
+<li>
+<p>Data Isolation (slightly reduced): Data is logically separated but resides in shared tables. Robust application logic is essential to prevent data leakage between tenants.</p>
+</li>
+<li>
+<p>Backup/Restore (more complex): Backing up/restoring for a single tenant requires filtering based on the tenant_resources_t table.</p>
+</li>
+<li>
+<p>Query Performance (potential issue): Queries might require joining with tenant_resources_t table which will add a bit overhead. Proper indexing and query optimization become crucial.</p>
+</li>
+</ul>
+<ol start="3">
+<li>Hybrid Approach (Recommended in many cases)</li>
+</ol>
+<ul>
+<li>
+<p>Combine the strengths of both approaches.</p>
+</li>
+<li>
+<p>Use UUIDs as primary keys for most tables for simplicity.</p>
+</li>
+<li>
+<p>Add host_id to tables where data isolation is paramount (e.g., tables containing sensitive financial or personal data) or where frequent tenant-specific queries are performed. This provides a more granular level of control and allows for optimized queries when needed.</p>
+</li>
+<li>
+<p>Use the tenant_resources_t table to maintain an overview of which resources belong to which tenant, supporting the application logic's multi-tenancy enforcement.</p>
+</li>
+</ul>
+<p>Choosing the Right Strategy:</p>
+<ul>
+<li>
+<p>Small Number of Tenants, Low Data Volume: UUIDs might be sufficient.</p>
+</li>
+<li>
+<p>Strict Data Isolation Requirements, Frequent Tenant-Specific Queries, High Data Volume: host_id on every relevant table or a hybrid approach is often preferable.</p>
+</li>
+<li>
+<p>Flexibility in Multi-Tenancy Implementation: Favors the UUID approach or Hybrid approach, with logic predominantly handled in the application layer.</p>
+</li>
+</ul>
+<p>Additional Considerations:</p>
+<ul>
+<li>
+<p>Database Support: Check if database (PostgreSQL) has specific features for multi-tenancy.</p>
+</li>
+<li>
+<p>Indexing: Carefully plan indexes for optimal performance in any multi-tenant scenario.</p>
+</li>
+<li>
+<p>Schema Design: Consider creating views for tenant-specific data access to simplify queries in the application layer.</p>
+</li>
+<li>
+<p>Security: Implement robust security measures to prevent data leakage between tenants, regardless of the chosen approach.</p>
+</li>
+</ul>
+<p>The hybrid approach usually provides the best balance between performance, data isolation, and development complexity in real-world multi-tenant applications. You have more direct control where strict isolation is required and can maintain the simplicity of UUIDs where it's beneficial. Using tenant_resources_t for application logic enforcement offers flexibility and a central point of management for tenant resource association. This approach also prepares the application for potential future expansion and different multi-tenancy demands as the application grows.</p>
+<h2 id="should-host_id-part-of-the-pk"><a class="header" href="#should-host_id-part-of-the-pk">Should host_id part of the PK</a></h2>
+<p>This is a classic multi-tenancy design question. Both approaches have implications. Let's analyze them:</p>
+<p><strong>Option 1: Current Approach - PK (<code>host_id</code>, <code>instance_id</code>)</strong></p>
+<ul>
+<li><strong>Pros:</strong>
+<ul>
+<li><strong>Excellent for Tenant-Specific Queries:</strong> This is the biggest advantage. Queries like <code>SELECT ... FROM instance_t WHERE host_id = ? AND ...</code> or <code>SELECT ... FROM instance_t WHERE host_id = ? ORDER BY instance_id</code> can directly and efficiently use the primary key index. The index is naturally ordered by tenant first, then by instance within that tenant. This improves data locality for a specific tenant's data.</li>
+<li><strong>Clear Logical Grouping:</strong> The primary key explicitly represents the concept that an instance <em>belongs to</em> a specific host (tenant).</li>
+<li><strong>Enforces Uniqueness Per Tenant:</strong> Guarantees that <code>instance_id</code> is unique <em>within</em> a given <code>host_id</code>. (Although UUIDv7 makes global collisions highly unlikely anyway).</li>
+</ul>
+</li>
+<li><strong>Cons:</strong>
+<ul>
+<li><strong>Wider Primary Key:</strong> The PK is 32 bytes (16+16).</li>
+<li><strong>Wider Foreign Keys:</strong> Any table referencing <code>instance_t</code> would need <em>both</em> <code>host_id</code> and <code>instance_id</code> as its foreign key columns.</li>
+<li><strong>Slightly Larger Secondary Indexes:</strong> Other indexes on <code>instance_t</code> will implicitly include both PK columns, making them slightly larger than if the PK was just 16 bytes.</li>
+</ul>
+</li>
+</ul>
+<p><strong>Option 2: Alternative - PK (<code>instance_id</code>)</strong></p>
+<ul>
+<li><strong>Pre-requisite:</strong> This <em>only</em> works if your application guarantees that <code>instance_id</code> is <strong>globally unique</strong> across all hosts/tenants. Given you're using UUIDv7, this is a safe assumption in practice, but the schema wouldn't <em>enforce</em> uniqueness <em>per host</em> explicitly via the PK itself.</li>
+<li><strong>Pros:</strong>
+<ul>
+<li><strong>Narrower Primary Key:</strong> The PK is only 16 bytes.</li>
+<li><strong>Simpler Foreign Keys:</strong> Tables referencing <code>instance_t</code> only need a single <code>instance_id</code> column for the foreign key.</li>
+<li><strong>Slightly Smaller Secondary Indexes:</strong> Other indexes on the table will be marginally smaller.</li>
+</ul>
+</li>
+<li><strong>Cons:</strong>
+<ul>
+<li><strong>Requires Separate Index for Tenant Queries:</strong> You would <em>absolutely need</em> a separate index on <code>(host_id, instance_id)</code> (or at least <code>(host_id)</code>) for efficient tenant-specific queries (<code>WHERE host_id = ?</code>). Without it, querying for a specific tenant's data would require less efficient scans. This index would likely be a <code>UNIQUE</code> index anyway to enforce the logical relationship: <code>CREATE UNIQUE INDEX instance_t_host_instance_idx ON instance_t (host_id, instance_id);</code></li>
+<li><strong>Potential Reduced Locality:</strong> While the separate index helps, the primary key index itself (based only on <code>instance_id</code>) might interleave data from different tenants physically, potentially slightly reducing cache efficiency for queries scanning many instances for a single tenant compared to the composite PK approach.</li>
+</ul>
+</li>
+</ul>
+<p><strong>Recommendation:</strong></p>
+<p><strong>Stick with the composite primary key: <code>PRIMARY KEY(host_id, instance_id)</code></strong>.</p>
+<p><strong>Reasoning:</strong></p>
+<ol>
+<li><strong>Performance for Core Use Case:</strong> In multi-tenant systems, filtering by the tenant identifier (<code>host_id</code>) is almost always the primary access pattern. Having <code>host_id</code> as the leading column in the PK index directly optimizes this critical path.</li>
+<li><strong>Index Necessity:</strong> Even if you chose <code>instance_id</code> as the sole PK, you would still need to create an index on <code>(host_id, instance_id)</code> for performance. Making this essential index the <em>primary key</em> index is often the most straightforward and efficient approach.</li>
+<li><strong>Clarity:</strong> The composite key clearly reflects the logical relationship and ownership.</li>
+<li><strong>Cost:</strong> The "cost" of a 32-byte PK vs. a 16-byte PK is often negligible compared to the performance gains achieved by aligning the PK index with the dominant query patterns in a multi-tenant architecture. The impact on FKs and secondary indexes is real but usually acceptable.</li>
+</ol>
+<p>Using just <code>instance_id</code> as the PK prioritizes global uniqueness and FK simplicity over optimizing tenant-specific queries directly via the PK index. In most multi-tenant scenarios, optimizing tenant queries is more important.</p>
+<h2 id="citus-postgresql-extension"><a class="header" href="#citus-postgresql-extension">Citus PostgreSQL Extension</a></h2>
+<p>Citus, now fully integrated into PostgreSQL as a distributed database extension, can be very helpful in scaling your multi-tenant application, especially if you anticipate significant data growth and high query loads. Here's how Citus can fit into your use case and the factors to consider:</p>
+<h4 id="how-citus-helps"><a class="header" href="#how-citus-helps">How Citus Helps:</a></h4>
+<ul>
+<li>
+<p>Horizontal Scalability: Citus allows you to distribute the data across multiple PostgreSQL nodes (servers), enabling horizontal scaling. This is crucial for handling increasing data volumes and query loads in a multi-tenant environment.</p>
+</li>
+<li>
+<p>Improved Query Performance: By distributing data and queries, Citus can significantly improve the performance of many types of queries, especially analytical queries that operate on large datasets. This is particularly beneficial if we have tenants with substantially different data volumes or query patterns.</p>
+</li>
+<li>
+<p>Shard Placement by Tenant: One of the most effective ways to use Citus for multi-tenancy is to shard the data by host_id (or a tenant ID). This means that all data for a given tenant resides on the same shard (a subset of the distributed database). This allows for efficient tenant isolation and simplifies queries for tenant-specific data.</p>
+</li>
+<li>
+<p>Simplified Multi-Tenant Queries: When sharding by tenant, queries that filter by host_id become very efficient because Citus can route them directly to the appropriate shard. This eliminates the need for expensive scans across the entire database.</p>
+</li>
+<li>
+<p>Flexibility: Citus supports various sharding strategies, allowing you to choose the best approach for the data and query patterns. You can even use a hybrid approach, distributing some tables while keeping others replicated across all nodes for faster access to shared data.</p>
+</li>
+</ul>
+<p>Example (Sharding by Tenant):</p>
+<p>Create a distributed table: When creating tables (e.g., user_t, api_endpoint_t, etc.), we would declare them as distributed tables in Citus, using the host_id as the distribution column:</p>
+<pre><code>CREATE TABLE user_t (
+    host_id UUID NOT NULL,
+    user_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    -- ... other columns
+) DISTRIBUTE BY HASH (host_id);
+</code></pre>
+<p>Querying: When querying data for a specific tenant, include the host_id in the WHERE clause:</p>
+<pre><code>SELECT * FROM users_t WHERE host_id = 'your-tenant-id';
+</code></pre>
+<p>Citus will automatically route this query to the shard containing the data for that tenant, resulting in much faster query execution.</p>
+<h4 id="citus-cost"><a class="header" href="#citus-cost">Citus Cost:</a></h4>
+<ul>
+<li>
+<p>Citus Open Source: The Citus open-source extension is free to use and is included in the PostgreSQL distribution. We can self-host and manage it.</p>
+</li>
+<li>
+<p>Azure CosmosDB for PostgreSQL (Managed Citus): Microsoft offers a fully managed cloud service called Azure CosmosDB for PostgreSQL, which is built on Citus. This service has usage-based pricing, and the cost depends on factors like the number of nodes, storage, and compute resources used. This managed option reduces the operational overhead of managing Citus yourself.</p>
+</li>
+</ul>
+<h4 id="recommendation"><a class="header" href="#recommendation">Recommendation:</a></h4>
+<p>Don't automatically add host_id to every table just because we are using Citus. Carefully analyze the data model, query patterns, and multi-tenancy requirements.</p>
+<ul>
+<li>
+<p>Distribute tables by host_id (tenant ID) when data locality and isolation are paramount, and we want to optimize tenant-specific queries.</p>
+</li>
+<li>
+<p>Consider replicating smaller, frequently joined tables to avoid unnecessary joins and host_id overhead.</p>
+</li>
+<li>
+<p>Use a central mapping table (tenant_resources_t) to manage tenant-resource associations and enforce multi-tenancy rules in the application logic where appropriate.</p>
+</li>
+</ul>
+<p>This more nuanced approach provides a balance between the benefits of distributed data with Citus and avoiding unnecessary complexity or performance overhead from overusing host_id. Choose the Citus deployment model (self-hosted open source or managed cloud service) that best suits our needs and budget.</p>
+<h4 id="primary-key-considerations-in-a-distributed-citus-environment"><a class="header" href="#primary-key-considerations-in-a-distributed-citus-environment">Primary Key Considerations in a Distributed Citus Environment</a></h4>
+<p>When a table includes <code>host_id</code> (due to sharding requirements), it is important to include <code>host_id</code> as part of the primary key. This ensures proper functioning and optimization within the Citus distributed database.</p>
+<ol>
+<li>
+<p><strong>Distribution Column Requirement</strong><br />
+In Citus, the distribution column (e.g., <code>host_id</code>) must be part of the primary key. This is essential for routing queries and distributing data correctly across shards.</p>
+</li>
+<li>
+<p><strong>Uniqueness Enforcement</strong></p>
+<ul>
+<li>The primary key enforces uniqueness across the entire distributed database.</li>
+<li>For example, if <code>user_id</code> is unique only within a tenant (host), then <code>(host_id, user_id)</code> is required as the primary key to ensure uniqueness across all shards.</li>
+</ul>
+</li>
+<li>
+<p><strong>Data Locality and Co-location</strong><br />
+Including <code>host_id</code> in the primary key ensures that all rows for the same tenant (identified by the same <code>host_id</code>) are stored together on a single shard. This provides:</p>
+<ul>
+<li><strong>Efficient Joins</strong>: Joins between tables related to the same tenant can be performed locally on a single shard, avoiding expensive cross-shard data transfers.</li>
+<li><strong>Optimized Queries</strong>: Queries filtering by <code>host_id</code> are efficiently routed to the appropriate shard.</li>
+</ul>
+</li>
+<li>
+<p><strong>Referential Integrity</strong><br />
+If other tables reference the <code>users_t</code> table and are also distributed by <code>host_id</code>, including <code>host_id</code> in the primary key of <code>users_t</code> is essential to maintain referential integrity across shards.</p>
+</li>
+</ol>
+<h2 id="multi-host-user-session-management"><a class="header" href="#multi-host-user-session-management">Multi-Host User Session Management</a></h2>
+<p>In a multi-host environment where multiple hosts reside on the same server, users must associate with one host at a time. The session management is handled as follows:</p>
+<ol>
+<li>
+<p><strong>Host Association on Login</strong>:</p>
+<ul>
+<li>Once a user logs in, a <strong>host cookie</strong> is returned, derived from the JWT token.</li>
+<li>The user's session defaults to the associated host in the cookie.</li>
+</ul>
+</li>
+<li>
+<p><strong>Switching Hosts</strong>:</p>
+<ul>
+<li>If a user wishes to switch to another host, they can:
+<ul>
+<li>Access the <strong>User Menu</strong> to select a different host.</li>
+<li>Log out of the current session.</li>
+</ul>
+</li>
+<li>During the next login, the session will be tied to the newly selected host.</li>
+</ul>
+</li>
+<li>
+<p><strong>Host in API Requests</strong>:</p>
+<ul>
+<li>For all API requests sent to the server, the host is typically included as part of the request payload.</li>
+<li>For login users, the host is in the JWT token as a custom claim.</li>
+<li>For guest users, the default host is used until the user is signed in.</li>
+<li>This ensures proper routing and handling of requests in a multi-host environment.</li>
+</ul>
+</li>
+</ol>
+<p>By associating users to a specific host for each session, this approach ensures clear separation of data and responsibilities across hosts, while providing users the flexibility to switch hosts as needed.</p>
+<h2 id="event-header"><a class="header" href="#event-header">Event Header</a></h2>
+<p>As the portal is based on the event sorucing, all events will be responsible for populating the database. So, they need to be separated by host_id as well. In the event header, we have one unique id which is generated when event is created. Also, it has host_id and user_id in the EventId which is included in every events.</p>
+<h2 id="reference-and-shared-tables"><a class="header" href="#reference-and-shared-tables">Reference and Shared Tables</a></h2>
+<p>In an application there are some data that is shared by all tenants. For example, the dropdown options on the UI and business validation. We call them reference data and have defined several tables to manage them centrally. For each reference data type, there is a logical table defined in the ref_table_t and marked as common or not. Common means the table can be shared with other tenants. Otherwise, it is only private for the owner tenant.</p>
+<p>Some other entities are very similar but they cannot be fit into the reference tables. For example, category_t table contains all the category definitions for different entities. These tables are designed with an optional host_id. Here is an exmaple.</p>
+<pre><code>CREATE TABLE category_t (
+    category_id          VARCHAR(22) NOT NULL,   -- unique id to identify the category
+    host_id              VARCHAR(22),            -- null mean global category
+    entity_type          VARCHAR(50) NOT NULL,   -- the version of the schema
+    category_name        VARCHAR(126) NOT NULL,  -- category name, must be url friendly.
+    category_desc        VARCHAR(1024) NOT NULL, -- decription
+    parent_category_id   VARCHAR(22) REFERENCES category_t(category_id) ON DELETE SET NULL, -- parent category id, null if there is no parent.
+    sort_order           INT DEFAULT 0,          -- sort order on the UI
+    update_user          VARCHAR (255) DEFAULT SESSION_USER NOT NULL,
+    update_ts            TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    PRIMARY KEY (category_id)
+);
+
+-- 1. Unique index for GLOBAL categories (where host_id IS NULL)
+-- Ensures uniqueness of (entity_type, category_name, parent_category_id) ONLY when host_id is NULL
+CREATE UNIQUE INDEX idx_category_unique_global
+ON category_t (entity_type, category_name, parent_category_id)
+NULLS NOT DISTINCT -- Handles NULLs in parent_category_id correctly
+WHERE host_id IS NULL;
+
+-- 2. Unique index for TENANT-SPECIFIC categories (where host_id IS NOT NULL)
+-- Ensures uniqueness of (host_id, entity_type, category_name, parent_category_id)
+-- for rows that belong to a specific host.
+CREATE UNIQUE INDEX idx_category_unique_tenant
+ON category_t (host_id, entity_type, category_name, parent_category_id)
+NULLS NOT DISTINCT -- Handles NULLs in parent_category_id correctly
+WHERE host_id IS NOT NULL;
+
+
+CREATE INDEX idx_category_entity_type ON category_t (entity_type);
+CREATE INDEX idx_category_parent ON category_t (parent_category_id);
+CREATE INDEX idx_category_name ON category_t (category_name);
+CREATE INDEX idx_category_host_id ON category_t (host_id);
+
+</code></pre>
+<p>On the UI, the host_id will be auto populated according to the associated host_id by the user in readonly mode. There is a checkbox "Is Global Category" in the form. If checked, the backend service will have an FGA rule to ensure that the user is admin and the host_id will be removed in the event. This works for both create and update.</p>
+<p>When viewing categories, the super admin might see all categories by default, possibly with a column or indicator showing the host_id (or "Global"). Filters should allow viewing global only, or a specific tenant's categories.</p>
+<p>Tenant Admin / Host Owner:</p>
+<p>When a tenant admin accesses the category management UI, their context is fixed to their own host_id.</p>
+<p>They should only be able to create/edit categories associated with their specific host_id.</p>
+<p>The UI should not offer them the option to create/edit global categories or categories for other hosts. The host_id is implicitly set or displayed as read-only based on their logged-in context.</p>
+<p>When viewing categories, they should see their own tenant-specific categories plus all applicable global categories. The UI should clearly differentiate between these (e.g., using grouping, labels, icons).</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../design.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../design/portal-event.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../design.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../design/portal-event.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+        <!-- Livereload script (if served using the cli tool) -->
+        <script>
+            const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsAddress = wsProtocol + "//" + location.host + "/" + "__livereload";
+            const socket = new WebSocket(wsAddress);
+            socket.onmessage = function (event) {
+                if (event.data === "reload") {
+                    socket.close();
+                    location.reload();
+                }
+            };
+
+            window.onbeforeunload = function() {
+                socket.close();
+            }
+        </script>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../mermaid.min.js"></script>
+        <script src="../mermaid-init.js"></script>
+
+
+    </div>
+    </body>
+</html>

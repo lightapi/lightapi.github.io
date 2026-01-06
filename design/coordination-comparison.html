@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Reference Table - Light Portal Documentation</title>
+        <title>Coordination Comparison - Light Portal Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -152,83 +152,53 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="reference-table"><a class="header" href="#reference-table">Reference Table</a></h1>
-<p>When building a web application, there would be a lot of dropdown selects in forms. The form itself only cares about the <code>id</code> and <code>label</code> list to render the form and only the <code>id</code> will be submitted to the backend API for single select and several <code>ids</code> for multiple select.</p>
-<p>To save the effort to create many similar tables, we can craete a set of tables for all dropdowns. For some of the reference tables, dropdown should be the same across all hosts and we can set common flag to 'Y' so that they are shared by all hosts. If the dropdown values might be different between hosts, we can create a reference table per host and link the reference table with host in a separate table that support sharding.</p>
-<h2 id="reference-schema"><a class="header" href="#reference-schema">Reference Schema</a></h2>
-<pre><code>CREATE TABLE ref_host_t (
-  table_id             VARCHAR(22) NOT NULL,
-  host_id              VARCHAR(22) NOT NULL,
-  PRIMARY KEY (table_id, host_id),
-  FOREIGN KEY (table_id) REFERENCES ref_table_t (table_id) ON DELETE CASCADE,
-  FOREIGN KEY (host_id) REFERENCES host (host_id) ON DELETE CASCADE
-);
-
-CREATE TABLE ref_table_t (
-  table_id             VARCHAR(22) NOT NULL, -- UUID genereated by Util
-  table_name           VARCHAR(80) NOT NULL, -- Name of the ref table for lookup.
-  table_desc           VARCHAR(1024) NULL,
-  active               CHAR(1) NOT NULL DEFAULT 'Y', -- Only active table returns values
-  editable             CHAR(1) NOT NULL DEFAULT 'Y', -- Table value and locale can be updated via ref admin
-  common               CHAR(1) NOT NULL DEFAULT 'Y', -- The drop down shared across hosts
-  PRIMARY KEY(table_id)
-);
-
-
-CREATE TABLE ref_value_t (
-  value_id              VARCHAR(22) NOT NULL,
-  table_id              VARCHAR(22) NOT NULL,
-  value_code            VARCHAR(80) NOT NULL, -- The dropdown value
-  start_time            TIMESTAMP NULL,       
-  end_time              TIMESTAMP NULL,
-  display_order         INT,                  -- for editor and dropdown list.
-  active                VARCHAR(1) NOT NULL DEFAULT 'Y',
-  PRIMARY KEY(value_id),
-  FOREIGN KEY table_id REFERENCES ref_table_t (table_id) ON DELETE CASCADE
-);
-
-
-CREATE TABLE value_locale_t (
-  value_id              VARCHAR(22) NOT NULL,
-  language              VARCHAR(2) NOT NULL,
-  value_desc            VARCHAR(256) NULL, -- The drop label in language.
-  PRIMARY KEY(value_id,language),
-  FOREIGN KEY value_id REFERENCES ref_value_t (value_id) ON DELETE CASCADE
-);
-
-
-
-CREATE TABLE relation_type_t (
-  relation_id           VARCHAR(22) NOT NULL,
-  relation_name         VARCHAR(32) NOT NULL, -- The lookup keyword for the relation.
-  relation_desc         VARCHAR(1024) NOT NULL,
-  PRIMARY KEY(relation_id)
-);
-
-
-
-CREATE TABLE relation_t (
-  relation_id           VARCHAR(22) NOT NULL,
-  value_id_from         VARCHAR(22) NOT NULL,
-  value_id_to           VARCHAR(22) NOT NULL,
-  active                VARCHAR(1) NOT NULL DEFAULT 'Y',
-  PRIMARY KEY(relation_id, value_id_from, value_id_to)
-  FOREIGN KEY relation_id REFERENCES relation_type_t (relation_id) ON DELETE CASCADE,
-  FOREIGN KEY value_id_from REFERENCES ref_value_t (value_id) ON DELETE CASCADE,
-  FOREIGN KEY value_id_to REFERENCES ref_table_t (value_id) ON DELETE CASCADE
-);
-
-</code></pre>
+                        <h1 id="comparison-leader-election-vs-competing-consumer-claiming"><a class="header" href="#comparison-leader-election-vs-competing-consumer-claiming">Comparison: Leader Election vs. Competing Consumer (Claiming)</a></h1>
+<p>The light-portal architecture employs two different distributed coordination strategies: <strong>Leader Election</strong> for the Scheduler and <strong>Competing Consumers (Offset Claiming)</strong> for the PostgreSQL Pub/Sub. Each approach is optimized for its specific use case.</p>
+<h2 id="summary-table"><a class="header" href="#summary-table">Summary Table</a></h2>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Feature</th><th style="text-align: left">Leader Election (<code>scheduler_lock_t</code>)</th><th style="text-align: left">Host Partitioning (<code>consumer_offsets</code>)</th></tr></thead><tbody>
+<tr><td style="text-align: left"><strong>Primary Goal</strong></td><td style="text-align: left">Exclusive Control (Safety)</td><td style="text-align: left">Horizontal Scalability (Throughput)</td></tr>
+<tr><td style="text-align: left"><strong>Mechanism</strong></td><td style="text-align: left">Centralized "lock" with heartbeat.</td><td style="text-align: left">Logical partitioning via <code>host_id</code> hash.</td></tr>
+<tr><td style="text-align: left"><strong>Parallelism</strong></td><td style="text-align: left">None (Single active instance).</td><td style="text-align: left">High (N partitions, N consumers).</td></tr>
+<tr><td style="text-align: left"><strong>Database Load</strong></td><td style="text-align: left">Very Low (Heartbeat only).</td><td style="text-align: left">Moderate (Per-partition updates).</td></tr>
+<tr><td style="text-align: left"><strong>Failover</strong></td><td style="text-align: left">Detection delay (Timeout-based).</td><td style="text-align: left">Instant (One processor per partition).</td></tr>
+<tr><td style="text-align: left"><strong>Complexity</strong></td><td style="text-align: left">Simple.</td><td style="text-align: left">Moderate (Hashing + Batching).</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h2 id="1-leader-election-used-in-distributed-scheduler"><a class="header" href="#1-leader-election-used-in-distributed-scheduler">1. Leader Election (Used in Distributed Scheduler)</a></h2>
+<h3 id="why-its-used-for-the-scheduler"><a class="header" href="#why-its-used-for-the-scheduler">Why it's used for the Scheduler:</a></h3>
+<p>The "work" done by the scheduler is extremely lightweight: it simply checks if a task is due, inserts a one-line event into the outbox, and updates the next run time. However, the cost of <strong>double execution</strong> (starting the same job twice) is high.</p>
+<ul>
+<li><strong>Efficiency</strong>: Having one leader prevents multiple instances from redundant polling of the <code>schedule_t</code> table, which reduces database contention.</li>
+<li><strong>Safety</strong>: It provides a simple guarantee that only one controller is making decisions about what triggers and when.</li>
+<li><strong>Scaling</strong>: Since the scheduler doesn't do the actual "heavy lifting" (the work is done by event consumers), the leader bottleneck is rarely an issue.</li>
+</ul>
+<h2 id="2-host-based-partitioning-used-in-postgres-pubsub"><a class="header" href="#2-host-based-partitioning-used-in-postgres-pubsub">2. Host-Based Partitioning (Used in Postgres Pub/Sub)</a></h2>
+<h3 id="why-its-used-for-event-processing"><a class="header" href="#why-its-used-for-event-processing">Why it's used for Event Processing:</a></h3>
+<p>Event processing is the "Data Plane" of the system. By partitioning based on <code>host_id</code>, we emulate Kafka's partitioning behavior within PostgreSQL.</p>
+<ul>
+<li><strong>Ordered Processing</strong>: Ensures all events for a specific host (or user) are processed by the same partition sequence, avoiding race conditions on multi-tenant data.</li>
+<li><strong>Throughput</strong>: Multiple consumers can process different partitions in parallel. 8 partitions = 8 instances working concurrently.</li>
+<li><strong>Implicit Load Balancing</strong>: Distributes thousands of hosts across a fixed number of partitions.</li>
+<li><strong>Resiliency</strong>: Each partition's progress is independent. A failure in one host/partition doesn't block others.</li>
+</ul>
+<h2 id="conclusion-which-is-better"><a class="header" href="#conclusion-which-is-better">Conclusion: Which is "Better"?</a></h2>
+<p>Neither is universally better; they are <strong>complementary</strong>:</p>
+<ul>
+<li><strong>Leader Election</strong> is better for <strong>orchestration and control</strong>: Where you need a single "brain" to make consistent decisions and volume is manageable.</li>
+<li><strong>Competing Consumers</strong> is better for <strong>workload distribution</strong>: Where you need to process a high volume of independent tasks as quickly as possible.</li>
+</ul>
+<p>In light-portal, we use the <strong>Scheduler (Leader)</strong> to reliably "kick off" tasks by emitting events, and the <strong>Pub/Sub (Competing Consumers)</strong> to at-scale process those events.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../design/portal-event.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../design/postgres-pubsub.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="../design/authentication-authorization.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../implementation.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -238,11 +208,11 @@ CREATE TABLE relation_t (
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../design/portal-event.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../design/postgres-pubsub.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="../design/authentication-authorization.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../implementation.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

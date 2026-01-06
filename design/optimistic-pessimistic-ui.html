@@ -1,0 +1,405 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Optimistic vs Pessimistic UI - Light Portal Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "../";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Light Portal Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="optimistic-vs-pessimistic-ui"><a class="header" href="#optimistic-vs-pessimistic-ui">Optimistic vs Pessimistic UI</a></h1>
+<p>When you create, update, delete an entity on the UI and refresh the list immediately, chances are the newly updated entity doesn't show up the changes. This is a classic challenge when working with systems that use <strong>Event Sourcing</strong> and <strong>CQRS (Command Query Responsibility Segregation)</strong>.</p>
+<ul>
+<li><strong>Command:</strong> Your <code>deleteHost</code> request is a <em>Command</em>. It's sent to the write-model to change the state of the system and publish an event (e.g., <code>HostDeletedEvent</code>).</li>
+<li><strong>Query:</strong> Your <code>fetchData</code> request is a <em>Query</em>. It reads from a separate read-model (the <code>hosts</code> database view/table).</li>
+<li><strong>Eventual Consistency:</strong> There is a delay (usually milliseconds, but it can vary) between the command succeeding and the event consumer updating the read-model.</li>
+</ul>
+<p>Your UI is so fast that it's sending the Query <em>before</em> the read-model has been updated, leading to the stale data problem.</p>
+<h3 id="should-we-wait-a-few-seconds"><a class="header" href="#should-we-wait-a-few-seconds">Should we wait a few seconds?</a></h3>
+<p><strong>No, please do not use a <code>setTimeout</code> to wait.</strong> This is the most important takeaway. It's an unreliable "magic number" that will cause problems:</p>
+<ul>
+<li><strong>Bad UX:</strong> It forces the user to wait for an arbitrary amount of time, even if the system is fast.</li>
+<li><strong>Unreliable:</strong> If the system is under heavy load, the delay might be longer than your timeout, and the bug will reappear.</li>
+<li><strong>It's a "code smell":</strong> It indicates that the UI isn't correctly handling the nature of the backend architecture.</li>
+</ul>
+<h3 id="the-professional-solutions"><a class="header" href="#the-professional-solutions">The Professional Solutions</a></h3>
+<p>There are two primary, robust patterns for handling this on the UI. The best choice depends on the desired user experience.</p>
+<hr />
+<h3 id="option-1-optimistic-ui-recommended-for-best-ux"><a class="header" href="#option-1-optimistic-ui-recommended-for-best-ux">Option 1: Optimistic UI (Recommended for Best UX)</a></h3>
+<p>This is the most common and user-friendly approach in modern web applications. You <strong>assume the command will succeed</strong> and update the UI immediately.</p>
+<p><strong>How it works:</strong></p>
+<ol>
+<li>User clicks "Delete".</li>
+<li>You <em>immediately</em> remove the item from your local React state. The user sees the item disappear instantly.</li>
+<li>You send the <code>deleteHost</code> command to the server in the background.</li>
+<li><strong>Crucially:</strong> If the command fails for some reason (e.g., validation error, server down), you revert the UI change (add the item back) and show an error message.</li>
+</ol>
+<p>This provides the best possible user experience because the UI feels instantaneous.</p>
+<p>Here is how you would implement this in your <code>handleDelete</code> function:</p>
+<pre><code class="language-tsx">  // Delete handler - OPTIMISTIC UI APPROACH
+  const handleDelete = useCallback(async (row: MRT_Row&lt;HostType&gt;) =&gt; {
+    if (!window.confirm(`Are you sure you want to delete host: ${row.original.subDomain}?`)) {
+      return;
+    }
+
+    // Keep a copy of the current data in case we need to roll back
+    const originalData = [...data];
+
+    // 1. Optimistically update the UI
+    setData(prevData =&gt; prevData.filter(host =&gt; host.hostId !== row.original.hostId));
+    setRowCount(prev =&gt; prev - 1); // Also optimistically update the total count
+
+    // 2. Send the command to the server
+    const cmd = {
+      host: 'lightapi.net',
+      service: 'host',
+      action: 'deleteHost',
+      version: '0.1.0',
+      data: { hostId: row.original.hostId, aggregateVersion: row.original.aggregateVersion },
+    };
+
+    try {
+      const result = await apiPost({ url: '/portal/command', headers: {}, body: cmd });
+      if (result.error) {
+        // 3a. On failure, revert the UI and show an error
+        console.error('API Error on delete:', result.error);
+        alert('Failed to delete host. Please try again.'); // Or use a snackbar
+        setData(originalData);
+        setRowCount(originalData.length); // Revert the count
+      }
+      // 3b. On success, do nothing! The UI is already correct.
+      // You could trigger a silent background refetch here if you want to be 100% in sync, but it's often not necessary.
+
+    } catch (e) {
+      // Also handle network errors
+      console.error('Network Error on delete:', e);
+      alert('Failed to delete host due to a network error.');
+      setData(originalData);
+      setRowCount(originalData.length);
+    }
+  }, [data]); // The main dependency is the 'data' for rollback.
+</code></pre>
+<hr />
+<h3 id="option-2-pessimistic-ui-with-state-locking-simpler-good-ux"><a class="header" href="#option-2-pessimistic-ui-with-state-locking-simpler-good-ux">Option 2: Pessimistic UI with State Locking (Simpler, Good UX)</a></h3>
+<p>This approach is more straightforward. You "lock" the UI in a loading state until you are certain the operation is complete.</p>
+<p><strong>How it works:</strong></p>
+<ol>
+<li>User clicks "Delete".</li>
+<li>You show a loading spinner <em>on that specific row</em> or disable the whole table.</li>
+<li>Send the <code>deleteHost</code> command.</li>
+<li>When the command API call returns a success, you then call <code>fetchData()</code> to get the fresh data. Because the command has completed, it's much more likely the read model is now consistent. This is essentially what you were trying to do before.</li>
+</ol>
+<p>The problem, as you noted, is that even after the command returns, the read model might <em>still</em> not be updated. The optimistic approach neatly sidesteps this entire timing issue. If you must stick to a pessimistic approach, the Optimistic UI is still the superior and often easier pattern to implement correctly.</p>
+<p><strong>To fix your current pessimistic implementation, you'd have to implement polling, which is complex:</strong></p>
+<ol>
+<li>Send delete command.</li>
+<li>On success, start a <code>setInterval</code> to call <code>fetchData</code> every 2 seconds.</li>
+<li>In each <code>fetchData</code> response, check if the deleted item is gone.</li>
+<li>If it is, <code>clearInterval</code> and stop.</li>
+<li>Add a timeout to stop polling after ~10-15 seconds to prevent infinite loops.</li>
+</ol>
+<p>As you can see, this is much more complicated than the optimistic update.</p>
+<h3 id="recommendation"><a class="header" href="#recommendation">Recommendation</a></h3>
+<p><strong>Adopt the Optimistic UI pattern (Option 1).</strong> It provides the best user experience, is resilient to timing issues caused by eventual consistency, and the implementation is clean and modern. The code provided for the optimistic <code>handleDelete</code> is a drop-in replacement that will solve your problem robustly.</p>
+<h3 id="should-you-poll-peroidically-to-sync-other-users-changes"><a class="header" href="#should-you-poll-peroidically-to-sync-other-users-changes">Should you poll peroidically to sync other users' changes</a></h3>
+<p>The short answer is: <strong>No, you should still avoid client-side polling for this specific use case.</strong> It's generally the wrong tool for this problem and creates more issues than it solves. The Optimistic UI approach is still preferable, but it needs to be combined with a robust backend and potentially other real-time technologies for a complete solution.</p>
+<p>Let's break down why and explore the professional-grade solutions.</p>
+<hr />
+<h3 id="why-polling-is-a-bad-fit-here"><a class="header" href="#why-polling-is-a-bad-fit-here">Why Polling is a Bad Fit Here</a></h3>
+<p>Your concern is valid: polling <em>does</em> add significant pressure, and it's inefficient.</p>
+<ol>
+<li><strong>High Network Traffic:</strong> Every active user would be sending a <code>getHost</code> query every few seconds. If you have 50 users on that page, that's 10-25 queries per second just from this one component, most of which will return no new data.</li>
+<li><strong>Database and Service Layer Load:</strong> This traffic directly translates to load on your service and database. Your <code>SELECT</code> query, while indexed, still consumes resources. At scale, this can become a significant performance bottleneck.</li>
+<li><strong>Delayed UX:</strong> The user experience is still poor. A user makes a change and might have to wait up to <code>X</code> seconds (your polling interval) to see it reflected, which feels sluggish.</li>
+<li><strong>Complexity:</strong> As we discussed, managing polling logic (starting, stopping, timeouts) on the client adds complexity and potential bugs.</li>
+</ol>
+<p>So, while polling <em>can</em> eventually get you the latest data, it's a brute-force approach with major drawbacks.</p>
+<hr />
+<h3 id="the-professional-grade-solutions-for-multi-user-environments"><a class="header" href="#the-professional-grade-solutions-for-multi-user-environments">The Professional-Grade Solutions for Multi-User Environments</a></h3>
+<p>The key is to shift from a "pull" model (client polling) to a "push" model (server notifies the client). This is where real-time technologies shine.</p>
+<h4 id="solution-1-optimistic-ui--server-sent-events-sse-or-websockets-best-for-real-time"><a class="header" href="#solution-1-optimistic-ui--server-sent-events-sse-or-websockets-best-for-real-time">Solution 1: Optimistic UI + Server-Sent Events (SSE) or WebSockets (Best for Real-Time)</a></h4>
+<p>This is the gold standard for collaborative applications.</p>
+<p><strong>How it Works:</strong></p>
+<ol>
+<li>
+<p><strong>Frontend (Your Optimistic UI):</strong></p>
+<ul>
+<li><strong>User A</strong> deletes a host. Their UI updates <em>instantly</em> (optimistic update). The <code>deleteHost</code> command is sent to the server.</li>
+<li><strong>User B</strong> is looking at the same list. Their screen is unchanged for now.</li>
+</ul>
+</li>
+<li>
+<p><strong>Backend (The Magic):</strong></p>
+<ul>
+<li>The command handler processes the <code>deleteHost</code> command and publishes a <code>HostDeletedEvent</code>.</li>
+<li>An <strong>Event Notifier Service</strong> listens for this event.</li>
+<li>Upon receiving the event, this service <strong>pushes a notification</strong> to all connected clients who are interested in <code>host</code> updates. This is done via <strong>Server-Sent Events (SSE)</strong> or <strong>WebSockets</strong>. SSE is often simpler for server-to-client-only communication.</li>
+</ul>
+</li>
+<li>
+<p><strong>Frontend (Receiving the Push):</strong></p>
+<ul>
+<li><strong>User B's</strong> browser receives the <code>HostDeletedEvent</code> push notification.</li>
+<li>The React component's event listener fires. It can do one of two things:
+<ul>
+<li><strong>A) Smart Update (Ideal):</strong> The event payload contains the <code>hostId</code> that was deleted. The client simply finds that ID in its local <code>data</code> state and removes it. This is hyper-efficient.</li>
+<li><strong>B) Refetch (Simpler):</strong> Upon receiving <em>any</em> host-related event, the client triggers a <code>fetchData()</code> call to get the latest list. This is less efficient than a smart update but still vastly better than polling.</li>
+</ul>
+</li>
+<li><strong>User A's</strong> browser also receives the event. It can simply ignore it, as its UI is already up-to-date.</li>
+</ul>
+</li>
+</ol>
+<p><strong>Why this is the best solution:</strong></p>
+<ul>
+<li><strong>Real-Time:</strong> Updates are pushed instantly to all users.</li>
+<li><strong>Hyper-Efficient:</strong> No unnecessary network requests. The server and client only communicate when there's an actual state change.</li>
+<li><strong>Scalable:</strong> A single event from the backend can update thousands of connected clients simultaneously.</li>
+<li><strong>Excellent UX:</strong> The application feels alive and collaborative.</li>
+</ul>
+<h4 id="solution-2-optimistic-ui--stale-while-revalidate-swr--react-query-with-refetch-on-focus"><a class="header" href="#solution-2-optimistic-ui--stale-while-revalidate-swr--react-query-with-refetch-on-focus">Solution 2: Optimistic UI + Stale-While-Revalidate (SWR) / <code>react-query</code> with Refetch-on-Focus</a></h4>
+<p>This is a powerful and very easy-to-implement pattern that offers a great "80% solution" without needing a full real-time backend setup. Libraries like <code>react-query</code> (now TanStack Query) or Vercel's <code>swr</code> are built for this.</p>
+<p><strong>How it Works:</strong></p>
+<ol>
+<li>You replace your manual <code>useState</code>/<code>useEffect</code>/<code>fetchData</code> logic with the <code>useQuery</code> hook from <code>react-query</code>.</li>
+<li><strong>User A</strong> deletes a host. You perform an <strong>optimistic update</strong> using the library's built-in tools.</li>
+<li><strong>User B</strong> is looking at the list. Nothing happens yet.</li>
+<li>Now, <strong>User B switches from another browser tab back to your application tab.</strong></li>
+<li><code>react-query</code> automatically detects this "window focus" event and triggers a background refetch of the data.</li>
+<li>The UI is seamlessly updated with the latest data (showing User A's deletion).</li>
+</ol>
+<p><strong>Why this is a great solution:</strong></p>
+<ul>
+<li><strong>Extremely Simple to Implement:</strong> You get this behavior for free just by using the library.</li>
+<li><strong>"Good Enough" Real-Time:</strong> Data is refreshed exactly when the user is most likely to need it (when they re-engage with the app).</li>
+<li><strong>Efficient:</strong> Avoids constant polling. It only refetches on specific, user-driven events (window focus, network reconnect, etc.).</li>
+<li><strong>Handles Caching, Loading States, etc.:</strong> These libraries solve many data-fetching headaches for you.</li>
+</ul>
+<h3 id="recommendation--path-forward"><a class="header" href="#recommendation--path-forward">Recommendation &amp; Path Forward</a></h3>
+<ol>
+<li>
+<p><strong>Immediate Step:</strong> Stick with the <strong>Optimistic UI</strong> approach from my previous answer. It correctly handles the <em>single-user</em> eventual consistency problem, which is your most pressing issue. It's the foundation for everything else.</p>
+</li>
+<li>
+<p><strong>Next Step (Highly Recommended):</strong> Introduce a data-fetching library like <strong>TanStack Query (<code>react-query</code>)</strong>. This will simplify your code and give you the "refetch-on-focus" behavior out of the box, largely solving the multi-user problem with minimal effort.</p>
+</li>
+<li>
+<p><strong>Long-Term Goal (For True Real-Time):</strong> If your application's core value is real-time collaboration (like a Google Doc or Figma), then plan to add a <strong>Server-Sent Events (SSE)</strong> or <strong>WebSocket</strong> layer to your backend to push updates to clients.</p>
+</li>
+</ol>
+<p><strong>In summary:</strong> Avoid client-side polling. Implement the optimistic UI pattern now, and for multi-user synchronization, use a purpose-built library like <code>react-query</code> or a real-time backend push technology like SSE.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../design/registration-onboarding.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../design/soft-hard-delete.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../design/registration-onboarding.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../design/soft-hard-delete.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+        <!-- Livereload script (if served using the cli tool) -->
+        <script>
+            const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsAddress = wsProtocol + "//" + location.host + "/" + "__livereload";
+            const socket = new WebSocket(wsAddress);
+            socket.onmessage = function (event) {
+                if (event.data === "reload") {
+                    socket.close();
+                    location.reload();
+                }
+            };
+
+            window.onbeforeunload = function() {
+                socket.close();
+            }
+        </script>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../mermaid.min.js"></script>
+        <script src="../mermaid-init.js"></script>
+
+
+    </div>
+    </body>
+</html>

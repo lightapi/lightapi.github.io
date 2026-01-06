@@ -1,0 +1,645 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Soft Delete vs Hard Delete - Light Portal Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "../";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Light Portal Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h2 id="soft-delete-vs-hard-delete"><a class="header" href="#soft-delete-vs-hard-delete">Soft Delete vs Hard Delete</a></h2>
+<p>Here is a classic problem in Event Sourcing, often related to the concept of <strong>"soft deletes" or "state transitions" versus "hard deletes" and re-insertions</strong>. The core issue is that <code>aggregate_version</code> must be strictly unique for a given aggregate. If you try to re-insert an aggregate at an old version, it fundamentally violates Event Sourcing principles.</p>
+<p>Let's break down the scenario and the best ways to handle it.</p>
+<hr />
+<h3 id="the-problem-scenario-version-conflict-on-re-add"><a class="header" href="#the-problem-scenario-version-conflict-on-re-add">The Problem Scenario: Version Conflict on Re-add</a></h3>
+<p>Your scenario:</p>
+<ol>
+<li><code>UserHostCreatedEvent (userId=U, hostId=H, aggregate_version=1)</code> -&gt; <code>event_store_t</code> has version 1. <code>user_host_t</code> (projection) has version 1.</li>
+<li><code>UserHostDeletedEvent (userId=U, hostId=H, aggregate_version=2)</code> -&gt; <code>event_store_t</code> has version 2. <code>user_host_t</code> either deletes or marks as inactive.</li>
+<li><code>UserHostCreatedEvent (userId=U, hostId=H, aggregate_version=1)</code> -&gt; <strong>CONFLICT!</strong> This event says the aggregate <code>(U,H)</code> is at version 1 again, but <code>event_store_t</code> already has version 2 for <code>(U,H)</code>.</li>
+</ol>
+<p><strong>Root Cause:</strong> You cannot "re-add" an aggregate at an old version. An aggregate's version always strictly increases. The action of "adding back" is not a "first time add" in the event history; it's a <em>new</em> state transition.</p>
+<hr />
+<h3 id="best-ways-to-handle-this-kind-of-scenario"><a class="header" href="#best-ways-to-handle-this-kind-of-scenario">Best Ways to Handle This Kind of Scenario</a></h3>
+<p>The solution involves redefining what "add back" means in an Event Sourcing context and how your aggregates and projections handle it.</p>
+<h4 id="option-1-state-transitions-recommended-for-your-scenario"><a class="header" href="#option-1-state-transitions-recommended-for-your-scenario">Option 1: State Transitions (Recommended for your scenario)</a></h4>
+<p>This is the most common and robust approach. Instead of thinking of "add" and "remove" as discrete CRUD operations on a single record, think of them as <strong>state changes</strong> of an aggregate instance that <em>always exists</em>.</p>
+<p><strong>Aggregate Design (Conceptual <code>UserHostMapping</code> Aggregate):</strong></p>
+<ul>
+<li>An aggregate representing the <strong>state of a <code>(User, Host)</code> relationship</strong> (e.g., <code>UserHostMappingAggregate(userId, hostId)</code>).</li>
+<li>It has a state, e.g., <code>ACTIVE</code>, <code>INACTIVE</code>.</li>
+<li>The <code>aggregate_id</code> for this aggregate would be a <strong>composite ID</strong> (e.g., <code>userId + "-" + hostId</code> or a UUID that represents this specific mapping).</li>
+<li>It has a <code>version</code> (sequence number).</li>
+</ul>
+<p><strong>Event Types:</strong></p>
+<ul>
+<li><code>UserHostActivatedEvent (userId, hostId, sequence_number)</code></li>
+<li><code>UserHostDeactivatedEvent (userId, hostId, sequence_number)</code></li>
+</ul>
+<p><strong>Scenario with State Transitions:</strong></p>
+<ol>
+<li>
+<p><strong>Add Host to User Mapping (First Time):</strong></p>
+<ul>
+<li>Command: <code>ActivateUserHostMapping(userId=U, hostId=H, expectedVersion=0)</code> (Expected version 0 because it doesn't exist yet).</li>
+<li>Aggregate <code>(U,H)</code>: Generates <code>UserHostActivatedEvent (userId=U, hostId=H, sequence_number=1)</code>.</li>
+<li><code>event_store_t</code>: Saves version 1.</li>
+<li><code>user_host_t</code> (projection): <strong>INSERTS</strong> record <code>(U, H, status=ACTIVE, aggregate_version=1)</code>.</li>
+</ul>
+</li>
+<li>
+<p><strong>Remove Host to User Mapping:</strong></p>
+<ul>
+<li>Command: <code>DeactivateUserHostMapping(userId=U, hostId=H, expectedVersion=1)</code>.</li>
+<li>Aggregate <code>(U,H)</code>: Generates <code>UserHostDeactivatedEvent (userId=U, hostId=H, sequence_number=2)</code>.</li>
+<li><code>event_store_t</code>: Saves version 2.</li>
+<li><code>user_host_t</code> (projection): <strong>UPDATES</strong> record <code>(U, H)</code> to <code>status=INACTIVE, aggregate_version=2</code>. (Doesn't delete the row).</li>
+</ul>
+</li>
+<li>
+<p><strong>Add Back the Same Host to User Mapping:</strong></p>
+<ul>
+<li>Command: <code>ReactivateUserHostMapping(userId=U, hostId=H, expectedVersion=2)</code>. (Expected version 2 because it's currently INACTIVE at version 2).</li>
+<li>Aggregate <code>(U,H)</code>: Generates <code>UserHostActivatedEvent (userId=U, hostId=H, sequence_number=3)</code>.</li>
+<li><code>event_store_t</code>: Saves version 3.</li>
+<li><code>user_host_t</code> (projection): <strong>UPDATES</strong> record <code>(U, H)</code> to <code>status=ACTIVE, aggregate_version=3</code>.</li>
+</ul>
+</li>
+</ol>
+<p><strong>Benefits of State Transitions:</strong></p>
+<ul>
+<li><strong>Strictly Monotonic Versions:</strong> The <code>sequence_number</code> for the <code>UserHostMapping</code> aggregate (<code>U,H</code>) always increases (0 -&gt; 1 -&gt; 2 -&gt; 3). No version conflicts.</li>
+<li><strong>Complete History:</strong> The Event Store clearly shows the activation/deactivation cycle.</li>
+<li><strong>Simpler Projection:</strong> The projection (<code>user_host_t</code>) never deletes rows; it only updates their status and version. This makes updates simple (<code>UPDATE ... WHERE aggregate_id = ? AND aggregate_version = ?</code>) and avoids <code>INSERT</code> conflicts on "re-add."</li>
+<li><strong>Idempotent Read Model Updates:</strong> The consumer logic is straightforward.</li>
+</ul>
+<h4 id="option-2-unique-id-for-each-relationship-instance-less-common-for-simple-toggles"><a class="header" href="#option-2-unique-id-for-each-relationship-instance-less-common-for-simple-toggles">Option 2: Unique ID for Each Relationship Instance (Less common for simple toggles)</a></h4>
+<ul>
+<li><strong>Approach:</strong> Instead of <code>(U,H)</code> being one aggregate that changes status, you treat each "active period" of <code>(U,H)</code> as a new, distinct aggregate.</li>
+<li><code>aggregate_id</code>: A brand new UUID for <em>each activation</em> of <code>(U,H)</code>.</li>
+<li>Event Types:
+<ul>
+<li><code>UserHostCreatedEvent (mappingId=M1, userId=U, hostId=H, sequence_number=1)</code></li>
+<li><code>UserHostDeletedEvent (mappingId=M1, userId=U, hostId=H, sequence_number=2)</code></li>
+<li><code>UserHostCreatedEvent (mappingId=M2, userId=U, hostId=H, sequence_number=1)</code> (for the second time)</li>
+</ul>
+</li>
+<li><strong>Projection:</strong> The <code>user_host_t</code> table would track these <code>mappingId</code>s, possibly with <code>start_ts</code> and <code>end_ts</code>. When a mapping is terminated, you update its <code>end_ts</code>. When "added back," you insert a new row with a new <code>mappingId</code>.</li>
+<li><strong>Complexity:</strong> Managing which <code>mappingId</code> is current for <code>(U,H)</code> can be tricky. It's usually overkill for simple active/inactive toggles.</li>
+</ul>
+<h4 id="option-3-history-table-for-user-host-mapping"><a class="header" href="#option-3-history-table-for-user-host-mapping">Option 3: History Table for User Host Mapping</a></h4>
+<ul>
+<li><strong>Approach:</strong> Create a user_host_history_t to keep a history of UserHostMapping.</li>
+<li><strong>Projection:</strong> The <code>user_host_t</code> and <code>user_host_history_t</code> join together for the query with both snapshot and historical views.</li>
+<li><strong>Complexity:</strong> Managing both original and historical tables is overkill in this use case unless you need historical query very frequently.</li>
+</ul>
+<hr />
+<h3 id="recommended-approach-for-your-user_host_t-scenario"><a class="header" href="#recommended-approach-for-your-user_host_t-scenario">Recommended Approach for your <code>user_host_t</code> scenario</a></h3>
+<p><strong>Go with Option 1: State Transitions for a <code>(User, Host)</code> Aggregate.</strong></p>
+<p><strong>Detailed Changes:</strong></p>
+<ol>
+<li>
+<p><strong>Database Schema for <code>user_host_t</code>:</strong></p>
+<ul>
+<li>Add a <code>status</code> column (e.g., <code>VARCHAR(10) NOT NULL DEFAULT 'ACTIVE'</code>).</li>
+<li>Ensure <code>aggregate_version</code> column exists.</li>
+<li>Primary key/unique constraint likely remains <code>(host_id, user_id)</code>.</li>
+</ul>
+<pre><code class="language-sql">ALTER TABLE user_host_t
+ADD COLUMN status VARCHAR(10) NOT NULL DEFAULT 'ACTIVE',
+ADD COLUMN aggregate_version BIGINT NOT NULL DEFAULT 0;
+
+-- Add a unique constraint if not already present on (host_id, user_id)
+-- ALTER TABLE user_host_t ADD CONSTRAINT pk_user_host PRIMARY KEY (host_id, user_id);
+</code></pre>
+</li>
+<li>
+<p><strong>Define specific Event Types:</strong></p>
+<ul>
+<li><code>UserHostActivatedEvent</code></li>
+<li><code>UserHostDeactivatedEvent</code></li>
+</ul>
+</li>
+<li>
+<p><strong>Command Handling Logic (Write Model):</strong></p>
+<ul>
+<li>When the "add host to user" command comes in:
+<ul>
+<li>Load the <code>UserHostMapping</code> aggregate (identified by <code>(host_id, user_id)</code>).</li>
+<li>If not found (expectedVersion 0), generate <code>UserHostActivatedEvent</code>.</li>
+<li>If found and <code>status=INACTIVE</code> (expectedVersion &gt; 0), generate <code>UserHostActivatedEvent</code>.</li>
+<li>If found and <code>status=ACTIVE</code> (expectedVersion &gt; 0), reject (already active, idempotent no-op).</li>
+</ul>
+</li>
+<li>When the "remove host from user" command comes in:
+<ul>
+<li>Load the <code>UserHostMapping</code> aggregate.</li>
+<li>If not found or <code>status=INACTIVE</code>, reject (already inactive/not found).</li>
+<li>If <code>status=ACTIVE</code>, generate <code>UserHostDeactivatedEvent</code>.</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p><strong><code>PortalEventConsumer</code> Logic (Read Model Update):</strong></p>
+<ul>
+<li>
+<p><strong>For <code>UserHostActivatedEvent</code>:</strong></p>
+<ul>
+<li>This event means the mapping is now active.</li>
+<li>Try to <code>UPDATE user_host_t SET status='ACTIVE', aggregate_version=? WHERE host_id=? AND user_id=? AND aggregate_version=?</code>.</li>
+<li>If 0 rows updated:
+<ul>
+<li>Check if the record exists (<code>SELECT COUNT(*) ...</code>).</li>
+<li>If it exists (and version didn't match), it's a <code>ConcurrencyException</code>.</li>
+<li>If it <em>doesn't</em> exist, it's the <em>very first time</em> this mapping became active, so <code>INSERT INTO user_host_t (...) VALUES (...)</code>.</li>
+</ul>
+</li>
+<li>This will handle both initial creation and reactivation as idempotent updates/inserts based on state.</li>
+</ul>
+</li>
+<li>
+<p><strong>For <code>UserHostDeactivatedEvent</code>:</strong></p>
+<ul>
+<li>This event means the mapping is now inactive.</li>
+<li><code>UPDATE user_host_t SET status='INACTIVE', aggregate_version=? WHERE host_id=? AND user_id=? AND aggregate_version=?</code>.</li>
+<li>If 0 rows updated, it's either <code>ConcurrencyException</code> or "not found" (already inactive).</li>
+</ul>
+</li>
+</ul>
+</li>
+</ol>
+<p>This approach treats the <code>user_host_t</code> relationship as a single logical entity (an aggregate instance) that transitions through states (<code>ACTIVE</code>/<code>INACTIVE</code>), ensuring the <code>aggregate_version</code> always progresses monotonically and avoiding the conflict you described.</p>
+<h2 id="command-handler-logic"><a class="header" href="#command-handler-logic">Command Handler Logic</a></h2>
+<p>It is crucial to figure out the db logic between the read model (what the UI sees) and the command model (what the command handler needs to decide). The command handler cannot rely solely on the UI's <code>expectedVersion</code> in this scenario. It needs to query its own source of truth (the Event Store) to decide if it's an "initial activation" or a "reactivation."</p>
+<p>Let's refine the command handling logic for the <code>UserHostMapping</code> aggregate.</p>
+<hr />
+<h3 id="key-the-command-handler-owns-the-decision-using-the-event-store"><a class="header" href="#key-the-command-handler-owns-the-decision-using-the-event-store">Key: The Command Handler Owns the Decision, Using the Event Store</a></h3>
+<p>The command handler's job is to:</p>
+<ol>
+<li><strong>Load the aggregate's current state</strong> (by replaying events from <code>event_store_t</code>).</li>
+<li><strong>Determine its <em>current status</em> and <em>current version</em></strong> based on that replay.</li>
+<li><strong>Compare the <code>expectedVersion</code> from the command</strong> with the aggregate's <code>currentVersion</code>.</li>
+<li><strong>Apply business rules</strong> to decide what event(s) to generate.</li>
+</ol>
+<h4 id="event-types--aggregate-id-as-per-previous-recommendation"><a class="header" href="#event-types--aggregate-id-as-per-previous-recommendation">Event Types &amp; Aggregate ID (as per previous recommendation)</a></h4>
+<ul>
+<li><strong>Aggregate ID:</strong> A composite of <code>hostId</code> and <code>userId</code> (e.g., <code>hostId + "_" + userId</code>).</li>
+<li><strong>Events:</strong>
+<ul>
+<li><code>UserHostActivatedEvent</code>: Represents the relationship becoming active.</li>
+<li><code>UserHostDeactivatedEvent</code>: Represents the relationship becoming inactive.</li>
+</ul>
+</li>
+</ul>
+<hr />
+<h3 id="step-by-step-command-handling-logic"><a class="header" href="#step-by-step-command-handling-logic">Step-by-Step Command Handling Logic</a></h3>
+<p>Let's assume your command handler is <code>UserHostMappingCommandHandler</code> and it interacts with a <code>UserHostMappingAggregate</code>.</p>
+<p><strong>1. <code>UserHostMappingAggregate</code> (Internal Logic):</strong></p>
+<p>This aggregate needs to rebuild its state (<code>currentStatus</code>, <code>currentVersion</code>) from its event stream.</p>
+<pre><code class="language-java">public class UserHostMappingAggregate {
+    private final String hostId;
+    private final String userId;
+    private UserHostMappingStatus currentStatus; // Enum: ACTIVE, INACTIVE, NON_EXISTENT
+    private long currentVersion; // Sequence number of the last applied event
+
+    private List&lt;DomainEvent&gt; uncommittedEvents = new ArrayList&lt;&gt;();
+
+    public UserHostMappingAggregate(String hostId, String userId) {
+        this.hostId = hostId;
+        this.userId = userId;
+        this.currentStatus = UserHostMappingStatus.NON_EXISTENT; // Initial state
+        this.currentVersion = 0;
+    }
+
+    public static UserHostMappingAggregate loadFromEvents(String hostId, String userId, List&lt;DomainEvent&gt; history) {
+        UserHostMappingAggregate aggregate = new UserHostMappingAggregate(hostId, userId);
+        if (history != null &amp;&amp; !history.isEmpty()) {
+            history.forEach(aggregate::applyEvent);
+        }
+        return aggregate;
+    }
+
+    private void applyEvent(DomainEvent event) {
+        if (event instanceof UserHostActivatedEvent) {
+            this.currentStatus = UserHostMappingStatus.ACTIVE;
+        } else if (event instanceof UserHostDeactivatedEvent) {
+            this.currentStatus = UserHostMappingStatus.INACTIVE;
+        }
+        this.currentVersion = event.getSequenceNumber(); // Update version based on event
+    }
+
+    // --- Command Handling Methods ---
+
+    public void activateMapping(long expectedVersion) {
+        // OCC Check (optional here, but good practice if not relying solely on DB constraint)
+        if (this.currentVersion != expectedVersion) {
+            throw new ConcurrencyException("Concurrency conflict. Expected version " + expectedVersion + ", actual " + this.currentVersion);
+        }
+
+        // Business Logic: What state must it be in to activate?
+        if (this.currentStatus == UserHostMappingStatus.ACTIVE) {
+            // Already active, idempotent no-op or reject as invalid transition
+            logger.info("Mapping for user {} host {} is already active. No new event generated.", userId, hostId);
+            return;
+        }
+
+        // Generate new event
+        long nextVersion = this.currentVersion + 1;
+        UserHostActivatedEvent event = new UserHostActivatedEvent(
+            UUID.randomUUID(), Instant.now(), getAggregateId(), "UserHostMapping", nextVersion, hostId, userId
+        );
+        uncommittedEvents.add(event);
+        applyEvent(event); // Apply to internal state immediately for consistency
+    }
+
+    public void deactivateMapping(long expectedVersion) {
+        // OCC Check
+        if (this.currentVersion != expectedVersion) {
+            throw new ConcurrencyException("Concurrency conflict. Expected version " + expectedVersion + ", actual " + this.currentVersion);
+        }
+
+        // Business Logic
+        if (this.currentStatus != UserHostMappingStatus.ACTIVE) {
+            logger.info("Mapping for user {} host {} is not active. Cannot deactivate.", userId, hostId);
+            throw new IllegalStateException("Mapping is not active and cannot be deactivated.");
+        }
+
+        // Generate new event
+        long nextVersion = this.currentVersion + 1;
+        UserHostDeactivatedEvent event = new UserHostDeactivatedEvent(
+            UUID.randomUUID(), Instant.now(), getAggregateId(), "UserHostMapping", nextVersion, hostId, userId
+        );
+        uncommittedEvents.add(event);
+        applyEvent(event);
+    }
+    
+    // Helper to get the composite aggregate ID
+    public String getAggregateId() {
+        return hostId + "_" + userId; // Consistent composite ID
+    }
+
+    // Getters for external access
+    public UserHostMappingStatus getCurrentStatus() { return currentStatus; }
+    public long getCurrentVersion() { return currentVersion; }
+    public List&lt;DomainEvent&gt; getUncommittedEvents() { return uncommittedEvents; }
+    public void markEventsCommitted() { uncommittedEvents.clear(); }
+
+    public enum UserHostMappingStatus {
+        ACTIVE, INACTIVE, NON_EXISTENT
+    }
+}
+</code></pre>
+<p><strong>2. <code>UserHostMappingCommandHandler</code> (Application Service):</strong></p>
+<p>This is where the command logic happens. The key is that the command from the UI is now generic (e.g., <code>SetUserHostMappingStatus</code>).</p>
+<pre><code class="language-java">public class UserHostMappingCommandHandler { // This is your application service
+    private final EventStoreEventRepository eventStoreRepository; // To load events
+    private final OutboxMessageRepository outboxRepository;     // To save new events
+
+    // Constructor injection
+    // ...
+
+    public void handleSetUserHostMappingStatus(String hostId, String userId, boolean activate, long expectedVersionFromUI) {
+        String aggregateId = hostId + "_" + userId;
+        
+        // 1. Load aggregate state from Event Store
+        List&lt;DomainEvent&gt; history = eventStoreRepository.findByAggregateIdOrderBySequenceNumberAsc(aggregateId)
+                                       .stream()
+                                       .map(this::deserializeEventStoreEvent) // Deserialize from DB format
+                                       .collect(Collectors.toList());
+        UserHostMappingAggregate aggregate = UserHostMappingAggregate.loadFromEvents(hostId, userId, history);
+
+        // 2. Perform business logic based on intent (activate) and current state
+        if (activate) {
+            aggregate.activateMapping(expectedVersionFromUI); // Will generate UserHostActivatedEvent
+        } else {
+            aggregate.deactivateMapping(expectedVersionFromUI); // Will generate UserHostDeactivatedEvent
+        }
+
+        // 3. Persist new events
+        List&lt;DomainEvent&gt; newEvents = aggregate.getUncommittedEvents();
+        if (!newEvents.isEmpty()) {
+            // Your transactional outbox logic (save to Event Store and Outbox)
+            eventStoreRepository.saveAll(newEvents.stream().map(this::mapToEventStoreEvent).collect(Collectors.toList()));
+            outboxRepository.saveAll(newEvents.stream().map(this::mapToOutboxMessage).collect(Collectors.toList()));
+            aggregate.markEventsCommitted();
+        }
+    }
+    
+    // Helper methods for serialization/deserialization as shown in previous examples
+    // ...
+}
+</code></pre>
+<p><strong>3. <code>PortalEventConsumer</code> Logic (Read Model Update):</strong></p>
+<p>The consumer updates <code>user_host_t</code> based on the events.</p>
+<ul>
+<li>
+<p><strong>For <code>UserHostActivatedEvent</code>:</strong></p>
+<pre><code class="language-java">// In your PortalEventConsumer (inside processSingleEventWithRetries for this event type)
+Map&lt;String, Object&gt; eventData = extractEventData(eventMap);
+String hostId = (String) eventMap.get(Constants.HOST); // Assuming hostId is a CE extension
+String userId = (String) eventMap.get(Constants.USER); // Assuming userId is a CE extension
+String aggregateId = (String) eventMap.get(CloudEventV1.SUBJECT); // Or extract from eventData if set as such
+long newVersion = getEventSequenceNumber(eventMap);
+
+// SQL: UPSERT is ideal here. If record exists, update status/version. If not, insert.
+// This handles both initial activation (INSERT) and reactivation (UPDATE) idempotently.
+final String upsertSql = "INSERT INTO user_host_t (host_id, user_id, status, aggregate_version, update_user, update_ts) " +
+                         "VALUES (?, ?, ?, ?, ?, ?) " +
+                         "ON CONFLICT (host_id, user_id) DO UPDATE SET " +
+                         "status = EXCLUDED.status, " +
+                         "aggregate_version = EXCLUDED.aggregate_version, " +
+                         "update_user = EXCLUDED.update_user, " +
+                         "update_ts = EXCLUDED.update_ts " +
+                         "WHERE user_host_t.aggregate_version &lt; EXCLUDED.aggregate_version"; // Only update if incoming event is newer
+
+try (PreparedStatement statement = conn.prepareStatement(upsertSql)) {
+    statement.setObject(1, UUID.fromString(hostId));
+    statement.setObject(2, UUID.fromString(userId));
+    statement.setString(3, UserHostMappingAggregate.UserHostMappingStatus.ACTIVE.name());
+    statement.setLong(4, newVersion);
+    statement.setString(5, (String)eventMap.get(Constants.USER)); // From CE extension
+    statement.setObject(6, OffsetDateTime.parse((String)eventMap.get(CloudEventV1.TIME)));
+    statement.executeUpdate();
+}
+</code></pre>
+<ul>
+<li><strong>Crucial <code>ON CONFLICT ... WHERE user_host_t.aggregate_version &lt; EXCLUDED.aggregate_version</code>:</strong> This makes the projection update idempotent and handles out-of-order delivery. If the database already has a <em>newer</em> version than the incoming event, it simply does nothing (<code>0 rows affected</code>), preventing a stale event from overwriting a more recent state.</li>
+</ul>
+</li>
+<li>
+<p><strong>For <code>UserHostDeactivatedEvent</code>:</strong></p>
+<pre><code class="language-java">// In your PortalEventConsumer (inside processSingleEventWithRetries for this event type)
+Map&lt;String, Object&gt; eventData = extractEventData(eventMap);
+String hostId = (String) eventMap.get(Constants.HOST);
+String userId = (String) eventMap.get(Constants.USER);
+long newVersion = getEventSequenceNumber(eventMap);
+
+final String updateSql = "UPDATE user_host_t SET status='INACTIVE', aggregate_version=?, update_user=?, update_ts=? " +
+                         "WHERE host_id = ? AND user_id = ? AND aggregate_version &lt; ?"; // Only update if incoming event is newer
+
+try (PreparedStatement statement = conn.prepareStatement(updateSql)) {
+    statement.setLong(1, newVersion);
+    statement.setString(2, (String)eventMap.get(Constants.USER));
+    statement.setObject(3, OffsetDateTime.parse((String)eventMap.get(CloudEventV1.TIME)));
+    statement.setObject(4, UUID.fromString(hostId));
+    statement.setObject(5, UUID.fromString(userId));
+    statement.setLong(6, newVersion); // Only update if current DB version &lt; newVersion (from event)
+    statement.executeUpdate();
+}
+</code></pre>
+</li>
+</ul>
+<hr />
+<h3 id="how-to-figure-it-out-in-the-command-handler-from-ui-perspective"><a class="header" href="#how-to-figure-it-out-in-the-command-handler-from-ui-perspective">How to Figure it Out in the Command Handler (from UI perspective)</a></h3>
+<p>The UI will initially query the <code>user_host_t</code> read model.</p>
+<ul>
+<li>
+<p><strong>Scenario A: UI queries, no record for <code>(U,H)</code> found.</strong></p>
+<ul>
+<li>UI infers state is "Non-Existent" or "Inactive".</li>
+<li>UI provides <code>expectedVersion = 0</code> to the command (because the read model had no entry).</li>
+<li>Command handler: <code>aggregate.currentStatus == NON_EXISTENT</code>. Generates <code>UserHostActivatedEvent (sequence_number=1)</code>.</li>
+</ul>
+</li>
+<li>
+<p><strong>Scenario B: UI queries, record <code>(U,H, status=ACTIVE, aggregate_version=1)</code> found.</strong></p>
+<ul>
+<li>UI provides <code>expectedVersion = 1</code> to the command.</li>
+<li>User wants to "remove."</li>
+<li>Command handler: <code>aggregate.currentStatus == ACTIVE</code>. Generates <code>UserHostDeactivatedEvent (sequence_number=2)</code>.</li>
+</ul>
+</li>
+<li>
+<p><strong>Scenario C: UI queries, record <code>(U,H, status=INACTIVE, aggregate_version=2)</code> found.</strong> (This assumes your UI <em>could</em> list inactive items, or an admin UI can see it.)</p>
+<ul>
+<li>UI provides <code>expectedVersion = 2</code> to the command.</li>
+<li>User wants to "add back" / "reactivate."</li>
+<li>Command handler: <code>aggregate.currentStatus == INACTIVE</code>. Generates <code>UserHostActivatedEvent (sequence_number=3)</code>.</li>
+</ul>
+</li>
+<li>
+<p><strong>Crucial UI Aspect:</strong> If the UI doesn't display inactive items (which is typical for a "list active" view), and the user tries to "add" an item that <em>used to exist but is now inactive</em>, the UI would initially send <code>expectedVersion = 0</code>.</p>
+<ul>
+<li>Command handler receives <code>expectedVersion = 0</code>, but aggregate is actually <code>INACTIVE</code> at <code>version=2</code>.</li>
+<li><strong>OCC Conflict!</strong> <code>aggregate.currentVersion (2) != expectedVersion (0)</code>. Command is rejected.</li>
+<li><strong>User Experience:</strong> "Cannot add. This mapping exists in an inactive state. Please activate it instead." This forces a clearer UI workflow.</li>
+</ul>
+</li>
+</ul>
+<p>By leveraging state transitions within your aggregate and using <code>ON CONFLICT</code> / <code>WHERE aggregate_version &lt; EXCLUDED.aggregate_version</code> in your projection updates, you ensure strict versioning, idempotent read models, and a consistent business logic flow.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../design/optimistic-pessimistic-ui.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../design/tenant-migration.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../design/optimistic-pessimistic-ui.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../design/tenant-migration.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+        <!-- Livereload script (if served using the cli tool) -->
+        <script>
+            const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsAddress = wsProtocol + "//" + location.host + "/" + "__livereload";
+            const socket = new WebSocket(wsAddress);
+            socket.onmessage = function (event) {
+                if (event.data === "reload") {
+                    socket.close();
+                    location.reload();
+                }
+            };
+
+            window.onbeforeunload = function() {
+                socket.close();
+            }
+        </script>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../mermaid.min.js"></script>
+        <script src="../mermaid-init.js"></script>
+
+
+    </div>
+    </body>
+</html>

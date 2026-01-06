@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Reference Table - Light Portal Documentation</title>
+        <title>Deployment - Light Portal Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -152,83 +152,19 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="reference-table"><a class="header" href="#reference-table">Reference Table</a></h1>
-<p>When building a web application, there would be a lot of dropdown selects in forms. The form itself only cares about the <code>id</code> and <code>label</code> list to render the form and only the <code>id</code> will be submitted to the backend API for single select and several <code>ids</code> for multiple select.</p>
-<p>To save the effort to create many similar tables, we can craete a set of tables for all dropdowns. For some of the reference tables, dropdown should be the same across all hosts and we can set common flag to 'Y' so that they are shared by all hosts. If the dropdown values might be different between hosts, we can create a reference table per host and link the reference table with host in a separate table that support sharding.</p>
-<h2 id="reference-schema"><a class="header" href="#reference-schema">Reference Schema</a></h2>
-<pre><code>CREATE TABLE ref_host_t (
-  table_id             VARCHAR(22) NOT NULL,
-  host_id              VARCHAR(22) NOT NULL,
-  PRIMARY KEY (table_id, host_id),
-  FOREIGN KEY (table_id) REFERENCES ref_table_t (table_id) ON DELETE CASCADE,
-  FOREIGN KEY (host_id) REFERENCES host (host_id) ON DELETE CASCADE
-);
-
-CREATE TABLE ref_table_t (
-  table_id             VARCHAR(22) NOT NULL, -- UUID genereated by Util
-  table_name           VARCHAR(80) NOT NULL, -- Name of the ref table for lookup.
-  table_desc           VARCHAR(1024) NULL,
-  active               CHAR(1) NOT NULL DEFAULT 'Y', -- Only active table returns values
-  editable             CHAR(1) NOT NULL DEFAULT 'Y', -- Table value and locale can be updated via ref admin
-  common               CHAR(1) NOT NULL DEFAULT 'Y', -- The drop down shared across hosts
-  PRIMARY KEY(table_id)
-);
-
-
-CREATE TABLE ref_value_t (
-  value_id              VARCHAR(22) NOT NULL,
-  table_id              VARCHAR(22) NOT NULL,
-  value_code            VARCHAR(80) NOT NULL, -- The dropdown value
-  start_time            TIMESTAMP NULL,       
-  end_time              TIMESTAMP NULL,
-  display_order         INT,                  -- for editor and dropdown list.
-  active                VARCHAR(1) NOT NULL DEFAULT 'Y',
-  PRIMARY KEY(value_id),
-  FOREIGN KEY table_id REFERENCES ref_table_t (table_id) ON DELETE CASCADE
-);
-
-
-CREATE TABLE value_locale_t (
-  value_id              VARCHAR(22) NOT NULL,
-  language              VARCHAR(2) NOT NULL,
-  value_desc            VARCHAR(256) NULL, -- The drop label in language.
-  PRIMARY KEY(value_id,language),
-  FOREIGN KEY value_id REFERENCES ref_value_t (value_id) ON DELETE CASCADE
-);
-
-
-
-CREATE TABLE relation_type_t (
-  relation_id           VARCHAR(22) NOT NULL,
-  relation_name         VARCHAR(32) NOT NULL, -- The lookup keyword for the relation.
-  relation_desc         VARCHAR(1024) NOT NULL,
-  PRIMARY KEY(relation_id)
-);
-
-
-
-CREATE TABLE relation_t (
-  relation_id           VARCHAR(22) NOT NULL,
-  value_id_from         VARCHAR(22) NOT NULL,
-  value_id_to           VARCHAR(22) NOT NULL,
-  active                VARCHAR(1) NOT NULL DEFAULT 'Y',
-  PRIMARY KEY(relation_id, value_id_from, value_id_to)
-  FOREIGN KEY relation_id REFERENCES relation_type_t (relation_id) ON DELETE CASCADE,
-  FOREIGN KEY value_id_from REFERENCES ref_value_t (value_id) ON DELETE CASCADE,
-  FOREIGN KEY value_id_to REFERENCES ref_table_t (value_id) ON DELETE CASCADE
-);
-
-</code></pre>
+                        <h1 id="deployment"><a class="header" href="#deployment">Deployment</a></h1>
+<p>Deployment service allows users to deploy and manage their configured light products. This service is used by the application and api developers and operations.</p>
+<p>The deployment service contains pipeline management, platform management and deployment management. It also integrates with product management and instance management services.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../design/portal-event.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../design/config-server.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="../design/authentication-authorization.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../design/timestamp.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -238,11 +174,11 @@ CREATE TABLE relation_t (
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../design/portal-event.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../design/config-server.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="../design/authentication-authorization.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../design/timestamp.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

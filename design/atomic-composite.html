@@ -1,0 +1,1677 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Atomic Events vs Composite Events - Light Portal Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "../";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Light Portal Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="atomic-events-vs-composite-events"><a class="header" href="#atomic-events-vs-composite-events">Atomic Events vs Composite Events</a></h1>
+<h2 id="event-design"><a class="header" href="#event-design">Event Design</a></h2>
+<p>This is a fundamental design decision in any Event Sourcing system, and the choice has significant long-term consequences for your system's flexibility, maintainability, and clarity.</p>
+<p>The overwhelming consensus and best practice is to design <strong>atomic events</strong>.</p>
+<p>Let's break down why, and then look at the trap of composite events.</p>
+<hr />
+<h3 id="1-atomic-events-the-recommended-approach"><a class="header" href="#1-atomic-events-the-recommended-approach">1. Atomic Events (The Recommended Approach)</a></h3>
+<p>An atomic event represents a single, granular, immutable fact that has occurred in your system. It is the smallest possible unit of change that has meaning to the business domain.</p>
+<p><strong>Example Scenario:</strong> A user updates their profile by changing their name and their shipping address on the same form.</p>
+<p>With atomic events, this single user action (the <em>Command</em>) would result in <strong>two separate events</strong> being written to the stream:</p>
+<ol>
+<li><code>CustomerNameChanged { customerId: "123", newName: "Jane Doe" }</code></li>
+<li><code>CustomerAddressChanged { customerId: "123", newAddress: "..." }</code></li>
+</ol>
+<h4 id="why-atomic-events-are-superior"><a class="header" href="#why-atomic-events-are-superior">Why Atomic Events are Superior:</a></h4>
+<p><strong>a) Maximum Flexibility and Reusability:</strong></p>
+<ul>
+<li><strong>Targeted Consumers:</strong> You can have different parts of your system (projections, process managers, other microservices) subscribe to only the events they care about. The shipping department only needs to know about <code>CustomerAddressChanged</code>, while the marketing department might only care about <code>CustomerNameChanged</code>. With a composite event, both would have to subscribe and parse the larger event to see if the part they care about was updated.</li>
+<li><strong>Future-Proofing:</strong> Six months from now, you might need to build a new feature that triggers a welcome kit to be sent when a customer provides an address for the first time. It's trivial to add a new consumer for the <code>CustomerAddressChanged</code> event.</li>
+</ul>
+<p><strong>b) Clear and Unambiguous Intent:</strong></p>
+<ul>
+<li>Each event has a single, well-defined purpose. The name of the event, like <code>ItemAddedToCart</code>, tells you exactly what happened.</li>
+<li>A composite event like <code>ProfileUpdated</code> is ambiguous. Did the name change? The address? The phone number? The password? You have to inspect the payload to understand the actual change, which makes the event stream harder to read and debug.</li>
+</ul>
+<p><strong>c) Simplified Event Handlers (Projections):</strong></p>
+<ul>
+<li>Your event handlers become small and simple. The logic for handling <code>CustomerAddressChanged</code> is focused purely on updating the address.</li>
+<li>With a composite event, your handler becomes a complex series of <code>if</code> statements: <code>if (event.newName != null) { updateName(); } if (event.newAddress != null) { updateAddress(); } ...</code>. This is brittle and hard to maintain.</li>
+</ul>
+<p><strong>d) Better for Versioning:</strong></p>
+<ul>
+<li>Events are immutable and stored forever. Your system will evolve. It's much easier to version a small, focused event (e.g., add an optional field to <code>CustomerAddressChanged_v2</code>) than it is to version a large, complex composite event where any one of its dozen fields might change.</li>
+</ul>
+<hr />
+<h3 id="2-composite-events-the-anti-pattern"><a class="header" href="#2-composite-events-the-anti-pattern">2. Composite Events (The Anti-Pattern)</a></h3>
+<p>A composite event attempts to bundle multiple state changes into a single, large event. It's often a result of developers mapping the event directly to the UI form or the incoming command.</p>
+<p>Using the same scenario (updating name and address):</p>
+<p>A composite event might look like this:</p>
+<ul>
+<li><code>CustomerProfileUpdated { customerId: "123", name: "Jane Doe", address: "...", phoneNumber: null }</code></li>
+</ul>
+<h4 id="the-problems-with-this-approach"><a class="header" href="#the-problems-with-this-approach">The Problems with this Approach:</a></h4>
+<ul>
+<li><strong>Loss of Granularity:</strong> As explained above, you lose the ability to react to specific changes.</li>
+<li><strong>Ambiguous Intent:</strong> The event name doesn't tell the whole story.</li>
+<li><strong>Sparse Payloads:</strong> What if the user only changed their name? The <code>address</code> and <code>phoneNumber</code> fields in the event payload would be <code>null</code> or unchanged. Your consumers have to handle these sparse, optional fields, leading to more complex logic.</li>
+<li><strong>False Cohesion:</strong> It groups things together that only changed <em>at the same time</em> but are not necessarily part of the same <em>business fact</em>.</li>
+</ul>
+<h3 id="3-the-key-insight-the-role-of-the-aggregate"><a class="header" href="#3-the-key-insight-the-role-of-the-aggregate">3. The Key Insight: The Role of the Aggregate</a></h3>
+<p>You might be thinking, "But the name and address change must be atomic! What if the system crashes after writing the first event but before the second?"</p>
+<p>This is where the <strong>Aggregate</strong> from Domain-Driven Design (DDD) comes in. The Aggregate is the consistency boundary.</p>
+<p>Here is the correct flow:</p>
+<ol>
+<li><strong>Command:</strong> A single <code>UpdateCustomerProfileCommand</code> is sent to the system. It contains both the new name and the new address.</li>
+<li><strong>Aggregate:</strong> The <code>Customer</code> Aggregate receives the command. It validates the business rules (e.g., the name isn't empty, the address is valid).</li>
+<li><strong>Event Generation:</strong> If the rules pass, the Aggregate's method produces <strong>a list of atomic events</strong>: <code>[CustomerNameChanged, CustomerAddressChanged]</code>.</li>
+<li><strong>Atomic Persistence:</strong> The Event Store then takes this list of events and persists them to the event stream <strong>in a single, atomic transaction</strong>. It's all or nothing. You will never have a <code>CustomerNameChanged</code> in the stream without the corresponding <code>CustomerAddressChanged</code> from the same command.</li>
+</ol>
+<blockquote>
+<p><strong>Key Takeaway:</strong> The <em>Command</em> can be composite (representing a single user gesture), but it should be resolved into a set of <em>atomic Events</em>. The atomicity of <em>writing</em> these events is guaranteed by your Aggregate and Event Store, not by bundling them into a single event type.</p>
+</blockquote>
+<hr />
+<h3 id="how-to-design-good-atomic-events-a-checklist"><a class="header" href="#how-to-design-good-atomic-events-a-checklist">How to Design Good Atomic Events (A Checklist)</a></h3>
+<ul>
+<li><strong>Name it in the Past Tense:</strong> <code>UserRegistered</code>, <code>OrderShipped</code>, <code>PasswordReset</code>. It's a fact that has already happened.</li>
+<li><strong>Capture Business Intent:</strong> Don't just record a CRUD-like change. <code>ProductPriceUpdated</code> is okay, but <code>PriceAdjustedForSale</code> is better because it captures the <em>why</em>.</li>
+<li><strong>Ensure it's a Complete Fact:</strong> Include all necessary data for a consumer to understand the event without having to look up previous state. For example, <code>ItemAddedToCart</code> should include <code>productId</code>, <code>quantity</code>, and <code>priceAtTimeOfAdding</code>, not just <code>productId</code>.</li>
+<li><strong>Include Causation and Correlation IDs:</strong> Add metadata to your events. Who triggered this change (<code>userId</code>)? What command caused it (<code>causationId</code>)? What overall business process is this part of (<code>correlationId</code>)?</li>
+<li><strong>Think "What happened?" not "What changed?":</strong> An event is a story. <code>OrderSubmitted</code> is a great event. A composite event like <code>OrderStateChanged { oldState: "Pending", newState: "Submitted" }</code> is far less expressive.</li>
+</ul>
+<h3 id="final-verdict"><a class="header" href="#final-verdict">Final Verdict</a></h3>
+<p><strong>Always design atomic events.</strong></p>
+<p>Use the Aggregate pattern to ensure that multiple atomic events resulting from a single command are persisted transactionally. This approach gives you a system that is far more flexible, maintainable, readable, and ready for future evolution.</p>
+<h2 id="transaction"><a class="header" href="#transaction">Transaction</a></h2>
+<p>When using Kafka to handle the events, we need to handle the transactions on both producer side and consumer side along with database transation to ensure multiple events can be handled together. The choice you make here directly impacts the atomicity, ordering, and resilience of your entire system.</p>
+<p>Let's break down the options and the correct way to handle transactions on both the producer and consumer side.</p>
+<h3 id="the-correct-approach-multiple-events-one-transaction"><a class="header" href="#the-correct-approach-multiple-events-one-transaction">The Correct Approach: Multiple Events, One Transaction</a></h3>
+<p>The best practice, by far, is to <strong>push multiple, individual event messages per command, wrapped in a single Kafka producer transaction.</strong></p>
+<p>This approach maintains the benefits of atomic events (flexibility, clarity) while guaranteeing the all-or-nothing atomicity you need.</p>
+<h4 id="how-to-implement-this-producer-side"><a class="header" href="#how-to-implement-this-producer-side">How to Implement This (Producer Side)</a></h4>
+<p>Your service that processes the command and talks to the <code>Aggregate</code> will do the following:</p>
+<ol>
+<li><strong>Generate Events:</strong> The <code>Customer</code> Aggregate generates the list of atomic events: <code>[CustomerNameChanged, CustomerAddressChanged]</code>.</li>
+<li><strong>Use Kafka Producer Transactions:</strong> This is the key feature that makes it all work.</li>
+</ol>
+<p>Here is a conceptual code flow (using Java-like syntax):</p>
+<pre><code class="language-java">// IMPORTANT: Configure your producer for transactions and idempotence
+// props.put("transactional.id", "my-unique-transactional-id");
+// props.put("enable.idempotence", "true");
+KafkaProducer&lt;String, Event&gt; producer = new KafkaProducer&lt;&gt;(props);
+
+// The list of events from your Aggregate
+List&lt;Event&gt; events = customerAggregate.handle(updateProfileCommand);
+
+// 1. Initialize the transaction
+producer.initTransactions();
+
+try {
+    // 2. Begin the transaction
+    producer.beginTransaction();
+
+    // The Aggregate ID (e.g., "customer-123") is the Kafka Key
+    String aggregateId = customerAggregate.getId();
+
+    for (Event event : events) {
+        // 3. Send EACH event as a SEPARATE message.
+        // CRUCIAL: All events for this transaction MUST have the same key.
+        // This ensures they all go to the same partition and are consumed in order.
+        producer.send(new ProducerRecord&lt;&gt;("customer-events-topic", aggregateId, event));
+    }
+
+    // 4. Commit the transaction.
+    // This makes all messages in the transaction visible to consumers atomically.
+    producer.commitTransaction();
+
+} catch (ProducerFencedException | OutOfOrderSequenceException | AuthorizationException e) {
+    // These are fatal errors, we should close the producer
+    producer.close();
+} catch (KafkaException e) {
+    // 5. If anything goes wrong, abort. None of the messages will be visible.
+    producer.abortTransaction();
+}
+
+producer.close();
+</code></pre>
+<p><strong>Why this is the best way:</strong></p>
+<ul>
+<li><strong>Atomicity Guaranteed:</strong> Kafka guarantees that consumers will either see ALL the messages from <code>commitTransaction</code> or NONE of them (if you <code>abortTransaction</code>).</li>
+<li><strong>Ordering Guaranteed:</strong> By using the same key (<code>aggregateId</code>) for all events in the transaction, you ensure they are written to the same partition in the exact order you sent them. Your consumer will read them in that same order.</li>
+<li><strong>Consumer Flexibility:</strong> Your stream processors can now consume individual, meaningful events. A shipping-related processor can filter for and process only <code>CustomerAddressChanged</code> events, completely ignoring <code>CustomerNameChanged</code>.</li>
+</ul>
+<hr />
+<h3 id="how-to-process-events-transactionally-consumer-side"><a class="header" href="#how-to-process-events-transactionally-consumer-side">How to Process Events Transactionally (Consumer Side)</a></h3>
+<p>Now, how does your streams processor populate the database tables while maintaining consistency? This is often called the "Transactional Outbox" pattern, but in reverse—a "Transactional Inbox".</p>
+<p>The goal is to <strong>atomically update the database AND commit the Kafka offset</strong>. You never want to commit an offset for a message whose database update failed.</p>
+<p>Here is the standard, robust pattern for a custom consumer/streams processor:</p>
+<ol>
+<li>
+<p><strong>Disable Kafka Auto-Commit:</strong> This is the most important step. Your application must take manual control of committing offsets. In your consumer configuration, set <code>enable.auto.commit=false</code>.</p>
+</li>
+<li>
+<p><strong>Consume and Process in Batches:</strong></p>
+</li>
+</ol>
+<pre><code class="language-java">// This is a conceptual loop for your consumer
+while (true) {
+    // 1. Poll for a batch of records. Kafka gives you a batch.
+    ConsumerRecords&lt;String, Event&gt; records = consumer.poll(Duration.ofMillis(1000));
+
+    if (records.isEmpty()) {
+        continue;
+    }
+
+    // Get your database connection
+    Connection dbConnection = database.getConnection();
+    dbConnection.setAutoCommit(false); // Start manual DB transaction management
+
+    try {
+        // 2. Process each record in the polled batch
+        for (ConsumerRecord&lt;String, Event&gt; record : records) {
+            Event event = record.value();
+            // Apply the change to the database based on the event type
+            processEvent(event, dbConnection);
+        }
+
+        // 3. If all events in the batch were processed successfully, commit the database transaction
+        dbConnection.commit();
+
+        // 4. IMPORTANT: Only after the DB commit succeeds, commit the Kafka offset.
+        // This tells Kafka "I have successfully and durably processed all messages up to this point."
+        consumer.commitSync();
+
+    } catch (SQLException e) {
+        // 5. If the DB update fails, rollback the DB transaction...
+        dbConnection.rollback();
+        // ...and DO NOT commit the Kafka offset.
+        // The consumer will re-poll and re-process this same batch of messages later.
+        // This is why your processing logic MUST be idempotent.
+        System.err.println("Database update failed. Rolling back. Will retry batch.");
+        // You might want to seek to the beginning of the failed batch to be explicit
+        // consumer.seek(record.topic(), record.partition(), record.offset());
+    } finally {
+        dbConnection.close();
+    }
+}
+</code></pre>
+<p>It is possible to handle transactions in a Kafka Streams processor, but it requires using the low-level Processor API and is significantly more complex than the standard consumer approach. You cannot achieve this with the high-level DSL (.map(), .filter(), etc.) alone.</p>
+<p>If your processor's only job is to read from Kafka and write to a database: Use the Plain Kafka Consumer. It is simpler, more direct, less error-prone, and purpose-built for this task. You are essentially building a custom, lightweight Kafka Connect sink.</p>
+<h4 id="the-critical-need-for-idempotency"><a class="header" href="#the-critical-need-for-idempotency">The Critical Need for Idempotency</a></h4>
+<p>Because a failure can occur after the DB commit but <em>before</em> the Kafka offset commit, your application might restart and re-process the same batch of events.</p>
+<p>Your database update logic <strong>must be idempotent</strong>. This means running the same update multiple times produces the same result as running it once.</p>
+<p><strong>Examples of Idempotent Operations:</strong></p>
+<ul>
+<li><strong><code>INSERT</code> with a primary key:</strong> <code>INSERT INTO customers (...) VALUES (...) ON DUPLICATE KEY UPDATE ...</code> (MySQL) or <code>INSERT ... ON CONFLICT ... DO UPDATE ...</code> (PostgreSQL).</li>
+<li><strong><code>UPDATE</code> statements:</strong> <code>UPDATE customers SET name = 'Jane Doe' WHERE customer_id = '123'</code>. Running this 5 times is the same as running it once.</li>
+<li><strong>Using Versioning:</strong> Store a <code>version</code> or <code>last_processed_event_id</code> in your database table.
+<pre><code class="language-sql">UPDATE customers
+SET name = 'Jane Doe', version = 2
+WHERE customer_id = '123' AND version = 1;
+</code></pre>
+If the update tries to run again, the <code>WHERE</code> clause will not match, and no rows will be affected.</li>
+</ul>
+<hr />
+<h3 id="why-not-put-a-list-of-events-in-one-message"><a class="header" href="#why-not-put-a-list-of-events-in-one-message">Why Not Put a List of Events in One Message?</a></h3>
+<p>This is an anti-pattern that solves one problem (producer atomicity) by creating many more downstream.</p>
+<ul>
+<li><strong>Loss of Meaning:</strong> The fundamental unit is the event, not a list of events. A Kafka message should represent one fact.</li>
+<li><strong>Consumer Complexity:</strong> Every single consumer now has to be written to expect a list. It has to deserialize the list and loop through it.</li>
+<li><strong>No Filtering:</strong> A consumer who only cares about <code>CustomerAddressChanged</code> still has to receive and parse the entire message containing the <code>CustomerNameChanged</code> event, only to discard it. This is inefficient and tightly couples your consumers to the producer's batching behavior.</li>
+<li><strong>Versioning Hell:</strong> Versioning a list of events is much harder than versioning a single event.</li>
+</ul>
+<h3 id="summary"><a class="header" href="#summary">Summary</a></h3>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Action</th><th style="text-align: left">Recommended Approach</th></tr></thead><tbody>
+<tr><td style="text-align: left"><strong>Event Design</strong></td><td style="text-align: left"><strong>Atomic Events</strong>: <code>CustomerNameChanged</code>, <code>CustomerAddressChanged</code>.</td></tr>
+<tr><td style="text-align: left"><strong>Producing to Kafka</strong></td><td style="text-align: left"><strong>Multiple Messages, One Kafka Transaction</strong>: Use <code>producer.beginTransaction()</code> and <code>producer.commitTransaction()</code>.</td></tr>
+<tr><td style="text-align: left"><strong>Kafka Message Key</strong></td><td style="text-align: left"><strong>Aggregate ID</strong>: Use the same key (e.g., <code>customer-123</code>) for all events from the same command to ensure ordering.</td></tr>
+<tr><td style="text-align: left"><strong>Consuming from Kafka</strong></td><td style="text-align: left"><strong>Manual Offset Commits</strong>: Disable auto-commit.</td></tr>
+<tr><td style="text-align: left"><strong>Database Updates</strong></td><td style="text-align: left"><strong>Transactional Batch Processing</strong>: <code>[Start DB Tx] -&gt; [Process Batch] -&gt; [Commit DB Tx] -&gt; [Commit Kafka Offset]</code>.</td></tr>
+<tr><td style="text-align: left"><strong>Database Logic</strong></td><td style="text-align: left"><strong>Idempotent</strong>: Your <code>UPDATE</code>/<code>INSERT</code> logic must handle being re-run on the same event without causing errors or incorrect data.</td></tr>
+</tbody></table>
+</div>
+<h2 id="mixed-aggregates-vs-single-aggregate"><a class="header" href="#mixed-aggregates-vs-single-aggregate">Mixed Aggregates vs Single Aggregate</a></h2>
+<p><strong>In the simple batch-processing consumer example I provided, the Kafka message key is <em>not</em> being used to segregate processing.</strong> The example processes a batch of records polled from Kafka, and that batch can indeed contain events for many different <code>user_id</code>s or <code>host_id</code>s, all mixed together in a single database transaction.</p>
+<p>Let's break down why this happens, the implications, and how to design a consumer that <em>does</em> respect aggregate boundaries for processing.</p>
+<hr />
+<h3 id="why-the-simple-batch-consumer-mixes-aggregates"><a class="header" href="#why-the-simple-batch-consumer-mixes-aggregates">Why the Simple Batch Consumer Mixes Aggregates</a></h3>
+<ol>
+<li>
+<p><strong>Kafka's Partitioning:</strong> You use the <code>user_id</code>/<code>host_id</code> as the key. Kafka's producer hashes this key to determine which partition the message goes to. This is <strong>excellent</strong> because it guarantees that all events for a single user (a single aggregate) will always go to the same partition and will be consumed in the order they were produced.</p>
+</li>
+<li>
+<p><strong>The Consumer's Polling:</strong> A Kafka consumer is assigned one or more partitions to read from. When it calls <code>consumer.poll()</code>, it fetches a batch of records that have arrived on <em>all of its assigned partitions</em> since the last poll.</p>
+<ul>
+<li>If your consumer is assigned Partition 0, and events for User A, User B, and User C have all landed on Partition 0, your polled batch will contain <code>[EventA1, EventB1, EventC1, EventA2, ...]</code>.</li>
+<li>They are mixed together, but the ordering <em>per key</em> is preserved (Event A1 will always come before Event A2).</li>
+</ul>
+</li>
+<li>
+<p><strong>The Simple Transaction Loop:</strong> The example loop I showed takes this entire mixed batch (<code>records</code>) and processes it within one DB transaction.</p>
+<pre><code class="language-java">// This loop combines multiple aggregates into one DB transaction
+dbConnection.beginTransaction();
+for (ConsumerRecord record : records) { // 'records' contains events for User A, B, C...
+    updateDatabase(record.value());
+}
+dbConnection.commit();
+</code></pre>
+</li>
+</ol>
+<h3 id="is-this-a-problem-the-trade-offs"><a class="header" href="#is-this-a-problem-the-trade-offs">Is This a Problem? (The Trade-offs)</a></h3>
+<p>For many use cases, processing mixed aggregates in a single batch is <strong>perfectly fine and often more performant.</strong></p>
+<ul>
+<li><strong>Pro: High Throughput.</strong> Batching database commits is much more efficient than committing after every single event. Committing a transaction that updates 100 rows for 50 different users is faster than running 100 separate transactions.</li>
+<li><strong>Con: "Noisy Neighbor" Problem.</strong> If processing an event for User C throws an unrecoverable <code>SQLException</code>, the entire batch transaction will be rolled back. This means the valid updates for User A and User B will also be rolled back and retried. The failure of one aggregate's event processing blocks the progress of others in the same batch.</li>
+<li><strong>Con: Loss of Concurrency.</strong> You are processing everything serially within a single consumer thread. You aren't taking advantage of the fact that User A's events are independent of User B's events.</li>
+</ul>
+<hr />
+<h3 id="the-better-approach-processing-per-aggregate"><a class="header" href="#the-better-approach-processing-per-aggregate">The Better Approach: Processing per Aggregate</a></h3>
+<p>If you want to isolate failures and potentially parallelize work, you need to change your consumer logic to process events grouped by their key (<code>user_id</code>/<code>host_id</code>).</p>
+<p>This pattern is more complex but far more robust for multi-tenant systems.</p>
+<h4 id="conceptual-code-for-aggregate-based-processing"><a class="header" href="#conceptual-code-for-aggregate-based-processing">Conceptual Code for Aggregate-based Processing</a></h4>
+<p>This approach reorganizes the polled batch by key <em>before</em> processing.</p>
+<pre><code class="language-java">// Still disable auto-commit: enable.auto.commit=false
+while (true) {
+    ConsumerRecords&lt;String, Event&gt; records = consumer.poll(Duration.ofMillis(1000));
+    if (records.isEmpty()) continue;
+
+    // 1. Group the polled records by their key (the aggregate ID)
+    Map&lt;String, List&lt;ConsumerRecord&lt;String, Event&gt;&gt;&gt; recordsByAggregate = new HashMap&lt;&gt;();
+    for (ConsumerRecord&lt;String, Event&gt; record : records) {
+        recordsByAggregate
+            .computeIfAbsent(record.key(), k -&gt; new ArrayList&lt;&gt;())
+            .add(record);
+    }
+
+    // This map now holds the highest offset for each partition from this poll
+    Map&lt;TopicPartition, OffsetAndMetadata&gt; offsetsToCommit = new HashMap&lt;&gt;();
+
+    // 2. Process the events for EACH aggregate in its OWN transaction
+    for (Map.Entry&lt;String, List&lt;ConsumerRecord&lt;String, Event&gt;&gt;&gt; entry : recordsByAggregate.entrySet()) {
+        String aggregateId = entry.getKey();
+        List&lt;ConsumerRecord&lt;String, Event&gt;&gt; aggregateEvents = entry.getValue();
+
+        // Start a DB transaction FOR THIS AGGREGATE ONLY
+        Connection dbConnection = database.getConnection();
+        dbConnection.setAutoCommit(false);
+
+        try {
+            for (ConsumerRecord&lt;String, Event&gt; record : aggregateEvents) {
+                // Your idempotent database logic
+                updateDatabaseForAggregate(record.value(), dbConnection);
+
+                // Keep track of the highest offset we've successfully processed
+                TopicPartition partition = new TopicPartition(record.topic(), record.partition());
+                OffsetAndMetadata offset = new OffsetAndMetadata(record.offset() + 1);
+                offsetsToCommit.merge(partition, offset, (oldVal, newVal) -&gt; newVal.offset() &gt; oldVal.offset() ? newVal : oldVal);
+            }
+            // Commit the DB transaction for this one aggregate
+            dbConnection.commit();
+
+        } catch (Exception e) {
+            // FAILURE for a single aggregate!
+            System.err.println("Failed to process batch for aggregate: " + aggregateId + ". Rolling back.");
+            dbConnection.rollback();
+            // What to do now?
+            // Option A: Skip this aggregate and continue with others (might break ordering).
+            // Option B (Better): Stop processing the entire poll, log the poison pill, and DO NOT commit any offsets.
+            // Let's assume Option B. We would break out of this loop.
+            // For simplicity, we'll just log and continue, but in reality, you need a robust dead-letter queue strategy here.
+        } finally {
+            dbConnection.close();
+        }
+    }
+
+    // 3. After attempting to process all aggregates in the batch, commit the offsets
+    // for all the partitions where we made progress.
+    if (!offsetsToCommit.isEmpty()) {
+        consumer.commitSync(offsetsToCommit);
+    }
+}
+</code></pre>
+<h3 id="key-differences-and-improvements-in-this-pattern"><a class="header" href="#key-differences-and-improvements-in-this-pattern">Key Differences and Improvements in this Pattern:</a></h3>
+<ol>
+<li><strong>Isolation:</strong> A failure in processing for <code>user-123</code> no longer affects <code>user-456</code>. The transaction for <code>user-456</code> can still be committed.</li>
+<li><strong>Correctness:</strong> The database state for each aggregate is updated transactionally, respecting its own event sequence.</li>
+<li><strong>Concurrency (Potential):</strong> This design is a stepping stone to true parallel processing. You could submit each <code>List&lt;ConsumerRecord&gt;</code> (the events for one aggregate) to a thread pool for processing, allowing you to update multiple users' data concurrently. This requires careful management of the offsets to commit.</li>
+</ol>
+<h3 id="summary-and-recommendation"><a class="header" href="#summary-and-recommendation">Summary and Recommendation</a></h3>
+<p>Your intuition was exactly right. The simple batch consumer ignores the key for processing logic, which can be a problem.</p>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Approach</th><th style="text-align: left">When to Use</th><th style="text-align: left">Key Benefit</th><th style="text-align: left">Key Drawback</th></tr></thead><tbody>
+<tr><td style="text-align: left"><strong>Simple Batch Processing</strong></td><td style="text-align: left">- High-throughput, simple ETL jobs. <br> - When a single failure blocking a whole batch is acceptable. <br> - Low-contention systems.</td><td style="text-align: left"><strong>Simplicity &amp; Performance.</strong> Easiest to write and often the fastest for bulk loading.</td><td style="text-align: left"><strong>Noisy Neighbor Problem.</strong> One bad event can halt processing for all others in the batch.</td></tr>
+<tr><td style="text-align: left"><strong>Per-Aggregate Processing</strong></td><td style="text-align: left">- <strong>Multi-tenant systems (your case).</strong> <br> - Systems requiring high reliability and fault isolation. <br> - When you need to guarantee progress for healthy aggregates even if others are failing.</td><td style="text-align: left"><strong>Robustness &amp; Isolation.</strong> Failures are contained to a single aggregate.</td><td style="text-align: left"><strong>Increased Complexity.</strong> Requires more code to group records and manage transactions and offsets carefully.</td></tr>
+</tbody></table>
+</div>
+<p><strong>For your system, especially a multi-tenant one, the "Per-Aggregate Processing" model is strongly recommended.</strong> The added complexity is a worthwhile investment for the significant gains in robustness and fault isolation. It correctly uses the Kafka key not just for partitioning, but also as the logical boundary for your downstream processing and transactions.</p>
+<h2 id="dlq-and-process-flow"><a class="header" href="#dlq-and-process-flow">DLQ and Process Flow</a></h2>
+<p>This is the final, crucial piece of the puzzle for building a truly resilient system. You've identified the exact scenario that separates a robust consumer from a brittle one: handling a "poison pill" message.</p>
+<p>A poison pill is a message that your consumer cannot process successfully, no matter how many times it retries. A database constraint violation (<code>UNIQUE constraint failed</code>, <code>FOREIGN KEY constraint failed</code>) is a perfect example. If you simply roll back and retry, you will be stuck in an infinite loop, processing the same failing message forever and making no progress.</p>
+<p><strong>Yes, you absolutely must handle this by routing the problematic events to a Dead Letter Queue (DLQ), which is typically another Kafka topic.</strong></p>
+<p>Here is the complete, robust workflow for handling these failures.</p>
+<hr />
+<h3 id="the-dead-letter-queue-dlq-pattern"><a class="header" href="#the-dead-letter-queue-dlq-pattern">The Dead Letter Queue (DLQ) Pattern</a></h3>
+<p>The goal is to isolate the "bad" event(s) so that the consumer can move on and continue processing subsequent "good" events for that aggregate and others.</p>
+<h4 id="1-the-dlq-topic"><a class="header" href="#1-the-dlq-topic">1. The DLQ Topic</a></h4>
+<p>First, you create another Kafka topic specifically for these failed events. For example, if your main topic is <code>customer-events</code>, your DLQ topic might be <code>customer-events-dlq</code>.</p>
+<p>The messages in the DLQ topic should be enriched with metadata about the failure:</p>
+<ul>
+<li>The original event payload.</li>
+<li>The original topic, partition, and offset.</li>
+<li>The <code>consumer-group</code> that failed to process it.</li>
+<li>A timestamp of the failure.</li>
+<li>The error message or stack trace (e.g., "UNIQUE constraint failed on customers.email").</li>
+</ul>
+<h4 id="2-modified-consumer-logic-with-dlq"><a class="header" href="#2-modified-consumer-logic-with-dlq">2. Modified Consumer Logic with DLQ</a></h4>
+<p>Let's refine the "Per-Aggregate Processing" logic to include the DLQ step.</p>
+<pre><code class="language-java">// Assumes you have a separate KafkaProducer instance for the DLQ
+KafkaProducer&lt;String, DeadLetterEvent&gt; dlqProducer = ...;
+
+while (true) {
+    ConsumerRecords&lt;String, Event&gt; records = consumer.poll(...);
+    if (records.isEmpty()) continue;
+
+    // Group records by aggregate key
+    Map&lt;String, List&lt;ConsumerRecord&lt;String, Event&gt;&gt;&gt; recordsByAggregate = groupRecordsByKey(records);
+
+    Map&lt;TopicPartition, OffsetAndMetadata&gt; offsetsToCommit = new HashMap&lt;&gt;();
+
+    for (Map.Entry&lt;String, List&lt;ConsumerRecord&lt;String, Event&gt;&gt;&gt; entry : recordsByAggregate.entrySet()) {
+        String aggregateId = entry.getKey();
+        List&lt;ConsumerRecord&lt;String, Event&gt;&gt; aggregateEvents = entry.getValue();
+
+        Connection dbConnection = database.getConnection();
+        dbConnection.setAutoCommit(false);
+
+        try {
+            for (ConsumerRecord&lt;String, Event&gt; record : aggregateEvents) {
+                // Your idempotent database update logic
+                updateDatabaseForAggregate(record.value(), dbConnection);
+            }
+            // If all events for this aggregate succeed, commit the DB transaction
+            dbConnection.commit();
+
+            // And mark the final offset for this aggregate as ready to commit
+            markOffsetsAsProcessed(aggregateEvents, offsetsToCommit);
+
+        } catch (SQLException e) {
+            // A "poison pill" or unrecoverable error was detected!
+            dbConnection.rollback(); // Roll back any partial DB changes for this aggregate
+
+            System.err.println("Unrecoverable error processing aggregate " + aggregateId + ". Sending to DLQ. Error: " + e.getMessage());
+
+            // **THE DLQ LOGIC**
+            // Send the entire batch of events for this failing aggregate to the DLQ.
+            // It's crucial to send the whole batch to preserve their relative order.
+            for (ConsumerRecord&lt;String, Event&gt; failedRecord : aggregateEvents) {
+                DeadLetterEvent dlqEvent = createDlqEvent(failedRecord, e);
+                // Use the same key to keep ordering in the DLQ
+                dlqProducer.send(new ProducerRecord&lt;&gt;("customer-events-dlq", aggregateId, dlqEvent));
+            }
+
+            // **CRITICAL STEP:** We have now "handled" these poison pill events by sending them to the DLQ.
+            // We must treat them as successfully processed from the perspective of the main topic
+            // so we can commit their offsets and move on.
+            markOffsetsAsProcessed(aggregateEvents, offsetsToCommit);
+
+        } catch (Exception otherException) {
+            // Handle transient errors (e.g., network timeout) differently.
+            // You might want to retry these without going to the DLQ immediately.
+            dbConnection.rollback();
+            // Don't commit offsets, let the consumer re-poll and retry.
+            System.err.println("Transient error occurred. Will retry batch.");
+            // Break the loop and wait for the next poll
+            break;
+
+        } finally {
+            dbConnection.close();
+        }
+    }
+
+    // After processing all aggregates in the poll...
+    if (!offsetsToCommit.isEmpty()) {
+        // Commit the offsets for both successfully processed and DLQ'd aggregates.
+        // This advances the consumer past the poison pill.
+        consumer.commitSync(offsetsToCommit);
+    }
+}
+
+// Helper method to create a DLQ event
+private DeadLetterEvent createDlqEvent(ConsumerRecord record, Exception e) {
+    // Populate with original event, error message, topic, offset, etc.
+    return new DeadLetterEvent(...);
+}
+
+// Helper method to update the offsets map
+private void markOffsetsAsProcessed(List&lt;ConsumerRecord&lt;String, Event&gt;&gt; records, Map&lt;TopicPartition, OffsetAndMetadata&gt; offsets) {
+    records.forEach(rec -&gt; {
+        TopicPartition partition = new TopicPartition(rec.topic(), rec.partition());
+        OffsetAndMetadata offset = new OffsetAndMetadata(rec.offset() + 1);
+        offsets.merge(partition, offset, (oldVal, newVal) -&gt; newVal.offset() &gt; oldVal.offset() ? newVal : oldVal);
+    });
+}
+</code></pre>
+<h3 id="what-to-do-with-the-dlq-topic"><a class="header" href="#what-to-do-with-the-dlq-topic">What to Do with the DLQ Topic?</a></h3>
+<p>The DLQ is not a garbage can. It's a hospital for sick messages. You need a strategy for managing it.</p>
+<ol>
+<li>
+<p><strong>Monitoring and Alerting:</strong> Set up alerts on the DLQ topic. A message landing here is an exceptional event that indicates a bug, bad data, or a system inconsistency. A human needs to be notified.</p>
+</li>
+<li>
+<p><strong>Manual Intervention:</strong> An operator or developer should inspect the DLQ message.</p>
+<ul>
+<li><strong>Is it a bug in the consumer?</strong> If so, deploy a fix to the consumer code.</li>
+<li><strong>Is it bad data from the producer?</strong> For example, a <code>UserRegistered</code> event was sent with an email that already exists. The upstream service needs to be fixed.</li>
+<li><strong>Is it a state inconsistency?</strong> Maybe an event arrived out of order due to a misconfiguration, and the state it expects in the database doesn't exist yet.</li>
+</ul>
+</li>
+<li>
+<p><strong>Reprocessing (The "Re-drive" Pattern):</strong> Once the underlying issue is fixed (e.g., the consumer bug is patched, or the inconsistent DB state is manually corrected), you need a way to re-introduce the events from the DLQ back into the main processing flow. This is typically done with a separate utility or "re-driver" application that reads from the DLQ and publishes the <em>original</em> event back to the <em>original</em> topic.</p>
+</li>
+</ol>
+<h3 id="differentiating-error-types"><a class="header" href="#differentiating-error-types">Differentiating Error Types</a></h3>
+<p>It's crucial to distinguish between:</p>
+<ul>
+<li><strong>Transient Errors:</strong> Network issues, temporary database unavailability, lock timeouts. These are retryable. The correct response is to roll back and <strong>not commit the offset</strong>, forcing a retry on the next poll.</li>
+<li><strong>Permanent Errors:</strong> DB constraint violations, deserialization errors, unrecoverable business logic failures (<code>NullPointerException</code>). These are <strong>not</strong> retryable. The correct response is to <strong>route to the DLQ and commit the offset</strong> to move on.</li>
+</ul>
+<p>Your <code>catch</code> blocks should be structured to differentiate these.</p>
+<pre><code class="language-java">try {
+    // ... processing logic
+} catch (SQLIntegrityConstraintViolationException | DeserializationException e) {
+    // PERMANENT: Rollback, send to DLQ, commit offset
+} catch (SQLTransientConnectionException | LockTimeoutException e) {
+    // TRANSIENT: Rollback, DO NOT commit offset, let it retry
+} catch (Exception e) {
+    // Generic catch-all, probably treat as permanent to be safe
+    // Rollback, send to DLQ, commit offset
+}
+</code></pre>
+<p>By implementing this complete pattern, you create a system that is not only transactional and correct but also self-healing. It can automatically isolate failures, alert you to the problem, and continue operating for all healthy aggregates, preventing a single bad event from bringing your entire system to a halt.</p>
+<h2 id="notification-and-event-store"><a class="header" href="#notification-and-event-store">Notification and Event Store</a></h2>
+<hr />
+<h3 id="1-is-notification_t-replacing-the-dlq"><a class="header" href="#1-is-notification_t-replacing-the-dlq">1. Is <code>notification_t</code> replacing the DLQ?</a></h3>
+<p><strong>Short Answer: No, not effectively. They serve different primary purposes, though they can complement each other.</strong></p>
+<p>Let's clarify the roles:</p>
+<ul>
+<li>
+<p><strong>Dead Letter Queue (DLQ - Kafka Topic):</strong></p>
+<ul>
+<li><strong>Primary Purpose:</strong> Operational recovery. It's a <strong>queue of unprocessable messages</strong> that allows your consumer to <em>move on</em> and continue processing subsequent messages. It's designed for <strong>reprocessing</strong> the original event once the underlying issue (code bug, bad data, external system outage) is resolved.</li>
+<li><strong>Nature:</strong> A temporary holding area for <em>raw events</em> that need to be re-driven into the main processing flow. It's part of your <strong>automated error handling and retry mechanism</strong>.</li>
+<li><strong>Mechanism:</strong> It preserves the <em>original message payload</em> (and its context) in a format easily consumable by other Kafka applications (like a re-driver).</li>
+</ul>
+</li>
+<li>
+<p><strong><code>notification_t</code> (Database Table):</strong></p>
+<ul>
+<li><strong>Primary Purpose:</strong> Audit, visibility, and user-facing reporting. It's a <strong>record of processing outcomes</strong> (success/failure) and associated metadata (error messages). It's a <strong>read model</strong> or a <strong>projection</strong> for displaying status.</li>
+<li><strong>Nature:</strong> A durable log or materialized view of processing activity. It's primarily for <strong>human intervention and analysis</strong>.</li>
+<li><strong>Mechanism:</strong> Stores a summary or specific details about what happened during processing, typically in a structured way that can be queried and displayed.</li>
+</ul>
+</li>
+</ul>
+<p><strong>Why <code>notification_t</code> doesn't replace a DLQ:</strong></p>
+<ol>
+<li>
+<p><strong>Reprocessing:</strong></p>
+<ul>
+<li>If an event fails and you only log it to <code>notification_t</code>, your Kafka consumer is still stuck. If it commits the offset for that failed message, the message is <strong>lost from the Kafka topic</strong> (due to retention policies). You'd then have to reconstruct the original message from <code>notification_t</code> and <em>manually re-publish it</em> to Kafka, which is cumbersome.</li>
+<li>A DLQ (Kafka topic) already holds the raw message and allows for a more automated re-driving process.</li>
+</ul>
+</li>
+<li>
+<p><strong>Operational Flow:</strong></p>
+<ul>
+<li>A DLQ is part of an automated pipeline: consumer fails -&gt; sends to DLQ -&gt; <em>consumer moves on</em>. Alerts are triggered.</li>
+<li>With just <code>notification_t</code>, you need an external mechanism (human reading the UI, another scheduled job) to query the table, identify failures, and trigger manual re-publishing. This is less reactive and scalable.</li>
+</ul>
+</li>
+<li>
+<p><strong>Mixing Concerns:</strong></p>
+<ul>
+<li>Your <code>notification_t</code> table correctly stores <em>processing results</em>. This is a <strong>projection</strong> of the events.</li>
+<li>The raw events themselves are what need to be re-driven.</li>
+<li>A DLQ focuses solely on holding the raw, unprocessable events.</li>
+</ul>
+</li>
+</ol>
+<p><strong>How they can complement each other:</strong></p>
+<ul>
+<li>When an event is sent to the DLQ, you <strong>also</strong> log an entry in <code>notification_t</code> indicating the failure, which event was sent to DLQ, and why. This provides the user-facing visibility you want while maintaining the operational robustness of the DLQ.</li>
+<li>Your re-driver for the DLQ could also update the <code>notification_t</code> entry when an event is successfully re-processed.</li>
+</ul>
+<p><strong>Conclusion on DLQ vs. <code>notification_t</code>:</strong> Your <code>notification_t</code> is a valuable audit and reporting tool, but it should not be your sole mechanism for handling unprocessable Kafka messages. The DLQ pattern with a dedicated Kafka topic is the industry standard for robust, scalable error handling and reprocessing in a streaming architecture.</p>
+<hr />
+<h3 id="2-using-notification_t-as-the-event-store-for-replay"><a class="header" href="#2-using-notification_t-as-the-event-store-for-replay">2. Using <code>notification_t</code> as the Event Store for replay?</a></h3>
+<p><strong>Short Answer: This is generally a poor idea due to mixed concerns and potential data loss, unless your <code>notification_t</code> is <em>specifically designed</em> as a pure Event Store.</strong></p>
+<p>Let's define "Event Store" in Event Sourcing:</p>
+<ul>
+<li><strong>The Event Store:</strong> This is the <strong>single, authoritative source of truth</strong> for your system's state. It stores <strong>all historical domain events</strong> (atomic, immutable facts) in the exact order they occurred, for all time (or at least for a very long retention period). It's used to:
+<ul>
+<li>Rebuild the current state of an aggregate.</li>
+<li>Replay all events to build new read models (projections).</li>
+<li>Perform historical analysis.</li>
+</ul>
+</li>
+</ul>
+<p><strong>Evaluating <code>notification_t</code> as an Event Store:</strong></p>
+<ul>
+<li>
+<p><strong>"Save all the events":</strong> This is the fundamental requirement. If it indeed stores the <em>full, raw, original event payload</em> for <em>every event</em> that enters your system, then this part is met.</p>
+</li>
+<li>
+<p><strong>"Success or failure of the processing with error message":</strong> This is where it breaks the Event Store principle. An Event Store should only contain <strong>facts</strong> that happened. Whether an event was processed successfully or failed is a <strong>derived state</strong> (a <em>projection</em> or <em>audit log entry</em>), not the event itself.</p>
+<ul>
+<li><strong>Problem 1: Mixing Concerns:</strong> Mixing raw events with processing results violates the purity of an Event Store. It makes the Event Store harder to reason about and potentially less efficient for replay.</li>
+<li><strong>Problem 2: Data Integrity/Purity for Replay:</strong> If you replay events from this table, do you replay the "success/failure" status? No, you only care about the event itself. This metadata is irrelevant for rebuilding aggregate state or building new projections.</li>
+</ul>
+</li>
+<li>
+<p><strong>"Kafka topic might not contain all the events":</strong> This is a critical point.</p>
+<ul>
+<li>If your Kafka topics have short retention (e.g., 7 days), then <strong>yes, you absolutely need an external, durable Event Store</strong> that retains events indefinitely.</li>
+<li>A relational database is a perfectly valid choice for an Event Store. Many Event Sourcing implementations use a relational DB table (<code>events</code> or <code>event_stream</code>) where each row is an event, uniquely identified, with the aggregate ID, sequence number, event type, and event payload.</li>
+</ul>
+</li>
+</ul>
+<p><strong>Recommendation for your Event Store:</strong></p>
+<ol>
+<li>
+<p><strong>Dedicate a separate table as your Event Store:</strong> If you want to use a database for event storage (which is fine!), create a table specifically for <code>events</code> or <code>event_store</code>.</p>
+<ul>
+<li>This table should only store the raw, immutable event data (ID, aggregate ID, sequence number, timestamp, type, payload).</li>
+<li>It should <strong>not</strong> include processing status or error messages. These are projection data.</li>
+</ul>
+</li>
+<li>
+<p><strong>Maintain <code>notification_t</code> as a separate read model:</strong> Your <code>notification_t</code> table should remain exactly as it is: a valuable projection that tracks the processing success/failure for auditing and user visibility. It is derived from the events, not the source of events.</p>
+</li>
+<li>
+<p><strong>Choose your Event Store carefully:</strong></p>
+<ul>
+<li><strong>Kafka:</strong> If you configure Kafka topics for <strong>infinite retention</strong> (or very long, e.g., years), Kafka can serve as your primary Event Store. This is powerful for stream processing.</li>
+<li><strong>Relational Database:</strong> If Kafka retention is short, or if you prefer a traditional database for your Event Store, design a dedicated <code>events</code> table that conforms to the Event Store principles.</li>
+<li><strong>Specialized Event Stores:</strong> There are also purpose-built Event Stores (e.g., EventStoreDB) that excel at this task.</li>
+</ul>
+</li>
+</ol>
+<p><strong>Combined Ideal Architecture:</strong></p>
+<ol>
+<li><strong>Producers</strong> send atomic events to <strong>Kafka topics</strong> (e.g., <code>customer-events</code>) using Kafka transactions for atomicity.</li>
+<li><strong>Kafka topics</strong> are configured with <strong>long retention</strong> if they are your Event Store, or short retention if you're using a separate database as Event Store.</li>
+<li><strong>Consumers/Stream Processors</strong> read from Kafka.
+<ul>
+<li>They process events (e.g., update a materialized view, send to another service).</li>
+<li>They <strong>also persist a copy of the event to your dedicated, pure Event Store table</strong> (if Kafka isn't your long-term store). This must happen transactionally with their other updates or be a separate, guaranteed write.</li>
+<li>They <strong>also</strong> update your <code>notification_t</code> table with the processing status (success/failure) for audit/UI.</li>
+<li>If an unrecoverable error occurs, they <strong>send the original event to a DLQ topic</strong> (e.g., <code>customer-events-dlq</code>) and <strong>log the failure to <code>notification_t</code></strong>.</li>
+<li>They then commit their offsets on the main topic.</li>
+</ul>
+</li>
+<li><strong>DLQ management:</strong> Separate processes monitor the DLQ, allow manual inspection, and facilitate re-driving events back to the main topic after a fix.</li>
+<li><strong>Replaying:</strong> When needed, new services or new read models can be built by replaying all events from your chosen Event Store (long-retention Kafka topics or your dedicated <code>events</code> database table).</li>
+</ol>
+<p>This separation of concerns leads to a much more robust, understandable, and maintainable system.</p>
+<h2 id="event-store"><a class="header" href="#event-store">Event Store</a></h2>
+<p>When to populate the event store is a crucial design decision for ensuring the integrity and completeness of your Event Store. There are two main patterns to consider, each with its own trade-offs.</p>
+<hr />
+<h3 id="option-1-populating-the-event-store-db-table-before-publishing-to-kafka-transactional-outbox-pattern"><a class="header" href="#option-1-populating-the-event-store-db-table-before-publishing-to-kafka-transactional-outbox-pattern">Option 1: Populating the Event Store (DB Table) <strong>Before</strong> Publishing to Kafka (Transactional Outbox Pattern)</a></h3>
+<p>This is generally the <strong>most robust and recommended approach</strong> for ensuring <strong>at-least-once (often effectively once) persistence</strong> of your events. It guarantees that an event is durably stored in your Event Store <em>before</em> it is ever considered for publishing to Kafka.</p>
+<h4 id="how-it-works"><a class="header" href="#how-it-works">How it works:</a></h4>
+<ol>
+<li>
+<p><strong>Command Processing:</strong></p>
+<ul>
+<li>Your <code>Aggregate</code> receives a command and generates a list of atomic events.</li>
+<li>These events are <strong>persisted to your dedicated Event Store table (e.g., <code>events_store_t</code>) within the <em>same local database transaction</em></strong> as any state changes to your aggregate's materialized view (if applicable). This is the key: a single local transaction.</li>
+<li>Alongside storing the event in <code>events_store_t</code>, the event is also stored in an <strong>"Outbox" table</strong> (e.g., <code>outbox_messages</code>) in the same database transaction. The <code>outbox_messages</code> table serves as a temporary holding area for events that need to be published to Kafka.</li>
+</ul>
+</li>
+<li>
+<p><strong>Outbox Relayer/Publisher:</strong></p>
+<ul>
+<li>A separate, dedicated process (the "Outbox Relayer" or "Change Data Capture (CDC) Publisher") continuously monitors the <code>outbox_messages</code> table for new entries.</li>
+<li>When it finds new events in the <code>outbox_messages</code> table, it reads them and <strong>publishes them to Kafka</strong>.</li>
+<li>After successfully publishing to Kafka, it marks the event as "published" in the <code>outbox_messages</code> table or deletes it.</li>
+</ul>
+</li>
+</ol>
+<h4 id="why-this-is-best"><a class="header" href="#why-this-is-best">Why this is best:</a></h4>
+<ul>
+<li><strong>Atomicity Guaranteed (Local):</strong> The critical guarantee is that the event is <em>either stored in your Event Store AND in the Outbox table</em>, or neither. If the application crashes after generating events but before publishing to Kafka, the events are durably stored in the Outbox and will be published later by the relayer.</li>
+<li><strong>No Data Loss:</strong> Events are never lost between generation and publication to Kafka.</li>
+<li><strong>Decoupling:</strong> The service generating events doesn't need to know about Kafka's availability. It only needs to commit to its local database. The Outbox Relayer handles the Kafka dependency.</li>
+<li><strong>Effective Once:</strong> Combined with Kafka's idempotent producer, this provides effectively once-delivery.</li>
+<li><strong>Source of Truth:</strong> The event_store_t database table will be our source of truth and it allows queries against it.</li>
+</ul>
+<h4 id="where-the-events_store_t-is-populated"><a class="header" href="#where-the-events_store_t-is-populated">Where the <code>events_store_t</code> is populated:</a></h4>
+<ul>
+<li><strong>In the same local DB transaction where the events are generated and recorded in the Outbox table.</strong></li>
+</ul>
+<hr />
+<h3 id="option-2-populating-the-event-store-db-table-after-consuming-from-kafka"><a class="header" href="#option-2-populating-the-event-store-db-table-after-consuming-from-kafka">Option 2: Populating the Event Store (DB Table) <strong>After</strong> Consuming from Kafka</a></h3>
+<p>This approach involves two stages of atomicity: first, the producer guarantees delivery to Kafka, and then the consumer guarantees persistence from Kafka to your Event Store.</p>
+<h4 id="how-it-works-1"><a class="header" href="#how-it-works-1">How it works:</a></h4>
+<ol>
+<li>
+<p><strong>Command Processing &amp; Kafka Publishing:</strong></p>
+<ul>
+<li>Your <code>Aggregate</code> generates events.</li>
+<li>These events are <strong>immediately published to Kafka</strong> using Kafka producer transactions (as we discussed previously, to guarantee all events from a command are published atomically).</li>
+</ul>
+</li>
+<li>
+<p><strong>Consumer Processing:</strong></p>
+<ul>
+<li>Your Kafka consumer (the one responsible for populating your Event Store) reads events from Kafka.</li>
+<li>For each event (or batch of events from the same aggregate), it <strong>persists the event to your dedicated <code>events_store_t</code> table within a local database transaction</strong>.</li>
+<li><strong>Crucially:</strong> It commits the Kafka offset <em>only after</em> the database transaction to <code>events_store_t</code> is successful.</li>
+</ul>
+</li>
+</ol>
+<h4 id="why-this-is-generally-less-ideal-for-the-primary-event-store"><a class="header" href="#why-this-is-generally-less-ideal-for-the-primary-event-store">Why this is generally less ideal for the <em>primary</em> Event Store:</a></h4>
+<ul>
+<li><strong>Producer Responsibility:</strong> The service that generates the events <em>also</em> has the responsibility of publishing to Kafka. If Kafka is down or slow, the producer service might be blocked or need to implement complex retry logic.</li>
+<li><strong>Data Durability Gap:</strong> There's a theoretical, albeit small, window where events are generated but might not yet be durably committed to <em>your</em> authoritative <code>events_store_t</code> database if the consumer or Kafka has issues. (Kafka itself provides durability, but your <em>application's</em> Event Store is separate).</li>
+<li><strong>Complexity for Replay:</strong> If your consumer fails and you need to replay events, where do you replay from? Kafka? What if Kafka's retention is short? This pattern <em>requires</em> Kafka to be the true long-term Event Store, or it introduces a reliance on the consumer correctly populating the DB.</li>
+<li><strong>Source of Truth:</strong> The Kafka topic is written first and it will be our event store. It doesn't support query on the events directly.</li>
+</ul>
+<h4 id="where-the-events_store_t-is-populated-1"><a class="header" href="#where-the-events_store_t-is-populated-1">Where the <code>events_store_t</code> is populated:</a></h4>
+<ul>
+<li><strong>In the consumer process, within a local DB transaction, after polling from Kafka.</strong></li>
+</ul>
+<hr />
+<h3 id="answering-your-specific-questions"><a class="header" href="#answering-your-specific-questions">Answering your Specific Questions:</a></h3>
+<ul>
+<li>
+<p><strong>"Where is the best place to populate this table?"</strong>
+<strong>The best place is in the same database transaction where the event is generated and stored in an Outbox table (Option 1).</strong> This ensures that your authoritative Event Store (your <code>events_store_t</code> table) is always the first and most reliable source of truth.</p>
+</li>
+<li>
+<p><strong>"In the second case, should we populate the failed events (events went to DLQ) to the event store?"</strong>
+This question is about what constitutes "truth" in your Event Store.</p>
+<p><strong>No, you should populate <em>all original events</em> to the <code>events_store_t</code> table regardless of whether they later cause a processing error or end up in a DLQ.</strong></p>
+<p><strong>Reasoning:</strong></p>
+<ul>
+<li>The <code>events_store_t</code> is a record of <em>what happened in the domain</em>. An event like <code>OrderPlaced</code> is a fact that occurred, regardless of whether a downstream system successfully processed it or failed due to a unique constraint violation.</li>
+<li>The <code>events_store_t</code> should be pure. It tells the story of your system's state changes.</li>
+<li>The fact that an event failed to be processed by a <em>consumer</em> is a <em>processing audit detail</em> that belongs in your <code>notification_t</code> table or system logs, not in the fundamental Event Store.</li>
+<li>If you <em>don't</em> put the failed event in <code>events_store_t</code>, you are losing part of your system's history. When you rebuild state by replaying from <code>events_store_t</code>, you would miss this event, leading to an incorrect state.</li>
+</ul>
+<p><strong>In summary:</strong></p>
+<ul>
+<li><strong><code>events_store_t</code>:</strong> Stores <em>all</em> events that happened, always.</li>
+<li><strong><code>notification_t</code>:</strong> Stores the <em>status</em> of processing each event (success/failure, error message), as a projection.</li>
+<li><strong>DLQ:</strong> Stores <em>unconsumable events</em> for reprocessing.</li>
+</ul>
+</li>
+</ul>
+<hr />
+<h3 id="conclusion"><a class="header" href="#conclusion">Conclusion</a></h3>
+<p>I strongly recommend implementing the <strong>Transactional Outbox pattern (Option 1)</strong> for populating your <code>events_store_t</code> table. This pattern has become an industry best practice for achieving reliable event publishing from a database-backed service. It is more complex initially but provides superior durability and resilience compared to directly publishing to Kafka from your domain service.</p>
+<p>And regardless of the publishing mechanism, your <code>events_store_t</code> should be a complete, immutable log of all domain events, untainted by processing outcomes.</p>
+<h2 id="change-data-capture"><a class="header" href="#change-data-capture">Change Data Capture</a></h2>
+<p>Using <strong>Change Data Capture (CDC)</strong> (like Debezium) for the <strong>Transactional Outbox</strong> is the gold standard for reliably publishing events from a database-backed service to Kafka.</p>
+<p>Here's a detailed design and a conceptual Java implementation for the producer side, along with the Debezium configuration.</p>
+<hr />
+<h3 id="overall-architecture"><a class="header" href="#overall-architecture">Overall Architecture</a></h3>
+<ol>
+<li>
+<p><strong>Producer Service (Your Java Application):</strong></p>
+<ul>
+<li>Receives commands (e.g., <code>UpdateCustomerProfileCommand</code>).</li>
+<li>Interacts with the <code>Customer</code> Aggregate.</li>
+<li>Generates a list of <strong>atomic domain events</strong> (e.g., <code>CustomerNameChanged</code>, <code>CustomerAddressChanged</code>).</li>
+<li><strong>Crucially:</strong> Persists these events to two database tables <strong>within a single local database transaction</strong>:
+<ul>
+<li><code>events_store_t</code>: Your immutable, authoritative Event Store (long-term historical log).</li>
+<li><code>outbox_messages</code>: A temporary table used by CDC to pick up events for Kafka.</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p><strong>Transactional Outbox Table (<code>outbox_messages</code>):</strong></p>
+<ul>
+<li>A simple database table that acts as a queue for events to be published.</li>
+<li>Rows are inserted into this table in the same transaction as any other domain state changes.</li>
+</ul>
+</li>
+<li>
+<p><strong>CDC Tool (Debezium):</strong></p>
+<ul>
+<li>Monitors the <code>outbox_messages</code> table (and potentially <code>events_store_t</code> if you want a separate stream for the full event store, though typically you'd monitor the outbox).</li>
+<li>Detects new rows (inserts).</li>
+<li>Captures the <code>after</code> image of the inserted row.</li>
+<li>Transforms this data into a Kafka message.</li>
+<li>Publishes the Kafka message to the configured topic.</li>
+</ul>
+</li>
+<li>
+<p><strong>Kafka Topic(s):</strong></p>
+<ul>
+<li>Events are published here. You can configure Debezium to route events to different topics based on the <code>aggregate_type</code> or <code>event_type</code> from your <code>outbox_messages</code> table.</li>
+</ul>
+</li>
+<li>
+<p><strong>Kafka Consumers:</strong></p>
+<ul>
+<li>Your downstream services (stream processors, materialized view builders, notification services) consume from these Kafka topics.</li>
+<li>They process the events, update their read models, and commit their offsets.</li>
+</ul>
+</li>
+</ol>
+<hr />
+<h3 id="design-of-the-database-tables"><a class="header" href="#design-of-the-database-tables">Design of the Database Tables</a></h3>
+<h4 id="1-events_store_t-your-primary-event-store"><a class="header" href="#1-events_store_t-your-primary-event-store">1. <code>events_store_t</code> (Your Primary Event Store)</a></h4>
+<p>This table holds the immutable, ordered sequence of all domain events.</p>
+<pre><code class="language-sql">CREATE TABLE events_store_t (
+    id UUID PRIMARY KEY,                   -- Unique ID for the event itself
+    aggregate_id VARCHAR(255) NOT NULL,    -- The ID of the aggregate (e.g., customer-123)
+    aggregate_type VARCHAR(255) NOT NULL,  -- The type of aggregate (e.g., 'Customer')
+    event_type VARCHAR(255) NOT NULL,      -- The specific type of event (e.g., 'CustomerNameChanged')
+    sequence_number BIGINT NOT NULL,       -- Monotonically increasing sequence number per aggregate
+    timestamp TIMESTAMP WITH TIME ZONE NOT NULL, -- When the event occurred
+    payload JSONB NOT NULL,                -- The full event payload (JSON)
+    metadata JSONB,                        -- Optional: correlation IDs, causation IDs, user ID, etc.
+    -- Constraints for event order and uniqueness per aggregate
+    UNIQUE (aggregate_id, sequence_number)
+);
+
+-- Index for efficient lookup by aggregate
+CREATE INDEX idx_events_store_aggregate ON events_store_t (aggregate_id);
+</code></pre>
+<h4 id="2-outbox_messages-for-cdc-publishing"><a class="header" href="#2-outbox_messages-for-cdc-publishing">2. <code>outbox_messages</code> (For CDC Publishing)</a></h4>
+<p>This table serves as the bridge to Kafka.</p>
+<pre><code class="language-sql">CREATE TABLE outbox_messages (
+    id UUID PRIMARY KEY,                   -- Unique ID for this outbox message
+    aggregate_id VARCHAR(255) NOT NULL,    -- The ID of the aggregate (for Kafka key)
+    aggregate_type VARCHAR(255) NOT NULL,  -- The type of aggregate (for Kafka topic routing)
+    event_type VARCHAR(255) NOT NULL,      -- The specific type of event
+    timestamp TIMESTAMP WITH TIME ZONE NOT NULL, -- When the event was created
+    payload JSONB NOT NULL,                -- The full event payload (JSON)
+    metadata JSONB,                        -- Optional: correlation IDs, causation IDs, user ID, etc.
+    -- Note: No sequence_number here, as the Event Store manages that.
+    -- Debezium will process these by insertion order.
+);
+-- An index on timestamp can be useful for manual cleanup or if not using CDC
+-- CREATE INDEX idx_outbox_timestamp ON outbox_messages (timestamp);
+</code></pre>
+<hr />
+<h3 id="java-implementation-producer-service"><a class="header" href="#java-implementation-producer-service">Java Implementation (Producer Service)</a></h3>
+<p>We'll use Spring Boot for simplicity, Spring Data JPA for database interaction, and Jackson for JSON serialization.</p>
+<p><strong>Dependencies (build.gradle):</strong></p>
+<pre><code class="language-gradle">dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.postgresql:postgresql' // Or your chosen DB driver
+    runtimeOnly 'com.h2database:h2' // For in-memory testing convenience
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+    implementation 'com.fasterxml.jackson.core:jackson-databind' // For JSON
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310' // For Java 8 Date/Time
+}
+</code></pre>
+<h4 id="1-domain-events"><a class="header" href="#1-domain-events">1. Domain Events</a></h4>
+<pre><code class="language-java">// domain/events/DomainEvent.java
+package com.example.eventoutbox.domain.events;
+
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
+
+import java.time.Instant;
+import java.util.UUID;
+
+// Use JsonTypeInfo for polymorphic deserialization (if you need to deserialize events later)
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "eventType")
+@JsonSubTypes({
+    @JsonSubTypes.Type(value = CustomerNameChanged.class, name = "CustomerNameChanged"),
+    @JsonSubTypes.Type(value = CustomerAddressChanged.class, name = "CustomerAddressChanged")
+})
+public abstract class DomainEvent {
+    private final UUID eventId;
+    private final Instant timestamp;
+    private final String aggregateId;
+    private final String aggregateType;
+    private final long sequenceNumber; // Important for Event Sourcing
+
+    public DomainEvent(UUID eventId, Instant timestamp, String aggregateId, String aggregateType, long sequenceNumber) {
+        this.eventId = eventId;
+        this.timestamp = timestamp;
+        this.aggregateId = aggregateId;
+        this.aggregateType = aggregateType;
+        this.sequenceNumber = sequenceNumber;
+    }
+
+    public UUID getEventId() { return eventId; }
+    public Instant getTimestamp() { return timestamp; }
+    public String getAggregateId() { return aggregateId; }
+    public String getAggregateType() { return aggregateType; }
+    public long getSequenceNumber() { return sequenceNumber; }
+
+    public abstract String getEventType();
+}
+
+// domain/events/CustomerNameChanged.java
+package com.example.eventoutbox.domain.events;
+
+import java.time.Instant;
+import java.util.UUID;
+
+public class CustomerNameChanged extends DomainEvent {
+    private final String newName;
+
+    public CustomerNameChanged(UUID eventId, Instant timestamp, String customerId, long sequenceNumber, String newName) {
+        super(eventId, timestamp, customerId, "Customer", sequenceNumber);
+        this.newName = newName;
+    }
+
+    public String getNewName() { return newName; }
+
+    @Override
+    public String getEventType() { return "CustomerNameChanged"; }
+}
+
+// domain/events/CustomerAddressChanged.java
+package com.example.eventoutbox.domain.events;
+
+import java.time.Instant;
+import java.util.UUID;
+
+public class CustomerAddressChanged extends DomainEvent {
+    private final String newAddress; // Simple string for address example
+
+    public CustomerAddressChanged(UUID eventId, Instant timestamp, String customerId, long sequenceNumber, String newAddress) {
+        super(eventId, timestamp, customerId, "Customer", sequenceNumber);
+        this.newAddress = newAddress;
+    }
+
+    public String getNewAddress() { return newAddress; }
+
+    @Override
+    public String getEventType() { return "CustomerAddressChanged"; }
+}
+</code></pre>
+<h4 id="2-aggregate"><a class="header" href="#2-aggregate">2. Aggregate</a></h4>
+<pre><code class="language-java">// domain/Customer.java
+package com.example.eventoutbox.domain;
+
+import com.example.eventoutbox.domain.events.CustomerAddressChanged;
+import com.example.eventoutbox.domain.events.CustomerNameChanged;
+import com.example.eventoutbox.domain.events.DomainEvent;
+import lombok.Getter;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+
+// This is a simplified Aggregate. In a real ES system, you'd load state from events.
+// For this example, we're just focusing on event generation.
+@Getter
+public class Customer {
+    private final String customerId;
+    private String name;
+    private String address;
+    private long currentSequenceNumber; // Tracks the next sequence number for new events
+
+    private final List&lt;DomainEvent&gt; uncommittedEvents = new ArrayList&lt;&gt;();
+
+    public Customer(String customerId, long currentSequenceNumber) {
+        this.customerId = customerId;
+        this.currentSequenceNumber = currentSequenceNumber;
+    }
+
+    public static Customer create(String customerId) {
+        return new Customer(customerId, 0L); // Start with seq 0 for a new aggregate
+    }
+
+    public void changeName(String newName) {
+        if (!newName.equals(this.name)) { // Only emit event if something actually changed
+            this.name = newName;
+            this.currentSequenceNumber++;
+            uncommittedEvents.add(new CustomerNameChanged(UUID.randomUUID(), Instant.now(), customerId, currentSequenceNumber, newName));
+        }
+    }
+
+    public void changeAddress(String newAddress) {
+        if (!newAddress.equals(this.address)) {
+            this.address = newAddress;
+            this.currentSequenceNumber++;
+            uncommittedEvents.add(new CustomerAddressChanged(UUID.randomUUID(), Instant.now(), customerId, currentSequenceNumber, newAddress));
+        }
+    }
+
+    // After events are stored, clear them
+    public void markEventsCommitted() {
+        this.uncommittedEvents.clear();
+    }
+}
+</code></pre>
+<h4 id="3-persistence-layer-entities-and-repositories"><a class="header" href="#3-persistence-layer-entities-and-repositories">3. Persistence Layer (Entities and Repositories)</a></h4>
+<pre><code class="language-java">// infrastructure/persistence/outbox/OutboxMessage.java
+package com.example.eventoutbox.infrastructure.persistence.outbox;
+
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
+import java.time.Instant;
+import java.util.UUID;
+
+@Entity
+@Table(name = "outbox_messages")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class OutboxMessage {
+    @Id
+    private UUID id; // Event ID
+
+    private String aggregateId;
+    private String aggregateType;
+    private String eventType;
+    private Instant timestamp;
+
+    @JdbcTypeCode(SqlTypes.JSON) // For PostgreSQL JSONB type
+    @Column(columnDefinition = "jsonb")
+    private String payload; // Store payload as JSON string
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
+    private String metadata; // Optional metadata as JSON string
+}
+
+// infrastructure/persistence/outbox/OutboxMessageRepository.java
+package com.example.eventoutbox.infrastructure.persistence.outbox;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.UUID;
+
+public interface OutboxMessageRepository extends JpaRepository&lt;OutboxMessage, UUID&gt; {}
+
+// infrastructure/persistence/eventstore/EventStoreEvent.java
+package com.example.eventoutbox.infrastructure.persistence.eventstore;
+
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
+import java.time.Instant;
+import java.util.UUID;
+
+@Entity
+@Table(name = "events_store_t")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class EventStoreEvent {
+    @Id
+    private UUID id; // Event ID
+
+    private String aggregateId;
+    private String aggregateType;
+    private String eventType;
+    private Instant timestamp;
+    private long sequenceNumber;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
+    private String payload; // Store payload as JSON string
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
+    private String metadata; // Optional metadata as JSON string
+}
+
+// infrastructure/persistence/eventstore/EventStoreEventRepository.java
+package com.example.eventoutbox.infrastructure.persistence.eventstore;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.UUID;
+
+public interface EventStoreEventRepository extends JpaRepository&lt;EventStoreEvent, UUID&gt; {}
+</code></pre>
+<h4 id="4-application-service-handles-commands-and-persistence"><a class="header" href="#4-application-service-handles-commands-and-persistence">4. Application Service (Handles Commands and Persistence)</a></h4>
+<p>This is where the magic of the single transaction happens.</p>
+<pre><code class="language-java">// application/CustomerApplicationService.java
+package com.example.eventoutbox.application;
+
+import com.example.eventoutbox.domain.Customer;
+import com.example.eventoutbox.domain.events.DomainEvent;
+import com.example.eventoutbox.infrastructure.persistence.eventstore.EventStoreEvent;
+import com.example.eventoutbox.infrastructure.persistence.eventstore.EventStoreEventRepository;
+import com.example.eventoutbox.infrastructure.persistence.outbox.OutboxMessage;
+import com.example.eventoutbox.infrastructure.persistence.outbox.OutboxMessageRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+@Service
+@RequiredArgsConstructor
+public class CustomerApplicationService {
+
+    private final OutboxMessageRepository outboxMessageRepository;
+    private final EventStoreEventRepository eventStoreEventRepository;
+    private final ObjectMapper objectMapper; // For JSON serialization
+
+    // Represents an incoming command from e.g., a REST endpoint
+    public record UpdateCustomerProfileCommand(String customerId, String newName, String newAddress) {}
+
+    // @Transactional ensures that all database operations within this method
+    // (saving to outbox_messages and events_store_t) are part of a single DB transaction.
+    @Transactional
+    public void updateCustomerProfile(UpdateCustomerProfileCommand command) {
+        // --- 1. Load/Create Aggregate (Simplified for this example) ---
+        // In a real Event Sourcing system, you would load the Customer's state
+        // by replaying events from eventStoreEventRepository for command.customerId.
+        // For simplicity, we'll assume a new customer or just focus on event generation.
+        Customer customer = Customer.create(command.customerId);
+        // customer.loadFromEvents(eventStoreEventRepository.findByAggregateIdOrderBySequenceNumberAsc(command.customerId));
+        
+        // --- 2. Apply Business Logic &amp; Generate Events ---
+        if (command.newName() != null) {
+            customer.changeName(command.newName());
+        }
+        if (command.newAddress() != null) {
+            customer.changeAddress(command.newAddress());
+        }
+
+        // --- 3. Persist Events to Event Store &amp; Outbox (Atomically) ---
+        List&lt;DomainEvent&gt; eventsToStore = customer.getUncommittedEvents();
+        if (eventsToStore.isEmpty()) {
+            return; // No changes, no events to publish
+        }
+
+        List&lt;EventStoreEvent&gt; eventStoreEntities = eventsToStore.stream()
+            .map(this::mapToEventStoreEvent)
+            .collect(Collectors.toList());
+        eventStoreEventRepository.saveAll(eventStoreEntities); // Save to the authoritative Event Store
+
+        List&lt;OutboxMessage&gt; outboxMessages = eventsToStore.stream()
+            .map(this::mapToOutboxMessage)
+            .collect(Collectors.toList());
+        outboxMessageRepository.saveAll(outboxMessages); // Save to the Outbox for CDC
+
+        customer.markEventsCommitted(); // Clear uncommitted events after successful persistence
+    }
+
+    private OutboxMessage mapToOutboxMessage(DomainEvent event) {
+        try {
+            return OutboxMessage.builder()
+                .id(event.getEventId())
+                .aggregateId(event.getAggregateId())
+                .aggregateType(event.getAggregateType())
+                .eventType(event.getEventType())
+                .timestamp(event.getTimestamp())
+                .payload(objectMapper.writeValueAsString(event)) // Serialize event to JSON
+                .metadata(null) // Add actual metadata if needed
+                .build();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to serialize event to JSON: " + event.getEventId(), e);
+        }
+    }
+
+    private EventStoreEvent mapToEventStoreEvent(DomainEvent event) {
+        try {
+            return EventStoreEvent.builder()
+                .id(event.getEventId())
+                .aggregateId(event.getAggregateId())
+                .aggregateType(event.getAggregateType())
+                .eventType(event.getEventType())
+                .timestamp(event.getTimestamp())
+                .sequenceNumber(event.getSequenceNumber())
+                .payload(objectMapper.writeValueAsString(event)) // Serialize event to JSON
+                .metadata(null) // Add actual metadata if needed
+                .build();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to serialize event to JSON: " + event.getEventId(), e);
+        }
+    }
+}
+</code></pre>
+<h4 id="5-rest-controller-entry-point"><a class="header" href="#5-rest-controller-entry-point">5. REST Controller (Entry Point)</a></h4>
+<pre><code class="language-java">// application/CustomerController.java
+package com.example.eventoutbox.application;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/customers")
+@RequiredArgsConstructor
+public class CustomerController {
+
+    private final CustomerApplicationService customerApplicationService;
+
+    @PostMapping("/profile")
+    public ResponseEntity&lt;String&gt; updateCustomerProfile(@RequestBody CustomerApplicationService.UpdateCustomerProfileCommand command) {
+        customerApplicationService.updateCustomerProfile(command);
+        return ResponseEntity.ok("Customer profile update command received and processed.");
+    }
+}
+</code></pre>
+<h4 id="6-spring-boot-application-and-applicationproperties"><a class="header" href="#6-spring-boot-application-and-applicationproperties">6. Spring Boot Application (and <code>application.properties</code>)</a></h4>
+<pre><code class="language-java">// EventOutboxApplication.java
+package com.example.eventoutbox;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class EventOutboxApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(EventOutboxApplication.class, args);
+    }
+}
+</code></pre>
+<pre><code class="language-properties"># application.properties (for H2 in-memory for testing)
+spring.datasource.url=jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+spring.datasource.driverClassName=org.h2.Driver
+spring.datasource.username=sa
+spring.datasource.password=
+spring.jpa.database-platform=org.hibernate.dialect.H2Dialect
+spring.jpa.hibernate.ddl-auto=update # Use 'update' for schema management in dev
+spring.jackson.serialization.write-dates-as-timestamps=false # Good practice for Instant
+
+# If using PostgreSQL:
+# spring.datasource.url=jdbc:postgresql://localhost:5432/yourdb
+# spring.datasource.username=youruser
+# spring.datasource.password=yourpassword
+# spring.jpa.database-platform=org.hibernate.dialect.PostgreSQLDialect
+</code></pre>
+<hr />
+<h3 id="debezium-configuration-conceptual"><a class="header" href="#debezium-configuration-conceptual">Debezium Configuration (Conceptual)</a></h3>
+<p>You'll deploy Debezium as a Kafka Connect connector. Here's a sample configuration (e.g., <code>postgresql-outbox-connector.json</code>) for PostgreSQL.</p>
+<pre><code class="language-json">{
+  "name": "outbox-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "postgres",
+    "database.password": "secret",
+    "database.dbname": "configserver",
+    "database.server.name": "postgres",
+    "topic.prefix": "portal-event", 
+
+    "schema.include.list": "public",
+    "table.include.list": "public.outbox_message_t",
+    "message.key.columns": "public.outbox_message_t:user_id",
+
+    "plugin.name": "pgoutput",
+    "publication.name": "dbz_publication",
+    "slot.name": "dbz_replication_slot",
+
+    "value.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter.schemas.enable": "false",
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "key.converter.schemas.enable": "false",
+
+    "transforms": "unwrap,timestamp_converter,extractPayload,extractKey,outbox,final_route", 
+
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.drop.tombstones": "false",
+    "transforms.unwrap.delete.handling.mode": "none",
+
+    "transforms.timestamp_converter.type": "org.apache.kafka.connect.transforms.TimestampConverter$Value",
+    "transforms.timestamp_converter.field": "event_ts",
+    "transforms.timestamp_converter.target.type": "Timestamp",
+    "transforms.timestamp_converter.format": "yyyy-MM-dd'T'HH:mm:ss.SSSSSS'Z'",
+
+    "transforms.extractPayload.type": "org.apache.kafka.connect.transforms.ExtractField$Value",
+    "transforms.extractPayload.field": "payload",
+    "transforms.extractPayload.parse.json": "true",
+
+    "transforms.extractKey.type": "org.apache.kafka.connect.transforms.ExtractField$Key",
+    "transforms.extractKey.field": "user_id",
+
+    "transforms.outbox.type": "io.debezium.transforms.outbox.EventRouter",
+    "transforms.outbox.table.field.event.id": "id",
+    "transforms.outbox.table.field.event.key": "user_id",
+    "transforms.outbox.table.field.event.type": "event_type",
+    "transforms.outbox.table.field.event.timestamp": "event_ts",
+    "transforms.outbox.table.field.event.payload": "payload",
+    "transforms.outbox.table.field.event.metadata": "metadata",
+    "transforms.outbox.table.field.aggregate.type": "aggregate_type",
+    "transforms.outbox.table.field.aggregate.id": "aggregate_id",
+
+    "transforms.final_route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.final_route.regex": "portal-event\\.public\\.outbox_message_t", 
+    "transforms.final_route.replacement": "portal-event"
+  }
+}
+</code></pre>
+<p>And here is the curl command to create the connector locally.</p>
+<pre><code>curl --location --request POST 'http://localhost:8083/connectors' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+  "name": "outbox-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "postgres",
+    "database.password": "secret",
+    "database.dbname": "configserver",
+    "database.server.name": "postgres",
+    "topic.prefix": "portal-event", 
+
+    "schema.include.list": "public",
+    "table.include.list": "public.outbox_message_t",
+    "message.key.columns": "public.outbox_message_t:user_id",
+
+    "plugin.name": "pgoutput",
+    "publication.name": "dbz_publication",
+    "slot.name": "dbz_replication_slot",
+    "slot.drop.on.stop": "false", 
+    "signal.when.disconnected": "true",
+    "tombstones.on.delete": "true",
+    "max.retries": 5,
+    "retry.delay.ms": 10000,
+
+    "value.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter.schemas.enable": "false",
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "key.converter.schemas.enable": "false",
+
+    "transforms": "unwrap,timestamp_converter,extractPayload,extractKey,outbox,final_route", 
+
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.drop.tombstones": "false",
+    "transforms.unwrap.delete.handling.mode": "none",
+
+    "transforms.timestamp_converter.type": "org.apache.kafka.connect.transforms.TimestampConverter$Value",
+    "transforms.timestamp_converter.field": "event_ts",
+    "transforms.timestamp_converter.target.type": "Timestamp",
+    "transforms.timestamp_converter.format": "yyyy-MM-dd'\''T'\''HH:mm:ss.SSSSSS'\''Z'\''",
+
+    "transforms.extractPayload.type": "org.apache.kafka.connect.transforms.ExtractField$Value",
+    "transforms.extractPayload.field": "payload",
+    "transforms.extractPayload.parse.json": "true",
+
+    "transforms.extractKey.type": "org.apache.kafka.connect.transforms.ExtractField$Key",
+    "transforms.extractKey.field": "user_id",
+
+    "transforms.outbox.type": "io.debezium.transforms.outbox.EventRouter",
+    "transforms.outbox.table.field.event.id": "id",
+    "transforms.outbox.table.field.event.key": "user_id",
+    "transforms.outbox.table.field.event.type": "event_type",
+    "transforms.outbox.table.field.event.timestamp": "event_ts",
+    "transforms.outbox.table.field.event.payload": "payload",
+    "transforms.outbox.table.field.event.metadata": "metadata",
+    "transforms.outbox.table.field.aggregate.type": "aggregate_type",
+    "transforms.outbox.table.field.aggregate.id": "aggregate_id",
+
+    "transforms.final_route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.final_route.regex": "portal-event\\.public\\.outbox_message_t", 
+    "transforms.final_route.replacement": "portal-event"
+  }
+}
+'
+</code></pre>
+<p><strong>Important Notes on Debezium Transforms:</strong></p>
+<ul>
+<li><strong><code>EventRouter</code> Transform:</strong> This is a specialized Debezium SMT (Single Message Transform) designed specifically for the Transactional Outbox pattern.
+<ul>
+<li>It expects <code>id</code>, <code>aggregate_id</code>, <code>aggregate_type</code>, <code>event_type</code>, <code>timestamp</code>, <code>payload</code>, and <code>metadata</code> fields in your <code>outbox_messages</code> table.</li>
+<li>It automatically wraps the <code>payload</code> into the Kafka message value and sets the Kafka key based on <code>aggregate_id</code>.</li>
+<li>It can route to specific topics (e.g., <code>outbox.Customer</code>, <code>outbox.Order</code>) based on <code>aggregate_type</code>.</li>
+<li>It filters out <code>DELETE</code> operations on the <code>outbox_messages</code> table (which is what your clean-up process would do, if you had one).</li>
+</ul>
+</li>
+<li><strong>CDC (Debezium) only processes <code>INSERT</code>s:</strong> When you insert a row into <code>outbox_messages</code>, Debezium picks it up. After it's published, you can (optionally) have a separate, idempotent cleanup job or a Debezium signal that deletes the record from <code>outbox_messages</code>. Debezium will then capture this <code>DELETE</code> event, but the <code>EventRouter</code> transform will typically filter it out, preventing re-publishing.</li>
+</ul>
+<hr />
+<h3 id="how-to-test-the-java-producer-service"><a class="header" href="#how-to-test-the-java-producer-service">How to test the Java Producer Service</a></h3>
+<ol>
+<li>
+<p>Run your Spring Boot application.</p>
+</li>
+<li>
+<p>Use a tool like <code>curl</code> or Postman to send a POST request:</p>
+<pre><code class="language-bash">curl -X POST http://localhost:8080/customers/profile \
+-H "Content-Type: application/json" \
+-d '{
+  "customerId": "customer-abc-123",
+  "newName": "Alice Smith",
+  "newAddress": "123 Main St, Anytown"
+}'
+</code></pre>
+</li>
+<li>
+<p>Check your database <code>events_store_t</code> and <code>outbox_messages</code> tables. You should see entries for <code>CustomerNameChanged</code> and <code>CustomerAddressChanged</code> in both, all committed atomically.</p>
+</li>
+</ol>
+<hr />
+<h3 id="key-benefits-of-this-setup"><a class="header" href="#key-benefits-of-this-setup">Key Benefits of this Setup</a></h3>
+<ul>
+<li><strong>Guaranteed Event Persistence:</strong> Events are first stored in your durable <code>events_store_t</code> and <code>outbox_messages</code> tables within a single, local, ACID transaction. This means if your application crashes before the event is published to Kafka, it's still safe in your database and will be picked up by Debezium later.</li>
+<li><strong>Decoupling:</strong> Your core business logic (in <code>CustomerApplicationService</code>) doesn't directly interact with Kafka. It only interacts with the database. This makes your service more resilient to Kafka outages.</li>
+<li><strong>Simplified Retries:</strong> Debezium and Kafka Connect handle the complexities of retrying Kafka publication.</li>
+<li><strong>Single Source of Truth:</strong> Your <code>events_store_t</code> remains the authoritative event log for replay and aggregate reconstruction.</li>
+<li><strong>Scalability:</strong> You can scale your application service and Debezium independently.</li>
+</ul>
+<p>This pattern is a fundamental building block for highly reliable, event-driven microservices.</p>
+<h2 id="multiple-topics"><a class="header" href="#multiple-topics">Multiple Topics</a></h2>
+<p>This is a classic scenario in event-driven architectures: an event needs to trigger processing in multiple downstream systems. The key is maintaining atomicity and understanding transaction boundaries.</p>
+<p>Given your setup where:</p>
+<ol>
+<li><code>ScheduleCreatedEvent</code> originates from your service's outbox.</li>
+<li>Debezium pushes it to <code>portal-event</code>.</li>
+<li>Your <code>PortalEventConsumer</code> reads from <code>portal-event</code> and performs database updates (like <code>notification_t</code>).</li>
+<li>The same event needs to go to be processed by the Schedule Kafka Streams.</li>
+<li>All operations related to processing this event should ideally be atomic.</li>
+</ol>
+<hr />
+<h3 id="understanding-the-transactional-challenge"><a class="header" href="#understanding-the-transactional-challenge">Understanding the Transactional Challenge</a></h3>
+<p>Your <code>PortalEventConsumer</code> has a well-defined transactional boundary:
+<strong><code>[Start DB Tx] -&gt; [DB Updates (e.g., notification_t)] -&gt; [DB Commit] -&gt; [Kafka Consumer Offset Commit]</code></strong></p>
+<p>You want to add "push to <code>light-schedule</code>" into this atomic unit.</p>
+<h3 id="options-for-pushing-to-light-schedule"><a class="header" href="#options-for-pushing-to-light-schedule">Options for Pushing to <code>light-schedule</code></a></h3>
+<p>Let's evaluate the best places:</p>
+<h4 id="1-not-recommended-direct-kafka-producer-send-within-portaleventconsumers-db-transaction"><a class="header" href="#1-not-recommended-direct-kafka-producer-send-within-portaleventconsumers-db-transaction">1. <strong>NOT Recommended: Direct Kafka Producer Send within <code>PortalEventConsumer</code>'s DB Transaction.</strong></a></h4>
+<ul>
+<li><strong>Approach:</strong> Inside the <code>PortalEventConsumer</code> loop, after processing <code>ScheduleCreatedEvent</code> and before <code>conn.commit()</code>, instantiate a Kafka Producer and <code>producer.send()</code> the event to <code>light-schedule</code>.</li>
+<li><strong>Problem:</strong> This is incredibly difficult to make truly atomic across all three resources (source Kafka topic <code>portal-event</code> offset, your database transaction, AND the target Kafka topic <code>light-schedule</code>).
+<ul>
+<li>If <code>producer.send()</code> to <code>light-schedule</code> fails <em>after</em> <code>conn.commit()</code> but <em>before</em> <code>consumer.commitSync()</code>, you have an inconsistent state: <code>notification_t</code> is updated, but <code>light-schedule</code> didn't get the event. The consumer will re-process, leading to duplicates in <code>notification_t</code> (which requires idempotency) and potential duplicates to <code>light-schedule</code>.</li>
+<li>Managing Kafka Producer transactions nested within a JDBC transaction is not standard and adds immense complexity.</li>
+</ul>
+</li>
+</ul>
+<h4 id="2-recommended-for-robustness-but-more-infrastructure-a-secondary-outbox-table"><a class="header" href="#2-recommended-for-robustness-but-more-infrastructure-a-secondary-outbox-table">2. <strong>Recommended for Robustness (but more infrastructure): A Secondary Outbox Table.</strong></a></h4>
+<ul>
+<li><strong>Approach:</strong>
+<ol>
+<li>When <code>PortalEventConsumer</code> processes <code>ScheduleCreatedEvent</code> from <code>portal-event</code>, it updates <code>notification_t</code> (and any other DB projections) in its current DB transaction.</li>
+<li><strong>Within the <em>same</em> DB transaction</strong>, it also inserts a record (representing the <code>ScheduleCreatedEvent</code> for <code>light-schedule</code>) into a <em>new, dedicated outbox table</em> (e.g., <code>schedule_events_outbox_t</code>).</li>
+<li>A <strong>second Debezium connector</strong> (or a polling publisher) then monitors <code>schedule_events_outbox_t</code> and pushes events to the <code>light-schedule</code> topic.</li>
+</ol>
+</li>
+<li><strong>Benefits:</strong>
+<ul>
+<li><strong>True Atomicity:</strong> The event lands in <code>notification_t</code> AND is queued for <code>light-schedule</code> publishing, all within the <code>PortalEventConsumer</code>'s single DB transaction. This is guaranteed.</li>
+<li><strong>High Reliability:</strong> Leverages the proven Transactional Outbox pattern again.</li>
+</ul>
+</li>
+<li><strong>Drawbacks:</strong>
+<ul>
+<li>Adds another outbox table to manage.</li>
+<li>Requires another Debezium connector instance.</li>
+<li>More operational overhead.</li>
+</ul>
+</li>
+</ul>
+<h4 id="3-most-recommended-for-simplicity--kafka-streams-integration-a-separate-kafka-streams-application"><a class="header" href="#3-most-recommended-for-simplicity--kafka-streams-integration-a-separate-kafka-streams-application">3. <strong>Most Recommended for Simplicity &amp; Kafka Streams Integration: A Separate Kafka Streams Application.</strong></a></h4>
+<ul>
+<li><strong>Approach:</strong>
+<ol>
+<li>Your <code>PortalEventConsumer</code> continues to subscribe to <code>portal-event</code> and performs its database updates to <code>notification_t</code> (and other projections) as it currently does. It remains the sink for <em>all</em> events from <code>portal-event</code> into your relational database.</li>
+<li>Create a <strong>separate, dedicated Kafka Streams application</strong> whose sole purpose is to process scheduling events.</li>
+<li>This Kafka Streams application subscribes directly to the <code>portal-event</code> topic.</li>
+<li>It uses Kafka Streams DSL to <code>filter</code> for <code>ScheduleCreatedEvent</code>s.</li>
+</ol>
+</li>
+<li><strong>Benefits:</strong>
+<ul>
+<li><strong>Clean Separation of Concerns:</strong> Your <code>PortalEventConsumer</code> is a database sink. Your Kafka Streams app is a stream processor.</li>
+<li><strong>Kafka Streams EOS (Exactly-Once Semantics):</strong> Kafka Streams handles transactional guarantees (atomic consumption from <code>portal-event</code> and process the scheduled events natively.</li>
+<li><strong>Simpler Code:</strong> No complex producer/consumer/DB transaction coordination in one app.</li>
+<li><strong>Scalability:</strong> Each application can scale independently.</li>
+</ul>
+</li>
+<li><strong>Drawbacks:</strong>
+<ul>
+<li>Adds another logical application to deploy and manage.</li>
+</ul>
+</li>
+</ul>
+<hr />
+<h3 id="best-place-to-push-to-light-schedule"><a class="header" href="#best-place-to-push-to-light-schedule">Best Place to Push to <code>light-schedule</code>:</a></h3>
+<p>For your setup, the <strong>Separate Kafka Streams Application (Option 3)</strong> is generally the best approach.</p>
+<ul>
+<li><strong>Your <code>PortalEventConsumer</code>'s role:</strong> It acts as a <strong>generic projection builder</strong> into your relational database, consuming all events from <code>portal-event</code> and updating <code>notification_t</code> (and any other necessary read models). This ensures a full audit and visibility for <em>all</em> processed events in your DB.</li>
+<li><strong>The new Kafka Streams app's role:</strong> It acts as a <strong>specialized router and processor</strong> for <code>ScheduleCreatedEvent</code>s specifically, forwarding them to the appropriate Kafka Streams pipeline (<code>light-schedule</code>).</li>
+</ul>
+<p>This maintains a clean, decoupled architecture where each component has a clear responsibility and leverages Kafka's native stream processing capabilities for atomic Kafka-to-Kafka operations.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../design/composite-surrogate.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../design/database-concurrency.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../design/composite-surrogate.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../design/database-concurrency.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+        <!-- Livereload script (if served using the cli tool) -->
+        <script>
+            const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsAddress = wsProtocol + "//" + location.host + "/" + "__livereload";
+            const socket = new WebSocket(wsAddress);
+            socket.onmessage = function (event) {
+                if (event.data === "reload") {
+                    socket.close();
+                    location.reload();
+                }
+            };
+
+            window.onbeforeunload = function() {
+                socket.close();
+            }
+        </script>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../mermaid.min.js"></script>
+        <script src="../mermaid-init.js"></script>
+
+
+    </div>
+    </body>
+</html>

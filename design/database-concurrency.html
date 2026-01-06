@@ -1,0 +1,886 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Database Concurrency - Light Portal Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "../";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Light Portal Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="database-concurrency"><a class="header" href="#database-concurrency">Database Concurrency</a></h1>
+<p>Multiple users updating the same aggregate is a classic concurrency problem in multi-user applications, often referred to as the "lost update" problem. In an Event Sourcing system, preventing this overwrite is crucial because the sequence of events defines the state.</p>
+<p>The standard and most effective way to prevent concurrent updates from overwriting each other in an Event Sourcing system is through <strong>Optimistic Concurrency Control (OCC)</strong>, specifically using <strong>version numbers (or sequence numbers) at the aggregate level.</strong></p>
+<hr />
+<h3 id="how-optimistic-concurrency-control-occ-works-in-event-sourcing"><a class="header" href="#how-optimistic-concurrency-control-occ-works-in-event-sourcing">How Optimistic Concurrency Control (OCC) Works in Event Sourcing</a></h3>
+<ol>
+<li>
+<p><strong>Version Tracking (Sequence Number):</strong></p>
+<ul>
+<li>Every Aggregate (e.g., a <code>Customer</code>, an <code>Order</code>, a <code>Product</code>) has a version, which is typically its <strong>current sequence number</strong> in the event stream. This sequence number represents the number of events that have been applied to build its current state.</li>
+<li>Your <code>events_store_t</code> table already has <code>sequence_number</code> for this purpose:
+<pre><code class="language-sql">CREATE TABLE events_store_t (
+    id UUID PRIMARY KEY,
+    aggregate_id VARCHAR(255) NOT NULL,
+    -- ... other fields ...
+    sequence_number BIGINT NOT NULL,       -- This is the key!
+    UNIQUE (aggregate_id, sequence_number) -- CRITICAL constraint!
+);
+</code></pre>
+The <code>UNIQUE (aggregate_id, sequence_number)</code> constraint is the fundamental database-level guarantee against concurrent writes for the same aggregate at the same version.</li>
+</ul>
+</li>
+<li>
+<p><strong>Load the Aggregate's Current Version:</strong></p>
+<ul>
+<li>When your application service wants to modify an aggregate, it first loads the aggregate's current state by replaying all events for that <code>aggregate_id</code> from the <code>events_store_t</code>.</li>
+<li>During this replay, it tracks the <code>currentSequenceNumber</code> (the sequence number of the <em>last</em> event applied).</li>
+</ul>
+</li>
+<li>
+<p><strong>Pass Expected Version with Command:</strong></p>
+<ul>
+<li>The user interface (UI) or the client application that initiated the change should also hold the <code>currentSequenceNumber</code> it <em>observed</em> when it last fetched the aggregate's state.</li>
+<li>This <code>expectedVersion</code> (or <code>expectedSequenceNumber</code>) is then sent along with the command (e.g., <code>UpdateCustomerProfileCommand(customerId, newName, newAddress, expectedSequenceNumber)</code>).</li>
+</ul>
+</li>
+<li>
+<p><strong>Conditional Event Appending:</strong></p>
+<ul>
+<li>When your <code>CustomerApplicationService</code> receives the command:
+<ul>
+<li>It loads the <code>Customer</code> aggregate from the <code>events_store_t</code>, determining its <em>actual</em> <code>currentSequenceNumber</code>.</li>
+<li>It compares the <code>command.expectedSequenceNumber</code> with the <code>customer.actualCurrentSequenceNumber</code> (derived from the Event Store).</li>
+<li><strong>If <code>command.expectedSequenceNumber</code> does NOT match <code>customer.actualCurrentSequenceNumber</code>:</strong> This means another concurrent transaction has already written new events for this aggregate <em>since the client loaded its state</em>. A <code>ConcurrencyException</code> (or similar domain-specific exception) is thrown.</li>
+<li><strong>If they DO match:</strong> The aggregate's business logic is applied, generating new events. These new events will have <code>customer.actualCurrentSequenceNumber + 1</code>, <code>customer.actualCurrentSequenceNumber + 2</code>, etc.</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p><strong>Atomic Persistence (The DB Constraint):</strong></p>
+<ul>
+<li>The new events are then attempted to be saved to <code>events_store_t</code> (and <code>outbox_messages</code>) within a single database transaction.</li>
+<li>If a concurrency conflict was <em>not</em> detected at step 4 (meaning two commands arrived almost simultaneously and passed the initial check), the <code>UNIQUE (aggregate_id, sequence_number)</code> constraint in the <code>events_store_t</code> table will prevent the "lost update." Only the first transaction to successfully insert events with the "next" sequence numbers will succeed. The second will fail with a <code>DataIntegrityViolationException</code> (or similar).</li>
+</ul>
+</li>
+</ol>
+<h3 id="example-flow"><a class="header" href="#example-flow">Example Flow:</a></h3>
+<ol>
+<li><strong>User A</strong> fetches <code>Customer-123</code>. The current state (replayed from <code>events_store_t</code>) shows <code>sequenceNumber = 5</code>.</li>
+<li><strong>User B</strong> also fetches <code>Customer-123</code>. It also sees <code>sequenceNumber = 5</code>.</li>
+<li><strong>User A</strong> sends <code>UpdateCustomerProfileCommand(customerId="123", newName="Alice", expectedSequenceNumber=5)</code>.
+<ul>
+<li>App Service loads <code>Customer-123</code>, actual <code>sequenceNumber = 5</code>. Matches <code>expectedSequenceNumber</code>.</li>
+<li>Generates <code>CustomerNameChanged</code> event with <code>sequenceNumber = 6</code>.</li>
+<li>Attempts to save event(s) to <code>events_store_t</code> (and <code>outbox_messages</code>). <strong>Succeeds.</strong></li>
+</ul>
+</li>
+<li><strong>User B</strong> sends <code>UpdateCustomerProfileCommand(customerId="123", newAddress="456 Oak", expectedSequenceNumber=5)</code>.
+<ul>
+<li>App Service loads <code>Customer-123</code>. It now replays events up to <code>sequenceNumber = 6</code>. So, <code>actualSequenceNumber = 6</code>.</li>
+<li>It compares <code>command.expectedSequenceNumber=5</code> with <code>customer.actualSequenceNumber=6</code>. <strong>They do NOT match!</strong></li>
+<li>The <code>CustomerApplicationService</code> throws a <code>ConcurrencyException</code>.</li>
+<li>The transaction is rolled back, and no events are written from User B's command.</li>
+</ul>
+</li>
+</ol>
+<h3 id="java-implementation-changes"><a class="header" href="#java-implementation-changes">Java Implementation Changes</a></h3>
+<p>Let's modify the previous <code>CustomerApplicationService</code> and add a way to load the aggregate from events.</p>
+<h4 id="1-customer-aggregate-revised"><a class="header" href="#1-customer-aggregate-revised">1. <code>Customer</code> Aggregate (Revised)</a></h4>
+<pre><code class="language-java">// domain/Customer.java (Revised)
+package com.example.eventoutbox.domain;
+
+import com.example.eventoutbox.domain.events.CustomerAddressChanged;
+import com.example.eventoutbox.domain.events.CustomerNameChanged;
+import com.example.eventoutbox.domain.events.DomainEvent;
+import lombok.Getter;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+
+@Getter
+public class Customer {
+    private final String customerId;
+    private String name;
+    private String address;
+    private long version; // This is the 'sequenceNumber' of the LAST applied event
+
+    private final List&lt;DomainEvent&gt; uncommittedEvents = new ArrayList&lt;&gt;();
+
+    // Constructor for creating a new aggregate
+    public Customer(String customerId) {
+        this.customerId = customerId;
+        this.version = 0; // New aggregates start at version 0
+    }
+
+    // Static factory method to load an aggregate from its events
+    public static Customer loadFromEvents(String customerId, List&lt;DomainEvent&gt; history) {
+        Customer customer = new Customer(customerId);
+        history.forEach(customer::applyEvent); // Apply each historical event
+        return customer;
+    }
+
+    // Method to apply an event to the aggregate's state
+    private void applyEvent(DomainEvent event) {
+        // This is where you would update the aggregate's internal state
+        // based on the specific event type.
+        if (event instanceof CustomerNameChanged nameChanged) {
+            this.name = nameChanged.getNewName();
+        } else if (event instanceof CustomerAddressChanged addressChanged) {
+            this.address = addressChanged.getNewAddress();
+        }
+        this.version = event.getSequenceNumber(); // Update version to the sequence number of the applied event
+    }
+
+    // Domain behavior methods that generate new events
+    public void changeName(String newName) {
+        if (!newName.equals(this.name)) {
+            // New events get the *next* sequence number
+            long nextSequence = this.version + 1;
+            CustomerNameChanged event = new CustomerNameChanged(UUID.randomUUID(), Instant.now(), customerId, nextSequence, newName);
+            uncommittedEvents.add(event);
+            applyEvent(event); // Apply immediately to current state for consistency
+        }
+    }
+
+    public void changeAddress(String newAddress) {
+        if (!newAddress.equals(this.address)) {
+            long nextSequence = this.version + 1;
+            CustomerAddressChanged event = new CustomerAddressChanged(UUID.randomUUID(), Instant.now(), customerId, nextSequence, newAddress);
+            uncommittedEvents.add(event);
+            applyEvent(event);
+        }
+    }
+
+    public void markEventsCommitted() {
+        this.uncommittedEvents.clear();
+    }
+}
+</code></pre>
+<h4 id="2-concurrencyexception"><a class="header" href="#2-concurrencyexception">2. <code>ConcurrencyException</code></a></h4>
+<pre><code class="language-java">// domain/ConcurrencyException.java
+package com.example.eventoutbox.domain;
+
+public class ConcurrencyException extends RuntimeException {
+    public ConcurrencyException(String message) {
+        super(message);
+    }
+}
+</code></pre>
+<h4 id="3-customerapplicationservice-revised"><a class="header" href="#3-customerapplicationservice-revised">3. <code>CustomerApplicationService</code> (Revised)</a></h4>
+<pre><code class="language-java">// application/CustomerApplicationService.java (Revised)
+package com.example.eventoutbox.application;
+
+import com.example.eventoutbox.domain.ConcurrencyException;
+import com.example.eventoutbox.domain.Customer;
+import com.example.eventoutbox.domain.events.DomainEvent;
+import com.example.eventoutbox.infrastructure.persistence.eventstore.EventStoreEvent;
+import com.example.eventoutbox.infrastructure.persistence.eventstore.EventStoreEventRepository;
+import com.example.eventoutbox.infrastructure.persistence.outbox.OutboxMessage;
+import com.example.eventoutbox.infrastructure.persistence.outbox.OutboxMessageRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+@Service
+@RequiredArgsConstructor
+public class CustomerApplicationService {
+
+    private final OutboxMessageRepository outboxMessageRepository;
+    private final EventStoreEventRepository eventStoreEventRepository;
+    private final ObjectMapper objectMapper;
+
+    // Command now includes expectedVersion
+    public record UpdateCustomerProfileCommand(String customerId, String newName, String newAddress, long expectedVersion) {}
+
+    @Transactional
+    public void updateCustomerProfile(UpdateCustomerProfileCommand command) {
+        // --- 1. Load Aggregate State ---
+        List&lt;EventStoreEvent&gt; historicalEvents = eventStoreEventRepository.findByAggregateIdOrderBySequenceNumberAsc(command.customerId());
+
+        Customer customer;
+        if (historicalEvents.isEmpty()) {
+            customer = new Customer(command.customerId());
+            // If it's a new aggregate, expectedVersion must be 0
+            if (command.expectedVersion() != 0) {
+                 throw new ConcurrencyException("Customer with ID " + command.customerId() + " does not exist or expected version is incorrect.");
+            }
+        } else {
+            // Deserialize historical events to DomainEvent objects
+            List&lt;DomainEvent&gt; domainEventsHistory = historicalEvents.stream()
+                .map(this::deserializeEventStoreEvent)
+                .collect(Collectors.toList());
+            customer = Customer.loadFromEvents(command.customerId(), domainEventsHistory);
+
+            // --- 2. OPTIMISTIC CONCURRENCY CHECK ---
+            if (customer.getVersion() != command.expectedVersion()) {
+                throw new ConcurrencyException(
+                    "Customer with ID " + command.customerId() + " has been updated by another user. " +
+                    "Expected version " + command.expectedVersion() + " but found " + customer.getVersion() + "."
+                );
+            }
+        }
+
+        // --- 3. Apply Business Logic &amp; Generate Events ---
+        if (command.newName() != null) {
+            customer.changeName(command.newName());
+        }
+        if (command.newAddress() != null) {
+            customer.changeAddress(command.newAddress());
+        }
+
+        // --- 4. Persist Events to Event Store &amp; Outbox (Atomically) ---
+        List&lt;DomainEvent&gt; eventsToStore = customer.getUncommittedEvents();
+        if (eventsToStore.isEmpty()) {
+            return; // No changes, no events to publish
+        }
+
+        try {
+            List&lt;EventStoreEvent&gt; eventStoreEntities = eventsToStore.stream()
+                .map(this::mapToEventStoreEvent)
+                .collect(Collectors.toList());
+            eventStoreEventRepository.saveAll(eventStoreEntities);
+
+            List&lt;OutboxMessage&gt; outboxMessages = eventsToStore.stream()
+                .map(this::mapToOutboxMessage)
+                .collect(Collectors.toList());
+            outboxMessageRepository.saveAll(outboxMessages);
+
+            customer.markEventsCommitted();
+        } catch (DataIntegrityViolationException e) {
+            // This catches the UNIQUE constraint violation on (aggregate_id, sequence_number)
+            // This means another transaction has just written to this aggregate
+            throw new ConcurrencyException(
+                "Another concurrent update detected for customer " + command.customerId() + ". " +
+                "Please refresh and try again.", e
+            );
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to serialize event to JSON", e);
+        }
+    }
+
+    // Helper methods for mapping/deserializing (similar to before)
+    private OutboxMessage mapToOutboxMessage(DomainEvent event) {
+        try {
+            return OutboxMessage.builder()
+                .id(event.getEventId())
+                .aggregateId(event.getAggregateId())
+                .aggregateType(event.getAggregateType())
+                .eventType(event.getEventType())
+                .timestamp(event.getTimestamp())
+                .payload(objectMapper.writeValueAsString(event))
+                .metadata(null)
+                .build();
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to serialize event to JSON: " + event.getEventId(), e);
+        }
+    }
+
+    private EventStoreEvent mapToEventStoreEvent(DomainEvent event) {
+        try {
+            return EventStoreEvent.builder()
+                .id(event.getEventId())
+                .aggregateId(event.getAggregateId())
+                .aggregateType(event.getAggregateType())
+                .eventType(event.getEventType())
+                .timestamp(event.getTimestamp())
+                .sequenceNumber(event.getSequenceNumber())
+                .payload(objectMapper.writeValueAsString(event))
+                .metadata(null)
+                .build();
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to serialize event to JSON: " + event.getEventId(), e);
+        }
+    }
+
+    private DomainEvent deserializeEventStoreEvent(EventStoreEvent eventStoreEvent) {
+        try {
+            // Assuming your event JSON includes the 'eventType' field for polymorphic deserialization
+            return objectMapper.readValue(eventStoreEvent.getPayload(), DomainEvent.class);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to deserialize event: " + eventStoreEvent.getId(), e);
+        }
+    }
+}
+</code></pre>
+<h4 id="4-eventstoreeventrepository-add-find-method"><a class="header" href="#4-eventstoreeventrepository-add-find-method">4. <code>EventStoreEventRepository</code> (Add find method)</a></h4>
+<pre><code class="language-java">// infrastructure/persistence/eventstore/EventStoreEventRepository.java (Revised)
+package com.example.eventoutbox.infrastructure.persistence.eventstore;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.List;
+import java.util.UUID;
+
+public interface EventStoreEventRepository extends JpaRepository&lt;EventStoreEvent, UUID&gt; {
+    List&lt;EventStoreEvent&gt; findByAggregateIdOrderBySequenceNumberAsc(String aggregateId);
+}
+</code></pre>
+<h4 id="5-customercontroller-handle-exception"><a class="header" href="#5-customercontroller-handle-exception">5. <code>CustomerController</code> (Handle Exception)</a></h4>
+<pre><code class="language-java">// application/CustomerController.java (Revised)
+package com.example.eventoutbox.application;
+
+import com.example.eventoutbox.domain.ConcurrencyException;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/customers")
+@RequiredArgsConstructor
+public class CustomerController {
+
+    private final CustomerApplicationService customerApplicationService;
+
+    public record UpdateCustomerProfileRequest(String customerId, String newName, String newAddress, long expectedVersion) {}
+
+    @PostMapping("/profile")
+    public ResponseEntity&lt;String&gt; updateCustomerProfile(@RequestBody UpdateCustomerProfileRequest request) {
+        CustomerApplicationService.UpdateCustomerProfileCommand command =
+            new CustomerApplicationService.UpdateCustomerProfileCommand(
+                request.customerId(), request.newName(), request.newAddress(), request.expectedVersion()
+            );
+        customerApplicationService.updateCustomerProfile(command);
+        return ResponseEntity.ok("Customer profile update command received and processed.");
+    }
+
+    @ExceptionHandler(ConcurrencyException.class)
+    public ResponseEntity&lt;String&gt; handleConcurrencyException(ConcurrencyException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ex.getMessage());
+    }
+}
+</code></pre>
+<h3 id="how-to-handle-concurrency-conflicts-on-the-clientui-side"><a class="header" href="#how-to-handle-concurrency-conflicts-on-the-clientui-side">How to Handle Concurrency Conflicts on the Client/UI Side:</a></h3>
+<p>When <code>ConcurrencyException</code> is thrown:</p>
+<ol>
+<li><strong>Inform the User:</strong> Display a message like "This item has been updated by another user. Please refresh the page to see the latest changes and try your update again."</li>
+<li><strong>Retry (less common for user-facing, but possible for background jobs):</strong> For non-interactive or automated processes, you might implement a retry mechanism. This retry would need to:
+<ul>
+<li>Fetch the <em>latest</em> state of the aggregate from a read model.</li>
+<li>Re-create the command based on the original intent and the <em>newly fetched expected version</em>.</li>
+<li>Re-send the command.</li>
+<li>This is typically only done if the change is "safe" to re-apply (e.g., adding an item, not changing a specific value).</li>
+</ul>
+</li>
+</ol>
+<p>By combining the version check in your application service with the <code>UNIQUE</code> constraint in your database, you create a robust optimistic concurrency control mechanism that prevents lost updates effectively.</p>
+<h3 id="what-if-event-consumer-fails-to-apply-an-event-to-its-read-model"><a class="header" href="#what-if-event-consumer-fails-to-apply-an-event-to-its-read-model">What if event consumer fails to apply an event to its read model</a></h3>
+<p>In this case, the read model becomes stale, and subsequent attempts to update based on that stale data will lead to conflicts.</p>
+<p>Let's break down the scenario and the robust solution.</p>
+<hr />
+<h3 id="the-problem-scenario-as-you-described"><a class="header" href="#the-problem-scenario-as-you-described">The Problem Scenario (as you described)</a></h3>
+<ol>
+<li><strong>UI:</strong> Queries <code>entity_t</code> table (read model), gets <code>Entity (aggregate_version = 5)</code>.</li>
+<li><strong>User:</strong> Makes changes.</li>
+<li><strong>UI:</strong> Sends <code>UpdateCommand (..., expectedVersion = 5)</code> to the write model.</li>
+<li><strong>Write Model (Command Handler):</strong>
+<ul>
+<li>Loads aggregate from <code>event_store_t</code>. Let's say its <code>actualVersion</code> is <code>5</code>.</li>
+<li><strong>OCC Check:</strong> <code>actualVersion (5) == expectedVersion (5)</code>. Success.</li>
+<li>Generates <code>Event (..., sequence_number = 6)</code>.</li>
+<li><strong>Persists <code>Event (..., sequence_number = 6)</code> to <code>event_store_t</code> and <code>outbox_message_t</code> in an ACID transaction.</strong> This commits version 6 to the <code>event_store_t</code>.</li>
+<li>Debezium publishes this event to Kafka.</li>
+</ul>
+</li>
+<li><strong>Kafka Consumer (PortalEventConsumer):</strong>
+<ul>
+<li>Reads <code>Event (..., sequence_number = 6, expectedVersion = 5)</code>.</li>
+<li>Tries to update <code>entity_t</code> (your read model): <code>UPDATE entity_t SET ..., aggregate_version = 6 WHERE entity_id = ? AND aggregate_version = 5</code>.</li>
+<li><strong>FAILURE:</strong> An exception occurs in the database update (e.g., a network error, a constraint violation unrelated to <code>aggregate_version</code>, or the consumer's JVM crashes).</li>
+<li><strong>Result:</strong> The <code>entity_t</code> table <strong>is NOT updated</strong> and remains at <code>aggregate_version = 5</code>. The <code>event_store_t</code> is at <code>aggregate_version = 6</code>. <strong>The read model is now stale.</strong></li>
+</ul>
+</li>
+<li><strong>Next UI interaction:</strong>
+<ul>
+<li>UI queries <code>entity_t</code> again. It still gets <code>Entity (aggregate_version = 5)</code> because the read model is stale.</li>
+<li>UI sends <code>UpdateCommand (..., expectedVersion = 5)</code>.</li>
+</ul>
+</li>
+<li><strong>Write Model (Command Handler) - Second Attempt:</strong>
+<ul>
+<li>Loads aggregate from <code>event_store_t</code>. Its <code>actualVersion</code> is <code>6</code>.</li>
+<li><strong>OCC Check:</strong> <code>actualVersion (6) != expectedVersion (5)</code>. <strong>Conflict detected!</strong></li>
+<li><strong>Result:</strong> The command handler throws a <code>ConcurrencyException</code>. <strong>It does NOT try to insert a new event into <code>event_store_t</code> with <code>sequence_number=6</code> (because that would be a duplicate and would indeed fail on the unique constraint).</strong> It <em>correctly rejects</em> the command.</li>
+</ul>
+</li>
+</ol>
+<p>The specific symptom you mentioned ("new event insert into the event_store_t and it will fail because the aggregate version is used before") should ideally <em>not</em> happen if the write model correctly detects OCC. The <code>ConcurrencyException</code> should prevent the duplicate event generation.</p>
+<p>The core problem, then, is <strong>stale read models due to consumer processing failures</strong>, which then lead to <code>ConcurrencyException</code> at the write model.</p>
+<hr />
+<h4 id="the-solution-robust-kafka-consumer-processing-retry--dlq"><a class="header" href="#the-solution-robust-kafka-consumer-processing-retry--dlq">The Solution: Robust Kafka Consumer Processing (Retry &amp; DLQ)</a></h4>
+<p>The solution lies entirely within your <strong>Kafka Consumer's (<code>PortalEventConsumerStartupHook</code>) error handling strategy.</strong></p>
+<p>Your most recent incremental code includes the <code>processSingleEventWithRetries</code> method with retry and DLQ logic. <strong>This is precisely the mechanism designed to handle this situation.</strong></p>
+<p>Here's how it's supposed to work and what you need to ensure is functioning correctly:</p>
+<ol>
+<li>
+<p><strong>Idempotency of Read Model Updates:</strong></p>
+<ul>
+<li>All your <code>dbProvider.createXxx</code>, <code>updateXxx</code>, <code>deleteXxx</code> methods (e.g., <code>updateRole</code>, <code>deleteRole</code>, <code>createRole</code>) <strong>must be idempotent in their database effects.</strong></li>
+<li>For <code>UPDATE</code> and <code>DELETE</code>, <code>WHERE aggregate_version = expectedVersion</code> makes them idempotent. If the update was already applied (or a newer version is present), <code>0 rows affected</code> means no harm done (though it might still trigger a <code>ConcurrencyException</code> within the consumer's <code>dbProvider</code> methods if you implement the record-not-found-vs-conflict check).</li>
+<li>For <code>INSERT</code>, use <code>INSERT ... ON CONFLICT (primary_key) DO UPDATE SET aggregate_version = excluded.aggregate_version, ...</code> (UPSERT) if the "create" event might be re-delivered and you expect it to update an existing record (e.g., in a snapshot table). Otherwise, if it's strictly a "create-only" and a duplicate PK is a bug, the <code>SQLException</code> for unique constraint violation is correct.</li>
+</ul>
+</li>
+<li>
+<p><strong>Consumer's Retry/DLQ Logic (The core fix):</strong>
+The <code>processSingleEventWithRetries</code> method is crucial.</p>
+<ul>
+<li>
+<p><strong>Transient Errors:</strong></p>
+<ul>
+<li>If <code>dbProvider.updateXxx</code> (or any other part of <code>processSingleEventWithRetries</code>) throws a <strong>transient <code>SQLException</code></strong> (e.g., connection timeout, deadlock), the <code>currentRetry</code> is incremented, and <code>Thread.sleep</code> occurs.</li>
+<li>If <code>maxRetries</code> is <strong>not</strong> exhausted, <code>processSingleEventWithRetries</code> will return <code>false</code>.</li>
+<li>The <code>onCompletion</code> loop will then <code>break;</code> (meaning it won't <code>commitSync()</code> any offsets for this batch).</li>
+<li>On the next <code>readRecords</code> call, the entire batch (including the transiently failed record) will be <strong>re-polled and re-processed</strong>. This relies on idempotency.</li>
+</ul>
+</li>
+<li>
+<p><strong>Permanent Errors:</strong></p>
+<ul>
+<li>If <code>dbProvider.updateXxx</code> throws a <strong><code>DbProvider.ConcurrencyException</code></strong> (meaning the read model's version was stale, so the <code>WHERE aggregate_version = expectedVersion</code> update in the consumer failed with 0 rows, but the record <em>did exist</em> at a higher version) or an <code>IllegalArgumentException</code> (bad data) or a <strong>permanent <code>SQLException</code></strong> (e.g., unique constraint violation on an <code>INSERT</code> where it shouldn't happen, or foreign key constraint violation):
+<ul>
+<li><code>processSingleEventWithRetries</code> will catch it and call <code>handlePermanentFailure</code>.</li>
+<li><code>handlePermanentFailure</code> sends the original Kafka record to the DLQ.</li>
+<li><code>processSingleEventWithRetries</code> then returns <code>true</code> (because the event has been "handled" by being DLQ'd).</li>
+<li><code>onCompletion</code> then <em>does</em> include this record's offset in <code>offsetsToCommit</code> and proceeds to <code>commitSync()</code> for the batch.</li>
+<li><strong>Result:</strong> The consumer makes progress past this "poison pill." The stale event in <code>entity_t</code> is not updated by this specific event, but the consumer doesn't get stuck.</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ol>
+<hr />
+<h4 id="how-to-handle-the-stale-ui-problem"><a class="header" href="#how-to-handle-the-stale-ui-problem">How to Handle the Stale UI Problem</a></h4>
+<p>Once the consumer's retry/DLQ is robust, the stale UI becomes a UX problem rather than a system consistency problem.</p>
+<ol>
+<li>
+<p><strong>Producer's <code>ConcurrencyException</code> is Key:</strong> When the UI sends <code>UpdateCommand(..., expectedVersion = 5)</code> and the <code>event_store_t</code> is already at version 6, the write model will throw <code>ConcurrencyException</code>. This is the <em>correct behavior</em>.</p>
+</li>
+<li>
+<p><strong>UI Response to <code>ConcurrencyException</code>:</strong></p>
+<ul>
+<li>The UI must catch this <code>ConcurrencyException</code> from the API.</li>
+<li>It should display a clear message to the user: "This record has been updated by another user. Please refresh the page to see the latest changes and re-apply your modifications if desired."</li>
+<li>It should then trigger a refresh of the data from the read model, which will then fetch <code>Entity (aggregate_version = 6)</code> (assuming the consumer <em>eventually</em> caught up or the record was DLQ'd and a manual fix was applied).</li>
+</ul>
+</li>
+</ol>
+<hr />
+<h4 id="summary-and-what-to-focus-on"><a class="header" href="#summary-and-what-to-focus-on">Summary and What to Focus On:</a></h4>
+<ol>
+<li><strong>Ensure <code>processSingleEventWithRetries</code> is fully correct and deployed.</strong> This is your primary defense against the consumer getting stuck.</li>
+<li><strong>Carefully verify the <code>isTransientSqlError</code> logic.</strong> It must accurately identify only <em>recoverable</em> database errors. Misclassifying permanent errors as transient will exhaust retries and then DLQ; misclassifying transient as permanent sends to DLQ too soon.</li>
+<li><strong>Confirm <code>handlePermanentFailure</code> correctly sends to DLQ and logs.</strong></li>
+<li><strong>Confirm your <code>dbProvider</code> methods are truly idempotent</strong> for re-delivered messages. <code>UPDATE ... WHERE aggregate_version = expectedVersion</code> is idempotent. <code>INSERT</code>s are trickier.</li>
+<li><strong>Educate your UI/API layer:</strong> They <em>must</em> handle the <code>ConcurrencyException</code> from the write model by forcing a refresh and user notification.</li>
+</ol>
+<p>Your recent changes to <code>PortalEventConsumerStartupHook</code> already implement this retry/DLQ pattern. The next step is to ensure that code is compilable, deployed correctly, and that the <code>dbProvider</code> methods are fully integrated with the <code>aggregate_version</code> for idempotency and OCC checking as discussed in the previous detailed answer.</p>
+<h3 id="what-if-dlq-messages-are-not-handled-in-a-timely-fashion"><a class="header" href="#what-if-dlq-messages-are-not-handled-in-a-timely-fashion">What if DLQ messages are not handled in a timely fashion</a></h3>
+<p>This is a critical operational risk with the Dead Letter Queue (DLQ) pattern: <strong>DLQ messages are "handled exceptions," not "disappearing problems."</strong> If they aren't processed, they represent real, unapplied business facts that can lead to data inconsistencies and broken business processes over time.</p>
+<p>If a message sits in the DLQ for 30 days, your read models will be stale, your UIs will report incorrect data, and downstream systems relying on that information will also be out of sync. This can severely damage data integrity and user trust.</p>
+<hr />
+<h4 id="the-dlq-is-a-hospital-or-quarantine-zone-not-a-graveyard"><a class="header" href="#the-dlq-is-a-hospital-or-quarantine-zone-not-a-graveyard">The DLQ is a "Hospital" or "Quarantine Zone," Not a "Graveyard"</a></h4>
+<p>It's a place for messages that <strong>need human intervention</strong> or a specific, non-automated re-driving process. It's <em>not</em> a place for messages to just die.</p>
+<h4 id="strategies-to-prevent-dlq-message-stagnation"><a class="header" href="#strategies-to-prevent-dlq-message-stagnation">Strategies to Prevent DLQ Message Stagnation</a></h4>
+<p>To ensure DLQ messages are handled in a timely fashion, you need a robust <strong>DLQ management strategy</strong> that goes beyond just pushing messages to the topic.</p>
+<h5 id="1-robust-monitoring--alerting-immediate-action"><a class="header" href="#1-robust-monitoring--alerting-immediate-action">1. Robust Monitoring &amp; Alerting (Immediate Action)</a></h5>
+<ul>
+<li><strong>Metric:</strong> Count of messages in DLQ topics (<code>kafka_topic_partition_current_offset</code>, <code>kafka_consumer_group_lag</code>, or custom JMX metrics).</li>
+<li><strong>Alerting Thresholds:</strong>
+<ul>
+<li><strong>Urgent:</strong> Alert immediately (PagerDuty, Slack, SMS) if the number of messages in <em>any</em> DLQ topic goes above 0 or a very small threshold (e.g., 5-10 messages). A DLQ is an <em>exceptional</em> queue.</li>
+<li><strong>Warning:</strong> Alert if messages persist for a certain duration (e.g., 1 hour, 4 hours).</li>
+</ul>
+</li>
+<li><strong>Dashboards:</strong> Create a dashboard that prominently displays the number of messages in each DLQ topic and their age.</li>
+</ul>
+<h5 id="2-clear-ownership--standard-operating-procedures-sops"><a class="header" href="#2-clear-ownership--standard-operating-procedures-sops">2. Clear Ownership &amp; Standard Operating Procedures (SOPs)</a></h5>
+<ul>
+<li><strong>Who owns the DLQ?</strong> Assign clear responsibility to a specific team (e.g., SRE, Development team for that microservice).</li>
+<li><strong>What's the process?</strong> Define a clear SOP for handling DLQ alerts:
+<ol>
+<li>Acknowledge alert.</li>
+<li>Inspect the DLQ message content (payload, error message, original topic/offset).</li>
+<li>Identify the root cause (code bug, malformed data, transient external system outage, business process error).</li>
+<li><strong>Decide on action:</strong>
+<ul>
+<li><strong>Fix Code/Data:</strong> If it's a bug, deploy a fix. If it's bad data, decide if it needs manual correction in the database or if upstream data entry needs fixing.</li>
+<li><strong>Re-drive:</strong> After fixing the root cause, re-drive the message(s) back to the original topic.</li>
+<li><strong>Discard (Rare &amp; Documented):</strong> Only if the message is truly unrecoverable garbage or a test message that accidentally ended up there, and its impact is negligible. <em>This decision must be audited and requires strong justification.</em></li>
+</ul>
+</li>
+</ol>
+</li>
+</ul>
+<h5 id="3-automated-dlq-re-driving-with-human-trigger-operational-playbook"><a class="header" href="#3-automated-dlq-re-driving-with-human-trigger-operational-playbook">3. Automated DLQ Re-driving with Human Trigger (Operational Playbook)</a></h5>
+<ul>
+<li>You'll need a "re-driver" tool/application.</li>
+<li><strong>Purpose:</strong> This tool reads messages from the DLQ, and publishes them back to their <em>original</em> topic for re-processing.</li>
+<li><strong>Features:</strong>
+<ul>
+<li><strong>Preview:</strong> Show content of DLQ messages before re-driving.</li>
+<li><strong>Selectivity:</strong> Allow re-driving specific messages, or ranges of messages.</li>
+<li><strong>Filtering:</strong> Filter by error type, timestamp, etc.</li>
+<li><strong>Audit:</strong> Log <em>who</em> re-drove <em>what</em> message.</li>
+</ul>
+</li>
+<li><strong>Integration:</strong>
+<ul>
+<li>Could be a simple command-line tool.</li>
+<li>Could be integrated into your internal developer portal or ops dashboard.</li>
+<li>Could be a scheduled job that runs periodically but <em>requires explicit human approval</em> before actually publishing.</li>
+</ul>
+</li>
+</ul>
+<h5 id="4-automated-retries-beyond-initial-consumer"><a class="header" href="#4-automated-retries-beyond-initial-consumer">4. Automated Retries (Beyond Initial Consumer)</a></h5>
+<p>For certain classes of "permanent-but-maybe-not-really" errors (e.g., external API rate limits, very long-running external process), you could have a <strong>separate, simpler consumer</strong> that specifically subscribes to the DLQ.</p>
+<ul>
+<li><strong>Purpose:</strong> This DLQ consumer would only handle a <em>very specific, narrow class</em> of DLQ messages.</li>
+<li><strong>Logic:</strong> It would apply <em>its own</em> retry logic (e.g., exponential backoff for a longer period, up to 24 hours).</li>
+<li><strong>Re-DLQ:</strong> If this DLQ consumer also fails after its retries, it would push the message back to the <em>same</em> DLQ topic (or a different, truly "unresolvable" DLQ) to re-trigger human intervention.</li>
+<li><strong>Caution:</strong> This adds complexity and should only be done for errors you've explicitly identified as potentially auto-recoverable over a very long time.</li>
+</ul>
+<h5 id="5-data-reconciliation-long-term-strategy"><a class="header" href="#5-data-reconciliation-long-term-strategy">5. Data Reconciliation (Long-Term Strategy)</a></h5>
+<ul>
+<li>For critical business data, even with DLQs, sometimes manual reconciliation or a dedicated reconciliation service might be needed.</li>
+<li>This involves periodically comparing your read model state with the authoritative Event Store (or an authoritative external system) to detect and resolve discrepancies that might have slipped through.</li>
+</ul>
+<hr />
+<h4 id="addressing-most-errors-cannot-be-recovered-anyway"><a class="header" href="#addressing-most-errors-cannot-be-recovered-anyway">Addressing "Most errors cannot be recovered anyway"</a></h4>
+<p>If "most errors cannot be recovered anyway" and always lead to DLQ, it points to a need for:</p>
+<ol>
+<li><strong>Better <code>isTransientSqlError</code> logic:</strong> Are you correctly identifying all <em>transient</em> SQL errors that could be retried by the main consumer?</li>
+<li><strong>More robust validation upstream:</strong> Can you prevent more malformed/invalid data from even generating events that will fail downstream? (E.g., more validation in the command handler).</li>
+<li><strong>Refined Domain Model/Business Rules:</strong> Sometimes, a "permanent" error in the consumer points to a business rule that isn't fully handled by events, or a valid state transition that wasn't expected.</li>
+</ol>
+<p>DLQs are not a substitute for preventing errors, but they are essential for graceful failure and ensuring eventual consistency. Their effectiveness hinges entirely on the operational discipline and tooling around them.</p>
+<h3 id="how-to-handle-the-scenario-that-it-takes-weeks-or-even-months-to-fix-a-bug-and-get-it-deployed"><a class="header" href="#how-to-handle-the-scenario-that-it-takes-weeks-or-even-months-to-fix-a-bug-and-get-it-deployed">How to handle the scenario that it takes weeks or even months to fix a bug and get it deployed</a></h3>
+<p>This is an issue regarding a major reality of enterprise software: <strong>deployment cycles can be slow, and manual intervention for DLQs simply isn't scalable for a continuous stream of errors.</strong> This is precisely why a purely "human-in-the-loop" DLQ management strategy breaks down in a corporate context with persistent bugs.</p>
+<p>To handle a bug that takes weeks/months to deploy, you need a strategy that focuses on <strong>containment, bypass, and eventually, reconciliation.</strong></p>
+<hr />
+<h4 id="strategy-for-long-deployment-cycle-bugs-weeksmonths"><a class="header" href="#strategy-for-long-deployment-cycle-bugs-weeksmonths">Strategy for Long-Deployment-Cycle Bugs (Weeks/Months)</a></h4>
+<p>The goal is to stop the errors from piling up indefinitely in the DLQ, and to allow the rest of the system to continue processing, even if some data is temporarily inconsistent.</p>
+<h5 id="1-immediate-containment-filtering-or-skipping-poison-pill-messages"><a class="header" href="#1-immediate-containment-filtering-or-skipping-poison-pill-messages">1. <strong>Immediate Containment: Filtering or Skipping "Poison Pill" Messages</strong></a></h5>
+<ul>
+<li>
+<p><strong>Implement a "Hot Fix" Filter (Code-based or SMT-based):</strong></p>
+<ul>
+<li><strong>In your Kafka Consumer (<code>PortalEventConsumerStartupHook</code>):</strong> If you identify a bug where a specific type of event (or event with specific data) consistently causes failures:
+<ul>
+<li><strong>Add a temporary code filter.</strong> For instance, if <code>ScheduleCreatedEvent</code> with <code>null</code> <code>userId</code> is causing <code>NullPointerException</code>, add:
+<pre><code class="language-java">if (eventType.equals(PortalConstants.SCHEDULE_CREATED_EVENT) &amp;&amp; eventMap.get("userId") == null) {
+    logger.warn("Skipping known bug event type {} for record {} due to null userId. Not processing.", eventType, record.offset());
+    handlePermanentFailure(record, "Known bug: null userId for " + eventType, "KnownBugSkip");
+    return true; // Mark as handled (DLQ'd), commit offset, move on.
+}
+</code></pre>
+</li>
+<li><strong>If the bug is in a specific <code>dbProvider</code> method:</strong> You can wrap that call in a try-catch for <code>PermanentProcessingException</code> specifically for that event type, and if it's the known bug, send it to DLQ and commit.</li>
+</ul>
+</li>
+<li><strong>Using Kafka Connect SMT (if source is Kafka Connect):</strong> You could implement a custom <code>Filter</code> SMT that drops/routes specific problematic messages <em>before</em> they even hit your consumer app. This requires deploying a new SMT, but it can be faster than an app deployment.</li>
+</ul>
+</li>
+<li>
+<p><strong>Why:</strong> This immediately stops the DLQ from growing uncontrollably with known bad messages. It sacrifices processing that specific message but ensures the consumer stays healthy.</p>
+</li>
+</ul>
+<h5 id="2-automated-limited-re-driving-for-transientknown-issues-or-triage"><a class="header" href="#2-automated-limited-re-driving-for-transientknown-issues-or-triage">2. <strong>Automated (Limited) Re-driving for Transient/Known Issues (Or Triage)</strong></a></h5>
+<ul>
+<li><strong>"Error Triage" Consumer:</strong> Instead of just sending to a single DLQ, consider a dedicated consumer that subscribes to your main DLQ topic.
+<ul>
+<li>This consumer acts as an automated triage.</li>
+<li>It checks the <code>errorType</code> (from <code>handlePermanentFailure</code>'s metadata).</li>
+<li><strong>If <code>errorType</code> is "TransientSqlError" or "RetriesExhausted" (but <em>could</em> eventually succeed):</strong> It re-publishes the <em>original</em> message back to the <code>portal-event</code> topic with an exponential backoff. It might implement its <em>own</em> max retries (e.g., 50 retries over 24 hours). If it <em>still</em> fails, <em>then</em> it pushes to a "Final DLQ" that truly requires manual intervention.</li>
+<li><strong>If <code>errorType</code> is "ConcurrencyConflict", "DataValidationError", "UnhandledEventType", or "KnownBugSkip":</strong> It pushes to a <em>separate</em> "Permanent DLQ" topic. This queue is smaller and truly requires human eyes.</li>
+</ul>
+</li>
+<li><strong>Why:</strong> This handles messages that might eventually self-resolve or that you know can't be fixed by immediate retries but aren't necessarily "dead forever." It reduces the volume of messages requiring immediate human attention.</li>
+</ul>
+<h5 id="3-manual-intervention-for-permanent-dlq--complex-bugs-when-devs-get-involved"><a class="header" href="#3-manual-intervention-for-permanent-dlq--complex-bugs-when-devs-get-involved">3. <strong>Manual Intervention for "Permanent DLQ" / Complex Bugs (When Devs Get Involved)</strong></a></h5>
+<ul>
+<li>The "Permanent DLQ" is where true bugs/bad data sit.</li>
+<li>The same monitoring and alerting from before applies, but now it's for a much smaller, higher-priority queue.</li>
+<li>Developers must actively:
+<ul>
+<li><strong>Analyze:</strong> What exactly caused this? Why did it bypass automated retries/filters?</li>
+<li><strong>Fix:</strong> Develop and deploy the bug fix.</li>
+<li><strong>Reconcile/Re-drive:</strong>
+<ul>
+<li>If the bug fix resolves the issue, use a <strong>re-driver tool</strong> to re-submit messages from the Permanent DLQ to the <code>portal-event</code> topic.</li>
+<li>If the bug resulted in data inconsistencies that can't be fixed by re-driving (e.g., a critical business state was violated), you might need to perform a <strong>manual database correction</strong> on the affected aggregate(s) (this is the most dangerous and should be avoided if possible).</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<h5 id="4-long-term-data-reconciliation--auditing"><a class="header" href="#4-long-term-data-reconciliation--auditing">4. <strong>Long-Term Data Reconciliation / Auditing</strong></a></h5>
+<ul>
+<li><strong>Offline Reconciliation:</strong> For critical data, implement daily/weekly batch jobs that compare the state of your read model tables with the authoritative Event Store.
+<ul>
+<li>If discrepancies are found, they are reported, and a reconciliation process is triggered (either manual or automated). This ensures that even if events were missed or misapplied, data consistency is eventually achieved.</li>
+</ul>
+</li>
+<li><strong>Event Replay (When all else fails):</strong> If a significant bug causes widespread data corruption or loss of consistency, the ultimate fallback is to:
+<ol>
+<li>Deploy the bug fix.</li>
+<li>Stop the affected read model consumer.</li>
+<li>Clear the affected read model tables.</li>
+<li><strong>Replay all historical events from the <code>event_store_t</code> (or long-retention Kafka topics) through the fixed consumer logic.</strong> This rebuilds the read model from scratch, reflecting the correct business logic. This is why Event Sourcing is so powerful.</li>
+</ol>
+</li>
+</ul>
+<hr />
+<h4 id="example-workflow-with-a-long-deployment-cycle-bug"><a class="header" href="#example-workflow-with-a-long-deployment-cycle-bug">Example Workflow with a Long-Deployment-Cycle Bug</a></h4>
+<ol>
+<li><strong>Bug Identified:</strong> <code>ScheduleCreatedEvent</code> creates a schedule, but due to a bug in the consumer's <code>dbProvider.createSchedule</code> method, it tries to insert a duplicate primary key if <code>scheduleId</code> (aggregate ID) exists, and this causes a permanent error in the consumer.</li>
+<li><strong>Immediate Containment (Filter/Bypass):</strong>
+<ul>
+<li>A hotfix is applied to the <code>PortalEventConsumerStartupHook</code> (or a dedicated filter SMT) to recognize <code>ScheduleCreatedEvent</code> where <code>scheduleId</code> already exists.</li>
+<li>For such events, it <code>handlePermanentFailure()</code> the message to a <code>portal-event-dlq-permanent</code> topic (or a <code>KnownBugDLQ</code>). This prevents the main consumer from getting stuck.</li>
+</ul>
+</li>
+<li><strong>DLQ Accumulation &amp; Monitoring:</strong> Messages related to this bug pile up in <code>portal-event-dlq-permanent</code>. Alerts are firing.</li>
+<li><strong>Development Fix:</strong> The development team works on a fix for <code>dbProvider.createSchedule</code> (e.g., changing it to an <code>UPSERT</code> if a "create" event implies "idempotent create/update" or better handling of duplicate primary keys if it truly is an error). This takes weeks.</li>
+<li><strong>Deployment:</strong> The fix is deployed.</li>
+<li><strong>Re-driving:</strong> Operations team uses the re-driver tool to:
+<ul>
+<li>Read messages from <code>portal-event-dlq-permanent</code>.</li>
+<li>Publish them back to the <code>portal-event</code> topic.</li>
+<li>The now-fixed consumer processes them correctly.</li>
+</ul>
+</li>
+</ol>
+<p>This approach balances immediate operational stability with eventual consistency, acknowledging the realities of enterprise deployment cycles.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../design/atomic-composite.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../design/msal-light-oauth.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../design/atomic-composite.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../design/msal-light-oauth.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+        <!-- Livereload script (if served using the cli tool) -->
+        <script>
+            const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsAddress = wsProtocol + "//" + location.host + "/" + "__livereload";
+            const socket = new WebSocket(wsAddress);
+            socket.onmessage = function (event) {
+                if (event.data === "reload") {
+                    socket.close();
+                    location.reload();
+                }
+            };
+
+            window.onbeforeunload = function() {
+                socket.close();
+            }
+        </script>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../mermaid.min.js"></script>
+        <script src="../mermaid-init.js"></script>
+
+
+    </div>
+    </body>
+</html>

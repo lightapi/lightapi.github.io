@@ -270,7 +270,7 @@
 </li>
 </ul>
 <h2 id="openapi-specification-extensions"><a class="header" href="#openapi-specification-extensions">OpenAPI Specification Extensions</a></h2>
-<p>OpenAPI uses the term security scheme for authentication and authorization schemes. OpenAPI 3.0 lets you describe APIs protected using the following <a href="https://swagger.io/docs/specification/v3_0/authentication/">security schemes</a>. The fine-grained authorization is just another layer of security and it is natural to define the fine-grained authorization in the same specification. It is can be done with OpenAPI specification extensions.</p>
+<p>OpenAPI uses the term security scheme for authentication and authorization schemes. OpenAPI 3.0 lets you describe APIs protected using the following <a href="https://swagger.io/docs/specification/v3_0/authentication/">security schemes</a>. The fine-grained authorization is just another layer of security and it is natural to define the fine-grained authorization in the same specification. It can be done with OpenAPI specification extensions.</p>
 <p>Extensions (also referred to as specification extensions or vendor extensions) are custom properties that start with x-, such as x-logo. They can be used to describe extra functionality that is not covered by the standard OpenAPI Specification. Many API-related products that support OpenAPI make use of extensions to document their own attributes, such as Amazon API Gateway, ReDoc, APIMatic and others.</p>
 <p>As OpenAPI specification openapi.yaml is loaded during the light-4j startup, the extensions will be available at runtime in cache for each endpoint just like the scopes definition. The API owner can define the following two extensions for each endpoint:</p>
 <ul>
@@ -292,11 +292,11 @@
         roles: "manager teller customer"
       x-response-filter:
         rule: "account-row-filter"
-        teller: 
+        teller:
           status: open
         customer:
           status: open
-          owner: @user_id          
+          owner: @user_id
         rule: "account-col-filter"
           teller: ["num","owner","type","firstName","lastName","status"]
           customer: ["num","owner","type","firstName","lastName"]
@@ -351,6 +351,17 @@
 
 </code></pre>
 <p>All rules are managed by the light-portal and shared by all the services. In addition, developers can create their customized rules for their own services.</p>
+<h2 id="response-filter"><a class="header" href="#response-filter">Response Filter</a></h2>
+<p>There are two type of filters. Row and Column.</p>
+<h4 id="row"><a class="header" href="#row">Row</a></h4>
+<p>For row filter, we need to check the condition defined for some of the properties in order to make the filter decision. In database, for each endpoint, we have colName, operator and colValue defined for the condition.</p>
+<p>The operator supports the following enum: ["=","!=","&lt;","&gt;","&lt;=","&gt;=","in","not in", "range"]</p>
+<p>For the colValue, we do support variables from the jwt token with @. For example, @eid will be replaced with the eid claim from the jwt token.</p>
+<h4 id="col"><a class="header" href="#col">Col</a></h4>
+<p>For column filter, we need to include a list of columns or exclude a list of columns in json format.</p>
+<p>["accountNo","firstName","lastName"]</p>
+<p>or</p>
+<p>!["status"]</p>
 
                     </main>
 

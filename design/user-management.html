@@ -418,7 +418,7 @@ ALTER TABLE user_t ADD CONSTRAINT user_email_uk UNIQUE ( email );
     PRIMARY KEY (host_id, position_id)
 );
 </code></pre>
-<p>employee_position_t (Employee Position Table): Links employees to their positions with effective dates.</p>
+<p>user_position_t (Employee Position Table): Links employees to their positions with effective dates.</p>
 <pre><code>CREATE TABLE employee_position_t (
     host_id                   VARCHAR(22) NOT NULL,
     employee_id               VARCHAR(50) NOT NULL,
@@ -587,7 +587,7 @@ ALTER TABLE user_t ADD CONSTRAINT user_email_uk UNIQUE ( email );
 <p>Define Attributes: Define all relevant attributes in attribute_t. Think about all the properties of your users, resources, and environment that might be used in access control decisions.</p>
 </li>
 <li>
-<p>Assign Attributes to Users: Populate user_attribute_t to associate attribute values with users.</p>
+<p>Assign Attributes to Users: Populate attribute_user_t to associate attribute values with users.</p>
 </li>
 <li>
 <p>Assign Attributes to Endpoints: Populate attribute_permission_t to associate attribute values with API endpoints.</p>
@@ -628,12 +628,87 @@ ALTER TABLE user_t ADD CONSTRAINT user_email_uk UNIQUE ( email );
 <p>Auditing and Compliance: Easier to audit and demonstrate compliance.</p>
 </li>
 </ul>
+<p>Format of attributes in JWT token:</p>
+<p>Unlike roles, groups and positions that can be concatanated as a string, an attribut is a key/value pair. We need to format multiple attributes into a string and put it into a token.</p>
+<p>Challenges</p>
+<ul>
+<li>
+<p>Spaces: The primary issue is that simple key-value pairs like key1:value1 key2:value2 will not work when value contain spaces.</p>
+</li>
+<li>
+<p>Escaping: We need a way to escape characters that may confuse the parser, for example if the value also contains a :.</p>
+</li>
+<li>
+<p>Readability: The format should be reasonably readable for debugging and human consumption.</p>
+</li>
+<li>
+<p>Parsing: The format should be easy to parse on the application side.</p>
+</li>
+</ul>
+<p>Options</p>
+<ol>
+<li>Comma-Separated Key-Value Pairs with Escaping:</li>
+</ol>
+<ul>
+<li>
+<p>Format: key1=value1,key2=value2_with_spaces,key3=value3,with,commas</p>
+</li>
+<li>
+<p>Escaping: Use backslash \ to escape commas and backslashes within the values. You can also escape spaces to make it more clear \</p>
+</li>
+<li>
+<p>Pros: Simple to implement, relatively easy to parse using splitting by comma and then by =.</p>
+</li>
+<li>
+<p>Cons: Can become hard to read with complex values, requires proper escaping, will become unreadable if \ need to be escaped.</p>
+</li>
+</ul>
+<ol start="2">
+<li>Custom Delimiter and Escaping:</li>
+</ol>
+<ul>
+<li>
+<p>Format: key1^=^value1~key2^=^value2 with spaces~key3^=^value3~</p>
+</li>
+<li>
+<p>Delimiter: Use ^=^ as delimiter for key and value and use ~ for different attributes.</p>
+</li>
+<li>
+<p>Pros: You can avoid many escaping issues and keep spaces, easier to read than comma separated values.</p>
+</li>
+<li>
+<p>Cons: Need to choose delimiter carefully to make sure it is unique.</p>
+</li>
+</ul>
+<ol start="3">
+<li>URL-Encoded Key-Value Pairs:</li>
+</ol>
+<ul>
+<li>
+<p>Format: key1=value1&amp;key2=value+with+spaces&amp;key3=value3%2Cwith%2Ccommas</p>
+</li>
+<li>
+<p>Pros: Well-established standard, handles spaces and special characters well.</p>
+</li>
+<li>
+<p>Cons: Requires URL encoding and decoding, slightly more overhead, can be less readable.</p>
+</li>
+<li>
+<p>Recommended Approach: Custom Delimiter with Simple Escaping</p>
+</li>
+</ul>
+<p>We recommend the Custom Delimiter with Simple Escaping approach for your use case. It's a good balance between simplicity, readability, and the ability to handle spaces within values. It avoids the need to rely on complex URL encoding and also avoids the unreadability issue of using comma with backslash escaping.</p>
 <h2 id="jwt-security-claims"><a class="header" href="#jwt-security-claims">JWT Security Claims</a></h2>
 <p>Using the tables defined above, follow these steps to create an authorization code token with user security claims:</p>
 <ol>
 <li>
 <p><strong><code>uid</code></strong><br />
-Assign the <code>user_id</code> to the <code>uid</code> claim in the JWT.</p>
+The <code>entity_id</code> (e.g., <code>employee_id</code> for employees and <code>customer_id</code> for customers) should be assigned to the <code>uid</code> claim in the JWT. This <code>uid</code> will be used by the response transformer to filter the response for the user and must represent a business identifier.</p>
+<p>Examples:</p>
+<ul>
+<li><strong>Employee</strong>: Use the ACF2 ID as the <code>uid</code>.</li>
+<li><strong>Customer</strong>: Use the CIF ID as the <code>uid</code> (e.g., in a banking context).</li>
+</ul>
 </li>
 <li>
 <p><strong><code>role</code></strong><br />
@@ -647,90 +722,167 @@ Add a list of groups the user belongs to.</p>
 <p><strong><code>att</code></strong><br />
 Include a list of key-value pairs representing user attributes.</p>
 </li>
+<li>
+<p><strong><code>pos</code></strong>
+Include a list of positions for the user.</p>
+</li>
+<li>
+<p><strong><code>host</code></strong>
+The host of the user.</p>
+</li>
 </ol>
-<h2 id="group-management-and-dynamic-membership"><a class="header" href="#group-management-and-dynamic-membership">Group Management and Dynamic Membership</a></h2>
-<h4 id="1-define-groups-related-to-the-organizational-structure"><a class="header" href="#1-define-groups-related-to-the-organizational-structure">1. Define Groups Related to the Organizational Structure</a></h4>
-<p>You can create groups that align with teams, departments, or other organizational units. These groups are relatively static and reflect the overall organizational structure. Use a separate table, <code>group_t</code>, as described above to store these groups.</p>
-<h4 id="2-use-the-reporting-structure-to-derive-dynamic-group-memberships"><a class="header" href="#2-use-the-reporting-structure-to-derive-dynamic-group-memberships">2. Use the Reporting Structure to Derive Dynamic Group Memberships</a></h4>
-<p>Instead of directly assigning all users to groups, you can:</p>
+<h4 id="example-token"><a class="header" href="#example-token">Example Token</a></h4>
+<pre><code>eyJraWQiOiJUal9sX3RJQlRnaW5PdFFiTDBQdjV3IiwiYWxnIjoiUlMyNTYifQ.eyJpc3MiOiJ1cm46Y29tOm5ldHdvcmtudDpvYXV0aDI6djEiLCJhdWQiOiJ1cm46Y29tLm5ldHdvcmtudCIsImV4cCI6MTczNDA2NDU5NSwianRpIjoicEs4WEtDZkU1aVFSdWdlQThJWXBwZyIsImlhdCI6MTczNDA2Mzk5NSwibmJmIjoxNzM0MDYzODc1LCJ2ZXIiOiIxLjAiLCJ1aWQiOiJzaDM1IiwidXR5IjoiRSIsImNpZCI6ImY3ZDQyMzQ4LWM2NDctNGVmYi1hNTJkLTRjNTc4NzQyMWU3MiIsImNzcmYiOiItTUN4OGhZRlF1bVZ3NFZkRDVHbEd3Iiwic2NwIjpbInBvcnRhbC5yIiwicG9ydGFsLnciLCJyZWYuciIsInJlZi53Il0sInJvbGUiOiJhZG1pbiB1c2VyIiwiYzEiOiIzNjEiLCJjMiI6IjY3IiwiZ3JwIjoiZGVsZXRlIGluc2VydCBzZWxlY3QgdXBkYXRlIiwiYXR0IjoiY291bnRyeV49XkNBTn5wZXJhbmVudCBlbXBsb3llZV49XnRydWV-c2VjdXJpdHlfY2xlYXJhbmNlX2xldmVsXj1eMiIsInBvcyI6IkFQSVBsYXRmb3JtRGVsaXZlcnkiLCJob3N0IjoiTjJDTXcwSEdRWGVMdkMxd0JmbG4yQSJ9.Gky_rR9hreP04GZm-0H_HBBAeDIPhQ9tsNuZclUzTdkMrYay40kcNk4jWkPdMcxfIfIbGj2eqSQgNhkBuym2yc6HsRF0nukZhYSGklVNXFe3R-0DdKwxxWyqvXyWDvrQtme0ttT2tYGTRRCZXnHDRMUFeDSz7kVjjIj3WymjFyxWBnWnBOjYqDL34652Fb8c7hWME0nSxbWO0ZvPRDhRM-l0nDGNm2ojq-3sjaU_pRywYahXP-wtnNSLwvctFgONPWSM9Ie6FqwRmYBFVo8OE0VdTRvUfnO4mL1O2UbTfxzbNJFv4HP1mSZG_SSB5j3t_RuZLfUMIajFi105ze2PUg
+</code></pre>
+<p>And the payload:</p>
+<pre><code>{
+  "iss": "urn:com:networknt:oauth2:v1",
+  "aud": "urn:com.networknt",
+  "exp": 1734064595,
+  "jti": "pK8XKCfE5iQRugeA8IYppg",
+  "iat": 1734063995,
+  "nbf": 1734063875,
+  "ver": "1.0",
+  "uid": "sh35",
+  "uty": "E",
+  "cid": "f7d42348-c647-4efb-a52d-4c5787421e72",
+  "csrf": "-MCx8hYFQumVw4VdD5GlGw",
+  "scp": [
+    "portal.r",
+    "portal.w",
+    "ref.r",
+    "ref.w"
+  ],
+  "role": "admin user",
+  "c1": "361",
+  "c2": "67",
+  "grp": "delete insert select update",
+  "att": "country^=^CAN~peranent employee^=^true~security_clearance_level^=^2",
+  "pos": "APIPlatformDelivery",
+  "host": "N2CMw0HGQXeLvC1wBfln2A"
+}
+</code></pre>
+<h2 id="group-and-position-management"><a class="header" href="#group-and-position-management">Group and Position Management</a></h2>
+<h4 id="define-groups-related-to-user-category"><a class="header" href="#define-groups-related-to-user-category">Define Groups Related to User Category</a></h4>
+<p>You can create groups that align with teams, departments, or other organizational units. These groups are relatively static and reflect the overall organizational structure. Use a separate table, <code>group_t</code>, as described earlier, to store these groups. Groups can be applied to all users regardless of their user type.</p>
+<h4 id="use-the-employee-reporting-structure-to-manage-positions"><a class="header" href="#use-the-employee-reporting-structure-to-manage-positions">Use the Employee Reporting Structure to Manage Positions</a></h4>
+<p>Positions are similar to groups in managing user permissions, but they leverage the organizational reporting structure to propagate permissions between team members and their direct manager.</p>
 <ul>
-<li>Assign base group memberships to individual users (e.g., only non-managers initially).</li>
-<li>Use the reporting relationships stored in the <code>report_relationship_t</code> table to infer additional group memberships based on the organizational hierarchy.</li>
+<li>
+<p>Position Flags</p>
+<p>Each position in the <code>position_t</code> table has two flags:</p>
+</li>
 </ul>
-<h4 id="3-retrieval-logic"><a class="header" href="#3-retrieval-logic">3. Retrieval Logic</a></h4>
+<ul>
+<li><strong><code>inherit_to_ancestor</code></strong>: Determines if the position is inherited by a subordinate.</li>
+<li><strong><code>inherit_to_sibling</code></strong>: Determines if the position is inherited by team members (siblings) under the same manager.</li>
+</ul>
+<ul>
+<li>
+<p>Responsibilities</p>
+<p>The application is responsible for propagating positions:</p>
+</li>
+</ul>
+<ul>
+<li><strong>Between Siblings</strong>: Assigning inherited positions to team members under the same manager.</li>
+<li><strong>To the Manager</strong>: Assigning inherited positions to the direct manager.</li>
+</ul>
+<ul>
+<li>
+<p>User Interface for Position Management</p>
+<p>A user interface (UI) can be implemented to simplify position management:</p>
+</li>
+</ul>
+<ul>
+<li><strong>Feature</strong>: List all potential inherited positions for selection when adding a new user or changing a manager.</li>
+<li><strong>Functionality</strong>: Allow administrators to choose specific positions to inherit for users and managers dynamically.</li>
+</ul>
+<h4 id="use-both-groups-and-positions"><a class="header" href="#use-both-groups-and-positions">Use Both Groups and Positions</a></h4>
+<p>You can choose to use both groups and positions for your organization. However, you need to ensure that groups and positions categorize users across different dimensions. In general, groups should be used for customers, while positions should be used for employees.</p>
+<h4 id="user-login-query"><a class="header" href="#user-login-query">User Login Query</a></h4>
+<p>Here is the query to run against the database tables upon a user login request:</p>
+<pre><code class="language-sql">SELECT
+    u.user_id,
+    u.user_type,
+    CASE
+        WHEN u.user_type = 'E' THEN e.employee_id
+        WHEN u.user_type = 'C' THEN c.customer_id
+        ELSE NULL
+    END AS entity_id,
+    CASE WHEN u.user_type = 'E' THEN string_agg(DISTINCT p.position_name, ' ' ORDER BY p.position_name) ELSE NULL END AS positions,
+    string_agg(DISTINCT r.role_name, ' ' ORDER BY r.role_name) AS roles,
+    string_agg(DISTINCT g.group_name, ' ' ORDER BY g.group_name) AS groups,
+     CASE
+        WHEN COUNT(DISTINCT at.attribute_name || '^=^' || aut.attribute_value) &gt; 0 THEN string_agg(DISTINCT at.attribute_name || '^=^' || aut.attribute_value, '~' ORDER BY at.attribute_name || '^=^' || aut.attribute_value)
+        ELSE NULL
+    END AS attributes
+FROM
+    user_t AS u
+LEFT JOIN
+    user_host_t AS uh ON u.user_id = uh.user_id
+LEFT JOIN
+    role_user_t AS ru ON u.user_id = ru.user_id
+LEFT JOIN
+    role_t AS r ON ru.host_id = r.host_id AND ru.role_id = r.role_id
+LEFT JOIN
+    attribute_user_t AS aut ON u.user_id = aut.user_id
+LEFT JOIN
+    attribute_t AS at ON aut.host_id = at.host_id AND aut.attribute_id = at.attribute_id
+LEFT JOIN
+    group_user_t AS gu ON u.user_id = gu.user_id
+LEFT JOIN
+    group_t AS g ON gu.host_id = g.host_id AND gu.group_id = g.group_id
+LEFT JOIN
+    employee_t AS e ON uh.host_id = e.host_id AND u.user_id = e.user_id
+LEFT JOIN
+    customer_t AS c ON uh.host_id = c.host_id AND u.user_id = c.user_id
+LEFT JOIN
+    employee_position_t AS ep ON e.host_id = ep.host_id AND e.employee_id = ep.employee_id
+LEFT JOIN
+    position_t AS p ON ep.host_id = p.host_id AND ep.position_id = p.position_id
+WHERE
+    u.email = 'steve.hu@lightapi.net'
+GROUP BY
+    u.user_id, u.user_type, e.employee_id, c.customer_id;
+</code></pre>
+<p>And here is an example result from the test database:</p>
+<pre><code>utgdG50vRVOX3mL1Kf83aA  E   sh35    APIPlatformDelivery admin user  delete insert select update country^=^CAN~peranent employee^=^true~security_clearance_level^=^2
+</code></pre>
+<h4 id="parse-attribute-string"><a class="header" href="#parse-attribute-string">Parse Attribute String</a></h4>
+<p>The query above returns attributes in a customized format. These attributes can be parsed using the <code>Util.parseAttributes</code> method available in the <strong>light-4j utility module</strong></p>
+<h2 id="portal-view-and-default-role"><a class="header" href="#portal-view-and-default-role">Portal View and Default Role</a></h2>
+<p>Given the flexibility of fine-grained authorization approaches, users can choose one or more methods to suit their business requirements. However, in scenarios where <strong>RBAC (Role-Based Access Control)</strong> is not utilized, the <code>role</code> claim may not exist in the custom claims of the JWT token.</p>
+<h4 id="handling-missing-role-in-jwt"><a class="header" href="#handling-missing-role-in-jwt">Handling Missing <code>role</code> in JWT</a></h4>
+<p>For the <strong>portal-view</strong> application, at least one role is required to filter menu items. To address cases where no roles are present in the JWT:</p>
 <ol>
 <li>
-<p><strong>Get User's Direct Groups</strong>:<br />
-Retrieve the groups a user is explicitly assigned to from the <code>user_group_t</code> table.</p>
+<p><strong>Default Role Assignment</strong>:<br />
+If the <code>role</code> claim is absent in the JWT, the system will:</p>
+<ul>
+<li>Assign a default role, <code>"user"</code>, to ensure compatibility.</li>
+<li>Include this role in a <code>roles</code> field in the browser cookie.</li>
+</ul>
 </li>
 <li>
-<p><strong>Traverse Up the Reporting Hierarchy</strong>:<br />
-Use the <code>report_relationship_t</code> table to find all the user's ancestors (managers) in the reporting structure.</p>
-</li>
-<li>
-<p><strong>Inherit Subordinate Group Memberships</strong>:<br />
-For each ancestor (manager), retrieve the direct reports' group memberships. Add these groups to the manager's effective group memberships. You can control the depth of inheritance (e.g., only inherit from direct reports or up to a certain level in the hierarchy).</p>
-</li>
-<li>
-<p><strong>Combine and Deduplicate</strong>:<br />
-Combine the user's direct group memberships with the inherited memberships, removing any duplicates.</p>
+<p><strong>Cookie Roles Field</strong>:</p>
+<ul>
+<li>The <code>roles</code> field in the cookie will contain a single role: <code>"user"</code>.</li>
+<li>This ensures the <strong>portal-view</strong> can still function as expected by displaying the appropriate menu items for users.</li>
+</ul>
 </li>
 </ol>
-<h4 id="example"><a class="header" href="#example">Example</a></h4>
-<p>Let's say:</p>
+<h4 id="example-workflow"><a class="header" href="#example-workflow">Example Workflow</a></h4>
+<ol>
+<li>A user authenticates, and their JWT is generated without a <code>role</code> claim.</li>
+<li>During authentication handling:
 <ul>
-<li>
-<p>Alice is a manager and belongs to the "Management" group.</p>
-</li>
-<li>
-<p>Bob reports to Alice and belongs to the "Engineering" group.</p>
-</li>
-<li>
-<p>Charlie reports to Bob and belongs to the "Engineering" and "Testing" groups.</p>
-</li>
+<li>The StatelessAuthHandler checks for the presence of the <code>role</code> claim.</li>
+<li>If no roles are found, the <code>"user"</code> role is added to the <code>roles</code> field in the cookie.</li>
 </ul>
-<p>When Bob's request comes in:</p>
-<ul>
-<li>
-<p>Query result contains Bob's direct group: "Engineering".</p>
 </li>
-<li>
-<p>Check reporting structure: Bob reports to Alice.</p>
-</li>
-<li>
-<p>Get group memberships of Bob's direct reports: "Engineering", "Testing". (These are inherited since Bob is Charlie's manager)</p>
-</li>
-<li>
-<p>Bob's effective groups are now "Engineering", "Testing".</p>
-</li>
-</ul>
-<p>When Alice's request comes in:</p>
-<ul>
-<li>
-<p>Query result contains Alice's direct group: "Management".</p>
-</li>
-<li>
-<p>Check reporting structure: Bob and Charlie report to Alice.</p>
-</li>
-<li>
-<p>Get group memberships of Alice's direct reports: "Engineering", "Testing" (inherited from Bob and Charlie).</p>
-</li>
-<li>
-<p>Alice's effective groups are now "Management", "Engineering", "Testing".</p>
-</li>
-</ul>
-<p>Advantages:</p>
-<ul>
-<li>
-<p>Reduced Administrative Overhead: You don't have to manually manage group memberships for managers as their teams change.</p>
-</li>
-<li>
-<p>Dynamic Access Control: Permissions adapt automatically as the reporting structure evolves.</p>
-</li>
-<li>
-<p>Centralized Logic: The inheritance logic is encapsulated in the logic, making it easier to maintain and update.</p>
-</li>
-</ul>
+<li>The <strong>portal-view</strong> reads the <code>roles</code> field from the cookie to filter menu items appropriately.</li>
+</ol>
+<p>This approach provides a seamless experience while maintaining compatibility with applications requiring roles for authorization or UI customization.</p>
 
                     </main>
 
@@ -740,7 +892,7 @@ Combine the user's direct group memberships with the inherited memberships, remo
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="../implementation.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../design/config-server.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -754,7 +906,7 @@ Combine the user's direct group memberships with the inherited memberships, remo
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="../implementation.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../design/config-server.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
