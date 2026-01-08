@@ -5688,17 +5688,27 @@ spring.jackson.serialization.write-dates-as-timestamps=false # Good practice for
     "plugin.name": "pgoutput",
     "publication.name": "dbz_publication",
     "slot.name": "dbz_replication_slot",
+    "slot.drop.on.stop": "false", 
+    "signal.when.disconnected": "true",
+    "tombstones.on.delete": "true",
+    "max.retries": 5,
+    "retry.delay.ms": 10000,
 
     "value.converter": "org.apache.kafka.connect.storage.StringConverter",
     "value.converter.schemas.enable": "false",
     "key.converter": "org.apache.kafka.connect.storage.StringConverter",
     "key.converter.schemas.enable": "false",
 
-    "transforms": "unwrap,timestamp_converter,extractPayload,extractKey,outbox,final_route", 
+    "transforms": "unwrap,addTransactionIdHeader,timestamp_converter,extractPayload,extractKey,outbox,final_route",
 
     "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
     "transforms.unwrap.drop.tombstones": "false",
     "transforms.unwrap.delete.handling.mode": "none",
+
+    "transforms.addTransactionIdHeader.type": "org.apache.kafka.connect.transforms.HeaderFrom$Value",
+    "transforms.addTransactionIdHeader.fields": "transaction_id",
+    "transforms.addTransactionIdHeader.headers": "transaction_id",
+    "transforms.addTransactionIdHeader.operation": "copy",
 
     "transforms.timestamp_converter.type": "org.apache.kafka.connect.transforms.TimestampConverter$Value",
     "transforms.timestamp_converter.field": "event_ts",
@@ -5763,11 +5773,16 @@ spring.jackson.serialization.write-dates-as-timestamps=false # Good practice for
     "key.converter": "org.apache.kafka.connect.storage.StringConverter",
     "key.converter.schemas.enable": "false",
 
-    "transforms": "unwrap,timestamp_converter,extractPayload,extractKey,outbox,final_route", 
+    "transforms": "unwrap,addTransactionIdHeader,timestamp_converter,extractPayload,extractKey,outbox,final_route",
 
     "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
     "transforms.unwrap.drop.tombstones": "false",
     "transforms.unwrap.delete.handling.mode": "none",
+
+    "transforms.addTransactionIdHeader.type": "org.apache.kafka.connect.transforms.HeaderFrom$Value",
+    "transforms.addTransactionIdHeader.fields": "transaction_id",
+    "transforms.addTransactionIdHeader.headers": "transaction_id",
+    "transforms.addTransactionIdHeader.operation": "copy",
 
     "transforms.timestamp_converter.type": "org.apache.kafka.connect.transforms.TimestampConverter$Value",
     "transforms.timestamp_converter.field": "event_ts",
@@ -5797,6 +5812,84 @@ spring.jackson.serialization.write-dates-as-timestamps=false # Good practice for
   }
 }
 '
+</code></pre>
+<p>If you want to replace the existing connector, you can use the put request.</p>
+<pre><code>curl --location --request PUT 'http://localhost:8083/connectors/outbox-connector/config' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "postgres",
+    "database.password": "secret",
+    "database.dbname": "configserver",
+    "database.server.name": "postgres",
+    "topic.prefix": "portal-event", 
+
+    "schema.include.list": "public",
+    "table.include.list": "public.outbox_message_t",
+    "message.key.columns": "public.outbox_message_t:user_id",
+
+    "plugin.name": "pgoutput",
+    "publication.name": "dbz_publication",
+    "slot.name": "dbz_replication_slot",
+    "slot.drop.on.stop": "false",
+    "signal.when.disconnected": "true",
+    "tombstones.on.delete": "true",
+    "max.retries": 5,
+    "retry.delay.ms": 10000,
+
+    "value.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter.schemas.enable": "false",
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "key.converter.schemas.enable": "false",
+
+    "transforms": "unwrap,addTransactionIdHeader,timestamp_converter,extractPayload,extractKey,outbox,final_route",
+
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.drop.tombstones": "false",
+    "transforms.unwrap.delete.handling.mode": "none",
+
+    "transforms.addTransactionIdHeader.type": "org.apache.kafka.connect.transforms.HeaderFrom$Value",
+    "transforms.addTransactionIdHeader.fields": "transaction_id",
+    "transforms.addTransactionIdHeader.headers": "transaction_id",
+    "transforms.addTransactionIdHeader.operation": "copy",
+
+    "transforms.timestamp_converter.type": "org.apache.kafka.connect.transforms.TimestampConverter$Value",
+    "transforms.timestamp_converter.field": "event_ts",
+    "transforms.timestamp_converter.target.type": "Timestamp",
+    "transforms.timestamp_converter.format": "yyyy-MM-dd'\''T'\''HH:mm:ss.SSSSSS'\''Z'\''",
+
+    "transforms.extractPayload.type": "org.apache.kafka.connect.transforms.ExtractField$Value",
+    "transforms.extractPayload.field": "payload",
+    "transforms.extractPayload.parse.json": "true",
+
+    "transforms.extractKey.type": "org.apache.kafka.connect.transforms.ExtractField$Key",
+    "transforms.extractKey.field": "user_id",
+
+    "transforms.outbox.type": "io.debezium.transforms.outbox.EventRouter",
+    "transforms.outbox.table.field.event.id": "id",
+    "transforms.outbox.table.field.event.key": "user_id",
+    "transforms.outbox.table.field.event.type": "event_type",
+    "transforms.outbox.table.field.event.timestamp": "event_ts",
+    "transforms.outbox.table.field.event.payload": "payload",
+    "transforms.outbox.table.field.event.metadata": "metadata",
+    "transforms.outbox.table.field.aggregate.type": "aggregate_type",
+    "transforms.outbox.table.field.aggregate.id": "aggregate_id",
+
+    "transforms.final_route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.final_route.regex": "portal-event\\.public\\.outbox_message_t",
+    "transforms.final_route.replacement": "portal-event"
+}'
+</code></pre>
+<p>The following are the commands to check the connector status and config:</p>
+<pre><code># Check connector status
+curl http://localhost:8083/connectors/outbox-connector/status
+
+# Check connector config
+curl http://localhost:8083/connectors/outbox-connector/config
 </code></pre>
 <p><strong>Important Notes on Debezium Transforms:</strong></p>
 <ul>
@@ -9003,6 +9096,357 @@ waitPeriodMs: ${db-event-consumer.waitPeriodMs:1000}
 <li><strong>Competing Consumers</strong> is better for <strong>workload distribution</strong>: Where you need to process a high volume of independent tasks as quickly as possible.</li>
 </ul>
 <p>In light-portal, we use the <strong>Scheduler (Leader)</strong> to reliably "kick off" tasks by emitting events, and the <strong>Pub/Sub (Competing Consumers)</strong> to at-scale process those events.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="kafka-event-processor"><a class="header" href="#kafka-event-processor">Kafka Event Processor</a></h1>
+<h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
+<p>The Kafka Event Processor (<code>PortalEventConsumerStartupHook</code>) consumes events from Kafka topics that are populated by Debezium CDC from the <code>outbox_message_t</code> table. It provides robust event processing with transaction-level granularity and Dead Letter Queue (DLQ) support.</p>
+<h2 id="architecture-3"><a class="header" href="#architecture-3">Architecture</a></h2>
+<p>The processor uses a <strong>two-phase processing strategy</strong> with automatic fallback to ensure both performance and reliability:</p>
+<ol>
+<li><strong>Optimistic Batch Processing</strong>: Attempts to process all transactions in a single database transaction for maximum throughput</li>
+<li><strong>Granular Fallback</strong>: On failure, switches to individual transaction processing with JDBC Savepoints to isolate failures</li>
+</ol>
+<h2 id="transaction-id-header"><a class="header" href="#transaction-id-header">Transaction ID Header</a></h2>
+<p>Events published to Kafka include a <code>transaction_id</code> header added by Debezium's <code>HeaderFrom</code> transform. This UUID groups all events that were generated within a single business transaction, enabling:</p>
+<ul>
+<li><strong>Precise transaction boundaries</strong>: Events are grouped by their actual transaction, not just by user/host</li>
+<li><strong>Atomic DLQ handling</strong>: Failed transactions are moved to DLQ as a complete unit</li>
+<li><strong>Backward compatibility</strong>: Falls back to Kafka key-based grouping for events without the header</li>
+</ul>
+<h3 id="debezium-configuration"><a class="header" href="#debezium-configuration">Debezium Configuration</a></h3>
+<p>The <code>transaction_id</code> header is added via the Debezium connector configuration:</p>
+<pre><code class="language-json">{
+  "transforms": "unwrap,addTransactionIdHeader,timestamp_converter,...",
+  
+  "transforms.addTransactionIdHeader.type": "org.apache.kafka.connect.transforms.HeaderFrom$Value",
+  "transforms.addTransactionIdHeader.fields": "transaction_id",
+  "transforms.addTransactionIdHeader.headers": "transaction_id",
+  "transforms.addTransactionIdHeader.operation": "copy"
+}
+</code></pre>
+<h2 id="processing-flow-1"><a class="header" href="#processing-flow-1">Processing Flow</a></h2>
+<h3 id="phase-1-optimistic-batch-processing"><a class="header" href="#phase-1-optimistic-batch-processing">Phase 1: Optimistic Batch Processing</a></h3>
+<pre><code class="language-java">// 1. Group events by transaction_id from headers
+Map&lt;String, List&lt;ConsumerRecord&gt;&gt; transactionBatches = groupByTransactionId(records);
+
+// 2. Process all transactions in one DB transaction
+Connection conn = ds.getConnection();
+conn.setAutoCommit(false);
+
+for (Map.Entry&lt;String, List&lt;ConsumerRecord&gt;&gt; entry : transactionBatches.entrySet()) {
+    for (ConsumerRecord record : entry.getValue()) {
+        updateDatabaseWithEvent(conn, record.getValue());
+    }
+}
+
+conn.commit();
+commitOffset(records);
+</code></pre>
+<p><strong>Benefits</strong>:</p>
+<ul>
+<li>High throughput with single database transaction</li>
+<li>Minimal overhead for the common success case</li>
+</ul>
+<h3 id="phase-2-fallback-with-savepoints"><a class="header" href="#phase-2-fallback-with-savepoints">Phase 2: Fallback with Savepoints</a></h3>
+<p>If the batch processing fails, the processor switches to granular mode:</p>
+<pre><code class="language-java">Connection conn = ds.getConnection();
+conn.setAutoCommit(false);
+
+for (Map.Entry&lt;String, List&lt;ConsumerRecord&gt;&gt; entry : transactionBatches.entrySet()) {
+    String transactionId = entry.getKey();
+    List&lt;ConsumerRecord&gt; txRecords = entry.getValue();
+    
+    Savepoint sp = conn.setSavepoint("TX_" + transactionId.hashCode());
+    try {
+        for (ConsumerRecord record : txRecords) {
+            updateDatabaseWithEvent(conn, record.getValue());
+        }
+        // Success - continue to next transaction
+        
+    } catch (Exception e) {
+        // Rollback only this transaction
+        conn.rollback(sp);
+        
+        // Send to DLQ
+        produceDLQ(txRecords, e);
+    }
+}
+
+// Commit all successful transactions
+conn.commit();
+commitOffset(allRecords);
+</code></pre>
+<p><strong>Benefits</strong>:</p>
+<ul>
+<li><strong>Isolation</strong>: Only failing transactions are moved to DLQ</li>
+<li><strong>Atomicity</strong>: All events in a transaction are processed together or fail together</li>
+<li><strong>No Blocking</strong>: Consumer continues processing subsequent transactions</li>
+<li><strong>Progress Guarantee</strong>: Offsets are committed for all records (successful + DLQ'd)</li>
+</ul>
+<h2 id="dead-letter-queue-dlq-1"><a class="header" href="#dead-letter-queue-dlq-1">Dead Letter Queue (DLQ)</a></h2>
+<h3 id="dlq-topic"><a class="header" href="#dlq-topic">DLQ Topic</a></h3>
+<p>Failed transactions are sent to a DLQ topic: <code>{original-topic}-dlq</code></p>
+<p>Each DLQ message includes:</p>
+<ul>
+<li><strong>Key</strong>: Original Kafka key (user_id)</li>
+<li><strong>Value</strong>: Original event payload</li>
+<li><strong>TraceabilityId</strong>: Exception stack trace for debugging</li>
+</ul>
+<h3 id="dlq-producer-configuration"><a class="header" href="#dlq-producer-configuration">DLQ Producer Configuration</a></h3>
+<p>The DLQ producer is configured via <code>DeadLetterProducerStartupHook</code> and must be enabled in the consumer config:</p>
+<pre><code class="language-yaml"># kafka-consumer.yml
+deadLetterEnabled: true
+deadLetterTopicExt: -dlq
+</code></pre>
+<h3 id="monitoring-and-recovery"><a class="header" href="#monitoring-and-recovery">Monitoring and Recovery</a></h3>
+<ol>
+<li><strong>Alerting</strong>: Set up monitoring on the DLQ topic for new messages</li>
+<li><strong>Investigation</strong>: Inspect DLQ messages to identify root cause (bad data, code bug, constraint violation)</li>
+<li><strong>Fix</strong>: Deploy code fix or correct data inconsistency</li>
+<li><strong>Replay</strong>: Use a re-driver application to republish events from DLQ back to the original topic</li>
+</ol>
+<h2 id="transaction-grouping-logic"><a class="header" href="#transaction-grouping-logic">Transaction Grouping Logic</a></h2>
+<p>The processor extracts <code>transaction_id</code> from Kafka record headers:</p>
+<pre><code class="language-java">private String extractTransactionId(ConsumerRecord&lt;Object, Object&gt; record) {
+    Map&lt;String, String&gt; headers = record.getHeaders();
+    if (headers != null) {
+        return headers.get("transaction_id");
+    }
+    return null;
+}
+</code></pre>
+<p><strong>Fallback for Legacy Events</strong>:
+If no <code>transaction_id</code> header is present (old events before the header was added), the processor falls back to using the Kafka key for grouping:</p>
+<pre><code class="language-java">String transactionId = extractTransactionId(record);
+if (transactionId == null) {
+    transactionId = (String) record.getKey(); // Backward compatibility
+}
+</code></pre>
+<h2 id="error-handling-strategy"><a class="header" href="#error-handling-strategy">Error Handling Strategy</a></h2>
+<h3 id="permanent-vs-transient-errors"><a class="header" href="#permanent-vs-transient-errors">Permanent vs Transient Errors</a></h3>
+<p>The processor treats all exceptions during fallback processing as <strong>permanent errors</strong> that warrant DLQ routing. This includes:</p>
+<ul>
+<li><strong>Database constraint violations</strong> (unique, foreign key, not null)</li>
+<li><strong>Deserialization errors</strong> (malformed JSON, schema mismatch)</li>
+<li><strong>Business logic errors</strong> (validation failures, state inconsistencies)</li>
+</ul>
+<p><strong>Rationale</strong>: If an event fails during fallback (after the initial batch attempt failed), it's unlikely to succeed on retry without intervention.</p>
+<h3 id="health-monitoring"><a class="header" href="#health-monitoring">Health Monitoring</a></h3>
+<p>The processor sets <code>healthy = false</code> on critical failures, which triggers Kubernetes health probes to restart the pod:</p>
+<ul>
+<li>Consumer instance not found</li>
+<li>Framework exceptions during polling</li>
+<li>Fatal errors in fallback processing (after DLQ attempt)</li>
+</ul>
+<h2 id="configuration-1"><a class="header" href="#configuration-1">Configuration</a></h2>
+<p>Consumer configuration in <code>kafka-consumer.yml</code>:</p>
+<pre><code class="language-yaml"># Kafka consumer properties
+topic: portal-event
+groupId: user-query-group
+keyFormat: string
+valueFormat: string
+
+# DLQ configuration
+deadLetterEnabled: true
+deadLetterTopicExt: -dlq
+
+# Polling configuration
+waitPeriod: 1000  # ms to wait between polls when no records
+</code></pre>
+<h2 id="comparison-with-db-event-consumer"><a class="header" href="#comparison-with-db-event-consumer">Comparison with DB Event Consumer</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Feature</th><th>Kafka Consumer</th><th>DB Consumer</th></tr></thead><tbody>
+<tr><td><strong>Event Source</strong></td><td>Kafka topic (via Debezium CDC)</td><td>Direct PostgreSQL polling</td></tr>
+<tr><td><strong>Transaction ID</strong></td><td>From Kafka headers</td><td>From <code>outbox_message_t.transaction_id</code> column</td></tr>
+<tr><td><strong>Grouping</strong></td><td><code>Map&lt;String, List&lt;ConsumerRecord&gt;&gt;</code></td><td><code>Map&lt;String, List&lt;EventData&gt;&gt;</code></td></tr>
+<tr><td><strong>DLQ Target</strong></td><td>Kafka DLQ topic</td><td>PostgreSQL <code>dead_letter_queue</code> table</td></tr>
+<tr><td><strong>Offset Management</strong></td><td>Kafka consumer offsets</td><td>PostgreSQL <code>consumer_offsets</code> table</td></tr>
+<tr><td><strong>Fallback Mechanism</strong></td><td>JDBC Savepoints</td><td>JDBC Savepoints</td></tr>
+</tbody></table>
+</div>
+<p>Both implementations share the same core DLQ philosophy: <strong>isolate failures at the transaction level to prevent blocking the entire consumer</strong>.</p>
+<h2 id="best-practices"><a class="header" href="#best-practices">Best Practices</a></h2>
+<ol>
+<li><strong>Idempotent Processing</strong>: Ensure <code>updateDatabaseWithEvent()</code> logic is idempotent to handle potential reprocessing</li>
+<li><strong>Monitor DLQ</strong>: Set up alerts for DLQ topic activity</li>
+<li><strong>Version Events</strong>: Use schema versioning to handle event evolution gracefully</li>
+<li><strong>Test Failure Scenarios</strong>: Regularly test DLQ routing with intentional failures</li>
+<li><strong>DLQ Retention</strong>: Configure appropriate retention for DLQ topics to allow investigation and replay</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="httpclient-retry"><a class="header" href="#httpclient-retry">HttpClient Retry</a></h1>
+<p>Since the JDK HttpClient supports proxy configuration, we use it to connect to external services through NetSkope or McAfee gateways within an enterprise environment. When comparing it with the light-4j Http2Client, we identified several important behavioral differences and usage considerations.</p>
+<h3 id="unresolved-inetsocketaddress"><a class="header" href="#unresolved-inetsocketaddress">Unresolved InetSocketAddress</a></h3>
+<p>When configuring a proxy for the JDK HttpClient, it is important to use an unresolved socket address for the proxy host.</p>
+<pre><code>        if (config.getProxyHost() != null &amp;&amp; !config.getProxyHost().isEmpty()) {
+            clientBuilder.proxy(ProxySelector.of(
+                    InetSocketAddress.createUnresolved(
+                            config.getProxyHost(),
+                            config.getProxyPort() == 0 ? 443 : config.getProxyPort()
+                    )
+            ));
+        }
+
+</code></pre>
+<p>Using InetSocketAddress.createUnresolved() ensures that DNS resolution occurs when a new connection is established, rather than at client creation time. This allows DNS lookups to respect TTL values and return updated IP addresses when DNS records change.</p>
+<h3 id="retry-with-temporary-httpclient"><a class="header" href="#retry-with-temporary-httpclient">Retry with Temporary HttpClient</a></h3>
+<p>The JDK HttpClient is a heavyweight, long-lived object and should not be created frequently. It also does not expose APIs to directly manage connections (for example, closing an existing connection and retrying with a fresh one).</p>
+<p>A naive retry strategy is to create a new HttpClient instance for retries. Below is an implementation we used for testing purposes:</p>
+<pre><code>                    /*
+                    A new client is created from the second attempt onwards as there is no way we can create new connections. Since this handler
+                    is a singleton, it would be a bad idea to repeatedly abandon HttpClient instances in a singleton handler. It will cause leak
+                    of resource. We need a clean connection without abandoning the shared resource. The solution is to create a temporary fresh
+                    client from the second attempt and discard it immediately to minimize resource footprint.
+                    */
+                    int maxRetries = config.getMaxConnectionRetries();
+                    HttpResponse&lt;byte[]&gt; response = null;
+
+                    for (int attempt = 0; attempt &lt; maxRetries; attempt++) {
+
+                        try {
+                            if (attempt == 0) {
+                                // First attempt: Use the long-lived, shared client
+                                response = this.client.send(request, HttpResponse.BodyHandlers.ofByteArray());
+                            } else {
+                                // Subsequent attempts: Create a fresh, temporary client inside a try-with-resources
+                                logger.info("Attempt {} failed. Creating fresh client for retry.", attempt);
+
+                                try (HttpClient temporaryClient = createJavaHttpClient()) {
+                                    response = temporaryClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+                                } // temporaryClient.close() called here if inner block exits normally/exceptionally
+                            }
+                            break; // Success! Exit the loop.
+                        } catch (IOException | InterruptedException e) {
+                            // Note: The exception could be from .send() OR from createJavaHttpClient() (if attempt &gt; 0)
+                            if (attempt &gt;= maxRetries - 1) {
+                                throw e; // Rethrow exception on final attempt failure
+                            }
+                            logger.warn("Attempt {} failed ({}). Retrying...", attempt + 1, e.getMessage());
+                            // Loop continues to next attempt
+                        }
+                    }
+
+</code></pre>
+<h4 id="load-test-findings"><a class="header" href="#load-test-findings">Load Test Findings</a></h4>
+<p>We created a test project under light-example-4j/instance-variable consisting of a caller service and a callee service. The caller created a new HttpClient per request.</p>
+<p>During load testing, we observed:</p>
+<ul>
+<li>
+<p>Extremely high thread and memory utilization</p>
+</li>
+<li>
+<p>Very poor throughput</p>
+</li>
+<li>
+<p>Sustained 100% CPU usage for several minutes after traffic stopped, as the JVM attempted to clean up HttpClient resources</p>
+</li>
+</ul>
+<p>This behavior exposes several serious problems.</p>
+<h4 id="identified-problems"><a class="header" href="#identified-problems">Identified Problems</a></h4>
+<p>The following is the problems:</p>
+<ol>
+<li>
+<p><strong>Resource Exhaustion (Threads &amp; Native Memory)</strong>
+The <code>java.net.http.HttpClient</code> is designed to be a long-lived, heavy object. When you create an instance, it spins up a background thread pool (specifically a <code>SelectorManager</code> thread) to handle async I/O.
+If you create a new client for <strong>every</strong> HTTP request, you are spawning thousands of threads. Even though the <code>client</code> reference is overwritten and eventually Garbage Collected, the background threads may not shut down immediately, leading to <code>OutOfMemoryError: unable to create new native thread</code> or high CPU usage.</p>
+</li>
+<li>
+<p><strong>Loss of Connection Pooling (Performance Killer)</strong>
+The <code>HttpClient</code> maintains an internal connection pool to reuse TCP connections (Keep-Alive) to the downstream service (<code>localhost:7002</code>). By recreating the client every time, you force a new TCP handshake (and SSL handshake if using HTTPS) for every single request. This drastically increases latency.</p>
+</li>
+<li>
+<p><strong>Thread Safety (Race Condition)</strong>
+Your handler is a singleton, meaning one instance of <code>DataGetHandler</code> serves all requests.
+You have defined <code>private HttpClient client;</code> as an instance variable.</p>
+<ul>
+<li><strong>Scenario:</strong> Request A comes in, creates a client, and assigns it to <code>this.client</code>. Immediately after, Request B comes in and overwrites <code>this.client</code> with a <em>new</em> client.</li>
+<li>Because <code>handleRequest</code> is called concurrently by multiple Undertow worker threads, having a mutable instance variable shared across requests is unsafe. While it might not crash immediately, it is poor design to share state this way without synchronization (though in this specific logic, you don't actually <em>need</em> to share the state, which makes it even worse).</li>
+</ul>
+</li>
+</ol>
+<h3 id="connection-close-header"><a class="header" href="#connection-close-header">Connection: close Header</a></h3>
+<p>Given the above findings, creating temporary HttpClient instances for retries is too risky. Further investigation revealed a safer and more efficient approach: forcing a new connection using the Connection: close header.</p>
+<p>By disabling persistent connections for a retry request, the existing HttpClient can be reused while ensuring the next request establishes a fresh TCP connection.</p>
+<h4 id="why-this-is-better-than-creating-a-new-httpclient"><a class="header" href="#why-this-is-better-than-creating-a-new-httpclient">Why this is better than creating a new HttpClient</a></h4>
+<ul>
+<li>
+<p>Lower Resource Overhead: Recreating HttpClient creates a new SelectorManager thread and internal infrastructure, which is a heavy operation.</p>
+</li>
+<li>
+<p>Prevents Thread Leaks: Repeatedly creating and discarding clients can lead to "SelectorManager" thread buildup if not closed properly.</p>
+</li>
+<li>
+<p>Clean Socket Management: The Connection: close header handles the lifecycle at the protocol level, allowing the existing client’s thread pool to remain stable.</p>
+</li>
+</ul>
+<h4 id="how-does-the-header-work"><a class="header" href="#how-does-the-header-work">How does the header work</a></h4>
+<p>The Connection: close header instructs both the client and the server (or load balancer) to terminate the TCP connection immediately after the current request/response exchange is finished. When you use this header on a retry, the following happens:</p>
+<ul>
+<li>
+<p>Current Request: The client established a connection (or reused one) to send the request.</p>
+</li>
+<li>
+<p>After Response: Once the response is received (or the request fails), the client's internal pool will not return that connection to the pool; it will close the socket.</p>
+</li>
+<li>
+<p>Next Attempt: Any subsequent request made by that same HttpClient instance will be forced to open a brand-new connection. This fresh connection will hit your load balancer again, which can then route it to a different, healthy node.</p>
+</li>
+</ul>
+<h4 id="recommended-retry-strategy-three-attempts"><a class="header" href="#recommended-retry-strategy-three-attempts">Recommended Retry Strategy (Three Attempts)</a></h4>
+<p>In most high-availability scenarios, retrying a third time (or using a "3-strikes" policy) is recommended. Here is the optimal sequence:</p>
+<ul>
+<li>
+<p>1st Attempt (Normal): Use the default persistent connection. This is fast and efficient.</p>
+</li>
+<li>
+<p>2nd Attempt (The "Fresh Connection" Retry): Use the Connection: close header. This forces the load balancer to re-evaluate the target node if the first one was dead or hanging.</p>
+</li>
+<li>
+<p>3rd Attempt (Final Safeguard): If the second attempt fails, it is often worth one final try with a small exponential backoff (e.g., 500ms–1s). This helps in cases of transient network congestion or when the load balancer hasn't yet updated its health checks to exclude the failing node.</p>
+</li>
+</ul>
+<pre><code>                    /*
+                     * 1st Attempt (Normal): Use the default persistent connection. This is fast and efficient.
+
+                     * 2nd Attempt (The "Fresh Connection" Retry): Use the Connection: close header. This forces
+                     *  the load balancer to re-evaluate the target node if the first one was dead or hanging.
+
+                     * 3rd Attempt (Final Safeguard): It will use a new connection to send the request.
+                     */
+                    int maxRetries = config.getMaxConnectionRetries();
+                    HttpResponse&lt;byte[]&gt; response = null;
+
+                    for (int attempt = 0; attempt &lt; maxRetries; attempt++) {
+                        try {
+                            HttpRequest finalRequest;
+
+                            if (attempt == 0) {
+                                // First attempt: Use original request (Keep-Alive enabled by default)
+                                finalRequest = request;
+                            } else {
+                                // Subsequent attempts: Force a fresh connection by adding the 'Connection: close' header.
+                                // This ensures the load balancer sees a new TCP handshake and can route to a new node.
+                                logger.info("Attempt {} failed. Retrying with 'Connection: close' to force fresh connection.", attempt);
+
+                                finalRequest = HttpRequest.newBuilder(request, (name, value) -&gt; true)
+                                        .header("Connection", "close")
+                                        .build();
+                            }
+
+                            // Always use the same shared, long-lived client
+                            response = this.client.send(finalRequest, HttpResponse.BodyHandlers.ofByteArray());
+                            break; // Success! Exit the loop.
+
+                        } catch (IOException | InterruptedException e) {
+                            if (attempt &gt;= maxRetries - 1) {
+                                throw e; // Rethrow on final attempt
+                            }
+                            logger.warn("Attempt {} failed ({}). Retrying...", attempt + 1, e.getMessage());
+
+                            // Optional: Add a small sleep/backoff here to allow LB health checks to update
+                        }
+                    }
+
+</code></pre>
+<h4 id="header-restriction"><a class="header" href="#header-restriction">Header Restriction</a></h4>
+<p>Header Restriction: Ensure your JVM is started with -Djdk.httpclient.allowRestrictedHeaders=connection to allow the HttpClient to modify the Connection header.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="implementation"><a class="header" href="#implementation">Implementation</a></h1>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="sign-in"><a class="header" href="#sign-in">Sign In</a></h1>
 <h2 id="portal-dashboard"><a class="header" href="#portal-dashboard">Portal Dashboard</a></h2>
@@ -9460,7 +9904,7 @@ Based on the selected user type:</p>
 <li><code>user-query</code></li>
 <li><code>service-query</code></li>
 </ul>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="configuration-1"><a class="header" href="#configuration-1">Configuration</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="configuration-2"><a class="header" href="#configuration-2">Configuration</a></h1>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="light-gateway-1"><a class="header" href="#light-gateway-1">light-gateway</a></h1>
 <h2 id="client-credentials-token"><a class="header" href="#client-credentials-token">Client Credentials Token</a></h2>
 <p>All the accesses from the light-gateway to the downstream APIs should have at least one token in the Authorization header. If there is an authorization code token in the Authorization header, then a client credentials token will be added to the X-Scope-Token header by the TokenHandler.</p>
