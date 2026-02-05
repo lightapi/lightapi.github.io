@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-64e35e07.js";
+            window.path_to_searchindex_js = "searchindex-bd553642.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-1cdaf237.js"></script>
+        <script src="toc-61f8b149.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -9403,6 +9403,253 @@ This procedure performs the heavy lifting:</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="config-clone"><a class="header" href="#config-clone">Config Clone</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="oauth-20-state-parameter-design"><a class="header" href="#oauth-20-state-parameter-design">OAuth 2.0 State Parameter Design</a></h1>
+<p>This document outlines the design, generation, and flow of the <code>state</code> parameter within the LightAPI OAuth 2.0 architecture.</p>
+<h2 id="overview-2"><a class="header" href="#overview-2">Overview</a></h2>
+<p>The <code>state</code> parameter is an opaque value used by the client to maintain state between the request and callback. In the OAuth 2.0 Authorization Code Flow, its primary and critical function is to prevent <strong>Cross-Site Request Forgery (CSRF)</strong> attacks.</p>
+<h2 id="workflow"><a class="header" href="#workflow">Workflow</a></h2>
+<p>The flow involves three parties:</p>
+<ol>
+<li><strong>Client</strong>: The application requesting access (e.g., Light Portal).</li>
+<li><strong>Authorization Server UI</strong>: The front-end login interface (e.g., Login View).</li>
+<li><strong>Authorization Service</strong>: The backend service validating credentials and issuing codes.</li>
+</ol>
+<h3 id="step-by-step-flow"><a class="header" href="#step-by-step-flow">Step-by-Step Flow</a></h3>
+<ol>
+<li>
+<p><strong>Generation (Client Side)</strong></p>
+<ul>
+<li>The User initiates a login action on the <strong>Client</strong>.</li>
+<li>The <strong>Client</strong> generates a cryptographically strong random string (the <code>state</code>).</li>
+<li>The <strong>Client</strong> stores this <code>state</code> locally (e.g., in a secure, HTTP-only cookie or Session Storage) bound to the user’s current session.</li>
+<li>The <strong>Client</strong> redirects the browser to the <strong>Authorization Server UI</strong> (<code>login-view</code>), appending the <code>state</code> as a query parameter.</li>
+</ul>
+<pre><code>GET https://login.lightapi.net/?client_id=...&amp;response_type=code&amp;state=xyz123...
+</code></pre>
+</li>
+<li>
+<p><strong>Preservation (Authorization Server UI)</strong></p>
+<ul>
+<li>The <strong>Authorization Server UI</strong> (<code>login-view</code>) loads and parses the query parameters.</li>
+<li>It <strong>must not</strong> modify or validate the <code>state</code>. Its sole responsibility is preservation.</li>
+<li>When the user submits credentials (username/password) or selects a social provider, the UI passes the <code>state</code> exactly as received to the backend <strong>Authorization Service</strong>.</li>
+</ul>
+</li>
+<li>
+<p><strong>Authorization (Authorization Service)</strong></p>
+<ul>
+<li>The backend service authenticates the user.</li>
+<li>Upon success, it generates an Authorization Code.</li>
+<li>It constructs the redirect URL back to the <strong>Client</strong>.</li>
+<li>It <strong>must</strong> append the <em>exact same</em> <code>state</code> value received from the UI to this redirect URL.</li>
+</ul>
+<pre><code>HTTP/1.1 302 Found
+Location: https://portal.lightapi.net/authorization?code=auth_code_abc&amp;state=xyz123...
+</code></pre>
+</li>
+<li>
+<p><strong>Verification (Client Side)</strong></p>
+<ul>
+<li>The <strong>Client</strong> receives the callback request.</li>
+<li>It extracts the <code>state</code> from the URL parameters.</li>
+<li>It retrieves the stored <code>state</code> from its local session.</li>
+<li>It compares the two values:
+<ul>
+<li><strong>Match</strong>: The request is valid. Proceed to exchange the code for a token.</li>
+<li><strong>Mismatch</strong>: The request is potentially malicious (CSRF likely). <strong>Reject the request</strong> and show an error.</li>
+</ul>
+</li>
+</ul>
+</li>
+</ol>
+<h2 id="security-requirements"><a class="header" href="#security-requirements">Security Requirements</a></h2>
+<ul>
+<li><strong>Uniqueness</strong>: The <code>state</code> must be unique per authentication request.</li>
+<li><strong>Entropy</strong>: It must be a cryptographically random string (high entropy) to be unguessable.</li>
+<li><strong>Binding</strong>: It must be bound to the user’s specific browser session on the client side.</li>
+</ul>
+<h2 id="responsibility-matrix"><a class="header" href="#responsibility-matrix">Responsibility Matrix</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Component</th><th style="text-align: left">Responsibility</th><th style="text-align: left">Action</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><strong>Portal (Client)</strong></td><td style="text-align: left"><strong>Owner</strong></td><td style="text-align: left">Generate, Store, Verify.</td></tr>
+<tr><td style="text-align: left"><strong>Login View (UI)</strong></td><td style="text-align: left"><strong>Carrier</strong></td><td style="text-align: left">Receive, Preserve, Forward.</td></tr>
+<tr><td style="text-align: left"><strong>Auth Service</strong></td><td style="text-align: left"><strong>Echo</strong></td><td style="text-align: left">Receive, Echo back in Redirect.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="references"><a class="header" href="#references">References</a></h2>
+<ul>
+<li><a href="https://datatracker.ietf.org/doc/html/rfc6749#section-10.12">RFC 6749 Section 10.12 (Cross-Site Request Forgery)</a></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="event-promotion-design-state-based-reconciliation-with-composite-keys"><a class="header" href="#event-promotion-design-state-based-reconciliation-with-composite-keys">Event Promotion Design: State-Based Reconciliation with Composite Keys</a></h1>
+<h2 id="overview-3"><a class="header" href="#overview-3">Overview</a></h2>
+<p>Traditional event sourcing replication involves copying raw events from one environment to another. However, this fails when the target environment has diverged (e.g., hotfixes), causing <code>aggregateVersion</code> conflicts. Additionally, strict global UUID constraints can prevent reusing the same ID across environments (Tenants). Finally, partial promotions can fail if parent dependencies (referential integrity) are missing in the target.</p>
+<p>To resolve this, we adopt a <strong>State-Based Reconciliation</strong> approach (Semantic Replay) combined with <strong>Composite Keys</strong> for identity and <strong>Recursive Dependency Resolution</strong> for integrity.</p>
+<h2 id="core-strategy-state-based-reconciliation"><a class="header" href="#core-strategy-state-based-reconciliation">Core Strategy: State-Based Reconciliation</a></h2>
+<h3 id="workflow-1"><a class="header" href="#workflow-1">Workflow</a></h3>
+<ol>
+<li><strong>Export (Lower Environment):</strong>
+<ul>
+<li>Query the <em>current state</em> (Snapshot) of the entity from the Lower Environment (LE).</li>
+<li>Produce a “Canonical State Snapshot” (JSON).</li>
+</ul>
+</li>
+<li><strong>Import &amp; Diff (Higher Environment):</strong>
+<ul>
+<li>Read the LE Snapshot.</li>
+<li>Query the <em>current</em> state of the representative entity in the Higher Environment (HE).</li>
+<li><strong>Compare:</strong>
+<ul>
+<li><strong>New?</strong> -&gt; Generate <code>XxxCreatedEvent</code>.</li>
+<li><strong>Changed?</strong> -&gt; Calculate Delta -&gt; Generate <code>XxxUpdatedEvent</code>.</li>
+<li><strong>Same?</strong> -&gt; No-op.</li>
+</ul>
+</li>
+</ul>
+</li>
+</ol>
+<h3 id="advantages"><a class="header" href="#advantages">Advantages</a></h3>
+<ul>
+<li><strong>Conflict Immunity:</strong> No <code>aggregateVersion</code> conflicts; we always append <em>new</em> events.</li>
+<li><strong>Self-Healing:</strong> Automatically synchronizes diverged states.</li>
+</ul>
+<h2 id="identity-strategy-composite-keys"><a class="header" href="#identity-strategy-composite-keys">Identity Strategy: Composite Keys</a></h2>
+<h3 id="the-problem-global-uuid-uniqueness"><a class="header" href="#the-problem-global-uuid-uniqueness">The Problem: Global UUID Uniqueness</a></h3>
+<p>In a multi-tenant system shareing a single database, a standard Primary Key <code>UUID</code> (e.g., <code>user_id</code>) is globally unique. This prevents us from having “User Steve” with UUID <code>123</code> in both the “Dev Tenant” and “Prod Tenant” if the DB enforces strict uniqueness on that column.</p>
+<h3 id="the-solution-composite-keys-host_id--aggregate_id"><a class="header" href="#the-solution-composite-keys-host_id--aggregate_id">The Solution: Composite Keys (<code>host_id</code> + <code>aggregate_id</code>)</a></h3>
+<p>We scope all identity by the Tenant ID (<code>host_id</code>).</p>
+<ol>
+<li>
+<p><strong>Schema Change:</strong></p>
+<ul>
+<li><strong>Primary Keys:</strong> Change from <code>PK(id)</code> to <code>PK(host_id, id)</code>.</li>
+<li><strong>Uniqueness:</strong> Change unique constraints (e.g., email) from <code>UK(email)</code> to <code>UK(host_id, email)</code>.</li>
+<li><strong>Event Store:</strong> Change unique constraint from <code>UK(aggregate_id, version)</code> to <code>UK(host_id, aggregate_id, version)</code>.</li>
+</ul>
+</li>
+<li>
+<p><strong>Promotion Benefit:</strong></p>
+<ul>
+<li><strong>Dev Tenant:</strong> <code>host_id=DEV, user_id=123</code></li>
+<li><strong>Prod Tenant:</strong> <code>host_id=PROD, user_id=123</code></li>
+<li>Matching entities is trivial (compare <code>id</code> directly).</li>
+</ul>
+</li>
+</ol>
+<h2 id="data-integrity-recursive-dependency-resolution"><a class="header" href="#data-integrity-recursive-dependency-resolution">Data Integrity: Recursive Dependency Resolution</a></h2>
+<h3 id="the-problem-missing-dependencies"><a class="header" href="#the-problem-missing-dependencies">The Problem: Missing Dependencies</a></h3>
+<p>Promoting a child entity (e.g., <strong>API Configuration</strong>) fails if its parent (e.g., <strong>API Instance</strong>) does not exist in the target environment (Higher Env).</p>
+<h3 id="the-solution-deep-promotion-recursive-bundling"><a class="header" href="#the-solution-deep-promotion-recursive-bundling">The Solution: Deep Promotion (Recursive Bundling)</a></h3>
+<p>The exporter must be “Topology Aware”.</p>
+<ol>
+<li>
+<p><strong>Dependency Metadata:</strong>
+Every Entity Type must declare its dependencies.</p>
+<ul>
+<li><code>ApiConfig</code> depends on <code>ApiInstance</code>.</li>
+<li><code>ApiInstance</code> depends on <code>GatewayInstance</code>.</li>
+<li><code>GatewayInstance</code> depends on <code>Host</code>.</li>
+</ul>
+</li>
+<li>
+<p><strong>Export Workflow (Recursive):</strong>
+When a user selects <code>ApiConfig-123</code> for promotion:</p>
+<ul>
+<li>System checks <code>ApiConfig-123</code> -&gt; Parent <code>ApiInstance-456</code>.</li>
+<li>System checks <code>ApiInstance-456</code> -&gt; Parent <code>GatewayInstance-789</code>.</li>
+<li><strong>Export Package:</strong> Includes <code>[GatewayInstance-789, ApiInstance-456, ApiConfig-123]</code> (Ordered by dependency).</li>
+</ul>
+</li>
+<li>
+<p><strong>Import Workflow (Ordered):</strong>
+The Importer processes the list in order:</p>
+<ol>
+<li><strong>GatewayInstance:</strong> Exists in Prod? Yes. (Skip).</li>
+<li><strong>ApiInstance:</strong> Exists in Prod? No. <strong>Action: Create <code>ApiInstance</code></strong>.</li>
+<li><strong>ApiConfig:</strong> Exists in Prod? No. <strong>Action: Create <code>ApiConfig</code></strong>.</li>
+</ol>
+</li>
+</ol>
+<h2 id="dry-run-technical-implementation"><a class="header" href="#dry-run-technical-implementation">Dry Run Technical Implementation</a></h2>
+<h3 id="purpose"><a class="header" href="#purpose">Purpose</a></h3>
+<p>To guarantee the promotion will succeed without actually modifying the Higher Environment (Production).</p>
+<h3 id="option-1-application-layer-simulation-fast-recommended-for-planning"><a class="header" href="#option-1-application-layer-simulation-fast-recommended-for-planning">Option 1: Application-Layer Simulation (Fast, Recommended for Planning)</a></h3>
+<ul>
+<li><strong>Logic:</strong> The Importer queries the DB (read-only) to fetch the current state of all entities in the package.</li>
+<li><strong>Result:</strong> It calculates the “Diff Plan” purely in memory.</li>
+<li><strong>Output:</strong> “Plan: Create API Instance (New), Update API Config (Diff)”.</li>
+<li><strong>Pros:</strong> Very fast, zero DB locks.</li>
+<li><strong>Cons:</strong> Does not verify deep database constraints (e.g., complex triggers or check constraints) that only trigger on write.</li>
+</ul>
+<h3 id="option-2-transaction-rollback-robust-recommended-for-validation"><a class="header" href="#option-2-transaction-rollback-robust-recommended-for-validation">Option 2: Transaction Rollback (Robust, Recommended for Validation)</a></h3>
+<ul>
+<li><strong>Logic:</strong>
+<ol>
+<li>Start a Database Transaction: <code>connection.setAutoCommit(false);</code></li>
+<li><strong>Simulate Execution:</strong> Perform the actual SQL Inserts and Updates generated by the Plan.
+<ul>
+<li>Insert <code>ApiInstance</code>…</li>
+<li>Insert <code>ApiConfig</code>…</li>
+</ul>
+</li>
+<li><strong>Check for Errors:</strong> If any SQL Exception occurs (e.g., FK violation, unique constraint violation), catch it.</li>
+<li><strong>Rollback:</strong> Regardless of success or failure, <strong>always</strong> call <code>connection.rollback()</code>.</li>
+</ol>
+</li>
+<li><strong>Output:</strong> “Validation Successful: The detailed plan is valid and safe to execute.” OR “Validation Failed: FK Violation on Table X”.</li>
+<li><strong>Pros:</strong> 100% certainty that the data is valid according to the database schema.</li>
+<li><strong>Cons:</strong> Slightly heavier key locks, but acceptable for admin operations.</li>
+</ul>
+<h3 id="recommendation-2"><a class="header" href="#recommendation-2">Recommendation</a></h3>
+<p>Use <strong>Option 1 (App Simulation)</strong> for the UI preview to show the user “what will happen”.
+Use <strong>Option 2 (Transaction Rollback)</strong> immediately when the user clicks “Promote” (as a pre-flight check) or as an explicit “Verify” button to ensure deep integrity.</p>
+<h2 id="sibling-deletion-handling-orphaned-items"><a class="header" href="#sibling-deletion-handling-orphaned-items">Sibling Deletion: Handling Orphaned Items</a></h2>
+<h3 id="the-user-case"><a class="header" href="#the-user-case">The User Case</a></h3>
+<p>When promoting a collection of items (e.g., “10 Config Properties” in HE vs “8 in LE”), simply creating or updating the 8 matching items from LE is insufficient. We must identify the <strong>2 extra items</strong> in HE that likely need to be deleted to match the LE state.</p>
+<h3 id="design-pattern-scoped-reconciliation"><a class="header" href="#design-pattern-scoped-reconciliation">Design Pattern: Scoped Reconciliation</a></h3>
+<p>To handle this, the import logic must be aware of the “Parent Scope” of the entities being promoted.</p>
+<ol>
+<li>
+<p><strong>Export (Snapshot with Siblings):</strong></p>
+<ul>
+<li>When promoting <code>ApiConfig-123</code>, we fetch <strong>ALL</strong> associated properties for that config in LE.</li>
+<li>LE Snapshot: <code>Properties = {P1, P2, ... P8}</code> (Total 8).</li>
+</ul>
+</li>
+<li>
+<p><strong>Import (Set Difference Logic):</strong></p>
+<ul>
+<li>Query <strong>ALL</strong> associated properties for <code>ApiConfig-123</code> in HE.</li>
+<li>HE State: <code>Properties = {P1, P2, ... P8, P9, P10}</code> (Total 10).</li>
+<li><strong>Logic:</strong> <code>HE_Only = HE_Set - LE_Set</code> =&gt; <code>{P9, P10}</code>.</li>
+</ul>
+</li>
+<li>
+<p><strong>User Decision (Interactive Mode):</strong></p>
+<ul>
+<li>The Dry Run Plan reports:
+<ul>
+<li><code>Updates:</code> 8 items synced (P1..P8).</li>
+<li><code>Deuntions (Potential):</code> 2 items exist in Prod but not Dev (P9, P10).</li>
+</ul>
+</li>
+<li><strong>Default Action:</strong> Do nothing (Safe Mode).</li>
+<li><strong>Option:</strong> “Sync Deletes” -&gt; Checkbox to delete extras?</li>
+<li><strong>Strict Mode:</strong> Mirror exact state (Automatically schedule <code>ConfigPropertyDeletedEvent</code> for P9, P10).</li>
+</ul>
+</li>
+</ol>
+<h3 id="implementation-checklist"><a class="header" href="#implementation-checklist">Implementation Checklist</a></h3>
+<ul>
+<li><input disabled="" type="checkbox"> Exporter must include the full list of children IDs when exporting a parent container.</li>
+<li><input disabled="" type="checkbox"> Importer must realize that for “One-to-Many” relationships, it has to fetch the full target set to detect orphans.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="implementation"><a class="header" href="#implementation">Implementation</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="sign-in"><a class="header" href="#sign-in">Sign In</a></h1>
@@ -9536,6 +9783,83 @@ This procedure performs the heavy lifting:</p>
 <p>It invokes ClientUtil.getAuthCodeDetail from the market-query service and calls the ClientUtil.deleteAuthCode to remove the auth code as it is one-time code.</p>
 <h2 id=""><a class="header" href="#"></a></h2>
 <h2 id="-1"><a class="header" href="#-1"></a></h2>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="login-view-1"><a class="header" href="#login-view-1">Login View</a></h1>
+<p>The <code>login-view</code> is a Single Page Application (SPA) built with React and Vite. It serves as the user interface for the OAuth 2.0 Authorization Code flow within the LightAPI ecosystem.</p>
+<h2 id="overview-4"><a class="header" href="#overview-4">Overview</a></h2>
+<p>This application acts as the front-end for the Authorization Server. When a user attempts to access a protected resource on a client application (the “Portal”), they are redirected to this application to authenticate and grant consent.</p>
+<p>It handles:</p>
+<ul>
+<li>User Authentication (Username/Password).</li>
+<li>Social Login (Google, Facebook, GitHub).</li>
+<li>OAuth 2.0 Consent Granting.</li>
+<li>Password Management (Forgot Password, Reset Password).</li>
+</ul>
+<h2 id="technology-stack"><a class="header" href="#technology-stack">Technology Stack</a></h2>
+<ul>
+<li><strong>Framework</strong>: React 18</li>
+<li><strong>Build Tool</strong>: Vite</li>
+<li><strong>UI Library</strong>: Material UI (MUI) v6</li>
+<li><strong>Routing</strong>: React Router DOM v6</li>
+<li><strong>Social Login</strong>:
+<ul>
+<li>Google: <code>@react-oauth/google</code></li>
+<li>Facebook: <code>@greatsumini/react-facebook-login</code></li>
+<li>GitHub: Manual OAuth 2.0 flow with <code>react-social-login-buttons</code></li>
+</ul>
+</li>
+</ul>
+<h2 id="key-flows"><a class="header" href="#key-flows">Key Flows</a></h2>
+<h3 id="1-oauth-20-authorization"><a class="header" href="#1-oauth-20-authorization">1. OAuth 2.0 Authorization</a></h3>
+<p>The application expects to be opened with standard OAuth 2.0 query parameters:</p>
+<ul>
+<li><code>client_id</code>: The ID of the client application requesting access.</li>
+<li><code>response_type</code>: Typically <code>code</code>.</li>
+<li><code>redirect_uri</code>: Where to redirect after success.</li>
+<li><code>state</code>: A random string generated by the client to prevent CSRF.</li>
+<li><code>scope</code>: Requested permissions.</li>
+</ul>
+<p><strong>Process:</strong></p>
+<ol>
+<li>The <code>Login</code> component extracts these parameters from the URL.</li>
+<li>User submits credentials or uses social login.</li>
+<li>On success, the application receives an authorization code from the backend.</li>
+<li>To grant consent (if configured), the user is shown the <code>Consent</code> screen.</li>
+<li>Finally, the browser is redirected to the <code>redirect_uri</code> with the <code>code</code> and <code>state</code>.</li>
+</ol>
+<h3 id="2-social-login-configuration"><a class="header" href="#2-social-login-configuration">2. Social Login Configuration</a></h3>
+<p>The application supports multiple identity providers.</p>
+<ul>
+<li><strong>Google</strong>: Uses the modern Google Identity Services. Configured in <code>src/main.jsx</code> via <code>GoogleOAuthProvider</code>.</li>
+<li><strong>Facebook</strong>: Uses the Facebook SDK wrapper. Configured in <code>src/components/FbLogin.jsx</code>.</li>
+<li><strong>GitHub</strong>: Uses a manual popup flow. The client ID is configured in <code>src/components/GithubLogin.jsx</code>. The redirect URI <code>/github/callback</code> handles the code extraction.</li>
+</ul>
+<h3 id="3-backend-integration"><a class="header" href="#3-backend-integration">3. Backend Integration</a></h3>
+<p>The application proxies API requests to the backend (Light Gateway/OAuth Provider) using <code>vite.config.js</code> proxy settings during development.</p>
+<ul>
+<li><code>/oauth2/*</code>: For token and code endpoints.</li>
+<li><code>/portal/*</code>: For user management commands (login query).</li>
+<li><code>/google</code>, <code>/facebook</code>, <code>/github</code>: Endpoints to exchange social tokens/codes for LightAPI authorization codes.</li>
+</ul>
+<h2 id="development"><a class="header" href="#development">Development</a></h2>
+<h3 id="setup"><a class="header" href="#setup">Setup</a></h3>
+<pre><code class="language-bash">yarn install
+</code></pre>
+<h3 id="run-locally"><a class="header" href="#run-locally">Run Locally</a></h3>
+<pre><code class="language-bash">yarn dev
+</code></pre>
+<p>Runs on <code>https://localhost:5173</code> by default.</p>
+<h3 id="build"><a class="header" href="#build">Build</a></h3>
+<pre><code class="language-bash">yarn build
+</code></pre>
+<p>Generates production assets in the <code>dist</code> folder.</p>
+<h2 id="project-structure"><a class="header" href="#project-structure">Project Structure</a></h2>
+<ul>
+<li><code>src/components/</code>: Reusable UI components (Login forms, Social buttons).</li>
+<li><code>src/theme.js</code>: MUI theme configuration.</li>
+<li><code>src/main.jsx</code>: Application entry point and providers.</li>
+<li><code>vite.config.js</code>: Vite configuration including proxy rules.</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="portal-services"><a class="header" href="#portal-services">Portal Services</a></h1>
 <p>This section provides an overview of the services utilized by Light Portal. Each service is implemented as a separate repository and is initialized during the hybrid-query or hybrid-command startup process. These services are designed to handle specific functionalities within the portal and may interact with one another to execute complex operations.</p>
@@ -9853,6 +10177,106 @@ This procedure performs the heavy lifting:</p>
 <li><code>user-query</code></li>
 <li><code>service-query</code></li>
 </ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="portal-view-1"><a class="header" href="#portal-view-1">Portal View</a></h1>
+<ul>
+<li><a href="#oauth-20-state-verification">OAuth 2.0 State Verification</a></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="oauth-20-state-verification"><a class="header" href="#oauth-20-state-verification">OAuth 2.0 State Verification</a></h1>
+<p>This document describes the implementation of CSRF protection for the OAuth 2.0 authorization code flow in the portal-view application.</p>
+<h2 id="overview-5"><a class="header" href="#overview-5">Overview</a></h2>
+<p>To prevent Cross-Site Request Forgery (CSRF) attacks during the OAuth 2.0 authentication process, we implement a state parameter check. A random state string is generated before the authentication request and verified upon the callback.</p>
+<h2 id="implementation-details-2"><a class="header" href="#implementation-details-2">Implementation Details</a></h2>
+<h3 id="state-generation"><a class="header" href="#state-generation">State Generation</a></h3>
+<p>Location: <code>src/components/Header/ProfileMenu.tsx</code></p>
+<p>When the user initiates the sign-in process:</p>
+<ol>
+<li>A random alphanumeric string is generated.</li>
+<li>This string is stored in the browser’s <code>localStorage</code> under the key <code>portal_auth_state</code>.</li>
+<li>The string is appended as the <code>state</code> query parameter to the OAuth 2.0 authorization URL.</li>
+</ol>
+<pre><code class="language-typescript">// Generate a random state for CSRF protection
+const state = Math.random().toString(36).substring(7);
+localStorage.setItem('portal_auth_state', state);
+
+const defaultUrl =
+  `https://locsignin.lightapi.net?client_id=...&amp;state=${state}`;
+</code></pre>
+<h3 id="redirect-handling"><a class="header" href="#redirect-handling">Redirect Handling</a></h3>
+<p>Location: <code>src/App.tsx</code></p>
+<p>To ensure the <code>state</code> query parameter is preserved during the redirect from the root path (<code>/</code>) to the dashboard, a custom <code>RedirectWithQuery</code> component is used. This component handles both standard query parameters and hash-based redirects (common with certain OAuth providers or router configurations).</p>
+<ol>
+<li>Checks <code>window.location.hash</code> for paths (e.g., <code>/#/app/dashboard?state=...</code>).</li>
+<li>Prioritizes the hash path if present to ensure <code>react-router</code> receives the correct target.</li>
+<li>Appends existing query parameters from <code>useLocation().search</code>.</li>
+<li>Uses <code>useNavigate</code> for the redirection.</li>
+</ol>
+<pre><code class="language-typescript">const RedirectWithQuery = ({ to }: { to: string }) =&gt; {
+  // ... logic to preserve search params and handle hash paths
+  if (window.location.pathname === to) return; // Prevent loop
+  // ...
+  navigate(target, { replace: true });
+};
+</code></pre>
+<h3 id="state-verification"><a class="header" href="#state-verification">State Verification</a></h3>
+<p>Location: <code>src/pages/dashboard/Dashboard.tsx</code></p>
+<p>Upon successful authentication, the provider redirects the user back to the application (defaulting to the Dashboard).</p>
+<ol>
+<li>The application retrieves the <code>state</code> parameter from the URL query string.</li>
+<li>It retrieves the stored state from <code>localStorage</code> (<code>portal_auth_state</code>).</li>
+<li>The two values are compared:
+<ul>
+<li><strong>Match:</strong> The verification succeeds, and the <code>portal_auth_state</code> is removed from <code>localStorage</code>.</li>
+<li><strong>Mismatch:</strong> The verification fails. The user is alerted and immediately logged out via <code>signOut</code> to protect the session.</li>
+</ul>
+</li>
+</ol>
+<pre><code class="language-typescript">useEffect(() =&gt; {
+  const searchParams = new URLSearchParams(location.search);
+  const state = searchParams.get('state');
+
+  // Check if we have a state and haven't attempted verification yet in this mount
+  if (state &amp;&amp; !verificationAttempted.current) {
+    verificationAttempted.current = true;
+    const storedState = localStorage.getItem('portal_auth_state');
+    if (storedState === state) {
+      console.log('OAuth state verified successfully.');
+      localStorage.removeItem('portal_auth_state');
+      // Remove state from URL to prevent re-verification
+      const newSearchParams = new URLSearchParams(location.search);
+      newSearchParams.delete('state');
+      navigate({ search: newSearchParams.toString() }, { replace: true });
+    } else {
+      console.error('OAuth state mismatch. Potential CSRF attack.');
+      alert('OAuth state mismatch. Potential CSRF attack. Logging out...');
+      signOut(userDispatch, navigate);
+    }
+  }
+}, [location, navigate, userDispatch]);
+</code></pre>
+<h2 id="testing-state-mismatch-manual-steps"><a class="header" href="#testing-state-mismatch-manual-steps">Testing State Mismatch (Manual Steps)</a></h2>
+<p>To manually verify the security logout mechanism:</p>
+<ol>
+<li><strong>Ensure you are logged in</strong> to the application.</li>
+<li>Open your browser’s <strong>Developer Tools</strong> (F12) and go to the <strong>Console</strong> tab.</li>
+<li>Set a dummy “valid” state in your local storage:
+<pre><code class="language-javascript">localStorage.setItem('portal_auth_state', 'my_secret_state');
+</code></pre>
+</li>
+<li>Manually modify the URL to include a <em>different</em> state parameter.
+<ul>
+<li>Example: <code>https://localhost:3000/app/dashboard?state=attackers_fake_state</code></li>
+<li><em>Note:</em> If using hash routing, ensure it is inside the hash: <code>https://localhost:3000/#/app/dashboard?state=attackers_fake_state</code></li>
+</ul>
+</li>
+<li><strong>Press Enter</strong> to navigate.</li>
+</ol>
+<p><strong>Expected Result:</strong></p>
+<ol>
+<li>An alert appears: <strong>“OAuth state mismatch. Potential CSRF attack. Logging out…”</strong></li>
+<li>The user is immediately signed out of the application.</li>
+</ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="configuration-2"><a class="header" href="#configuration-2">Configuration</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>

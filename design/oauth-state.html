@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Config Snapshot - Light Portal Documentation</title>
+        <title>OAuth State - Light Portal Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -174,137 +174,98 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="configuration-snapshot-design"><a class="header" href="#configuration-snapshot-design">Configuration Snapshot Design</a></h1>
-<p>This document describes the design and implementation of the configuration snapshot feature in the light-portal.</p>
+                        <h1 id="oauth-20-state-parameter-design"><a class="header" href="#oauth-20-state-parameter-design">OAuth 2.0 State Parameter Design</a></h1>
+<p>This document outlines the design, generation, and flow of the <code>state</code> parameter within the LightAPI OAuth 2.0 architecture.</p>
 <h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
-<p>A configuration snapshot captures the state of an instance’s configuration at a specific point in time. It includes all properties, files, and relationships defined for that instance, merging overrides from various levels (Product, Environment, Product Version) into a “burned-in” effective configuration.</p>
-<p>Snapshots are created in two scenarios:</p>
+<p>The <code>state</code> parameter is an opaque value used by the client to maintain state between the request and callback. In the OAuth 2.0 Authorization Code Flow, its primary and critical function is to prevent <strong>Cross-Site Request Forgery (CSRF)</strong> attacks.</p>
+<h2 id="workflow"><a class="header" href="#workflow">Workflow</a></h2>
+<p>The flow involves three parties:</p>
 <ol>
-<li><strong>Deployment Trigger:</strong> Automatically created when a deployment occurs (to capture the state being deployed).</li>
-<li><strong>User Trigger:</strong> Manually created by a user via the UI (e.g., to save a milestone).</li>
+<li><strong>Client</strong>: The application requesting access (e.g., Light Portal).</li>
+<li><strong>Authorization Server UI</strong>: The front-end login interface (e.g., Login View).</li>
+<li><strong>Authorization Service</strong>: The backend service validating credentials and issuing codes.</li>
 </ol>
-<h2 id="data-model"><a class="header" href="#data-model">Data Model</a></h2>
-<h3 id="snapshot-header-config_snapshot_t"><a class="header" href="#snapshot-header-config_snapshot_t">Snapshot Header (<code>config_snapshot_t</code>)</a></h3>
-<p>Captures metadata about the snapshot.</p>
-<ul>
-<li><code>snapshot_id</code>: UUID</li>
-<li><code>snapshot_type</code>: Type of snapshot (e.g., <code>DEPLOYMENT</code>, <code>USER_SAVE</code>)</li>
-<li><code>instance_id</code>: Target instance</li>
-<li><code>host_id</code>: Tenant identifier</li>
-<li><code>deployment_id</code>: Link to deployment (if applicable)</li>
-<li><code>product_version</code>: Locked product version at time of snapshot</li>
-<li><code>service_id</code>: Locked service ID</li>
-</ul>
-<h3 id="snapshot-content"><a class="header" href="#snapshot-content">Snapshot Content</a></h3>
-<p>Snapshot data is normalizing into shadow tables that mirror the runtime configuration tables. These tables differ from the runtime tables by including a <code>snapshot_id</code> and lacking some runtime-specific fields.</p>
-<p>Key tables include:</p>
-<ul>
-<li><code>snapshot_instance_property_t</code></li>
-<li><code>snapshot_instance_file_t</code></li>
-<li><code>snapshot_deployment_instance_property_t</code></li>
-<li><code>snapshot_product_version_property_t</code></li>
-<li><code>snapshot_environment_property_t</code></li>
-<li>… (others for APIs, Apps, etc.)</li>
-</ul>
-<h3 id="effective-configuration-config_snapshot_property_t"><a class="header" href="#effective-configuration-config_snapshot_property_t">Effective Configuration (<code>config_snapshot_property_t</code>)</a></h3>
-<p>A flattened, merged view of all properties for the snapshot. This table represents the “final” configuration values used by the instance.</p>
-<ul>
-<li>Calculated by merging properties from all levels (Deployment &gt; Instance &gt; Product Version &gt; Environment &gt; Product) based on priority.</li>
-</ul>
-<h2 id="backend-implementation"><a class="header" href="#backend-implementation">Backend Implementation</a></h2>
-<h3 id="stored-procedure-create_snapshot"><a class="header" href="#stored-procedure-create_snapshot">Stored Procedure (<code>create_snapshot</code>)</a></h3>
-<p>Located in <code>portal-db/postgres/sp_tr_fn.sql</code>.
-This procedure performs the heavy lifting:</p>
-<ol>
-<li>Validates the instance and retrieves scope data (product, environment, etc.).</li>
-<li>Creates the snapshot header record.</li>
-<li>Copies raw data from active runtime tables to snapshot tables (e.g., <code>instance_property_t</code> -&gt; <code>snapshot_instance_property_t</code>).</li>
-<li><strong>Merges</strong> properties from all levels into <code>config_snapshot_property_t</code>.
-<ul>
-<li>Handles list/map merging (aggregation).</li>
-<li>Handles scalar overriding (last update wins/priority tiers).</li>
-</ul>
-</li>
-</ol>
-<h3 id="persistence-layer-configpersistenceimpljava"><a class="header" href="#persistence-layer-configpersistenceimpljava">Persistence Layer (<code>ConfigPersistenceImpl.java</code>)</a></h3>
-<p>Provides the Java interface to calls the stored procedure:</p>
-<ul>
-<li><code>createConfigSnapshot</code>: Calls <code>CALL create_snapshot(...)</code>.</li>
-<li><code>getConfigSnapshot</code>: Retrieves snapshot headers with filtering/sorting.</li>
-<li><code>updateConfigSnapshot</code>: Updates metadata (description).</li>
-<li><code>deleteConfigSnapshot</code>: Deletes a snapshot and its cascaded data (if cascade delete is set up in DB, otherwise manual cleanup might be needed).</li>
-</ul>
-<h2 id="front-end-implementation"><a class="header" href="#front-end-implementation">Front End Implementation</a></h2>
-<h3 id="config-snapshot-page-configsnapshottsx"><a class="header" href="#config-snapshot-page-configsnapshottsx">Config Snapshot Page (<code>ConfigSnapshot.tsx</code>)</a></h3>
-<ul>
-<li>Displays a list of snapshots for a selected instance.</li>
-<li>Supports filtering by <code>current</code>, ID, date, etc.</li>
-<li><strong>Actions:</strong>
-<ul>
-<li><strong>Create:</strong> Navigates to <code>/app/form/createConfigSnapshot</code>.</li>
-<li><strong>Update:</strong> Fetches fresh data and navigates to update form.</li>
-<li><strong>Delete:</strong> Calls <code>deleteSnapshot</code> command.</li>
-</ul>
-</li>
-</ul>
-<h2 id="gap-analysis--missing-components"><a class="header" href="#gap-analysis--missing-components">Gap Analysis &amp; Missing Components</a></h2>
-<p>The following components are currently <strong>MISSING</strong> or incomplete:</p>
+<h3 id="step-by-step-flow"><a class="header" href="#step-by-step-flow">Step-by-Step Flow</a></h3>
 <ol>
 <li>
-<p><strong>Command Handlers:</strong></p>
+<p><strong>Generation (Client Side)</strong></p>
 <ul>
-<li><code>CreateConfigSnapshot</code> handler (for User Trigger) is missing in <code>config-command</code>.</li>
-<li><code>DeleteConfigSnapshot</code> handler is missing in <code>config-command</code>.</li>
-<li><code>GetFreshConfigSnapshot</code> handler is missing (required for the “Update” action in UI).</li>
+<li>The User initiates a login action on the <strong>Client</strong>.</li>
+<li>The <strong>Client</strong> generates a cryptographically strong random string (the <code>state</code>).</li>
+<li>The <strong>Client</strong> stores this <code>state</code> locally (e.g., in a secure, HTTP-only cookie or Session Storage) bound to the user’s current session.</li>
+<li>The <strong>Client</strong> redirects the browser to the <strong>Authorization Server UI</strong> (<code>login-view</code>), appending the <code>state</code> as a query parameter.</li>
+</ul>
+<pre><code>GET https://login.lightapi.net/?client_id=...&amp;response_type=code&amp;state=xyz123...
+</code></pre>
+</li>
+<li>
+<p><strong>Preservation (Authorization Server UI)</strong></p>
+<ul>
+<li>The <strong>Authorization Server UI</strong> (<code>login-view</code>) loads and parses the query parameters.</li>
+<li>It <strong>must not</strong> modify or validate the <code>state</code>. Its sole responsibility is preservation.</li>
+<li>When the user submits credentials (username/password) or selects a social provider, the UI passes the <code>state</code> exactly as received to the backend <strong>Authorization Service</strong>.</li>
 </ul>
 </li>
 <li>
-<p><strong>Deployment Integration:</strong></p>
+<p><strong>Authorization (Authorization Service)</strong></p>
 <ul>
-<li><code>CreateDeployment.java</code> (in <code>deployment-command</code>) does <strong>NOT</strong> call <code>createConfigSnapshot</code>.</li>
-<li>The automatic snapshot creation on deployment is currently not implemented.</li>
+<li>The backend service authenticates the user.</li>
+<li>Upon success, it generates an Authorization Code.</li>
+<li>It constructs the redirect URL back to the <strong>Client</strong>.</li>
+<li>It <strong>must</strong> append the <em>exact same</em> <code>state</code> value received from the UI to this redirect URL.</li>
 </ul>
+<pre><code>HTTP/1.1 302 Found
+Location: https://portal.lightapi.net/authorization?code=auth_code_abc&amp;state=xyz123...
+</code></pre>
 </li>
 <li>
-<p><strong>API Definition:</strong></p>
+<p><strong>Verification (Client Side)</strong></p>
 <ul>
-<li>The <code>createConfigSnapshot</code> and <code>deleteConfigSnapshot</code> endpoints need to be defined in the schema/routing if they are not already.</li>
+<li>The <strong>Client</strong> receives the callback request.</li>
+<li>It extracts the <code>state</code> from the URL parameters.</li>
+<li>It retrieves the stored <code>state</code> from its local session.</li>
+<li>It compares the two values:
+<ul>
+<li><strong>Match</strong>: The request is valid. Proceed to exchange the code for a token.</li>
+<li><strong>Mismatch</strong>: The request is potentially malicious (CSRF likely). <strong>Reject the request</strong> and show an error.</li>
+</ul>
+</li>
 </ul>
 </li>
 </ol>
-<h2 id="action-plan"><a class="header" href="#action-plan">Action Plan</a></h2>
-<ol>
-<li>
-<p><strong>Implement Command Handlers:</strong></p>
+<h2 id="security-requirements"><a class="header" href="#security-requirements">Security Requirements</a></h2>
 <ul>
-<li>Create <code>CreateConfigSnapshot</code> handler in <code>config-command</code> that invokes <code>ConfigPersistence.createConfigSnapshot</code>.</li>
-<li>Create <code>DeleteConfigSnapshot</code> handler in <code>config-command</code>.</li>
-<li>Create <code>GetFreshConfigSnapshot</code> handler in <code>config-query</code>.</li>
+<li><strong>Uniqueness</strong>: The <code>state</code> must be unique per authentication request.</li>
+<li><strong>Entropy</strong>: It must be a cryptographically random string (high entropy) to be unguessable.</li>
+<li><strong>Binding</strong>: It must be bound to the user’s specific browser session on the client side.</li>
 </ul>
-</li>
-<li>
-<p><strong>Integrate with Deployment:</strong></p>
+<h2 id="responsibility-matrix"><a class="header" href="#responsibility-matrix">Responsibility Matrix</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Component</th><th style="text-align: left">Responsibility</th><th style="text-align: left">Action</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><strong>Portal (Client)</strong></td><td style="text-align: left"><strong>Owner</strong></td><td style="text-align: left">Generate, Store, Verify.</td></tr>
+<tr><td style="text-align: left"><strong>Login View (UI)</strong></td><td style="text-align: left"><strong>Carrier</strong></td><td style="text-align: left">Receive, Preserve, Forward.</td></tr>
+<tr><td style="text-align: left"><strong>Auth Service</strong></td><td style="text-align: left"><strong>Echo</strong></td><td style="text-align: left">Receive, Echo back in Redirect.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="references"><a class="header" href="#references">References</a></h2>
 <ul>
-<li>Modify <code>CreateDeployment.java</code> (or the platform handler it invokes) to call <code>ConfigPersistence.createConfigSnapshot</code> immediately after a successful deployment job is submitted or completed.</li>
+<li><a href="https://datatracker.ietf.org/doc/html/rfc6749#section-10.12">RFC 6749 Section 10.12 (Cross-Site Request Forgery)</a></li>
 </ul>
-</li>
-<li>
-<p><strong>Review Idempotency:</strong></p>
-<ul>
-<li>Ensure <code>create_snapshot</code> handles re-runs gracefully (Idempotency is partially handled by UUID generation, but business logic should prevent duplicate snapshots for the exact same state if needed).</li>
-</ul>
-</li>
-</ol>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../design/kafka-event-processor.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../design/config-clone.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../design/config-clone.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../design/event-promotion.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -314,11 +275,11 @@ This procedure performs the heavy lifting:</p>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../design/kafka-event-processor.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../design/config-clone.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../design/config-clone.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../design/event-promotion.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Config Snapshot - Light Portal Documentation</title>
+        <title>Event Promotion - Light Portal Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -174,137 +174,179 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="configuration-snapshot-design"><a class="header" href="#configuration-snapshot-design">Configuration Snapshot Design</a></h1>
-<p>This document describes the design and implementation of the configuration snapshot feature in the light-portal.</p>
+                        <h1 id="event-promotion-design-state-based-reconciliation-with-composite-keys"><a class="header" href="#event-promotion-design-state-based-reconciliation-with-composite-keys">Event Promotion Design: State-Based Reconciliation with Composite Keys</a></h1>
 <h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
-<p>A configuration snapshot captures the state of an instance’s configuration at a specific point in time. It includes all properties, files, and relationships defined for that instance, merging overrides from various levels (Product, Environment, Product Version) into a “burned-in” effective configuration.</p>
-<p>Snapshots are created in two scenarios:</p>
+<p>Traditional event sourcing replication involves copying raw events from one environment to another. However, this fails when the target environment has diverged (e.g., hotfixes), causing <code>aggregateVersion</code> conflicts. Additionally, strict global UUID constraints can prevent reusing the same ID across environments (Tenants). Finally, partial promotions can fail if parent dependencies (referential integrity) are missing in the target.</p>
+<p>To resolve this, we adopt a <strong>State-Based Reconciliation</strong> approach (Semantic Replay) combined with <strong>Composite Keys</strong> for identity and <strong>Recursive Dependency Resolution</strong> for integrity.</p>
+<h2 id="core-strategy-state-based-reconciliation"><a class="header" href="#core-strategy-state-based-reconciliation">Core Strategy: State-Based Reconciliation</a></h2>
+<h3 id="workflow"><a class="header" href="#workflow">Workflow</a></h3>
 <ol>
-<li><strong>Deployment Trigger:</strong> Automatically created when a deployment occurs (to capture the state being deployed).</li>
-<li><strong>User Trigger:</strong> Manually created by a user via the UI (e.g., to save a milestone).</li>
-</ol>
-<h2 id="data-model"><a class="header" href="#data-model">Data Model</a></h2>
-<h3 id="snapshot-header-config_snapshot_t"><a class="header" href="#snapshot-header-config_snapshot_t">Snapshot Header (<code>config_snapshot_t</code>)</a></h3>
-<p>Captures metadata about the snapshot.</p>
+<li><strong>Export (Lower Environment):</strong>
 <ul>
-<li><code>snapshot_id</code>: UUID</li>
-<li><code>snapshot_type</code>: Type of snapshot (e.g., <code>DEPLOYMENT</code>, <code>USER_SAVE</code>)</li>
-<li><code>instance_id</code>: Target instance</li>
-<li><code>host_id</code>: Tenant identifier</li>
-<li><code>deployment_id</code>: Link to deployment (if applicable)</li>
-<li><code>product_version</code>: Locked product version at time of snapshot</li>
-<li><code>service_id</code>: Locked service ID</li>
+<li>Query the <em>current state</em> (Snapshot) of the entity from the Lower Environment (LE).</li>
+<li>Produce a “Canonical State Snapshot” (JSON).</li>
 </ul>
-<h3 id="snapshot-content"><a class="header" href="#snapshot-content">Snapshot Content</a></h3>
-<p>Snapshot data is normalizing into shadow tables that mirror the runtime configuration tables. These tables differ from the runtime tables by including a <code>snapshot_id</code> and lacking some runtime-specific fields.</p>
-<p>Key tables include:</p>
+</li>
+<li><strong>Import &amp; Diff (Higher Environment):</strong>
 <ul>
-<li><code>snapshot_instance_property_t</code></li>
-<li><code>snapshot_instance_file_t</code></li>
-<li><code>snapshot_deployment_instance_property_t</code></li>
-<li><code>snapshot_product_version_property_t</code></li>
-<li><code>snapshot_environment_property_t</code></li>
-<li>… (others for APIs, Apps, etc.)</li>
+<li>Read the LE Snapshot.</li>
+<li>Query the <em>current</em> state of the representative entity in the Higher Environment (HE).</li>
+<li><strong>Compare:</strong>
+<ul>
+<li><strong>New?</strong> -&gt; Generate <code>XxxCreatedEvent</code>.</li>
+<li><strong>Changed?</strong> -&gt; Calculate Delta -&gt; Generate <code>XxxUpdatedEvent</code>.</li>
+<li><strong>Same?</strong> -&gt; No-op.</li>
 </ul>
-<h3 id="effective-configuration-config_snapshot_property_t"><a class="header" href="#effective-configuration-config_snapshot_property_t">Effective Configuration (<code>config_snapshot_property_t</code>)</a></h3>
-<p>A flattened, merged view of all properties for the snapshot. This table represents the “final” configuration values used by the instance.</p>
-<ul>
-<li>Calculated by merging properties from all levels (Deployment &gt; Instance &gt; Product Version &gt; Environment &gt; Product) based on priority.</li>
-</ul>
-<h2 id="backend-implementation"><a class="header" href="#backend-implementation">Backend Implementation</a></h2>
-<h3 id="stored-procedure-create_snapshot"><a class="header" href="#stored-procedure-create_snapshot">Stored Procedure (<code>create_snapshot</code>)</a></h3>
-<p>Located in <code>portal-db/postgres/sp_tr_fn.sql</code>.
-This procedure performs the heavy lifting:</p>
-<ol>
-<li>Validates the instance and retrieves scope data (product, environment, etc.).</li>
-<li>Creates the snapshot header record.</li>
-<li>Copies raw data from active runtime tables to snapshot tables (e.g., <code>instance_property_t</code> -&gt; <code>snapshot_instance_property_t</code>).</li>
-<li><strong>Merges</strong> properties from all levels into <code>config_snapshot_property_t</code>.
-<ul>
-<li>Handles list/map merging (aggregation).</li>
-<li>Handles scalar overriding (last update wins/priority tiers).</li>
+</li>
 </ul>
 </li>
 </ol>
-<h3 id="persistence-layer-configpersistenceimpljava"><a class="header" href="#persistence-layer-configpersistenceimpljava">Persistence Layer (<code>ConfigPersistenceImpl.java</code>)</a></h3>
-<p>Provides the Java interface to calls the stored procedure:</p>
+<h3 id="advantages"><a class="header" href="#advantages">Advantages</a></h3>
 <ul>
-<li><code>createConfigSnapshot</code>: Calls <code>CALL create_snapshot(...)</code>.</li>
-<li><code>getConfigSnapshot</code>: Retrieves snapshot headers with filtering/sorting.</li>
-<li><code>updateConfigSnapshot</code>: Updates metadata (description).</li>
-<li><code>deleteConfigSnapshot</code>: Deletes a snapshot and its cascaded data (if cascade delete is set up in DB, otherwise manual cleanup might be needed).</li>
+<li><strong>Conflict Immunity:</strong> No <code>aggregateVersion</code> conflicts; we always append <em>new</em> events.</li>
+<li><strong>Self-Healing:</strong> Automatically synchronizes diverged states.</li>
 </ul>
-<h2 id="front-end-implementation"><a class="header" href="#front-end-implementation">Front End Implementation</a></h2>
-<h3 id="config-snapshot-page-configsnapshottsx"><a class="header" href="#config-snapshot-page-configsnapshottsx">Config Snapshot Page (<code>ConfigSnapshot.tsx</code>)</a></h3>
-<ul>
-<li>Displays a list of snapshots for a selected instance.</li>
-<li>Supports filtering by <code>current</code>, ID, date, etc.</li>
-<li><strong>Actions:</strong>
-<ul>
-<li><strong>Create:</strong> Navigates to <code>/app/form/createConfigSnapshot</code>.</li>
-<li><strong>Update:</strong> Fetches fresh data and navigates to update form.</li>
-<li><strong>Delete:</strong> Calls <code>deleteSnapshot</code> command.</li>
-</ul>
-</li>
-</ul>
-<h2 id="gap-analysis--missing-components"><a class="header" href="#gap-analysis--missing-components">Gap Analysis &amp; Missing Components</a></h2>
-<p>The following components are currently <strong>MISSING</strong> or incomplete:</p>
+<h2 id="identity-strategy-composite-keys"><a class="header" href="#identity-strategy-composite-keys">Identity Strategy: Composite Keys</a></h2>
+<h3 id="the-problem-global-uuid-uniqueness"><a class="header" href="#the-problem-global-uuid-uniqueness">The Problem: Global UUID Uniqueness</a></h3>
+<p>In a multi-tenant system shareing a single database, a standard Primary Key <code>UUID</code> (e.g., <code>user_id</code>) is globally unique. This prevents us from having “User Steve” with UUID <code>123</code> in both the “Dev Tenant” and “Prod Tenant” if the DB enforces strict uniqueness on that column.</p>
+<h3 id="the-solution-composite-keys-host_id--aggregate_id"><a class="header" href="#the-solution-composite-keys-host_id--aggregate_id">The Solution: Composite Keys (<code>host_id</code> + <code>aggregate_id</code>)</a></h3>
+<p>We scope all identity by the Tenant ID (<code>host_id</code>).</p>
 <ol>
 <li>
-<p><strong>Command Handlers:</strong></p>
+<p><strong>Schema Change:</strong></p>
 <ul>
-<li><code>CreateConfigSnapshot</code> handler (for User Trigger) is missing in <code>config-command</code>.</li>
-<li><code>DeleteConfigSnapshot</code> handler is missing in <code>config-command</code>.</li>
-<li><code>GetFreshConfigSnapshot</code> handler is missing (required for the “Update” action in UI).</li>
+<li><strong>Primary Keys:</strong> Change from <code>PK(id)</code> to <code>PK(host_id, id)</code>.</li>
+<li><strong>Uniqueness:</strong> Change unique constraints (e.g., email) from <code>UK(email)</code> to <code>UK(host_id, email)</code>.</li>
+<li><strong>Event Store:</strong> Change unique constraint from <code>UK(aggregate_id, version)</code> to <code>UK(host_id, aggregate_id, version)</code>.</li>
 </ul>
 </li>
 <li>
-<p><strong>Deployment Integration:</strong></p>
+<p><strong>Promotion Benefit:</strong></p>
 <ul>
-<li><code>CreateDeployment.java</code> (in <code>deployment-command</code>) does <strong>NOT</strong> call <code>createConfigSnapshot</code>.</li>
-<li>The automatic snapshot creation on deployment is currently not implemented.</li>
-</ul>
-</li>
-<li>
-<p><strong>API Definition:</strong></p>
-<ul>
-<li>The <code>createConfigSnapshot</code> and <code>deleteConfigSnapshot</code> endpoints need to be defined in the schema/routing if they are not already.</li>
+<li><strong>Dev Tenant:</strong> <code>host_id=DEV, user_id=123</code></li>
+<li><strong>Prod Tenant:</strong> <code>host_id=PROD, user_id=123</code></li>
+<li>Matching entities is trivial (compare <code>id</code> directly).</li>
 </ul>
 </li>
 </ol>
-<h2 id="action-plan"><a class="header" href="#action-plan">Action Plan</a></h2>
+<h2 id="data-integrity-recursive-dependency-resolution"><a class="header" href="#data-integrity-recursive-dependency-resolution">Data Integrity: Recursive Dependency Resolution</a></h2>
+<h3 id="the-problem-missing-dependencies"><a class="header" href="#the-problem-missing-dependencies">The Problem: Missing Dependencies</a></h3>
+<p>Promoting a child entity (e.g., <strong>API Configuration</strong>) fails if its parent (e.g., <strong>API Instance</strong>) does not exist in the target environment (Higher Env).</p>
+<h3 id="the-solution-deep-promotion-recursive-bundling"><a class="header" href="#the-solution-deep-promotion-recursive-bundling">The Solution: Deep Promotion (Recursive Bundling)</a></h3>
+<p>The exporter must be “Topology Aware”.</p>
 <ol>
 <li>
-<p><strong>Implement Command Handlers:</strong></p>
+<p><strong>Dependency Metadata:</strong>
+Every Entity Type must declare its dependencies.</p>
 <ul>
-<li>Create <code>CreateConfigSnapshot</code> handler in <code>config-command</code> that invokes <code>ConfigPersistence.createConfigSnapshot</code>.</li>
-<li>Create <code>DeleteConfigSnapshot</code> handler in <code>config-command</code>.</li>
-<li>Create <code>GetFreshConfigSnapshot</code> handler in <code>config-query</code>.</li>
+<li><code>ApiConfig</code> depends on <code>ApiInstance</code>.</li>
+<li><code>ApiInstance</code> depends on <code>GatewayInstance</code>.</li>
+<li><code>GatewayInstance</code> depends on <code>Host</code>.</li>
 </ul>
 </li>
 <li>
-<p><strong>Integrate with Deployment:</strong></p>
+<p><strong>Export Workflow (Recursive):</strong>
+When a user selects <code>ApiConfig-123</code> for promotion:</p>
 <ul>
-<li>Modify <code>CreateDeployment.java</code> (or the platform handler it invokes) to call <code>ConfigPersistence.createConfigSnapshot</code> immediately after a successful deployment job is submitted or completed.</li>
+<li>System checks <code>ApiConfig-123</code> -&gt; Parent <code>ApiInstance-456</code>.</li>
+<li>System checks <code>ApiInstance-456</code> -&gt; Parent <code>GatewayInstance-789</code>.</li>
+<li><strong>Export Package:</strong> Includes <code>[GatewayInstance-789, ApiInstance-456, ApiConfig-123]</code> (Ordered by dependency).</li>
 </ul>
 </li>
 <li>
-<p><strong>Review Idempotency:</strong></p>
+<p><strong>Import Workflow (Ordered):</strong>
+The Importer processes the list in order:</p>
+<ol>
+<li><strong>GatewayInstance:</strong> Exists in Prod? Yes. (Skip).</li>
+<li><strong>ApiInstance:</strong> Exists in Prod? No. <strong>Action: Create <code>ApiInstance</code></strong>.</li>
+<li><strong>ApiConfig:</strong> Exists in Prod? No. <strong>Action: Create <code>ApiConfig</code></strong>.</li>
+</ol>
+</li>
+</ol>
+<h2 id="dry-run-technical-implementation"><a class="header" href="#dry-run-technical-implementation">Dry Run Technical Implementation</a></h2>
+<h3 id="purpose"><a class="header" href="#purpose">Purpose</a></h3>
+<p>To guarantee the promotion will succeed without actually modifying the Higher Environment (Production).</p>
+<h3 id="option-1-application-layer-simulation-fast-recommended-for-planning"><a class="header" href="#option-1-application-layer-simulation-fast-recommended-for-planning">Option 1: Application-Layer Simulation (Fast, Recommended for Planning)</a></h3>
 <ul>
-<li>Ensure <code>create_snapshot</code> handles re-runs gracefully (Idempotency is partially handled by UUID generation, but business logic should prevent duplicate snapshots for the exact same state if needed).</li>
+<li><strong>Logic:</strong> The Importer queries the DB (read-only) to fetch the current state of all entities in the package.</li>
+<li><strong>Result:</strong> It calculates the “Diff Plan” purely in memory.</li>
+<li><strong>Output:</strong> “Plan: Create API Instance (New), Update API Config (Diff)”.</li>
+<li><strong>Pros:</strong> Very fast, zero DB locks.</li>
+<li><strong>Cons:</strong> Does not verify deep database constraints (e.g., complex triggers or check constraints) that only trigger on write.</li>
+</ul>
+<h3 id="option-2-transaction-rollback-robust-recommended-for-validation"><a class="header" href="#option-2-transaction-rollback-robust-recommended-for-validation">Option 2: Transaction Rollback (Robust, Recommended for Validation)</a></h3>
+<ul>
+<li><strong>Logic:</strong>
+<ol>
+<li>Start a Database Transaction: <code>connection.setAutoCommit(false);</code></li>
+<li><strong>Simulate Execution:</strong> Perform the actual SQL Inserts and Updates generated by the Plan.
+<ul>
+<li>Insert <code>ApiInstance</code>…</li>
+<li>Insert <code>ApiConfig</code>…</li>
+</ul>
+</li>
+<li><strong>Check for Errors:</strong> If any SQL Exception occurs (e.g., FK violation, unique constraint violation), catch it.</li>
+<li><strong>Rollback:</strong> Regardless of success or failure, <strong>always</strong> call <code>connection.rollback()</code>.</li>
+</ol>
+</li>
+<li><strong>Output:</strong> “Validation Successful: The detailed plan is valid and safe to execute.” OR “Validation Failed: FK Violation on Table X”.</li>
+<li><strong>Pros:</strong> 100% certainty that the data is valid according to the database schema.</li>
+<li><strong>Cons:</strong> Slightly heavier key locks, but acceptable for admin operations.</li>
+</ul>
+<h3 id="recommendation"><a class="header" href="#recommendation">Recommendation</a></h3>
+<p>Use <strong>Option 1 (App Simulation)</strong> for the UI preview to show the user “what will happen”.
+Use <strong>Option 2 (Transaction Rollback)</strong> immediately when the user clicks “Promote” (as a pre-flight check) or as an explicit “Verify” button to ensure deep integrity.</p>
+<h2 id="sibling-deletion-handling-orphaned-items"><a class="header" href="#sibling-deletion-handling-orphaned-items">Sibling Deletion: Handling Orphaned Items</a></h2>
+<h3 id="the-user-case"><a class="header" href="#the-user-case">The User Case</a></h3>
+<p>When promoting a collection of items (e.g., “10 Config Properties” in HE vs “8 in LE”), simply creating or updating the 8 matching items from LE is insufficient. We must identify the <strong>2 extra items</strong> in HE that likely need to be deleted to match the LE state.</p>
+<h3 id="design-pattern-scoped-reconciliation"><a class="header" href="#design-pattern-scoped-reconciliation">Design Pattern: Scoped Reconciliation</a></h3>
+<p>To handle this, the import logic must be aware of the “Parent Scope” of the entities being promoted.</p>
+<ol>
+<li>
+<p><strong>Export (Snapshot with Siblings):</strong></p>
+<ul>
+<li>When promoting <code>ApiConfig-123</code>, we fetch <strong>ALL</strong> associated properties for that config in LE.</li>
+<li>LE Snapshot: <code>Properties = {P1, P2, ... P8}</code> (Total 8).</li>
+</ul>
+</li>
+<li>
+<p><strong>Import (Set Difference Logic):</strong></p>
+<ul>
+<li>Query <strong>ALL</strong> associated properties for <code>ApiConfig-123</code> in HE.</li>
+<li>HE State: <code>Properties = {P1, P2, ... P8, P9, P10}</code> (Total 10).</li>
+<li><strong>Logic:</strong> <code>HE_Only = HE_Set - LE_Set</code> =&gt; <code>{P9, P10}</code>.</li>
+</ul>
+</li>
+<li>
+<p><strong>User Decision (Interactive Mode):</strong></p>
+<ul>
+<li>The Dry Run Plan reports:
+<ul>
+<li><code>Updates:</code> 8 items synced (P1..P8).</li>
+<li><code>Deuntions (Potential):</code> 2 items exist in Prod but not Dev (P9, P10).</li>
+</ul>
+</li>
+<li><strong>Default Action:</strong> Do nothing (Safe Mode).</li>
+<li><strong>Option:</strong> “Sync Deletes” -&gt; Checkbox to delete extras?</li>
+<li><strong>Strict Mode:</strong> Mirror exact state (Automatically schedule <code>ConfigPropertyDeletedEvent</code> for P9, P10).</li>
 </ul>
 </li>
 </ol>
+<h3 id="implementation-checklist"><a class="header" href="#implementation-checklist">Implementation Checklist</a></h3>
+<ul>
+<li><input disabled="" type="checkbox"> Exporter must include the full list of children IDs when exporting a parent container.</li>
+<li><input disabled="" type="checkbox"> Importer must realize that for “One-to-Many” relationships, it has to fetch the full target set to detect orphans.</li>
+</ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../design/kafka-event-processor.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../design/oauth-state.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../design/config-clone.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../implementation.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -314,11 +356,11 @@ This procedure performs the heavy lifting:</p>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../design/kafka-event-processor.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../design/oauth-state.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../design/config-clone.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../implementation.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
