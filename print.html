@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-bd553642.js";
+            window.path_to_searchindex_js = "searchindex-b9102176.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-61f8b149.js"></script>
+        <script src="toc-cda6ba95.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -183,6 +183,255 @@
 <h1 id="design"><a class="header" href="#design">Design</a></h1>
 <p>Light Portal is an application that connect the providers to the consumers, and it contains many components or applications. Each component will have some API endpoints and a user interface in the portal view single page application.</p>
 <p>To allow the users to understand each component in detail in term of design, we have collected all the design documents in this section.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="portal-view"><a class="header" href="#portal-view">Portal View</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mutliple-environment"><a class="header" href="#mutliple-environment">Mutliple Environment</a></h1>
+<p>This document outlines the necessary changes to configure portal view to work dynamically across different environments (sdx, dev, non-prod, prod) using environment-specific configuration.</p>
+<h2 id="1-environment-variables-setup"><a class="header" href="#1-environment-variables-setup">1. Environment Variables Setup</a></h2>
+<h3 id="create-env-file"><a class="header" href="#create-env-file">Create .env File</a></h3>
+<p>Create environment-specific .env files in project root:</p>
+<pre><code># Environment variables
+# VITE_BASE_PATH is used as the base URL prefix for API calls.
+VITE_BASE_PATH=/bff/admin/
+# VITE_PORTAL_URL is the full absolute URL where the frontend static files are served
+VITE_PORTAL_URL=https://sdx.lightapi.net/bff
+</code></pre>
+<h3 id="required-environment-variables"><a class="header" href="#required-environment-variables">Required Environment Variables</a></h3>
+<ul>
+<li><strong>VITE_BASE_PATH:</strong> Defines the sub-path where your application is deployed.</li>
+<li><strong>VITE_PORTAL_URL:</strong> The API endpoint base URL.</li>
+</ul>
+<h3 id="benefits-of-env-configuration"><a class="header" href="#benefits-of-env-configuration">Benefits of .env Configuration</a></h3>
+<ul>
+<li>Switch environments without code changes</li>
+<li>Maintain a single codebase for all environments</li>
+</ul>
+<h2 id="2-vite-configuration-changes"><a class="header" href="#2-vite-configuration-changes">2. Vite Configuration Changes</a></h2>
+<p><strong>File:</strong> <code>vite.config.js</code>
+<strong>Location:</strong> Project root</p>
+<p><strong>Required Change:</strong></p>
+<pre><code class="language-javascript">import { defineConfig, loadEnv } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig(({ mode }) =&gt; {
+  const env = loadEnv(mode, process.cwd(), '');
+
+  return {
+    plugins: [react()],
+    base: env.VITE_BASE_PATH || "/",
+    // ... other configurations
+  };
+});
+</code></pre>
+<h3 id="why-this-change-is-necessary"><a class="header" href="#why-this-change-is-necessary">Why This Change is Necessary?</a></h3>
+<p><strong>The Problem Without <code>base</code> Configuration</strong></p>
+<p>When your application is deployed to a sub-path rather than the domain root, all asset references break.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Deployment Scenario</th><th style="text-align: left">Required <code>base</code> Value</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>https://example.com/</code></td><td style="text-align: left"><code>"/"</code> (default)</td></tr>
+<tr><td style="text-align: left"><code>https://example.com/portal/</code></td><td style="text-align: left"><code>"/portal/"</code></td></tr>
+<tr><td style="text-align: left"><code>https://example.com/app/v2/</code></td><td style="text-align: left"><code>"/app/v2/"</code></td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="what-base-affects"><a class="header" href="#what-base-affects">What <code>base</code> Affects</a></h3>
+<p>The <code>base</code> configuration controls how Vite prefixes:</p>
+<ul>
+<li>Static asset URLs (JavaScript, CSS, images, fonts)</li>
+<li>Client-side routing paths</li>
+<li>Public folder references</li>
+</ul>
+<h3 id="example-without-vs-with-base"><a class="header" href="#example-without-vs-with-base">Example: Without vs With <code>base</code></a></h3>
+<p><strong>Without <code>base</code> Configuration:</strong></p>
+<ul>
+<li>App hosted at: <code>https://example.com/portal/</code></li>
+<li>Vite generates: <code>&lt;script src="/assets/index.js"&gt;</code></li>
+<li>Browser requests: <code>https://example.com/assets/index.js</code></li>
+<li>Result: 404 Not Found ❌</li>
+</ul>
+<p><strong>With <code>base</code>: “/portal/”:</strong></p>
+<ul>
+<li>App hosted at: <code>https://example.com/portal/</code></li>
+<li>Vite generates: <code>&lt;script src="/portal/assets/index.js"&gt;</code></li>
+<li>Browser requests: <code>https://example.com/portal/assets/index.js</code></li>
+<li>Result: Success ✅</li>
+</ul>
+<h2 id="3-react-router-configuration-changes"><a class="header" href="#3-react-router-configuration-changes">3. React Router Configuration Changes</a></h2>
+<p><strong>File:</strong> <code>App.tsx</code>
+<strong>Location:</strong> <code>src/App.tsx</code></p>
+<p><strong>Required Change:</strong></p>
+<pre><code class="language-jsx">import { BrowserRouter } from 'react-router-dom';
+
+function App() {
+  const basename = import.meta.env.VITE_BASE_PATH || "/";
+
+  return (
+    &lt;BrowserRouter basename={basename}&gt;
+      {/* Your app routes and components */}
+    &lt;/BrowserRouter&gt;
+  );
+}
+
+export default App;
+</code></pre>
+<h3 id="what-basename-does"><a class="header" href="#what-basename-does">What <code>basename</code> Does</a></h3>
+<p>The <code>basename</code> prop tells React Router the base URL prefix for all routes in your application.</p>
+<h3 id="routing-behavior-comparison"><a class="header" href="#routing-behavior-comparison">Routing Behavior Comparison</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Scenario</th><th style="text-align: left">Without basename</th><th style="text-align: left">With basename=“/portal”</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>&lt;Link to="/dashboard"&gt;</code></td><td style="text-align: left">Navigates to <code>/dashboard</code></td><td style="text-align: left">Navigates to <code>/portal/dashboard</code></td></tr>
+<tr><td style="text-align: left"><code>path="/settings"</code> matches</td><td style="text-align: left"><code>/settings</code></td><td style="text-align: left"><code>/portal/settings</code></td></tr>
+<tr><td style="text-align: left"><code>useNavigate("/login")</code></td><td style="text-align: left">Goes to <code>/login</code></td><td style="text-align: left">Goes to <code>/portal/login</code></td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="why-its-required"><a class="header" href="#why-its-required">Why It’s Required</a></h3>
+<p>When your app is hosted at a sub-path (e.g., <code>https://example.com/portal/</code>), React Router needs to know that <code>/portal</code> is the deployment prefix, not part of your route definitions.</p>
+<p><strong>Without <code>basename</code>:</strong></p>
+<ol>
+<li>You define <code>&lt;Route path="/dashboard" /&gt;</code></li>
+<li>User visits <code>/portal/dashboard</code></li>
+<li>React Router sees <code>/portal/dashboard</code> → no match → <strong>Route Not Found ❌</strong></li>
+</ol>
+<p><strong>With <code>basename="/portal"</code>:</strong></p>
+<ol>
+<li>React Router strips <code>/portal</code> from the URL</li>
+<li>Sees <code>/dashboard</code> → matches your route → <strong>Success ✅</strong></li>
+</ol>
+<h2 id="4-api-call-configuration"><a class="header" href="#4-api-call-configuration">4. API Call Configuration</a></h2>
+<h3 id="current-behavior-issue"><a class="header" href="#current-behavior-issue">Current Behavior Issue</a></h3>
+<p>Without a configured base URL, the browser constructs API request URLs relative to the current page origin.</p>
+<p><strong>Example:</strong></p>
+<ul>
+<li>App running at: <code>https://example.com/portal/dashboard</code></li>
+<li>API call: <code>fetch('/api/users')</code></li>
+<li>Browser sends request to: <code>https://example.com/api/users</code></li>
+</ul>
+<p>This may work in some cases but breaks when:</p>
+<ul>
+<li>API is hosted on a different domain/subdomain</li>
+<li>API has a different base path</li>
+<li>Cross-environment consistency is needed</li>
+</ul>
+<h3 id="solution-custom-fetch-wrapper"><a class="header" href="#solution-custom-fetch-wrapper">Solution: Custom Fetch Wrapper</a></h3>
+<p><strong>File:</strong> <code>src/utils/fetchClient.js</code></p>
+<pre><code class="language-javascript">const BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+
+/**
+ * Custom fetch wrapper with automatic base URL prefixing
+ * @param {string} endpoint - API endpoint path (e.g., '/api/users')
+ * @param {Object} options - Fetch options (method, headers, body, etc.)
+ * @returns {Promise} - Response JSON
+ */
+async function fetchClient(endpoint, options = {}) {
+  const url = `${BASE_URL}${endpoint}`;
+
+  const defaultHeaders = {
+    "Content-Type": "application/json",
+  };
+
+  const config = {
+    ...options,
+    headers: {
+      ...defaultHeaders,
+      ...options.headers,
+    },
+  };
+
+  const response = await fetch(url, config);
+
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+export default fetchClient;
+</code></pre>
+<h3 id="usage-example"><a class="header" href="#usage-example">Usage Example</a></h3>
+<pre><code class="language-javascript">import fetchClient from './utils/fetchClient';
+
+// GET request
+const users = await fetchClient('/api/users');
+
+// POST request
+const newUser = await fetchClient('/api/users', {
+  method: 'POST',
+  body: JSON.stringify({ name: 'John Doe', email: 'john@example.com' }),
+});
+
+// With custom headers
+const data = await fetchClient('/api/protected', {
+  headers: {
+    'Authorization': `Bearer ${token}`,
+  },
+});
+</code></pre>
+<h3 id="benefits"><a class="header" href="#benefits">Benefits</a></h3>
+<ul>
+<li><strong>Consistency:</strong> All API calls use the same base URL</li>
+<li><strong>Environment flexibility:</strong> Different API endpoints per environment</li>
+<li><strong>Maintainability:</strong> Single place to update API configuration</li>
+<li><strong>Error handling:</strong> Centralized response validation</li>
+</ul>
+<h2 id="5-build-and-deployment-steps"><a class="header" href="#5-build-and-deployment-steps">5. Build and Deployment Steps</a></h2>
+<p><strong>Step 1: Change the .env variables for specific environment (sdx, dev, prod etc.)</strong></p>
+<pre><code>VITE_BASE_PATH=/ (base path)
+VITE_PORTAL_URL=https://example.com (endpoint URL)
+</code></pre>
+<p><strong>Step 2: Build</strong></p>
+<pre><code class="language-bash">npm run build
+</code></pre>
+<pre><code></code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="oauth-kafka"><a class="header" href="#oauth-kafka">OAuth Kafka</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="token-exchange"><a class="header" href="#token-exchange">Token Exchange</a></h1>
+<p>This document outlines the design decisions and implementation details for supporting multiple token exchange flows in the <code>oauth-kafka</code> module.</p>
+<h2 id="comparison-of-detection-methods"><a class="header" href="#comparison-of-detection-methods">Comparison of Detection Methods</a></h2>
+<p>When implementing token exchange (RFC 8693), the server must determine which identity provider (IdP) issued the <code>subject_token</code> to verify it correctly and map claims.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Method</th><th style="text-align: left">Explanation</th><th style="text-align: left">Pros</th><th style="text-align: left">Cons</th><th style="text-align: left">Recommended For</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><strong>JWT Peek (<code>iss</code>)</strong></td><td style="text-align: left">Server decodes the token header/body without verification to read the <code>iss</code> claim.</td><td style="text-align: left">Zero client configuration; Uses standard parameters.</td><td style="text-align: left">Token is parsed twice; Sensitive to malformed tokens.</td><td style="text-align: left">Public OIDC providers (Azure, Okta, Google).</td></tr>
+<tr><td style="text-align: left"><strong>Custom URNs</strong></td><td style="text-align: left">Client sends a specific <code>requested_token_type</code> (e.g. <code>urn:networknt:msal</code>).</td><td style="text-align: left">Explicit and unambiguous; Follows standard extensibility.</td><td style="text-align: left">Clients must know the specific URNs for each flow.</td><td style="text-align: left">Mixed heterogeneous token types (SAML vs JWT).</td></tr>
+<tr><td style="text-align: left"><strong><code>subject_issuer</code></strong></td><td style="text-align: left">Client passes an extra <code>subject_issuer</code> parameter in the request.</td><td style="text-align: left">Clean API; Works with “opaque” (non-JWT) tokens.</td><td style="text-align: left">Non-standard parameter; Redundant for self-describing JWTs.</td><td style="text-align: left">Opaque tokens or overlapping issuers.</td></tr>
+<tr><td style="text-align: left"><strong>Client Context</strong></td><td style="text-align: left">Server maps the <code>client_id</code> of the caller to a specific flow.</td><td style="text-align: left">Highly secure; Enforces strict per-client policy.</td><td style="text-align: left">High management overhead; Inflexible for multi-source clients.</td><td style="text-align: left">Rigid, security-conscious B2B integrations.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="implementation-strategy"><a class="header" href="#implementation-strategy">Implementation Strategy</a></h2>
+<p>Our implementation in <code>ProviderIdTokenPostHandler</code> uses a hybrid approach:</p>
+<ol>
+<li><strong><code>requested_token_type</code></strong>: Primary differentiator. We support <code>msal</code> (default) and <code>internal</code>.</li>
+<li><strong>Modular Handlers</strong>: Logic is delegated to <code>handleMsalTokenExchange</code> and <code>handleInternalTokenExchange</code>.</li>
+<li><strong>Internal Flow</strong>: Uses <code>jose4j</code> for transparent decoding of internal JWTs and verifies against host-specific keys.</li>
+</ol>
+<h2 id="recommendation"><a class="header" href="#recommendation">Recommendation</a></h2>
+<p>For the current <code>light-portal</code> ecosystem:</p>
+<ul>
+<li><strong>JWT Peek (<code>iss</code>)</strong> is recommended for external OIDC providers (like MSAL) as it provides the best balance of user experience (no extra parameters) and reliability.</li>
+<li><strong><code>requested_token_type</code></strong> should be used for internal service-to-service exchanges where the flow is known and should be explicit.</li>
+<li><strong>Client Context</strong> should be considered for high-security environments where the server must dictate exactly which token sources are allowed for a given client.</li>
+</ul>
+<h2 id="future-considerations"><a class="header" href="#future-considerations">Future Considerations</a></h2>
+<ul>
+<li>Implement automated issuer discovery if the number of external providers grows.</li>
+<li>Support “opaque” token exchange by integrating with introspection endpoints of external IdPs.</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="multi-tenant"><a class="header" href="#multi-tenant">Multi-Tenant</a></h1>
 <h2 id="database-schema"><a class="header" href="#database-schema">Database Schema</a></h2>
@@ -394,7 +643,7 @@ CREATE TABLE tenant_resource_t(
 <p>Azure CosmosDB for PostgreSQL (Managed Citus): Microsoft offers a fully managed cloud service called Azure CosmosDB for PostgreSQL, which is built on Citus. This service has usage-based pricing, and the cost depends on factors like the number of nodes, storage, and compute resources used. This managed option reduces the operational overhead of managing Citus yourself.</p>
 </li>
 </ul>
-<h4 id="recommendation"><a class="header" href="#recommendation">Recommendation:</a></h4>
+<h4 id="recommendation-1"><a class="header" href="#recommendation-1">Recommendation:</a></h4>
 <p>Don’t automatically add host_id to every table just because we are using Citus. Carefully analyze the data model, query patterns, and multi-tenancy requirements.</p>
 <ul>
 <li>
@@ -6637,7 +6886,7 @@ The <code>processSingleEventWithRetries</code> method is crucial.</p>
 <p>This approach balances immediate operational stability with eventual consistency, acknowledging the realities of enterprise deployment cycles.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="msal-light-oauth-integration"><a class="header" href="#msal-light-oauth-integration">MSAL Light OAuth Integration</a></h1>
-<h2 id="token-exchange"><a class="header" href="#token-exchange">Token Exchange</a></h2>
+<h2 id="token-exchange-1"><a class="header" href="#token-exchange-1">Token Exchange</a></h2>
 <p>We have a React Single Page Application(SPA) running within a corporate network using Azure AD for SSO. However, we want to use JWT tokens from another OAuth 2.0 provider Light-OAuth to issue the token with additional custom claims for fine-grained Authorization. What is the best way to do the integration?</p>
 <p>This is a common and powerful architectural pattern used to separate authentication from authorization, allowing you to use a central identity provider (like Azure AD) for <em>who the user is</em> and a specialized service for <em>what the user can do</em>.</p>
 <p>The goal is to use the trusted identity established by Microsoft to “mint” a new, enriched token from your second provider.</p>
@@ -7087,7 +7336,7 @@ function MyComponent() {
 <li>Add a timeout to stop polling after ~10-15 seconds to prevent infinite loops.</li>
 </ol>
 <p>As you can see, this is much more complicated than the optimistic update.</p>
-<h3 id="recommendation-1"><a class="header" href="#recommendation-1">Recommendation</a></h3>
+<h3 id="recommendation-2"><a class="header" href="#recommendation-2">Recommendation</a></h3>
 <p><strong>Adopt the Optimistic UI pattern (Option 1).</strong> It provides the best user experience, is resilient to timing issues caused by eventual consistency, and the implementation is clean and modern. The code provided for the optimistic <code>handleDelete</code> is a drop-in replacement that will solve your problem robustly.</p>
 <h3 id="should-you-poll-peroidically-to-sync-other-users-changes"><a class="header" href="#should-you-poll-peroidically-to-sync-other-users-changes">Should you poll peroidically to sync other users’ changes</a></h3>
 <p>The short answer is: <strong>No, you should still avoid client-side polling for this specific use case.</strong> It’s generally the wrong tool for this problem and creates more issues than it solves. The Optimistic UI approach is still preferable, but it needs to be combined with a robust backend and potentially other real-time technologies for a complete solution.</p>
@@ -9022,7 +9271,7 @@ SELECT start_offset, end_offset FROM upd;
 <p><strong>Commit</strong>: After processing all transactions (successful or moved to DLQ), the consumer commits the transaction, advancing the offset.</p>
 </li>
 </ol>
-<h4 id="benefits"><a class="header" href="#benefits">Benefits</a></h4>
+<h4 id="benefits-1"><a class="header" href="#benefits-1">Benefits</a></h4>
 <ul>
 <li><strong>Isolation</strong>: Only the failing transaction is moved to DLQ; other transactions in the batch proceed normally.</li>
 <li><strong>Atomicity</strong>: All events belonging to a single business transaction are either processed together or moved to DLQ together.</li>
@@ -9605,7 +9854,7 @@ The Importer processes the list in order:</p>
 <li><strong>Pros:</strong> 100% certainty that the data is valid according to the database schema.</li>
 <li><strong>Cons:</strong> Slightly heavier key locks, but acceptable for admin operations.</li>
 </ul>
-<h3 id="recommendation-2"><a class="header" href="#recommendation-2">Recommendation</a></h3>
+<h3 id="recommendation-3"><a class="header" href="#recommendation-3">Recommendation</a></h3>
 <p>Use <strong>Option 1 (App Simulation)</strong> for the UI preview to show the user “what will happen”.
 Use <strong>Option 2 (Transaction Rollback)</strong> immediately when the user clicks “Promote” (as a pre-flight check) or as an explicit “Verify” button to ensure deep integrity.</p>
 <h2 id="sibling-deletion-handling-orphaned-items"><a class="header" href="#sibling-deletion-handling-orphaned-items">Sibling Deletion: Handling Orphaned Items</a></h2>
@@ -9739,7 +9988,7 @@ Use <strong>Option 2 (Transaction Rollback)</strong> immediately when the user c
 </ul>
 <h2 id="light-gateway"><a class="header" href="#light-gateway">Light Gateway</a></h2>
 <p>The light-gateway instance acts as a BFF and it has a routing rule to route any request with prefix /oauth2 to kafka-oauth server.</p>
-<h2 id="oauth-kafka"><a class="header" href="#oauth-kafka">OAuth Kafka</a></h2>
+<h2 id="oauth-kafka-1"><a class="header" href="#oauth-kafka-1">OAuth Kafka</a></h2>
 <ul>
 <li>
 <p><strong>LightPortalAuthenticator</strong></p>
@@ -9774,7 +10023,7 @@ Use <strong>Option 2 (Transaction Rollback)</strong> immediately when the user c
 <p>It processes the MarketCodeCreatedEvent and calls dbProvider.createMarketCode with the event.</p>
 <h2 id="createmarketcode"><a class="header" href="#createmarketcode">createMarketCode</a></h2>
 <p>This method in dbProvider will put the event value into cacheManager cache named “auth_code”. Now, the code is ready to be query from the market-query.</p>
-<h2 id="portal-view"><a class="header" href="#portal-view">Portal View</a></h2>
+<h2 id="portal-view-1"><a class="header" href="#portal-view-1">Portal View</a></h2>
 <p>The HostIdCodePostHandler redirects the code to the Portal View with /authorization?code=??? and this request will be sent to the light-gateway StatelessAuthHandler.</p>
 <h2 id="statelessauthhandler"><a class="header" href="#statelessauthhandler">StatelessAuthHandler</a></h2>
 <p>If the request path matches to the configured authPath, it will retrieve the code from the query parameter. Then create a csrf UUID token and an AuthorizationCodeRequest to get a token via OauthHelper. This request will have the auth code, the csrf token and other properties from the configuration. The request is sent to the HostIdTokenPostHandler to create the authorization code token.</p>
@@ -10178,7 +10427,7 @@ Use <strong>Option 2 (Transaction Rollback)</strong> immediately when the user c
 <li><code>service-query</code></li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="portal-view-1"><a class="header" href="#portal-view-1">Portal View</a></h1>
+<h1 id="portal-view-2"><a class="header" href="#portal-view-2">Portal View</a></h1>
 <ul>
 <li><a href="#oauth-20-state-verification">OAuth 2.0 State Verification</a></li>
 </ul>

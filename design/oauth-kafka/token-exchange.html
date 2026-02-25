@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Query Active Rows - Light Portal Documentation</title>
+        <title>Token Exchange - Light Portal Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -12,33 +12,33 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="../favicon-de23e50b.svg">
-        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
-        <link rel="stylesheet" href="../css/variables-8adf115d.css">
-        <link rel="stylesheet" href="../css/general-2459343d.css">
-        <link rel="stylesheet" href="../css/chrome-ae938929.css">
-        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
+        <link rel="icon" href="../../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../../css/general-2459343d.css">
+        <link rel="stylesheet" href="../../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../../css/print-9e4910d8.css" media="print">
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
+        <link rel="stylesheet" href="../../fonts/fonts-9644e21d.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
-        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
-        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
 
 
         <!-- Provide site root and default themes to javascript -->
         <script>
-            const path_to_root = "../";
+            const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-b9102176.js";
+            window.path_to_searchindex_js = "../../searchindex-b9102176.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-cda6ba95.js"></script>
+        <script src="../../toc-cda6ba95.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -105,7 +105,7 @@
             <!-- populated by js -->
             <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
             <noscript>
-                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
             </noscript>
             <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -140,7 +140,7 @@
                     <h1 class="menu-title">Light Portal Documentation</h1>
 
                     <div class="right-buttons">
-                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
                             <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
                         </a>
 
@@ -174,107 +174,52 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="query-active-rows"><a class="header" href="#query-active-rows">Query Active Rows</a></h1>
-<p>Since we use soft deletes for most tables in the read model, we need to apply an active = true filter to our queries.</p>
-<p>For single-table queries, this is straightforward—we can simply add AND active = true to the query. However, for join queries involving multiple tables, the active = true condition must be applied consistently across all participating tables, ideally in an automatic manner.</p>
-<p>There are two approaches we can take on top of the current database provider implementation:</p>
-<h3 id="active-in-filters"><a class="header" href="#active-in-filters">Active in filters</a></h3>
-<pre><code>    @Override
-    public Result&lt;String&gt; queryRolePermission(int offset, int limit, String filtersJson, String globalFilter, String sortingJson, String hostId) {
-
-
-        boolean isActive = true; // Default to true (active records only)
-
-        // Iterate safely to find and remove the 'active' filter to handle it manually
-        if (filters != null) {
-            Iterator&lt;Map&lt;String, Object&gt;&gt; it = filters.iterator();
-            while (it.hasNext()) {
-                Map&lt;String, Object&gt; filter = it.next();
-                if ("active".equals(filter.get("id"))) {
-                    Object val = filter.get("value");
-                    if (val != null) {
-                        isActive = Boolean.parseBoolean(val.toString());
-                    }
-                    it.remove(); // Remove from list so dynamicFilter doesn't add it again
-                    break;
-                }
-            }
-        }
-
-        StringBuilder activeSql = new StringBuilder();
-        if (isActive) {
-            // Strict consistency: A record is only "active" if all related entities are active
-            activeSql.append(" AND rp.active = true");
-            activeSql.append(" AND r.active = true");
-            activeSql.append(" AND ae.active = true");
-            activeSql.append(" AND av.active = true");
-        } else {
-            // Soft-deleted view: Usually we only care that the specific record itself is inactive
-            activeSql.append(" AND rp.active = false");
-        }
-
-    }	
-
-</code></pre>
-<p><strong>Pros</strong></p>
+                        <h1 id="token-exchange"><a class="header" href="#token-exchange">Token Exchange</a></h1>
+<p>This document outlines the design decisions and implementation details for supporting multiple token exchange flows in the <code>oauth-kafka</code> module.</p>
+<h2 id="comparison-of-detection-methods"><a class="header" href="#comparison-of-detection-methods">Comparison of Detection Methods</a></h2>
+<p>When implementing token exchange (RFC 8693), the server must determine which identity provider (IdP) issued the <code>subject_token</code> to verify it correctly and map claims.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Method</th><th style="text-align: left">Explanation</th><th style="text-align: left">Pros</th><th style="text-align: left">Cons</th><th style="text-align: left">Recommended For</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><strong>JWT Peek (<code>iss</code>)</strong></td><td style="text-align: left">Server decodes the token header/body without verification to read the <code>iss</code> claim.</td><td style="text-align: left">Zero client configuration; Uses standard parameters.</td><td style="text-align: left">Token is parsed twice; Sensitive to malformed tokens.</td><td style="text-align: left">Public OIDC providers (Azure, Okta, Google).</td></tr>
+<tr><td style="text-align: left"><strong>Custom URNs</strong></td><td style="text-align: left">Client sends a specific <code>requested_token_type</code> (e.g. <code>urn:networknt:msal</code>).</td><td style="text-align: left">Explicit and unambiguous; Follows standard extensibility.</td><td style="text-align: left">Clients must know the specific URNs for each flow.</td><td style="text-align: left">Mixed heterogeneous token types (SAML vs JWT).</td></tr>
+<tr><td style="text-align: left"><strong><code>subject_issuer</code></strong></td><td style="text-align: left">Client passes an extra <code>subject_issuer</code> parameter in the request.</td><td style="text-align: left">Clean API; Works with “opaque” (non-JWT) tokens.</td><td style="text-align: left">Non-standard parameter; Redundant for self-describing JWTs.</td><td style="text-align: left">Opaque tokens or overlapping issuers.</td></tr>
+<tr><td style="text-align: left"><strong>Client Context</strong></td><td style="text-align: left">Server maps the <code>client_id</code> of the caller to a specific flow.</td><td style="text-align: left">Highly secure; Enforces strict per-client policy.</td><td style="text-align: left">High management overhead; Inflexible for multi-source clients.</td><td style="text-align: left">Rigid, security-conscious B2B integrations.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="implementation-strategy"><a class="header" href="#implementation-strategy">Implementation Strategy</a></h2>
+<p>Our implementation in <code>ProviderIdTokenPostHandler</code> uses a hybrid approach:</p>
+<ol>
+<li><strong><code>requested_token_type</code></strong>: Primary differentiator. We support <code>msal</code> (default) and <code>internal</code>.</li>
+<li><strong>Modular Handlers</strong>: Logic is delegated to <code>handleMsalTokenExchange</code> and <code>handleInternalTokenExchange</code>.</li>
+<li><strong>Internal Flow</strong>: Uses <code>jose4j</code> for transparent decoding of internal JWTs and verifies against host-specific keys.</li>
+</ol>
+<h2 id="recommendation"><a class="header" href="#recommendation">Recommendation</a></h2>
+<p>For the current <code>light-portal</code> ecosystem:</p>
 <ul>
-<li>No need to change the signature, UI and service layer.</li>
+<li><strong>JWT Peek (<code>iss</code>)</strong> is recommended for external OIDC providers (like MSAL) as it provides the best balance of user experience (no extra parameters) and reliability.</li>
+<li><strong><code>requested_token_type</code></strong> should be used for internal service-to-service exchanges where the flow is known and should be explicit.</li>
+<li><strong>Client Context</strong> should be considered for high-security environments where the server must dictate exactly which token sources are allowed for a given client.</li>
 </ul>
-<p><strong>Cons</strong></p>
+<h2 id="future-considerations"><a class="header" href="#future-considerations">Future Considerations</a></h2>
 <ul>
-<li>Need to iterate all filters to find the active flag per call.</li>
-</ul>
-<h3 id="active-as-a-seperate-parameter"><a class="header" href="#active-as-a-seperate-parameter">Active as a seperate parameter</a></h3>
-<pre><code>    @Override
-    public Result&lt;String&gt; queryRolePermission(int offset, int limit, String filtersJson, String globalFilter, String sortingJson, boolean active, String hostId) {
-        
-        StringBuilder activeSql = new StringBuilder();
-        if (active) {
-            // Strict consistency: A record is only "active" if all related entities are active
-            activeSql.append(" AND rp.active = true");
-            activeSql.append(" AND r.active = true");
-            activeSql.append(" AND ae.active = true");
-            activeSql.append(" AND av.active = true");
-        } else {
-            // Soft-deleted view: Usually we only care that the specific record itself is inactive
-            activeSql.append(" AND rp.active = false");
-        }
-
-
-    }	
-</code></pre>
-<p><strong>Pros</strong></p>
-<ul>
-<li>Logic is simple in the query.</li>
-</ul>
-<p><strong>Cons</strong></p>
-<ul>
-<li>Need to change the service layer and UI to add an additional parameter.</li>
-</ul>
-<h3 id="conclusion"><a class="header" href="#conclusion">Conclusion</a></h3>
-<p>We recommend proceeding with Option 2. While it requires an initial refactor of the Service and UI layers, it provides strict type safety and cleaner code.</p>
-<p>Reasoning:</p>
-<ul>
-<li>
-<p>Code Reuse: Option 1 requires repeating the filter iteration logic inside every DAO method. Option 2 keeps DAO methods clean.</p>
-</li>
-<li>
-<p>Semantics: The active status affects multiple table joins (Data Integrity), distinguishing it from standard column filters. It should be an explicit argument.</p>
-</li>
-<li>
-<p>Maintainability: Option 2 decouples the Database layer from the UI’s JSON structure. If the UI changes how it sends the active status, we only change the extraction logic in the Controller, not every SQL query method.</p>
-</li>
+<li>Implement automated issuer discovery if the number of external providers grows.</li>
+<li>Support “opaque” token exchange by integrating with introspection endpoints of external IdPs.</li>
 </ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../design/cascade-soft-delete.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../../design/oauth-kafka.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../design/distributed-scheduler.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../../design/multi-tenant.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -284,11 +229,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../design/cascade-soft-delete.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../../design/oauth-kafka.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../design/distributed-scheduler.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../../design/multi-tenant.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
@@ -308,17 +253,17 @@
         </script>
 
 
-        <script src="../elasticlunr-ef4e11c1.min.js"></script>
-        <script src="../mark-09e88c2c.min.js"></script>
-        <script src="../searcher-c2a407aa.js"></script>
+        <script src="../../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../../mark-09e88c2c.min.js"></script>
+        <script src="../../searcher-c2a407aa.js"></script>
 
-        <script src="../clipboard-1626706a.min.js"></script>
-        <script src="../highlight-abc7f01d.js"></script>
-        <script src="../book-a0b12cfe.js"></script>
+        <script src="../../clipboard-1626706a.min.js"></script>
+        <script src="../../highlight-abc7f01d.js"></script>
+        <script src="../../book-a0b12cfe.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../mermaid-3a6b472a.min.js"></script>
-        <script src="../mermaid-init-025d9952.js"></script>
+        <script src="../../mermaid-3a6b472a.min.js"></script>
+        <script src="../../mermaid-init-025d9952.js"></script>
 
 
 

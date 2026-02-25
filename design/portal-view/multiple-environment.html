@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Query Active Rows - Light Portal Documentation</title>
+        <title>Mutliple Environment - Light Portal Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -12,33 +12,33 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="../favicon-de23e50b.svg">
-        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
-        <link rel="stylesheet" href="../css/variables-8adf115d.css">
-        <link rel="stylesheet" href="../css/general-2459343d.css">
-        <link rel="stylesheet" href="../css/chrome-ae938929.css">
-        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
+        <link rel="icon" href="../../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../../css/general-2459343d.css">
+        <link rel="stylesheet" href="../../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../../css/print-9e4910d8.css" media="print">
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
+        <link rel="stylesheet" href="../../fonts/fonts-9644e21d.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
-        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
-        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
 
 
         <!-- Provide site root and default themes to javascript -->
         <script>
-            const path_to_root = "../";
+            const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-b9102176.js";
+            window.path_to_searchindex_js = "../../searchindex-b9102176.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-cda6ba95.js"></script>
+        <script src="../../toc-cda6ba95.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -105,7 +105,7 @@
             <!-- populated by js -->
             <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
             <noscript>
-                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
             </noscript>
             <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -140,7 +140,7 @@
                     <h1 class="menu-title">Light Portal Documentation</h1>
 
                     <div class="right-buttons">
-                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
                             <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
                         </a>
 
@@ -174,107 +174,223 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="query-active-rows"><a class="header" href="#query-active-rows">Query Active Rows</a></h1>
-<p>Since we use soft deletes for most tables in the read model, we need to apply an active = true filter to our queries.</p>
-<p>For single-table queries, this is straightforward—we can simply add AND active = true to the query. However, for join queries involving multiple tables, the active = true condition must be applied consistently across all participating tables, ideally in an automatic manner.</p>
-<p>There are two approaches we can take on top of the current database provider implementation:</p>
-<h3 id="active-in-filters"><a class="header" href="#active-in-filters">Active in filters</a></h3>
-<pre><code>    @Override
-    public Result&lt;String&gt; queryRolePermission(int offset, int limit, String filtersJson, String globalFilter, String sortingJson, String hostId) {
-
-
-        boolean isActive = true; // Default to true (active records only)
-
-        // Iterate safely to find and remove the 'active' filter to handle it manually
-        if (filters != null) {
-            Iterator&lt;Map&lt;String, Object&gt;&gt; it = filters.iterator();
-            while (it.hasNext()) {
-                Map&lt;String, Object&gt; filter = it.next();
-                if ("active".equals(filter.get("id"))) {
-                    Object val = filter.get("value");
-                    if (val != null) {
-                        isActive = Boolean.parseBoolean(val.toString());
-                    }
-                    it.remove(); // Remove from list so dynamicFilter doesn't add it again
-                    break;
-                }
-            }
-        }
-
-        StringBuilder activeSql = new StringBuilder();
-        if (isActive) {
-            // Strict consistency: A record is only "active" if all related entities are active
-            activeSql.append(" AND rp.active = true");
-            activeSql.append(" AND r.active = true");
-            activeSql.append(" AND ae.active = true");
-            activeSql.append(" AND av.active = true");
-        } else {
-            // Soft-deleted view: Usually we only care that the specific record itself is inactive
-            activeSql.append(" AND rp.active = false");
-        }
-
-    }	
-
+                        <h1 id="mutliple-environment"><a class="header" href="#mutliple-environment">Mutliple Environment</a></h1>
+<p>This document outlines the necessary changes to configure portal view to work dynamically across different environments (sdx, dev, non-prod, prod) using environment-specific configuration.</p>
+<h2 id="1-environment-variables-setup"><a class="header" href="#1-environment-variables-setup">1. Environment Variables Setup</a></h2>
+<h3 id="create-env-file"><a class="header" href="#create-env-file">Create .env File</a></h3>
+<p>Create environment-specific .env files in project root:</p>
+<pre><code># Environment variables
+# VITE_BASE_PATH is used as the base URL prefix for API calls.
+VITE_BASE_PATH=/bff/admin/
+# VITE_PORTAL_URL is the full absolute URL where the frontend static files are served
+VITE_PORTAL_URL=https://sdx.lightapi.net/bff
 </code></pre>
-<p><strong>Pros</strong></p>
+<h3 id="required-environment-variables"><a class="header" href="#required-environment-variables">Required Environment Variables</a></h3>
 <ul>
-<li>No need to change the signature, UI and service layer.</li>
+<li><strong>VITE_BASE_PATH:</strong> Defines the sub-path where your application is deployed.</li>
+<li><strong>VITE_PORTAL_URL:</strong> The API endpoint base URL.</li>
 </ul>
-<p><strong>Cons</strong></p>
+<h3 id="benefits-of-env-configuration"><a class="header" href="#benefits-of-env-configuration">Benefits of .env Configuration</a></h3>
 <ul>
-<li>Need to iterate all filters to find the active flag per call.</li>
+<li>Switch environments without code changes</li>
+<li>Maintain a single codebase for all environments</li>
 </ul>
-<h3 id="active-as-a-seperate-parameter"><a class="header" href="#active-as-a-seperate-parameter">Active as a seperate parameter</a></h3>
-<pre><code>    @Override
-    public Result&lt;String&gt; queryRolePermission(int offset, int limit, String filtersJson, String globalFilter, String sortingJson, boolean active, String hostId) {
-        
-        StringBuilder activeSql = new StringBuilder();
-        if (active) {
-            // Strict consistency: A record is only "active" if all related entities are active
-            activeSql.append(" AND rp.active = true");
-            activeSql.append(" AND r.active = true");
-            activeSql.append(" AND ae.active = true");
-            activeSql.append(" AND av.active = true");
-        } else {
-            // Soft-deleted view: Usually we only care that the specific record itself is inactive
-            activeSql.append(" AND rp.active = false");
-        }
+<h2 id="2-vite-configuration-changes"><a class="header" href="#2-vite-configuration-changes">2. Vite Configuration Changes</a></h2>
+<p><strong>File:</strong> <code>vite.config.js</code>
+<strong>Location:</strong> Project root</p>
+<p><strong>Required Change:</strong></p>
+<pre><code class="language-javascript">import { defineConfig, loadEnv } from 'vite';
+import react from '@vitejs/plugin-react';
 
+export default defineConfig(({ mode }) =&gt; {
+  const env = loadEnv(mode, process.cwd(), '');
 
-    }	
+  return {
+    plugins: [react()],
+    base: env.VITE_BASE_PATH || "/",
+    // ... other configurations
+  };
+});
 </code></pre>
-<p><strong>Pros</strong></p>
+<h3 id="why-this-change-is-necessary"><a class="header" href="#why-this-change-is-necessary">Why This Change is Necessary?</a></h3>
+<p><strong>The Problem Without <code>base</code> Configuration</strong></p>
+<p>When your application is deployed to a sub-path rather than the domain root, all asset references break.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Deployment Scenario</th><th style="text-align: left">Required <code>base</code> Value</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>https://example.com/</code></td><td style="text-align: left"><code>"/"</code> (default)</td></tr>
+<tr><td style="text-align: left"><code>https://example.com/portal/</code></td><td style="text-align: left"><code>"/portal/"</code></td></tr>
+<tr><td style="text-align: left"><code>https://example.com/app/v2/</code></td><td style="text-align: left"><code>"/app/v2/"</code></td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="what-base-affects"><a class="header" href="#what-base-affects">What <code>base</code> Affects</a></h3>
+<p>The <code>base</code> configuration controls how Vite prefixes:</p>
 <ul>
-<li>Logic is simple in the query.</li>
+<li>Static asset URLs (JavaScript, CSS, images, fonts)</li>
+<li>Client-side routing paths</li>
+<li>Public folder references</li>
 </ul>
-<p><strong>Cons</strong></p>
+<h3 id="example-without-vs-with-base"><a class="header" href="#example-without-vs-with-base">Example: Without vs With <code>base</code></a></h3>
+<p><strong>Without <code>base</code> Configuration:</strong></p>
 <ul>
-<li>Need to change the service layer and UI to add an additional parameter.</li>
+<li>App hosted at: <code>https://example.com/portal/</code></li>
+<li>Vite generates: <code>&lt;script src="/assets/index.js"&gt;</code></li>
+<li>Browser requests: <code>https://example.com/assets/index.js</code></li>
+<li>Result: 404 Not Found ❌</li>
 </ul>
-<h3 id="conclusion"><a class="header" href="#conclusion">Conclusion</a></h3>
-<p>We recommend proceeding with Option 2. While it requires an initial refactor of the Service and UI layers, it provides strict type safety and cleaner code.</p>
-<p>Reasoning:</p>
+<p><strong>With <code>base</code>: “/portal/”:</strong></p>
 <ul>
-<li>
-<p>Code Reuse: Option 1 requires repeating the filter iteration logic inside every DAO method. Option 2 keeps DAO methods clean.</p>
-</li>
-<li>
-<p>Semantics: The active status affects multiple table joins (Data Integrity), distinguishing it from standard column filters. It should be an explicit argument.</p>
-</li>
-<li>
-<p>Maintainability: Option 2 decouples the Database layer from the UI’s JSON structure. If the UI changes how it sends the active status, we only change the extraction logic in the Controller, not every SQL query method.</p>
-</li>
+<li>App hosted at: <code>https://example.com/portal/</code></li>
+<li>Vite generates: <code>&lt;script src="/portal/assets/index.js"&gt;</code></li>
+<li>Browser requests: <code>https://example.com/portal/assets/index.js</code></li>
+<li>Result: Success ✅</li>
 </ul>
+<h2 id="3-react-router-configuration-changes"><a class="header" href="#3-react-router-configuration-changes">3. React Router Configuration Changes</a></h2>
+<p><strong>File:</strong> <code>App.tsx</code>
+<strong>Location:</strong> <code>src/App.tsx</code></p>
+<p><strong>Required Change:</strong></p>
+<pre><code class="language-jsx">import { BrowserRouter } from 'react-router-dom';
+
+function App() {
+  const basename = import.meta.env.VITE_BASE_PATH || "/";
+
+  return (
+    &lt;BrowserRouter basename={basename}&gt;
+      {/* Your app routes and components */}
+    &lt;/BrowserRouter&gt;
+  );
+}
+
+export default App;
+</code></pre>
+<h3 id="what-basename-does"><a class="header" href="#what-basename-does">What <code>basename</code> Does</a></h3>
+<p>The <code>basename</code> prop tells React Router the base URL prefix for all routes in your application.</p>
+<h3 id="routing-behavior-comparison"><a class="header" href="#routing-behavior-comparison">Routing Behavior Comparison</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Scenario</th><th style="text-align: left">Without basename</th><th style="text-align: left">With basename=“/portal”</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>&lt;Link to="/dashboard"&gt;</code></td><td style="text-align: left">Navigates to <code>/dashboard</code></td><td style="text-align: left">Navigates to <code>/portal/dashboard</code></td></tr>
+<tr><td style="text-align: left"><code>path="/settings"</code> matches</td><td style="text-align: left"><code>/settings</code></td><td style="text-align: left"><code>/portal/settings</code></td></tr>
+<tr><td style="text-align: left"><code>useNavigate("/login")</code></td><td style="text-align: left">Goes to <code>/login</code></td><td style="text-align: left">Goes to <code>/portal/login</code></td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="why-its-required"><a class="header" href="#why-its-required">Why It’s Required</a></h3>
+<p>When your app is hosted at a sub-path (e.g., <code>https://example.com/portal/</code>), React Router needs to know that <code>/portal</code> is the deployment prefix, not part of your route definitions.</p>
+<p><strong>Without <code>basename</code>:</strong></p>
+<ol>
+<li>You define <code>&lt;Route path="/dashboard" /&gt;</code></li>
+<li>User visits <code>/portal/dashboard</code></li>
+<li>React Router sees <code>/portal/dashboard</code> → no match → <strong>Route Not Found ❌</strong></li>
+</ol>
+<p><strong>With <code>basename="/portal"</code>:</strong></p>
+<ol>
+<li>React Router strips <code>/portal</code> from the URL</li>
+<li>Sees <code>/dashboard</code> → matches your route → <strong>Success ✅</strong></li>
+</ol>
+<h2 id="4-api-call-configuration"><a class="header" href="#4-api-call-configuration">4. API Call Configuration</a></h2>
+<h3 id="current-behavior-issue"><a class="header" href="#current-behavior-issue">Current Behavior Issue</a></h3>
+<p>Without a configured base URL, the browser constructs API request URLs relative to the current page origin.</p>
+<p><strong>Example:</strong></p>
+<ul>
+<li>App running at: <code>https://example.com/portal/dashboard</code></li>
+<li>API call: <code>fetch('/api/users')</code></li>
+<li>Browser sends request to: <code>https://example.com/api/users</code></li>
+</ul>
+<p>This may work in some cases but breaks when:</p>
+<ul>
+<li>API is hosted on a different domain/subdomain</li>
+<li>API has a different base path</li>
+<li>Cross-environment consistency is needed</li>
+</ul>
+<h3 id="solution-custom-fetch-wrapper"><a class="header" href="#solution-custom-fetch-wrapper">Solution: Custom Fetch Wrapper</a></h3>
+<p><strong>File:</strong> <code>src/utils/fetchClient.js</code></p>
+<pre><code class="language-javascript">const BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+
+/**
+ * Custom fetch wrapper with automatic base URL prefixing
+ * @param {string} endpoint - API endpoint path (e.g., '/api/users')
+ * @param {Object} options - Fetch options (method, headers, body, etc.)
+ * @returns {Promise} - Response JSON
+ */
+async function fetchClient(endpoint, options = {}) {
+  const url = `${BASE_URL}${endpoint}`;
+
+  const defaultHeaders = {
+    "Content-Type": "application/json",
+  };
+
+  const config = {
+    ...options,
+    headers: {
+      ...defaultHeaders,
+      ...options.headers,
+    },
+  };
+
+  const response = await fetch(url, config);
+
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+export default fetchClient;
+</code></pre>
+<h3 id="usage-example"><a class="header" href="#usage-example">Usage Example</a></h3>
+<pre><code class="language-javascript">import fetchClient from './utils/fetchClient';
+
+// GET request
+const users = await fetchClient('/api/users');
+
+// POST request
+const newUser = await fetchClient('/api/users', {
+  method: 'POST',
+  body: JSON.stringify({ name: 'John Doe', email: 'john@example.com' }),
+});
+
+// With custom headers
+const data = await fetchClient('/api/protected', {
+  headers: {
+    'Authorization': `Bearer ${token}`,
+  },
+});
+</code></pre>
+<h3 id="benefits"><a class="header" href="#benefits">Benefits</a></h3>
+<ul>
+<li><strong>Consistency:</strong> All API calls use the same base URL</li>
+<li><strong>Environment flexibility:</strong> Different API endpoints per environment</li>
+<li><strong>Maintainability:</strong> Single place to update API configuration</li>
+<li><strong>Error handling:</strong> Centralized response validation</li>
+</ul>
+<h2 id="5-build-and-deployment-steps"><a class="header" href="#5-build-and-deployment-steps">5. Build and Deployment Steps</a></h2>
+<p><strong>Step 1: Change the .env variables for specific environment (sdx, dev, prod etc.)</strong></p>
+<pre><code>VITE_BASE_PATH=/ (base path)
+VITE_PORTAL_URL=https://example.com (endpoint URL)
+</code></pre>
+<p><strong>Step 2: Build</strong></p>
+<pre><code class="language-bash">npm run build
+</code></pre>
+<pre><code></code></pre>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../design/cascade-soft-delete.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../../design/portal-view.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../design/distributed-scheduler.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../../design/oauth-kafka.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -284,11 +400,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../design/cascade-soft-delete.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../../design/portal-view.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../design/distributed-scheduler.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../../design/oauth-kafka.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
@@ -308,17 +424,17 @@
         </script>
 
 
-        <script src="../elasticlunr-ef4e11c1.min.js"></script>
-        <script src="../mark-09e88c2c.min.js"></script>
-        <script src="../searcher-c2a407aa.js"></script>
+        <script src="../../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../../mark-09e88c2c.min.js"></script>
+        <script src="../../searcher-c2a407aa.js"></script>
 
-        <script src="../clipboard-1626706a.min.js"></script>
-        <script src="../highlight-abc7f01d.js"></script>
-        <script src="../book-a0b12cfe.js"></script>
+        <script src="../../clipboard-1626706a.min.js"></script>
+        <script src="../../highlight-abc7f01d.js"></script>
+        <script src="../../book-a0b12cfe.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../mermaid-3a6b472a.min.js"></script>
-        <script src="../mermaid-init-025d9952.js"></script>
+        <script src="../../mermaid-3a6b472a.min.js"></script>
+        <script src="../../mermaid-init-025d9952.js"></script>
 
 
 

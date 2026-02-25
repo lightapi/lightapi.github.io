@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Query Active Rows - Light Portal Documentation</title>
+        <title>Portal View - Light Portal Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -174,107 +174,17 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="query-active-rows"><a class="header" href="#query-active-rows">Query Active Rows</a></h1>
-<p>Since we use soft deletes for most tables in the read model, we need to apply an active = true filter to our queries.</p>
-<p>For single-table queries, this is straightforward—we can simply add AND active = true to the query. However, for join queries involving multiple tables, the active = true condition must be applied consistently across all participating tables, ideally in an automatic manner.</p>
-<p>There are two approaches we can take on top of the current database provider implementation:</p>
-<h3 id="active-in-filters"><a class="header" href="#active-in-filters">Active in filters</a></h3>
-<pre><code>    @Override
-    public Result&lt;String&gt; queryRolePermission(int offset, int limit, String filtersJson, String globalFilter, String sortingJson, String hostId) {
-
-
-        boolean isActive = true; // Default to true (active records only)
-
-        // Iterate safely to find and remove the 'active' filter to handle it manually
-        if (filters != null) {
-            Iterator&lt;Map&lt;String, Object&gt;&gt; it = filters.iterator();
-            while (it.hasNext()) {
-                Map&lt;String, Object&gt; filter = it.next();
-                if ("active".equals(filter.get("id"))) {
-                    Object val = filter.get("value");
-                    if (val != null) {
-                        isActive = Boolean.parseBoolean(val.toString());
-                    }
-                    it.remove(); // Remove from list so dynamicFilter doesn't add it again
-                    break;
-                }
-            }
-        }
-
-        StringBuilder activeSql = new StringBuilder();
-        if (isActive) {
-            // Strict consistency: A record is only "active" if all related entities are active
-            activeSql.append(" AND rp.active = true");
-            activeSql.append(" AND r.active = true");
-            activeSql.append(" AND ae.active = true");
-            activeSql.append(" AND av.active = true");
-        } else {
-            // Soft-deleted view: Usually we only care that the specific record itself is inactive
-            activeSql.append(" AND rp.active = false");
-        }
-
-    }	
-
-</code></pre>
-<p><strong>Pros</strong></p>
-<ul>
-<li>No need to change the signature, UI and service layer.</li>
-</ul>
-<p><strong>Cons</strong></p>
-<ul>
-<li>Need to iterate all filters to find the active flag per call.</li>
-</ul>
-<h3 id="active-as-a-seperate-parameter"><a class="header" href="#active-as-a-seperate-parameter">Active as a seperate parameter</a></h3>
-<pre><code>    @Override
-    public Result&lt;String&gt; queryRolePermission(int offset, int limit, String filtersJson, String globalFilter, String sortingJson, boolean active, String hostId) {
-        
-        StringBuilder activeSql = new StringBuilder();
-        if (active) {
-            // Strict consistency: A record is only "active" if all related entities are active
-            activeSql.append(" AND rp.active = true");
-            activeSql.append(" AND r.active = true");
-            activeSql.append(" AND ae.active = true");
-            activeSql.append(" AND av.active = true");
-        } else {
-            // Soft-deleted view: Usually we only care that the specific record itself is inactive
-            activeSql.append(" AND rp.active = false");
-        }
-
-
-    }	
-</code></pre>
-<p><strong>Pros</strong></p>
-<ul>
-<li>Logic is simple in the query.</li>
-</ul>
-<p><strong>Cons</strong></p>
-<ul>
-<li>Need to change the service layer and UI to add an additional parameter.</li>
-</ul>
-<h3 id="conclusion"><a class="header" href="#conclusion">Conclusion</a></h3>
-<p>We recommend proceeding with Option 2. While it requires an initial refactor of the Service and UI layers, it provides strict type safety and cleaner code.</p>
-<p>Reasoning:</p>
-<ul>
-<li>
-<p>Code Reuse: Option 1 requires repeating the filter iteration logic inside every DAO method. Option 2 keeps DAO methods clean.</p>
-</li>
-<li>
-<p>Semantics: The active status affects multiple table joins (Data Integrity), distinguishing it from standard column filters. It should be an explicit argument.</p>
-</li>
-<li>
-<p>Maintainability: Option 2 decouples the Database layer from the UI’s JSON structure. If the UI changes how it sends the active status, we only change the extraction logic in the Controller, not every SQL query method.</p>
-</li>
-</ul>
+                        <h1 id="portal-view"><a class="header" href="#portal-view">Portal View</a></h1>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../design/cascade-soft-delete.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../design.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../design/distributed-scheduler.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../design/portal-view/multiple-environment.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -284,11 +194,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../design/cascade-soft-delete.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../design.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../design/distributed-scheduler.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../design/portal-view/multiple-environment.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
