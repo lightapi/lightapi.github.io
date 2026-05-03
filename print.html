@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-ecf30778.js";
+            window.path_to_searchindex_js = "searchindex-72ec6d25.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-b1de0e59.js"></script>
+        <script src="toc-1d2c5f3e.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -559,6 +559,1367 @@ CREATE TABLE api_endpoint_t (
 <li><strong>LLM Execution</strong>: When a model calls the tool, the Gateway uses the stored <code>tool_schema</code> for pre-flight validation and the <code>tool_metadata</code> to enforce security policies.</li>
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="too-many-pagesforms"><a class="header" href="#too-many-pagesforms">Too Many Pages/Forms</a></h1>
+<p>The portal has accumulated many pages, generated forms, custom admin screens,
+and feature-specific entry points. The sidebar can expose these pages, but it
+does not help a user understand which pages are required to finish a real
+business task. The MCP Gateway quick start wizard is a useful experiment, but
+it also shows the limitation of a rigid linear wizard: real tasks have optional
+steps, pre-existing data, and multiple valid starting points.</p>
+<p>This document proposes a task-oriented navigation layer for <code>portal-view</code>.</p>
+<h2 id="problem"><a class="header" href="#problem">Problem</a></h2>
+<p>Users currently need to know the portal information architecture before they
+can complete a task. For example, onboarding an API to MCP Gateway may require
+some combination of:</p>
+<ul>
+<li>create or select an API</li>
+<li>create or select an API version</li>
+<li>link the API version to a gateway or sidecar instance</li>
+<li>select MCP tools</li>
+<li>configure access control</li>
+<li>revisit instance, API, or role administration later</li>
+</ul>
+<p>The same pattern exists across other areas. A task is not a single route; it is
+a sequence of related pages and forms. The current navigation model makes users
+pick pages first, then infer the task process themselves.</p>
+<h2 id="current-mcp-wizard-observation"><a class="header" href="#current-mcp-wizard-observation">Current MCP Wizard Observation</a></h2>
+<p>The MCP Gateway wizard already has useful building blocks:</p>
+<ul>
+<li><code>flowConfig.tsx</code> keeps step metadata in one place.</li>
+<li><code>McpServerForm.tsx</code> renders a generic wizard shell.</li>
+<li><code>useMcpPrefill.ts</code> can resume from URL context such as <code>apiId</code>,
+<code>apiVersionId</code>, and <code>instanceApiId</code>.</li>
+<li>Several steps are marked skippable.</li>
+</ul>
+<p>However, the wizard is still too rigid:</p>
+<ul>
+<li>Step order is linear even when the task is naturally conditional.</li>
+<li>Initial step selection relies on hard-coded step numbers.</li>
+<li>Optional work is represented as skip buttons instead of task state.</li>
+<li>The wizard duplicates or wraps existing forms instead of treating existing
+pages/forms as first-class task steps.</li>
+<li>The solution is specific to MCP Gateway and does not help users navigate the
+rest of the portal.</li>
+</ul>
+<h2 id="design-goals"><a class="header" href="#design-goals">Design Goals</a></h2>
+<ul>
+<li>Let users start from a task, not a page name.</li>
+<li>Keep existing pages and generated forms as the source of truth.</li>
+<li>Support multiple entry points into the same task.</li>
+<li>Detect what has already been completed and show only relevant next actions.</li>
+<li>Support optional, required, blocked, complete, and skipped steps.</li>
+<li>Preserve role-based visibility and host-specific context.</li>
+<li>Allow users to leave a task, return later, and continue from context.</li>
+<li>Make the approach reusable for MCP, API publishing, access control,
+deployment, config promotion, migration, and admin workflows.</li>
+</ul>
+<h2 id="non-goals"><a class="header" href="#non-goals">Non-Goals</a></h2>
+<ul>
+<li>Do not replace every admin page with a wizard.</li>
+<li>Do not create a separate custom form for each task if an existing generated
+form already works.</li>
+<li>Do not use the sidebar as the only navigation surface.</li>
+<li>Do not force a strict step sequence when the data model allows safe jumping.</li>
+</ul>
+<h2 id="proposed-solution"><a class="header" href="#proposed-solution">Proposed Solution</a></h2>
+<p>Add a task-oriented navigation layer above the current pages/forms.</p>
+<p>The main pieces are:</p>
+<ol>
+<li>Task Center</li>
+<li>Task Registry</li>
+<li>Task Progress Resolver</li>
+<li>Task Navigation Shell</li>
+<li>Global Search and Command Palette</li>
+<li>Contextual Next Actions</li>
+</ol>
+<h2 id="task-center"><a class="header" href="#task-center">Task Center</a></h2>
+<p>The Task Center is a page where users choose what they want to accomplish. It
+should group work by intent, not by implementation table.</p>
+<p>Example task groups:</p>
+<ul>
+<li>API Marketplace
+<ul>
+<li>Register a new API</li>
+<li>Add an API version</li>
+<li>Publish an API</li>
+<li>Review API details</li>
+</ul>
+</li>
+<li>MCP Gateway
+<ul>
+<li>Onboard an existing API to MCP Gateway</li>
+<li>Register a standalone MCP server</li>
+<li>Configure MCP tools</li>
+<li>Configure MCP access control</li>
+</ul>
+</li>
+<li>Access Control
+<ul>
+<li>Create role</li>
+<li>Assign permissions</li>
+<li>Configure endpoint access</li>
+</ul>
+</li>
+<li>Platform Operations
+<ul>
+<li>Register controller/gateway instance</li>
+<li>Link API version to instance</li>
+<li>Promote configuration</li>
+</ul>
+</li>
+<li>Portal Administration
+<ul>
+<li>Manage host users</li>
+<li>Export/import portal data</li>
+<li>Convert migration snapshot</li>
+</ul>
+</li>
+</ul>
+<p>Each task card should show:</p>
+<ul>
+<li>title</li>
+<li>short description</li>
+<li>required role</li>
+<li>common starting object, such as API, instance, host, or client</li>
+<li>progress status when the current context is known</li>
+<li>primary action such as Start, Continue, Review, or Fix Missing Step</li>
+</ul>
+<h2 id="task-registry"><a class="header" href="#task-registry">Task Registry</a></h2>
+<p>Introduce a registry that describes tasks and steps declaratively. This is the
+generalized version of the current MCP <code>flowConfig.tsx</code>, but it should route to
+existing pages/forms instead of rendering every step inside one wizard.</p>
+<p>Example TypeScript shape:</p>
+<pre><code class="language-ts">export type TaskDefinition = {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  roles?: string[];
+  keywords: string[];
+  entryPoints: TaskEntryPoint[];
+  steps: TaskStep[];
+};
+
+export type TaskStep = {
+  id: string;
+  title: string;
+  description?: string;
+  required: boolean;
+  dependsOn?: string[];
+  route: (ctx: TaskContext) =&gt; string;
+  formId?: string;
+  completeWhen?: TaskCompletionCheck;
+  visibleWhen?: TaskVisibilityCheck;
+  blockedWhen?: TaskBlockedCheck;
+};
+</code></pre>
+<p>The task registry should live close to portal navigation code, for example:</p>
+<pre><code class="language-text">src/tasks/taskRegistry.ts
+src/tasks/taskTypes.ts
+src/tasks/resolvers/
+src/pages/tasks/TaskCenter.tsx
+src/pages/tasks/TaskDetail.tsx
+</code></pre>
+<h2 id="page-and-form-metadata"><a class="header" href="#page-and-form-metadata">Page And Form Metadata</a></h2>
+<p>To make search and tasks work well, pages and generated forms need metadata.</p>
+<p>For generated forms, the metadata can come from <code>Forms.json</code> plus a small
+registry override when the form title is not enough.</p>
+<p>For custom pages, add a route/page registry:</p>
+<pre><code class="language-ts">export type PageDefinition = {
+  route: string;
+  title: string;
+  description?: string;
+  category: string;
+  roles?: string[];
+  keywords: string[];
+  entities?: string[];
+};
+</code></pre>
+<p>This registry can feed:</p>
+<ul>
+<li>sidebar sections</li>
+<li>Task Center</li>
+<li>command palette</li>
+<li>page breadcrumbs</li>
+<li>contextual next actions</li>
+</ul>
+<p>The important rule is that page/form metadata should be reused, not copied into
+each wizard.</p>
+<h2 id="task-progress-resolver"><a class="header" href="#task-progress-resolver">Task Progress Resolver</a></h2>
+<p>A task should not blindly ask users to complete steps that are already done.
+Each task can have a resolver that checks the current host and entity context.</p>
+<p>For MCP Gateway, the resolver can check:</p>
+<ul>
+<li>API exists</li>
+<li>API version exists</li>
+<li>instance API link exists</li>
+<li>MCP tool configuration exists</li>
+<li>access control exists</li>
+</ul>
+<p>The UI then marks each step:</p>
+<ul>
+<li>Complete</li>
+<li>Required</li>
+<li>Optional</li>
+<li>Blocked</li>
+<li>Skipped</li>
+<li>Needs review</li>
+</ul>
+<p>The resolver should use existing query endpoints where possible. The first
+implementation can query on page load. Later, it can cache per task/session.</p>
+<h2 id="task-navigation-shell"><a class="header" href="#task-navigation-shell">Task Navigation Shell</a></h2>
+<p>Instead of a full-screen wizard that owns all steps, use a task shell that can
+wrap or accompany existing pages.</p>
+<p>Recommended behavior:</p>
+<ul>
+<li>A task detail page shows the checklist and current state.</li>
+<li>Selecting a step navigates to the existing page/form with task context in the
+URL or router state.</li>
+<li>The target page shows a compact “Task” panel or return link.</li>
+<li>After save, the user can return to the checklist or continue to the next
+recommended step.</li>
+</ul>
+<p>Example URL:</p>
+<pre><code class="language-text">/app/form/createService?task=mcp-onboard-api&amp;returnTo=/app/tasks/mcp-onboard-api
+</code></pre>
+<p>This keeps existing page behavior intact while adding guided navigation.</p>
+<h2 id="global-search-and-command-palette"><a class="header" href="#global-search-and-command-palette">Global Search And Command Palette</a></h2>
+<p>The portal should have a global launcher. It should search tasks, pages, forms,
+and entities.</p>
+<p>Examples:</p>
+<ul>
+<li>“onboard mcp”</li>
+<li>“create api”</li>
+<li>“auth client”</li>
+<li>“relation type”</li>
+<li>“instance api”</li>
+<li>“export snapshot”</li>
+</ul>
+<p>Search results should be role-aware and host-aware.</p>
+<p>Result types:</p>
+<ul>
+<li>Task</li>
+<li>Page</li>
+<li>Form</li>
+<li>Entity</li>
+<li>Recent item</li>
+</ul>
+<p>This is the fastest way to help expert users without forcing them through a
+wizard.</p>
+<h2 id="contextual-next-actions"><a class="header" href="#contextual-next-actions">Contextual Next Actions</a></h2>
+<p>Detail pages should expose next actions based on the current entity.</p>
+<p>Examples:</p>
+<ul>
+<li>API detail
+<ul>
+<li>Add version</li>
+<li>Link version to gateway</li>
+<li>Configure MCP tools</li>
+<li>Configure access control</li>
+</ul>
+</li>
+<li>Instance detail
+<ul>
+<li>Link API version</li>
+<li>Configure MCP tools</li>
+<li>View gateway servers</li>
+</ul>
+</li>
+<li>Auth client detail
+<ul>
+<li>Assign owner</li>
+<li>Review sessions</li>
+<li>Review audit</li>
+</ul>
+</li>
+<li>Snapshot export
+<ul>
+<li>Convert snapshot</li>
+<li>Import snapshot</li>
+</ul>
+</li>
+</ul>
+<p>These actions should come from the same task registry, not from one-off buttons
+hard-coded on every page.</p>
+<h2 id="mcp-gateway-example"><a class="header" href="#mcp-gateway-example">MCP Gateway Example</a></h2>
+<p>The MCP Gateway quick start can be rebuilt as a task:</p>
+<pre><code class="language-text">Task: Onboard API to MCP Gateway
+
+Steps:
+1. Select or create API
+2. Select or create API version
+3. Choose deployment mode
+4. Link API version to gateway or sidecar instance
+5. Select MCP tools
+6. Configure access control
+</code></pre>
+<p>Step behavior:</p>
+<ul>
+<li>API selection is required unless <code>apiId</code> is already provided.</li>
+<li>API version is required unless <code>apiVersionId</code> is already provided.</li>
+<li>Spec upload is optional and only shown when creating a new API/version.</li>
+<li>Deployment mode is required when the version is not linked.</li>
+<li>Gateway selection is required only for centralized deployment.</li>
+<li>Tool selection is optional if users only want to register the server first.</li>
+<li>Access control is optional but should be shown as a recommended final step.</li>
+</ul>
+<p>This task can support several entry points:</p>
+<pre><code class="language-text">/app/tasks/mcp-onboard-api
+/app/tasks/mcp-onboard-api?apiId=...
+/app/tasks/mcp-onboard-api?apiId=...&amp;apiVersionId=...
+/app/tasks/mcp-onboard-api?instanceApiId=...
+</code></pre>
+<p>The UI should not rely on fixed step numbers. It should compute visible steps
+from the task context and completion state.</p>
+<h2 id="task-state"><a class="header" href="#task-state">Task State</a></h2>
+<p>Start with client-side state:</p>
+<ul>
+<li>URL query parameters for entity context</li>
+<li><code>sessionStorage</code> for in-progress task context</li>
+<li>existing backend records for real completion state</li>
+</ul>
+<p>Later, add persisted task state if needed:</p>
+<ul>
+<li>user id</li>
+<li>host id</li>
+<li>task id</li>
+<li>context JSON</li>
+<li>skipped step ids</li>
+<li>last active step</li>
+<li>updated timestamp</li>
+</ul>
+<p>Persisting task state should not become the source of truth for business data.
+It should only remember navigation state and user choices. Completion should be
+derived from actual portal records.</p>
+<h2 id="sidebar-role"><a class="header" href="#sidebar-role">Sidebar Role</a></h2>
+<p>The sidebar should become smaller and more stable. It should expose major
+areas, not every page/form.</p>
+<p>Recommended sidebar sections:</p>
+<ul>
+<li>Home</li>
+<li>Tasks</li>
+<li>Marketplace</li>
+<li>MCP Gateway</li>
+<li>Operations</li>
+<li>Administration</li>
+</ul>
+<p>Deep links should still exist, but they should be discoverable through search,
+contextual actions, and task detail pages.</p>
+<h2 id="implementation-plan"><a class="header" href="#implementation-plan">Implementation Plan</a></h2>
+<h3 id="phase-1-inventory-and-metadata"><a class="header" href="#phase-1-inventory-and-metadata">Phase 1: Inventory And Metadata</a></h3>
+<ul>
+<li>Create page/form metadata registry.</li>
+<li>Add task registry types.</li>
+<li>Register the most-used pages and forms.</li>
+<li>Add global search over registered tasks/pages/forms.</li>
+</ul>
+<h3 id="phase-2-task-center"><a class="header" href="#phase-2-task-center">Phase 2: Task Center</a></h3>
+<ul>
+<li>Add <code>/app/tasks</code>.</li>
+<li>Add task category cards.</li>
+<li>Add task detail checklist page.</li>
+<li>Implement client-side task context with URL parameters and session storage.</li>
+</ul>
+<h3 id="phase-3-mcp-gateway-task"><a class="header" href="#phase-3-mcp-gateway-task">Phase 3: MCP Gateway Task</a></h3>
+<ul>
+<li>Convert the current MCP wizard flow into <code>mcp-onboard-api</code> task definition.</li>
+<li>Reuse existing MCP components for the pages that still need custom UI.</li>
+<li>Replace hard-coded step numbers with resolver-driven visible steps.</li>
+<li>Add return-to-task behavior after saves.</li>
+</ul>
+<h3 id="phase-4-contextual-actions"><a class="header" href="#phase-4-contextual-actions">Phase 4: Contextual Actions</a></h3>
+<ul>
+<li>Add task actions to API detail and instance detail pages.</li>
+<li>Add task actions to access control and config pages where appropriate.</li>
+<li>Use the task registry to drive action visibility.</li>
+</ul>
+<h3 id="phase-5-broader-rollout"><a class="header" href="#phase-5-broader-rollout">Phase 5: Broader Rollout</a></h3>
+<ul>
+<li>Add tasks for API publishing, config promotion, host/user management, and
+snapshot export/import.</li>
+<li>Reduce sidebar clutter once task/search usage is available.</li>
+<li>Add persisted task state only if session storage is not enough.</li>
+</ul>
+<h2 id="risks-and-mitigations"><a class="header" href="#risks-and-mitigations">Risks And Mitigations</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Risk</th><th>Mitigation</th></tr>
+</thead>
+<tbody>
+<tr><td>Task registry duplicates sidebar and route definitions</td><td>Reuse page/form metadata as the source for labels, roles, and keywords</td></tr>
+<tr><td>Task state becomes stale</td><td>Derive completion from backend records, not saved task status</td></tr>
+<tr><td>Users lose flexibility</td><td>Allow direct page navigation and command-palette search</td></tr>
+<tr><td>Implementation grows into another wizard framework</td><td>Route to existing pages/forms wherever possible</td></tr>
+<tr><td>Role filtering becomes inconsistent</td><td>Centralize role checks in the page/task registry</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="recommendation"><a class="header" href="#recommendation">Recommendation</a></h2>
+<p>Keep the MCP Gateway wizard as a prototype, but do not build more isolated
+wizards in the same style. The long-term solution should be:</p>
+<ul>
+<li>a task registry</li>
+<li>a Task Center</li>
+<li>resolver-driven progress</li>
+<li>global search</li>
+<li>contextual next actions</li>
+<li>reuse of existing pages and generated forms</li>
+</ul>
+<p>This gives new users guided paths while still letting experienced users jump
+directly to the page or form they already know.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="user-filter"><a class="header" href="#user-filter">User Filter</a></h1>
+<p>As more portal users manage their own APIs, clients, instances, schedules, and
+configuration records, giving every operator a broad <code>admin</code> role becomes too
+coarse. A broad admin can see and modify records created by other admins on the
+same host. This document proposes an incremental owner-scoped filtering model
+for <code>portal-view</code>.</p>
+<p>The first step is a UI-side filter based on the user recorded on each row, such
+as <code>update_user</code>. This is not a complete security boundary. The same rule must
+eventually be enforced in the query and command services with fine-grained
+authorization from the rule engine. The UI implementation is still useful
+because it improves day-to-day user experience and gives us a concrete policy
+shape to move into the service layer.</p>
+<h2 id="problem-1"><a class="header" href="#problem-1">Problem</a></h2>
+<p>Portal admin pages were originally designed for a small set of trusted
+operators. Many tables expose all host-scoped records once the user can access
+the admin page.</p>
+<p>That model creates problems as adoption grows:</p>
+<ul>
+<li>application owners need to manage their own APIs, clients, and instances</li>
+<li>broad admin roles expose unrelated records from other teams</li>
+<li>users can accidentally edit or delete records owned by another user or team</li>
+<li>creating one role per page, such as <code>api-admin</code> or <code>instance-admin</code>, still
+does not solve row ownership</li>
+<li>service-layer fine-grained authorization is not available everywhere yet</li>
+</ul>
+<p>The immediate need is to let users use admin-like pages while limiting the rows
+they see and act on.</p>
+<h2 id="current-experiment"><a class="header" href="#current-experiment">Current Experiment</a></h2>
+<p><code>Schedule.tsx</code> is the first experimental page. The idea is:</p>
+<ul>
+<li>users can access the schedule admin surface</li>
+<li>normal users only see schedules where <code>updateUser</code> matches their user id</li>
+<li>global admins or schedule admins can still see all schedules</li>
+<li>the <code>updateUser</code> column can be hidden for normal users</li>
+<li>create/update/delete actions are available only on the visible set</li>
+</ul>
+<p>One implementation detail matters: ownership filters must be added before the
+request payload serializes the <code>filters</code> array.</p>
+<pre><code class="language-ts">const apiFilters = [];
+
+if (ownedOnly &amp;&amp; userId) {
+  apiFilters.push({ id: "updateUser", value: userId });
+}
+
+const cmdData = {
+  filters: JSON.stringify(apiFilters),
+};
+</code></pre>
+<p>Adding the filter after <code>cmdData.filters</code> is built will not send it to the
+backend.</p>
+<h2 id="design-goals-1"><a class="header" href="#design-goals-1">Design Goals</a></h2>
+<ul>
+<li>Allow regular users to manage records they created or updated.</li>
+<li>Avoid giving every self-service user broad all-record admin visibility.</li>
+<li>Keep the admin table implementation familiar and incremental.</li>
+<li>Centralize the owner filter logic instead of duplicating it page by page.</li>
+<li>Make the UI rule match the future service-layer rule as closely as possible.</li>
+<li>Preserve host scoping and existing role-based page visibility.</li>
+<li>Avoid presenting UI-side filtering as a security boundary.</li>
+</ul>
+<h2 id="non-goals-1"><a class="header" href="#non-goals-1">Non-Goals</a></h2>
+<ul>
+<li>Do not claim UI filtering is sufficient authorization.</li>
+<li>Do not replace service-layer rule-engine enforcement.</li>
+<li>Do not solve full team ownership in the first UI-only pass.</li>
+<li>Do not migrate every admin page in one large change.</li>
+<li>Do not overload <code>update_user</code> as the permanent ownership model if a better
+owner field exists or can be added.</li>
+</ul>
+<h2 id="ownership-model"><a class="header" href="#ownership-model">Ownership Model</a></h2>
+<p>There are several possible ownership signals. They should be treated in this
+order of preference.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Meaning</th><th>Recommendation</th></tr>
+</thead>
+<tbody>
+<tr><td><code>owner_user_id</code></td><td>explicit individual owner</td><td>best long-term user ownership field</td></tr>
+<tr><td><code>owner_position_id</code></td><td>explicit position or org-unit owner</td><td>best long-term team/hierarchy ownership field</td></tr>
+<tr><td><code>create_user</code></td><td>original creator</td><td>good fallback if available</td></tr>
+<tr><td><code>update_user</code></td><td>last updater</td><td>useful interim fallback, but not true ownership</td></tr>
+<tr><td>domain-specific owner, such as <code>operation_owner</code></td><td>business owner</td><td>useful when the field is reliable and normalized</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>update_user</code> is acceptable for the first UI experiment because many tables
+already have it. However, it has an important semantic problem: ownership moves
+to whoever last updated the row. If Alice creates an API and Bob updates it,
+Bob becomes the owner under an <code>update_user</code> rule.</p>
+<p>The long-term model should add explicit owner fields where needed:</p>
+<pre><code class="language-text">owner_user_id
+owner_position_id
+</code></pre>
+<p><code>owner_group_id</code> is intentionally deferred. Groups are still useful for flat
+team membership, but position ownership fits the portal authorization model
+better when access should follow the organization hierarchy. <code>owner_org_id</code> is
+also deferred because normal portal records are already scoped by <code>host_id</code>, and
+<code>host_t</code> links back to <code>org_t</code> through the host domain. Add organization-level
+ownership only if a future cross-host/global ownership use case requires it.</p>
+<p>Do not add <code>created_by</code> and <code>updated_by</code> as authorization fields in Phase 4.
+The existing <code>update_user</code> and <code>update_ts</code> columns remain the last-updater audit
+trail. If creator audit becomes important, add <code>create_user</code> and <code>create_ts</code> as
+audit fields later, not as substitutes for stable ownership.</p>
+<p>Until explicit owner columns exist, each page should declare which field is used
+for interim UI owner filtering.</p>
+<h2 id="role-model"><a class="header" href="#role-model">Role Model</a></h2>
+<p>Use one page per entity type, but separate page visibility from row scope.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Role</th><th>Meaning</th><th>Page access</th><th>Row scope</th></tr>
+</thead>
+<tbody>
+<tr><td><code>user</code></td><td>baseline signed-in portal user</td><td>only approved self-service admin pages</td><td>owned records only</td></tr>
+<tr><td><code>admin</code></td><td>global portal administrator, effectively super admin</td><td>all admin pages</td><td>all records</td></tr>
+<tr><td><code>&lt;entity&gt;-admin</code></td><td>administrator for one entity type, such as <code>schedule-admin</code></td><td>that entity’s admin page</td><td>all records for that entity</td></tr>
+<tr><td><code>platform-admin</code></td><td>deployment platform administrator if this role is kept</td><td>platform/deployment platform pages only</td><td>not a global all-record role</td></tr>
+</tbody>
+</table>
+</div>
+<p>Do not give every <code>user</code> account access to every admin page. Only pages that are
+safe for self-service ownership should be exposed to <code>user</code>, and each of those
+pages must apply the owner filter and action guards.</p>
+<p>The <code>admin</code> role can be repurposed as the global all-record role once the
+sidebar stops using it as a broad menu marker. Role checks must use exact role
+tokens. A role such as <code>schedule-admin</code> must not match <code>admin</code> through substring
+checks.</p>
+<h2 id="access-modes"><a class="header" href="#access-modes">Access Modes</a></h2>
+<p>The UI should support three access modes.</p>
+<h3 id="owner-scoped-admin"><a class="header" href="#owner-scoped-admin">Owner-Scoped Admin</a></h3>
+<p>This is the default self-service mode. The user can open admin pages, but rows
+are filtered to records they own.</p>
+<p>Example:</p>
+<pre><code class="language-text">roles: user
+scope: owned
+filter: updateUser = current user id
+</code></pre>
+<h3 id="all-scope-admin"><a class="header" href="#all-scope-admin">All-Scope Admin</a></h3>
+<p>This is for operators who can see and manage every record on the current host.</p>
+<p>Example roles:</p>
+<pre><code class="language-text">admin
+schedule-admin
+</code></pre>
+<p>The default all-scope role is <code>admin</code>. Page-specific roles such as
+<code>schedule-admin</code> can opt a user into all-record visibility for one area. Do not
+use <code>platform-admin</code> as a global all-scope role because the portal already has a
+Platform Admin page for deployment platform management.</p>
+<h3 id="read-only-or-support-view"><a class="header" href="#read-only-or-support-view">Read-Only or Support View</a></h3>
+<p>Some users may need to see records without modifying them. This can be added
+later with separate flags:</p>
+<pre><code class="language-text">canReadAll = true
+canWriteOwned = true
+canWriteAll = false
+</code></pre>
+<h2 id="proposed-ui-architecture"><a class="header" href="#proposed-ui-architecture">Proposed UI Architecture</a></h2>
+<p>Add a small ownership-scope helper used by admin pages.</p>
+<p>Example shape:</p>
+<pre><code class="language-ts">type OwnershipScopeOptions = {
+  roles?: string | null;
+  userId?: string | null;
+  ownerField: string;
+  allScopeRoles?: string[];
+};
+
+type OwnershipScope = {
+  ownedOnly: boolean;
+  ownerFilter: { id: string; value: string } | null;
+  canWriteAll: boolean;
+};
+</code></pre>
+<p>Example usage:</p>
+<pre><code class="language-ts">import {
+  applyOwnershipFilter,
+  defaultAllScopeRoles,
+  ownershipScope,
+} from "../utils/ownershipScope";
+
+const ownership = ownershipScope({
+  roles,
+  userId,
+  ownerField: "updateUser",
+  allScopeRoles: [...defaultAllScopeRoles, "schedule-admin"],
+});
+
+const apiFilters = applyOwnershipFilter(columnFiltersWithoutActive, ownership);
+</code></pre>
+<p>This helper should live near other portal navigation/task utilities or in a
+small access utility module, for example:</p>
+<pre><code class="language-text">src/utils/ownershipScope.ts
+</code></pre>
+<p>or:</p>
+<pre><code class="language-text">src/tasks/accessScope.ts
+</code></pre>
+<p>The helper should not call the backend. It only computes the UI filter and UI
+capabilities from the current user state.</p>
+<h2 id="sidebar-behavior"><a class="header" href="#sidebar-behavior">Sidebar Behavior</a></h2>
+<p>The sidebar should not use <code>admin</code> as a marker on every admin menu link. That
+made the whole Administration group disappear for normal users and prevented
+owner-scoped self-service pages from being reachable.</p>
+<p>Recommended behavior:</p>
+<ul>
+<li><code>admin</code> users see every Administration link.</li>
+<li>non-admin users see only Administration links explicitly marked with <code>user</code>
+or a matching entity role, such as <code>role: "user schedule-admin"</code>.</li>
+<li>only add <code>user</code> to a link after that page has owner-scoped filtering and
+action guards.</li>
+<li>remove <code>role: "admin"</code> from individual menu links.</li>
+<li>use exact role-token matching instead of string <code>includes</code>, so
+<code>schedule-admin</code> does not accidentally grant <code>admin</code>.</li>
+</ul>
+<p>At the Phase 3 rollout point, the following Administration links are safe to
+expose to <code>user</code> because the pages apply the shared owner-scope helper and
+action guards:</p>
+<ul>
+<li>API Admin</li>
+<li>API Detail</li>
+<li>OAuth Auth Client and Client Token</li>
+<li>App Admin</li>
+<li>Instance Admin, Runtime Instance, and instance relationship pages</li>
+<li>Schedule Admin</li>
+<li>Workflow Definition</li>
+</ul>
+<p>Configuration, platform admin, user/role admin, workflow process/task/audit
+pages, and lower-volume metadata pages should remain admin-only until they have
+the same owner-scope treatment or a separate support/read-only policy.</p>
+<h2 id="admin-page-behavior"><a class="header" href="#admin-page-behavior">Admin Page Behavior</a></h2>
+<p>For an owner-scoped user:</p>
+<ul>
+<li>add the owner filter before the query payload is serialized</li>
+<li>hide the owner column if it does not add useful information</li>
+<li>show a small scope label such as “My records”</li>
+<li>keep create actions available</li>
+<li>allow update/delete only for rows matching the ownership rule</li>
+<li>preserve normal table sorting, pagination, and global filter behavior</li>
+</ul>
+<p>For an all-scope admin:</p>
+<ul>
+<li>do not add the owner filter</li>
+<li>show a scope label such as “All host records”</li>
+<li>show the owner/update columns</li>
+<li>allow existing admin actions</li>
+</ul>
+<p>For a user without enough context:</p>
+<ul>
+<li>if <code>userId</code> is missing, do not run an owner-scoped query</li>
+<li>show a clear message that user context is required</li>
+<li>avoid falling back to all-record visibility</li>
+</ul>
+<h2 id="action-level-guard"><a class="header" href="#action-level-guard">Action-Level Guard</a></h2>
+<p>List filtering is not enough for a good UI. Row actions should also check the
+same scope.</p>
+<p>Example:</p>
+<pre><code class="language-ts">const canUpdateRow =
+  ownership.canWriteAll ||
+  row.original.updateUser === userId;
+</code></pre>
+<p>For rows the user cannot modify:</p>
+<ul>
+<li>hide destructive actions, or</li>
+<li>disable them with a tooltip explaining the scope</li>
+</ul>
+<p>Even after service-layer authorization is implemented, the UI should keep these
+guards so users understand why an action is unavailable.</p>
+<h2 id="phase-4-ownership-columns"><a class="header" href="#phase-4-ownership-columns">Phase 4 Ownership Columns</a></h2>
+<p>For high-value entity tables, add canonical owner columns directly on the
+entity row:</p>
+<pre><code class="language-text">owner_user_id UUID NULL
+owner_position_id VARCHAR(128) NULL
+</code></pre>
+<p>Recommended constraints where the table has <code>host_id</code>:</p>
+<pre><code class="language-text">FOREIGN KEY (host_id, owner_user_id)
+  REFERENCES user_host_t(host_id, user_id)
+
+FOREIGN KEY (host_id, owner_position_id)
+  REFERENCES position_t(host_id, position_id)
+</code></pre>
+<p>Both owner columns should be nullable during migration. New records should get
+<code>owner_user_id</code> from the authenticated user on the service side by default. Do
+not trust a browser-submitted owner user id unless the caller has permission to
+assign ownership.</p>
+<p><code>owner_position_id</code> should be optional on create. The UI can show a host
+position dropdown populated from the user’s allowed positions. If the user has
+exactly one effective position and the page is configured for position
+ownership, the UI can default to that position. If the user has multiple
+positions, require an explicit choice when position ownership is desired.</p>
+<p>For portal forms, the optional position owner field should be exposed as
+<code>ownerPositionId</code> and backed by the existing position label dynaselect query.
+The form action uses the <code>position/getPositionLabel</code> endpoint, which is backed
+by the <code>queryPositionLabel</code> persistence method and returns the id/label pairs
+needed by the select control.</p>
+<p>Do not expose <code>ownerUserId</code> as a normal create/update form field. The command
+path must derive <code>owner_user_id</code> from the authenticated user in the event
+context. If an owner-transfer use case is needed later, implement it as a
+separate command with explicit authorization and audit behavior.</p>
+<p>Normal update forms may update <code>owner_position_id</code> when the page allows the
+caller to choose or clear the owning position. <code>update_user</code> changes on every
+update and remains audit metadata. <code>owner_user_id</code> should not change on normal
+update; it changes only through an explicit owner-transfer action restricted to
+the current owner, <code>admin</code>, or the relevant entity-admin role.</p>
+<p>Existing rows should be migrated conservatively:</p>
+<ul>
+<li>if <code>update_user</code> can be resolved to a user in the host, it can be used as an
+initial <code>owner_user_id</code></li>
+<li>leave <code>owner_position_id</code> null unless there is a reliable source for the
+owning position</li>
+<li>rows with no owner columns populated should be treated as unassigned legacy
+rows, visible only to all-scope admins until an owner is assigned</li>
+</ul>
+<h2 id="service-layer-target"><a class="header" href="#service-layer-target">Service-Layer Target</a></h2>
+<p>The UI filter is an interim step. The durable solution belongs in the query and
+command services.</p>
+<p>The service layer should eventually:</p>
+<ul>
+<li>derive user id, roles, host id, and scopes from JWT claims</li>
+<li>ignore client-supplied owner filters as an authorization source</li>
+<li>inject owner predicates into query handlers based on the authenticated user</li>
+<li>reject update/delete commands when the user does not own the row and lacks
+all-scope permission</li>
+<li>use rule-engine policies for exceptions and domain-specific ownership</li>
+</ul>
+<p>Once service-side owner enforcement is implemented, the UI should no longer be
+the source of authorization predicates. The service should inject the ownership
+predicate from authenticated user context and rule-engine decisions.</p>
+<p>The UI should still keep owner-aware behavior for usability:</p>
+<ul>
+<li>show “My records” or “Admin View” scope labels</li>
+<li>hide or show owner columns based on the user’s scope</li>
+<li>disable update/delete actions that the current user cannot take</li>
+<li>optionally send a simple view hint such as <code>scope=owned</code> or <code>scope=all</code></li>
+</ul>
+<p>The service must treat any UI-supplied scope or owner filter as a hint only. It
+must ignore, override, or reject filters that would expand the caller’s
+authorized scope.</p>
+<p>For owner-scoped users, the service-side predicate should be an OR condition:</p>
+<pre><code class="language-text">owner_user_id = current_user_id
+OR owner_position_id IN current_user_effective_positions
+</code></pre>
+<p>For all-scope admins, such as <code>admin</code> or the relevant entity-admin role, the
+service should omit this owner predicate and return all rows within the normal
+host scope.</p>
+<p>The UI and backend should share the same policy concepts:</p>
+<pre><code class="language-text">host scope
+entity type
+owner field
+owned-only permission
+all-record permission
+read vs write capability
+</code></pre>
+<p>Position hierarchy must be resolved by the service layer or rule engine. A JWT
+claim such as <code>pos=ai-engineer</code> only grants exact-position access unless the
+service expands it to effective positions from <code>position_t</code> and
+<code>user_position_t</code>. If hierarchy is enabled, the effective position set should
+include inherited positions according to the existing position inheritance
+rules.</p>
+<p>Rows with <code>owner_position_id IS NULL</code> are not position-owned. A user can still
+see the row if <code>owner_user_id</code> matches their user id. Rows where both
+<code>owner_user_id</code> and <code>owner_position_id</code> are null are unassigned legacy rows and
+should not be visible to normal owner-scoped users by default.</p>
+<h2 id="rule-engine-direction"><a class="header" href="#rule-engine-direction">Rule Engine Direction</a></h2>
+<p>The rule engine can express policies such as:</p>
+<pre><code class="language-text">user can read API when api.owner_user_id == user.user_id
+user can update API when api.owner_user_id == user.user_id
+admin can read all APIs on host
+admin can update all APIs on host
+api-admin can read all APIs on host
+api-admin can update all APIs on host
+support can read all APIs but cannot update
+</code></pre>
+<p>For tables that do not yet have explicit ownership fields, the policy can
+temporarily map ownership to <code>update_user</code>.</p>
+<h2 id="rollout-plan"><a class="header" href="#rollout-plan">Rollout Plan</a></h2>
+<h3 id="phase-1-fix-schedule-experiment"><a class="header" href="#phase-1-fix-schedule-experiment">Phase 1: Fix Schedule Experiment</a></h3>
+<ul>
+<li>Fix filter ordering so <code>updateUser</code> is included in the request.</li>
+<li>Use roles plus user id to decide owner-scoped vs all-scope mode.</li>
+<li>Add action-level guards for update/delete.</li>
+<li>Keep the current route behavior unchanged.</li>
+</ul>
+<h3 id="phase-2-add-reusable-ui-helper"><a class="header" href="#phase-2-add-reusable-ui-helper">Phase 2: Add Reusable UI Helper</a></h3>
+<ul>
+<li>Create a shared ownership-scope helper.</li>
+<li>Add unit-level coverage if the repo has a practical test pattern.</li>
+<li>Document default all-scope roles.</li>
+<li>Keep owner field configurable per page.</li>
+</ul>
+<h3 id="phase-3-apply-to-high-value-admin-pages"><a class="header" href="#phase-3-apply-to-high-value-admin-pages">Phase 3: Apply To High-Value Admin Pages</a></h3>
+<p>Start with pages where users commonly manage their own records:</p>
+<ul>
+<li>API admin</li>
+<li>API detail/version admin</li>
+<li>OAuth clients</li>
+<li>client apps</li>
+<li>instances</li>
+<li>instance API links</li>
+<li>schedules</li>
+<li>workflow definitions</li>
+</ul>
+<p>Then expand to lower-volume metadata pages.</p>
+<p>Current implementation status:</p>
+<ul>
+<li><code>src/utils/ownershipScope.ts</code> centralizes exact role matching, owner-scope
+calculation, owner filter injection, and owner-column hiding.</li>
+<li>Sidebar access now exposes only scoped links to <code>user</code> or matching
+entity-admin roles, while exact <code>admin</code> continues to see all Administration
+links.</li>
+<li>API pages use <code>admin</code> and <code>api-admin</code> for all-record scope, with <code>user</code>
+limited by <code>updateUser</code>.</li>
+<li>OAuth client pages use <code>admin</code> and <code>oauth-client-admin</code> for all-record scope,
+with <code>user</code> limited by <code>updateUser</code>.</li>
+<li>Client app pages use <code>admin</code> and <code>app-admin</code> for all-record scope, with
+<code>user</code> limited by <code>updateUser</code>.</li>
+<li>Instance pages use <code>admin</code> and <code>instance-admin</code> for all-record scope, with
+<code>user</code> limited by <code>updateUser</code>.</li>
+<li>Schedule pages use <code>admin</code> and <code>schedule-admin</code> for all-record scope, with
+<code>user</code> limited by <code>updateUser</code>.</li>
+<li>Workflow Definition uses <code>admin</code> and <code>workflow-admin</code> for all-record scope,
+with <code>user</code> limited by <code>updateUser</code>.</li>
+<li>Task/page search registries use exact role-token checks so <code>schedule-admin</code>
+or another entity-admin role does not accidentally match global <code>admin</code>,
+while exact <code>admin</code> still has global visibility.</li>
+</ul>
+<p>Deferred from this phase:</p>
+<ul>
+<li>Workflow Process, Task, Worklist, Work, Audit, and Trace remain admin-only
+until their ownership rules are defined and implemented.</li>
+<li>Configuration and platform pages remain admin-only because their ownership
+model is not yet defined.</li>
+<li>User and role administration remain admin-only because exposing them to
+self-service users would require a separate delegated-administration model.</li>
+</ul>
+<h3 id="phase-4-add-explicit-ownership-fields"><a class="header" href="#phase-4-add-explicit-ownership-fields">Phase 4: Add Explicit Ownership Fields</a></h3>
+<p>Where <code>update_user</code> is too weak, add proper owner fields through the database
+and services.</p>
+<p>Candidate fields:</p>
+<pre><code class="language-text">owner_user_id
+owner_position_id
+</code></pre>
+<p>Apply these first to the high-value tables that already have owner-scoped admin
+pages. Keep the fields nullable during migration, default <code>owner_user_id</code> from
+the authenticated user on create, and make owner transfer explicit.</p>
+<p>Current implementation status:</p>
+<ul>
+<li><code>portal-db</code> adds nullable <code>owner_user_id</code> and <code>owner_position_id</code> columns to
+the high-value portal tables used by the owner-scoped admin pages.</li>
+<li>The migration backfills <code>owner_user_id</code> from <code>update_user</code> only when
+<code>update_user</code> is already a UUID. Non-UUID audit values remain unassigned
+instead of blocking the migration.</li>
+<li>A database insert trigger defaults <code>owner_user_id</code> from <code>update_user</code> for new
+rows when the command path writes the authenticated user id into
+<code>update_user</code>.</li>
+<li>Query projections for the scoped UI pages now return <code>ownerUserId</code> and
+<code>ownerPositionId</code>, and UUID filtering recognizes <code>ownerUserId</code>.</li>
+<li><code>portal-view</code> now uses <code>ownerUserId</code> for ownership checks on action controls.
+The UI no longer sends an owner filter for service-enforced pages because
+service-side scope must include both direct user ownership and position
+ownership.</li>
+<li>Owner-aware create/update forms expose optional <code>ownerPositionId</code> with a
+host-scoped position dynaselect backed by <code>queryPositionLabel</code>.</li>
+<li>Command schemas allow optional <code>ownerPositionId</code> for the owner-aware create
+and update commands. They do not accept <code>ownerUserId</code>; <code>owner_user_id</code> comes
+from the authenticated event user.</li>
+<li><code>light-portal</code> persistence writes <code>owner_user_id</code> from the event user on
+create and writes <code>owner_position_id</code> from <code>ownerPositionId</code> on create/update.</li>
+<li>Schedule query is the first service-enforced owner-scope path. Non all-scope
+users are filtered by
+<code>owner_user_id = current_user_id OR owner_position_id IN effective positions</code>
+based on authenticated audit context.</li>
+</ul>
+<p>Remaining rollout work:</p>
+<ul>
+<li>Add explicit owner-transfer commands instead of changing ownership through
+normal update forms.</li>
+</ul>
+<h3 id="phase-5-enforce-in-services"><a class="header" href="#phase-5-enforce-in-services">Phase 5: Enforce In Services</a></h3>
+<ul>
+<li>Add query-side owner predicates.</li>
+<li>Add command-side ownership checks.</li>
+<li>Move policy decisions into rule-engine configuration.</li>
+<li>Keep the UI filters as usability hints, not authorization.</li>
+</ul>
+<p>Current implementation status:</p>
+<ul>
+<li>Query-side owner predicates are implemented for Schedule, API, API Version,
+App, OAuth Client, Client Token, Instance, Instance API, Instance API Path
+Prefix, Instance App, Instance App API, Runtime Instance, and Workflow
+Definition.</li>
+<li>Query handlers derive scope from the authenticated audit attachment. Users
+with the global <code>admin</code> role or the entity-specific all-scope role bypass the
+owner predicate; other users are scoped by user id or effective positions.</li>
+<li>The UI keeps owner-aware action guards, but it does not send the owner filter
+as a request filter for service-enforced pages. That keeps position-owned rows
+visible when the service grants access by <code>owner_position_id</code>.</li>
+<li>The db-provider keeps backward-compatible query methods and adds owner-aware
+overloads so query services can roll forward independently.</li>
+</ul>
+<p>Remaining service rollout work:</p>
+<ul>
+<li>Add command-side ownership checks before update/delete actions.</li>
+<li>Add explicit owner-transfer commands and audit events.</li>
+<li>Move the all-scope role and position hierarchy decisions from Java guards into
+rule-engine policy once the service-side rule context is ready.</li>
+</ul>
+<h2 id="future-improvement-entity-access-grants"><a class="header" href="#future-improvement-entity-access-grants">Future Improvement: Entity Access Grants</a></h2>
+<p>Do not introduce a generic ownership table in Phase 4. It adds query joins,
+pagination complexity, and weaker referential integrity before we have a clear
+sharing use case.</p>
+<p>A generic table can be added later for secondary grants, sharing, and delegated
+administration. It should supplement the canonical owner columns rather than
+replace them.</p>
+<p>Possible future shape:</p>
+<pre><code class="language-text">entity_access_t
+  host_id
+  entity_type
+  entity_id
+  principal_type   -- user, position, group, role
+  principal_id
+  access_level     -- owner, maintainer, viewer
+</code></pre>
+<p>Use this only when we need use cases such as:</p>
+<ul>
+<li>share one API with another position or group</li>
+<li>give support read-only access to a selected set of records</li>
+<li>delegate maintenance without transferring the canonical owner</li>
+<li>manage record-specific exceptions from an Access Admin page</li>
+</ul>
+<h2 id="risks-and-mitigations-1"><a class="header" href="#risks-and-mitigations-1">Risks And Mitigations</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Risk</th><th>Mitigation</th></tr>
+</thead>
+<tbody>
+<tr><td>UI filter is bypassed</td><td>Treat it as interim only; enforce in services next</td></tr>
+<tr><td><code>update_user</code> changes ownership unexpectedly</td><td>Prefer explicit owner fields; use <code>update_user</code> only as fallback</td></tr>
+<tr><td>users lose access to records updated by operators</td><td>support owner transfer or explicit owner fields</td></tr>
+<tr><td>inconsistent page behavior</td><td>centralize scope helper and rollout page by page</td></tr>
+<tr><td>broad admins still need all records</td><td>define all-scope roles separately from self-service admin</td></tr>
+<tr><td>query filters can be removed by browser tools</td><td>backend must inject authorization predicates from JWT claims</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="recommendation-1"><a class="header" href="#recommendation-1">Recommendation</a></h2>
+<p>Use owner-scoped filtering as the first UI step, but centralize it immediately.
+Do not copy the <code>Schedule.tsx</code> logic into every page by hand.</p>
+<p>The recommended path is:</p>
+<ol>
+<li>fix the schedule filter ordering</li>
+<li>introduce a reusable ownership-scope helper</li>
+<li>apply it to the most common self-service admin pages</li>
+<li>add explicit owner fields where <code>update_user</code> is not good enough</li>
+<li>enforce the same rules in query and command services through the rule engine</li>
+</ol>
+<p>This gives users a safer admin experience now while creating a clear migration
+path to real fine-grained authorization.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="contextual-help-links"><a class="header" href="#contextual-help-links">Contextual Help Links</a></h1>
+<p><code>portal-view</code> has many pages, generated forms, task flows, and admin tables.
+Even with the task-oriented navigation work, users still need page-specific and
+form-specific help when they are making a decision or filling a field. This
+document proposes a contextual help-link model for pages and forms.</p>
+<h2 id="problem-2"><a class="header" href="#problem-2">Problem</a></h2>
+<p>Users often need help at the exact point where they are working:</p>
+<ul>
+<li>what this page is for</li>
+<li>when to use this form</li>
+<li>what required fields mean</li>
+<li>which optional fields matter</li>
+<li>what permissions or ownership rules apply</li>
+<li>what happens after submit</li>
+<li>how this page fits into a larger task</li>
+</ul>
+<p>Today, help is usually outside the UI context. Users must know where to look,
+which document applies, and which page or form name maps to the screen in front
+of them.</p>
+<h2 id="design-goals-2"><a class="header" href="#design-goals-2">Design Goals</a></h2>
+<ul>
+<li>Add a clear help entry point to every major page and generated form.</li>
+<li>Keep help content close to the product documentation source of truth.</li>
+<li>Avoid bloating the <code>portal-view</code> application bundle with documentation.</li>
+<li>Allow documentation-only updates without rebuilding <code>portal-view</code>.</li>
+<li>Make help links declarative so page, form, and task metadata can drive them.</li>
+<li>Keep link identifiers stable even if routes or component names change.</li>
+<li>Support future documentation search, related topics, and task-specific help.</li>
+<li>Preserve the ability to run the app locally with a configurable docs base URL.</li>
+</ul>
+<h2 id="non-goals-2"><a class="header" href="#non-goals-2">Non-Goals</a></h2>
+<ul>
+<li>Do not build a full documentation authoring system inside <code>portal-view</code>.</li>
+<li>Do not duplicate long user guides in component source files.</li>
+<li>Do not block a page or form rollout because full documentation is missing.</li>
+<li>Do not use contextual help as a replacement for better labels, validation, or
+field-level error messages.</li>
+</ul>
+<h2 id="documentation-location-decision"><a class="header" href="#documentation-location-decision">Documentation Location Decision</a></h2>
+<p>The help content should live in <code>light-portal-doc</code>. <code>portal-view</code> should store
+only metadata that points to the relevant help page.</p>
+<p>Recommended split:</p>
+<pre><code class="language-text">light-portal-doc
+  src/help/portal-view/
+    pages/
+    forms/
+    tasks/
+    concepts/
+
+portal-view
+  page registry, task registry, and form metadata with help ids or help paths
+</code></pre>
+<h3 id="why-light-portal-doc"><a class="header" href="#why-light-portal-doc">Why <code>light-portal-doc</code></a></h3>
+<p>Pros:</p>
+<ul>
+<li>Keeps user-facing documentation in the documentation repo.</li>
+<li>Allows documentation changes without rebuilding or redeploying <code>portal-view</code>.</li>
+<li>Avoids increasing the app bundle with markdown content.</li>
+<li>Supports documentation search, navigation, publishing, and review workflows.</li>
+<li>Allows the same help content to be linked from support tickets, onboarding,
+release notes, and external docs.</li>
+<li>Fits the existing pattern where portal-view design docs already live in
+<code>light-portal-doc</code>.</li>
+</ul>
+<p>Cons:</p>
+<ul>
+<li>Requires stable published URLs.</li>
+<li>Requires a configurable docs base URL for local and deployed environments.</li>
+<li>Can drift from UI behavior unless we add link validation and ownership rules.</li>
+</ul>
+<h3 id="why-not-portal-viewdocs"><a class="header" href="#why-not-portal-viewdocs">Why Not <code>portal-view/docs</code></a></h3>
+<p>Pros:</p>
+<ul>
+<li>Easy to review UI and docs in one PR.</li>
+<li>Help content can be tightly coupled to the component version.</li>
+<li>Local development does not need a separate docs deployment.</li>
+</ul>
+<p>Cons:</p>
+<ul>
+<li>Documentation-only changes require app rebuilds and deployments.</li>
+<li>Large markdown content can bloat the frontend repo and build context.</li>
+<li>It is harder to provide a proper documentation navigation/search experience.</li>
+<li>It encourages implementation notes and user help to mix in the same repo.</li>
+</ul>
+<p>Recommendation: use <code>light-portal-doc</code> for content and keep <code>portal-view</code>
+limited to stable link metadata.</p>
+<h2 id="help-content-structure"><a class="header" href="#help-content-structure">Help Content Structure</a></h2>
+<p>Create a user-facing help tree separate from design docs:</p>
+<pre><code class="language-text">src/help/portal-view/
+  pages/
+    api-admin.md
+    api-detail.md
+    instance-admin.md
+    schedule-admin.md
+  forms/
+    create-api.md
+    update-api.md
+    create-client.md
+    update-instance.md
+  tasks/
+    mcp-onboard-api.md
+    register-standalone-mcp-server.md
+  concepts/
+    ownership-and-positions.md
+    hosts-and-user-hosts.md
+    api-versioning.md
+</code></pre>
+<p>Use page-level help for screen orientation and form-level help for submission
+semantics. Use concept help for reusable explanations that should not be copied
+into many page/form documents.</p>
+<h2 id="url-strategy"><a class="header" href="#url-strategy">URL Strategy</a></h2>
+<p>Help URLs should be stable and human-readable.</p>
+<p>Recommended public URL shape:</p>
+<pre><code class="language-text">/help/portal-view/pages/api-admin
+/help/portal-view/forms/create-api
+/help/portal-view/tasks/mcp-onboard-api
+/help/portal-view/concepts/ownership-and-positions
+</code></pre>
+<p>Do not make the public URL depend on React route internals or component names.
+If a route changes from <code>/app/api</code> to another route later, the help URL should
+not need to change.</p>
+<p><code>portal-view</code> should build the absolute link from a runtime config value:</p>
+<pre><code class="language-text">PORTAL_DOC_BASE_URL=https://doc.lightapi.net
+</code></pre>
+<p>or for Vite:</p>
+<pre><code class="language-text">VITE_PORTAL_DOC_BASE_URL=https://doc.lightapi.net
+</code></pre>
+<p>Local development can point to a local docs server:</p>
+<pre><code class="language-text">VITE_PORTAL_DOC_BASE_URL=http://localhost:3000
+</code></pre>
+<h2 id="metadata-contract"><a class="header" href="#metadata-contract">Metadata Contract</a></h2>
+<p>Use a stable help id or help path in the app metadata. A help path is more
+direct and easier to validate.</p>
+<p>Page registry example:</p>
+<pre><code class="language-ts">{
+  id: "api-admin",
+  title: "API Admin",
+  route: "/app/apis",
+  helpPath: "/help/portal-view/pages/api-admin",
+}
+</code></pre>
+<p>Task registry example:</p>
+<pre><code class="language-ts">{
+  id: "mcp-onboard-api",
+  title: "Onboard API to MCP Gateway",
+  helpPath: "/help/portal-view/tasks/mcp-onboard-api",
+}
+</code></pre>
+<p>Form metadata example:</p>
+<pre><code class="language-json">{
+  "formId": "createApi",
+  "helpPath": "/help/portal-view/forms/create-api",
+  "actions": []
+}
+</code></pre>
+<p>If we need indirection later, we can change to <code>helpId</code> and resolve it through a
+small registry:</p>
+<pre><code class="language-ts">{
+  helpId: "forms.create-api"
+}
+</code></pre>
+<p>Start with <code>helpPath</code> because it is simple, transparent, and works well with
+static documentation.</p>
+<h2 id="portal-ui-behavior"><a class="header" href="#portal-ui-behavior">Portal UI Behavior</a></h2>
+<p>Each page and generated form should have a small help action in a predictable
+location.</p>
+<p>Recommended behavior:</p>
+<ul>
+<li>open help in a new browser tab</li>
+<li>use an external-link icon or help icon with an accessible label</li>
+<li>keep the help action near the page title or form title</li>
+<li>if a form is opened inside a task shell, prefer form-specific help first and
+show task help as a secondary link</li>
+<li>if no specific help exists yet, fall back to the nearest page or concept help</li>
+</ul>
+<p>Example resolution order for a form opened from a task:</p>
+<ol>
+<li>form <code>helpPath</code></li>
+<li>current task <code>helpPath</code></li>
+<li>current page <code>helpPath</code></li>
+<li>generic portal help landing page</li>
+</ol>
+<p>Do not render a broken link. If a help path is missing, hide the action or show
+the fallback help link.</p>
+<h2 id="generated-forms"><a class="header" href="#generated-forms">Generated Forms</a></h2>
+<p>Generated forms should support a top-level <code>helpPath</code> field in <code>Forms.json</code>.
+The renderer can read it and show a help action in the form header.</p>
+<p>For example:</p>
+<pre><code class="language-json">{
+  "formId": "createSchedule",
+  "helpPath": "/help/portal-view/forms/create-schedule",
+  "schema": {},
+  "form": []
+}
+</code></pre>
+<p>Field-level help can be added later, but it should not be the first step. Many
+field descriptions can stay in the JSON schema title/description. Use
+field-level help only for fields where a short description is not enough, such
+as security, ownership, deployment, or advanced configuration fields.</p>
+<p>Possible future field shape:</p>
+<pre><code class="language-json">{
+  "key": "ownerPositionId",
+  "helpPath": "/help/portal-view/concepts/ownership-and-positions"
+}
+</code></pre>
+<h2 id="task-aware-help"><a class="header" href="#task-aware-help">Task-Aware Help</a></h2>
+<p>The task-oriented navigation layer should support task help separately from page
+or form help. A user working on the same form may need different context
+depending on the task.</p>
+<p>Example:</p>
+<ul>
+<li><code>createApi</code> opened from “Register a new API” links to create API form help.</li>
+<li><code>createApi</code> opened from “Onboard API to MCP Gateway” can also link to MCP
+onboarding task help.</li>
+</ul>
+<p>The UI should pass task context through existing task URL parameters and layout
+state, then render both links when useful:</p>
+<pre><code class="language-text">Help: Create API
+Related: Onboard API to MCP Gateway
+</code></pre>
+<h2 id="authoring-guidelines"><a class="header" href="#authoring-guidelines">Authoring Guidelines</a></h2>
+<p>Each page help document should include:</p>
+<ul>
+<li>what the page is used for</li>
+<li>who can access it</li>
+<li>what records are visible</li>
+<li>common actions</li>
+<li>links to related forms and tasks</li>
+</ul>
+<p>Each form help document should include:</p>
+<ul>
+<li>when to use the form</li>
+<li>what happens after submit</li>
+<li>required fields</li>
+<li>important optional fields</li>
+<li>ownership and permission behavior</li>
+<li>validation or troubleshooting notes</li>
+</ul>
+<p>Keep help content user-facing. Do not put implementation details, class names,
+or database internals in the main help body unless they are truly needed for an
+operator.</p>
+<h2 id="validation"><a class="header" href="#validation">Validation</a></h2>
+<p>To prevent link drift, add a lightweight validation step once the first help
+docs exist.</p>
+<p>Validation should check:</p>
+<ul>
+<li>every <code>helpPath</code> in <code>portal-view</code> points to a markdown source in
+<code>light-portal-doc</code></li>
+<li>every high-value page has page help</li>
+<li>every high-value form has form help</li>
+<li>no help path uses a route-specific or component-specific unstable name</li>
+</ul>
+<p>This can start as a script in <code>light-portal-doc</code> or a shared CI check that
+accepts both repo paths.</p>
+<h2 id="rollout-plan-1"><a class="header" href="#rollout-plan-1">Rollout Plan</a></h2>
+<h3 id="phase-1-documentation-structure"><a class="header" href="#phase-1-documentation-structure">Phase 1: Documentation Structure</a></h3>
+<ul>
+<li>Create <code>src/help/portal-view/pages</code>.</li>
+<li>Create <code>src/help/portal-view/forms</code>.</li>
+<li>Create <code>src/help/portal-view/tasks</code>.</li>
+<li>Create <code>src/help/portal-view/concepts</code>.</li>
+<li>Add placeholder help pages for the high-value admin pages and forms.</li>
+</ul>
+<h3 id="phase-2-app-metadata"><a class="header" href="#phase-2-app-metadata">Phase 2: App Metadata</a></h3>
+<ul>
+<li>Add optional <code>helpPath</code> to <code>pageRegistry.ts</code>.</li>
+<li>Add optional <code>helpPath</code> to <code>taskRegistry.ts</code>.</li>
+<li>Add optional top-level <code>helpPath</code> to generated form metadata.</li>
+<li>Add a docs base URL runtime config.</li>
+</ul>
+<h3 id="phase-3-ui-components"><a class="header" href="#phase-3-ui-components">Phase 3: UI Components</a></h3>
+<ul>
+<li>Add a reusable help-link component.</li>
+<li>Render page help near page titles.</li>
+<li>Render form help in the generated form header.</li>
+<li>Render task help in the task navigation shell.</li>
+<li>Add fallback behavior when a specific help link is missing.</li>
+</ul>
+<h3 id="phase-4-coverage-and-validation"><a class="header" href="#phase-4-coverage-and-validation">Phase 4: Coverage And Validation</a></h3>
+<ul>
+<li>Add help paths for all self-service owner-scoped admin pages.</li>
+<li>Add help paths for all high-value create/update forms.</li>
+<li>Add a validation script for help path coverage and broken links.</li>
+<li>Add missing docs over time as pages move into the task-oriented model.</li>
+</ul>
+<h2 id="initial-scope"><a class="header" href="#initial-scope">Initial Scope</a></h2>
+<p>Start with the pages and forms most likely to be used by self-service users:</p>
+<ul>
+<li>API Admin and API Detail</li>
+<li>create/update API</li>
+<li>create/update API Version</li>
+<li>App Admin</li>
+<li>create/update App</li>
+<li>OAuth Client and Client Token</li>
+<li>create/update Client</li>
+<li>create Client Token</li>
+<li>Instance Admin and relationship pages</li>
+<li>create/update Instance</li>
+<li>create Instance API</li>
+<li>create/update Instance API Path Prefix</li>
+<li>create Instance App</li>
+<li>create Instance App API</li>
+<li>Schedule Admin</li>
+<li>create/update Schedule</li>
+<li>Workflow Definition</li>
+<li>create/update Workflow Definition</li>
+</ul>
+<p>Then expand to admin-only pages after their ownership and access model is clear.</p>
+<h2 id="mvp-decisions"><a class="header" href="#mvp-decisions">MVP Decisions</a></h2>
+<p>Use these decisions for the first implementation.</p>
+<h3 id="missing-help-links"><a class="header" href="#missing-help-links">Missing Help Links</a></h3>
+<p>Do not hide the help action when a specific page, form, or task help path is
+missing. Fall back to the generic portal-view help landing page:</p>
+<pre><code class="language-text">/help/portal-view/index
+</code></pre>
+<p>This keeps the UI consistent. A missing specific help page should degrade to
+general help instead of making the help affordance disappear.</p>
+<h3 id="help-presentation"><a class="header" href="#help-presentation">Help Presentation</a></h3>
+<p>Open help in a new browser tab for the MVP. Do not build an embedded markdown
+viewer, side drawer, or iframe-based documentation panel in the first version.</p>
+<p>This keeps <code>portal-view</code> small and avoids adding documentation rendering,
+iframe, routing, and panel-state complexity to the app. A side panel can be
+revisited later if users need in-page help while editing long forms.</p>
+<h3 id="json-schema-descriptions"><a class="header" href="#json-schema-descriptions">JSON Schema Descriptions</a></h3>
+<p>Do not auto-generate full form help pages from JSON schema descriptions. Schema
+titles and descriptions are best used for inline labels, helper text, or
+field-level tooltips.</p>
+<p>Form-level help should explain why the form exists, when to use it, what
+happens after submit, and how the form fits into a larger workflow. It should
+not simply repeat field types and required flags.</p>
+<h3 id="documentation-versioning"><a class="header" href="#documentation-versioning">Documentation Versioning</a></h3>
+<p>Use latest documentation URLs for the MVP. Do not introduce release-versioned
+help URLs in the first implementation.</p>
+<p>The portal will likely support both cloud SaaS deployments and enterprise
+on-premise deployments. SaaS users normally interact with the latest deployed
+portal, but enterprise customers may run older portal versions for a longer
+period. Versioned docs are therefore a good future requirement, but they should
+not block the first help-link rollout.</p>
+<p>Keep <code>helpPath</code> values relative and version-neutral:</p>
+<pre><code class="language-text">/help/portal-view/forms/create-api
+</code></pre>
+<p>Then versioning can be introduced later by changing only the configured docs
+base URL:</p>
+<pre><code class="language-text">PORTAL_DOC_BASE_URL=https://doc.lightapi.net/v2.0
+</code></pre>
+<p>This keeps the app metadata stable while allowing SaaS to use latest docs and
+on-premise builds to point at version-specific documentation.</p>
+<h2 id="future-enhancements"><a class="header" href="#future-enhancements">Future Enhancements</a></h2>
+<h3 id="in-page-help-drawer"><a class="header" href="#in-page-help-drawer">In-Page Help Drawer</a></h3>
+<p>Add an optional in-page help drawer after the <code>helpPath</code> metadata is stable and
+the first new-tab implementation has proven useful.</p>
+<p>The drawer should be opt-in, not the default for every form. Long or complex
+configuration forms can declare:</p>
+<pre><code class="language-json">{
+  "helpPath": "/help/portal-view/forms/update-instance",
+  "inPageHelp": true
+}
+</code></pre>
+<p>When enabled, the UI can render a right-side drawer that displays the help
+document through an iframe or a lightweight markdown renderer. This avoids
+constant tab switching for complex forms while keeping the MVP simple.</p>
+<h3 id="field-level-help-paths"><a class="header" href="#field-level-help-paths">Field-Level Help Paths</a></h3>
+<p>Add field-level help paths sparingly for complex fields and architectural
+concepts. Standard fields should continue to use JSON schema titles,
+descriptions, helper text, or tooltips.</p>
+<p>Example future field metadata:</p>
+<pre><code class="language-json">{
+  "key": "ownerPositionId",
+  "helpPath": "/help/portal-view/concepts/ownership-and-positions"
+}
+</code></pre>
+<p>The UI can render a small help icon next to the field label when a field-level
+<code>helpPath</code> exists. Good candidates include ownership, security, OAuth token
+exchange, deployment target, transport configuration, and workflow definition
+fields.</p>
+<h3 id="versioned-documentation"><a class="header" href="#versioned-documentation">Versioned Documentation</a></h3>
+<p>Add release-versioned documentation when multiple portal versions must be
+supported at the same time, especially for on-premise enterprise deployments.</p>
+<p>The relative <code>helpPath</code> values should remain unchanged. The deployment or build
+configuration should select the versioned docs base URL:</p>
+<pre><code class="language-text">SaaS/latest:
+PORTAL_DOC_BASE_URL=https://doc.lightapi.net
+
+On-premise v2.0:
+PORTAL_DOC_BASE_URL=https://doc.lightapi.net/v2.0
+</code></pre>
+<p>This gives cloud deployments a simple latest-docs experience and gives
+enterprise deployments a path to version-matched help without changing
+<code>portal-view</code> metadata.</p>
+<h2 id="recommendation-2"><a class="header" href="#recommendation-2">Recommendation</a></h2>
+<p>Store user-facing help content in <code>light-portal-doc</code> and add declarative
+<code>helpPath</code> metadata in <code>portal-view</code>. This keeps documentation maintainable and
+publishable while allowing every page, form, and task to provide context-aware
+help from the UI.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="oauth-kafka"><a class="header" href="#oauth-kafka">OAuth Kafka</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="token-exchange"><a class="header" href="#token-exchange">Token Exchange</a></h1>
@@ -579,24 +1940,134 @@ CREATE TABLE api_endpoint_t (
 </table>
 </div>
 <h2 id="implementation-strategy"><a class="header" href="#implementation-strategy">Implementation Strategy</a></h2>
-<p>Our implementation in <code>ProviderIdTokenPostHandler</code> uses a hybrid approach:</p>
+<p>Our implementation in <code>ProviderIdTokenPostHandler</code> uses <strong>Option 4: Client Context</strong> as the primary strategy:</p>
 <ol>
-<li><strong><code>requested_token_type</code></strong>: Primary differentiator. We support <code>msal</code> (default) and <code>internal</code>.</li>
-<li><strong>Modular Handlers</strong>: Logic is delegated to <code>handleMsalTokenExchange</code> and <code>handleInternalTokenExchange</code>.</li>
-<li><strong>Internal Flow</strong>: Uses <code>jose4j</code> for transparent decoding of internal JWTs and verifies against host-specific keys.</li>
-</ol>
-<h2 id="recommendation"><a class="header" href="#recommendation">Recommendation</a></h2>
-<p>For the current <code>light-portal</code> ecosystem:</p>
+<li><strong>Database-Driven Configuration</strong>: A new column <code>token_ex_type</code> has been added to the <code>auth_client_t</code> table to specify the supported exchange type for each client.
+<pre><code class="language-sql">ALTER TABLE auth_client_t ADD COLUMN token_ex_type VARCHAR(64);
+</code></pre>
+</li>
+<li><strong>Supported Exchange Types</strong>:
 <ul>
-<li><strong>JWT Peek (<code>iss</code>)</strong> is recommended for external OIDC providers (like MSAL) as it provides the best balance of user experience (no extra parameters) and reliability.</li>
-<li><strong><code>requested_token_type</code></strong> should be used for internal service-to-service exchanges where the flow is known and should be explicit.</li>
-<li><strong>Client Context</strong> should be considered for high-security environments where the server must dictate exactly which token sources are allowed for a given client.</li>
+<li><code>msal</code>: Microsoft Authentication Library based exchange.</li>
+<li><code>ccac</code>: Client Credentials to Authorization Code exchange.</li>
+</ul>
+</li>
+<li><strong>Flow Determination</strong>: Instead of relying on client-supplied parameters like <code>requested_token_type</code>, the server retrieves the <code>token_ex_type</code> from the client context in the database to decide which handler to use. This ensures that only authorized exchange types are performed for each specific client.</li>
+</ol>
+<h2 id="recommendation-3"><a class="header" href="#recommendation-3">Recommendation</a></h2>
+<p>For the <code>light-portal</code> ecosystem:</p>
+<ul>
+<li><strong>Option 4: Client Context</strong> is the selected method. It provides the highest level of security by ensuring that token exchange flows are explicitly configured and restricted on a per-client basis in the database.</li>
+<li><strong><code>token_ex_type</code></strong> should be populated for any client that requires token exchange functionality. Clients without this configuration will not be allowed to perform token exchange.</li>
 </ul>
 <h2 id="future-considerations"><a class="header" href="#future-considerations">Future Considerations</a></h2>
 <ul>
 <li>Implement automated issuer discovery if the number of external providers grows.</li>
 <li>Support “opaque” token exchange by integrating with introspection endpoints of external IdPs.</li>
+<li>Extend the <code>auth_client_t</code> configuration to support multiple allowed exchange types per client if needed.</li>
 </ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="oauth-audit"><a class="header" href="#oauth-audit">OAuth Audit</a></h1>
+<p>The OAuth services keep authorization codes and refresh tokens as operational state. These rows are short lived and are now written directly to <code>auth_code_t</code> and <code>auth_refresh_token_t</code> instead of being created through the general event store. This avoids high-volume login and refresh-token churn in <code>event_store_t</code> and <code>outbox_message_t</code>.</p>
+<p>Audit and login history are recorded separately in append-oriented OAuth audit tables.</p>
+<h2 id="goals"><a class="header" href="#goals">Goals</a></h2>
+<ul>
+<li>Show administrators who is currently online.</li>
+<li>Show a user the last login time and session history.</li>
+<li>Track refresh-token rotation and rejected refresh attempts.</li>
+<li>Preserve enough history for support and security review without storing raw secrets.</li>
+<li>Keep the hot login and token-refresh path simple and transactional.</li>
+</ul>
+<h2 id="tables"><a class="header" href="#tables">Tables</a></h2>
+<p><code>auth_session_t</code> stores one row per login session. It is the current and historical session summary.</p>
+<ul>
+<li><code>session_id</code> identifies the browser/device session.</li>
+<li><code>login_ts</code>, <code>last_refresh_ts</code>, <code>logout_ts</code>, and <code>expires_ts</code> describe the session lifetime.</li>
+<li><code>status</code> is <code>ACTIVE</code>, <code>LOGGED_OUT</code>, <code>EXPIRED</code>, or <code>REVOKED</code>.</li>
+<li><code>refresh_count</code> is incremented on each successful refresh-token rotation.</li>
+<li><code>ip_address</code>, <code>user_agent</code>, and <code>device_id</code> are optional request context fields.</li>
+</ul>
+<p><code>auth_session_audit_t</code> stores append-only auth audit entries.</p>
+<ul>
+<li><code>LOGIN_SUCCEEDED</code></li>
+<li><code>LOGIN_FAILED</code></li>
+<li><code>AUTH_CODE_ISSUED</code></li>
+<li><code>AUTH_CODE_CONSUMED</code></li>
+<li><code>REFRESH_TOKEN_ISSUED</code></li>
+<li><code>REFRESH_TOKEN_ROTATED</code></li>
+<li><code>REFRESH_TOKEN_REJECTED</code></li>
+<li><code>LOGOUT</code></li>
+<li><code>SESSION_EXPIRED</code></li>
+<li><code>SESSION_REVOKED</code></li>
+</ul>
+<p><code>auth_refresh_token_t.session_id</code> links the currently valid refresh token to the session that owns it. This removes ambiguity when the same user is logged in from multiple browsers or devices.</p>
+<p>Audit rows keep <code>session_id</code> as data, but do not use a hard foreign key to <code>auth_session_t</code>. Audit history must remain groupable by session even if operational session rows are later archived or removed.</p>
+<h2 id="login-flow"><a class="header" href="#login-flow">Login Flow</a></h2>
+<p>When <code>/oauth2/{providerId}/code</code> authenticates the user:</p>
+<ol>
+<li>Insert the authorization code into <code>auth_code_t</code>.</li>
+<li>Insert an <code>ACTIVE</code> session into <code>auth_session_t</code>.</li>
+<li>Insert <code>LOGIN_SUCCEEDED</code> and <code>AUTH_CODE_ISSUED</code> audit rows.</li>
+<li>Include the <code>session_id</code> in the auth code row so the token exchange can attach the refresh token to the same session.</li>
+</ol>
+<p>Failed logins write <code>LOGIN_FAILED</code> with the available host, provider, client, request metadata, and failure reason.</p>
+<h2 id="authorization-code-exchange"><a class="header" href="#authorization-code-exchange">Authorization Code Exchange</a></h2>
+<p>When <code>grant_type=authorization_code</code> succeeds:</p>
+<ol>
+<li>Delete the consumed auth code from <code>auth_code_t</code>.</li>
+<li>Insert the refresh token into <code>auth_refresh_token_t</code> with the auth code’s <code>session_id</code>.</li>
+<li>Insert <code>AUTH_CODE_CONSUMED</code> and <code>REFRESH_TOKEN_ISSUED</code> audit rows.</li>
+</ol>
+<h2 id="refresh-token-rotation"><a class="header" href="#refresh-token-rotation">Refresh Token Rotation</a></h2>
+<p>When <code>grant_type=refresh_token</code> succeeds, the service performs one transaction:</p>
+<ol>
+<li>Insert the replacement refresh token.</li>
+<li>Delete the previous refresh token with its expected aggregate version.</li>
+<li>Update <code>auth_session_t.last_refresh_ts</code> and increment <code>refresh_count</code>.</li>
+<li>Insert <code>REFRESH_TOKEN_ROTATED</code> with the old and new token ids.</li>
+</ol>
+<p>If a refresh token is missing, invalid, or belongs to the wrong client, the service writes <code>REFRESH_TOKEN_REJECTED</code> when enough context is available. Raw refresh-token values must not be stored in audit metadata.</p>
+<h2 id="admin-revocation"><a class="header" href="#admin-revocation">Admin Revocation</a></h2>
+<p>Administrators can kick out a user by revoking the user’s current refresh token. Operationally, deleting the refresh token is enough to stop the session from renewing once the current access token expires. The audit/session model adds explicit session state to that behavior.</p>
+<p>The revocation operation must run as one transaction:</p>
+<ol>
+<li>Find the refresh token row and its <code>session_id</code>.</li>
+<li>Delete the refresh token from <code>auth_refresh_token_t</code>.</li>
+<li>Update <code>auth_session_t</code>:
+<ul>
+<li><code>status = 'REVOKED'</code></li>
+<li><code>logout_ts = CURRENT_TIMESTAMP</code></li>
+<li><code>end_reason = 'ADMIN_REVOKED'</code></li>
+</ul>
+</li>
+<li>Insert <code>SESSION_REVOKED</code> into <code>auth_session_audit_t</code>.</li>
+</ol>
+<p>The database patch provides <code>revoke_auth_session_by_refresh_token(host_id, refresh_token, admin_user, reason)</code> for this workflow. Admin screens should call the revoke operation instead of issuing a plain refresh-token delete when the intent is to kick out a logged-in user.</p>
+<p>If the refresh token has no <code>session_id</code>, the operation still deletes the token and returns <code>NULL</code>. This preserves backward compatibility with refresh-token rows created before session tracking.</p>
+<h2 id="admin-queries"><a class="header" href="#admin-queries">Admin Queries</a></h2>
+<p>Current online users:</p>
+<pre><code class="language-sql">SELECT *
+FROM auth_session_t
+WHERE status = 'ACTIVE'
+  AND (expires_ts IS NULL OR expires_ts &gt; CURRENT_TIMESTAMP);
+</code></pre>
+<p>User login history:</p>
+<pre><code class="language-sql">SELECT *
+FROM auth_session_t
+WHERE host_id = $1
+  AND user_id = $2
+ORDER BY login_ts DESC;
+</code></pre>
+<p>Session duration:</p>
+<pre><code class="language-sql">SELECT
+    login_ts,
+    COALESCE(logout_ts, last_refresh_ts, CURRENT_TIMESTAMP) - login_ts AS duration
+FROM auth_session_t
+WHERE host_id = $1
+  AND session_id = $2;
+</code></pre>
+<h2 id="retention"><a class="header" href="#retention">Retention</a></h2>
+<p><code>auth_session_t</code> can be retained longer than operational token tables. <code>auth_session_audit_t</code> should use a retention policy appropriate for the deployment, for example 90 days or one year. Retention jobs should delete audit rows by <code>event_ts</code> and optionally archive them before deletion.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="multi-tenant"><a class="header" href="#multi-tenant">Multi-Tenant</a></h1>
 <h2 id="database-schema"><a class="header" href="#database-schema">Database Schema</a></h2>
@@ -808,7 +2279,7 @@ CREATE TABLE tenant_resource_t(
 <p>Azure CosmosDB for PostgreSQL (Managed Citus): Microsoft offers a fully managed cloud service called Azure CosmosDB for PostgreSQL, which is built on Citus. This service has usage-based pricing, and the cost depends on factors like the number of nodes, storage, and compute resources used. This managed option reduces the operational overhead of managing Citus yourself.</p>
 </li>
 </ul>
-<h4 id="recommendation-1"><a class="header" href="#recommendation-1">Recommendation:</a></h4>
+<h4 id="recommendation-4"><a class="header" href="#recommendation-4">Recommendation:</a></h4>
 <p>Don’t automatically add host_id to every table just because we are using Citus. Carefully analyze the data model, query patterns, and multi-tenancy requirements.</p>
 <ul>
 <li>
@@ -2408,9 +3879,7 @@ The host of the user.</p>
   "csrf": "-MCx8hYFQumVw4VdD5GlGw",
   "scp": [
     "portal.r",
-    "portal.w",
-    "ref.r",
-    "ref.w"
+    "portal.w"
   ],
   "role": "admin user",
   "c1": "361",
@@ -7501,7 +8970,7 @@ function MyComponent() {
 <li>Add a timeout to stop polling after ~10-15 seconds to prevent infinite loops.</li>
 </ol>
 <p>As you can see, this is much more complicated than the optimistic update.</p>
-<h3 id="recommendation-2"><a class="header" href="#recommendation-2">Recommendation</a></h3>
+<h3 id="recommendation-5"><a class="header" href="#recommendation-5">Recommendation</a></h3>
 <p><strong>Adopt the Optimistic UI pattern (Option 1).</strong> It provides the best user experience, is resilient to timing issues caused by eventual consistency, and the implementation is clean and modern. The code provided for the optimistic <code>handleDelete</code> is a drop-in replacement that will solve your problem robustly.</p>
 <h3 id="should-you-poll-peroidically-to-sync-other-users-changes"><a class="header" href="#should-you-poll-peroidically-to-sync-other-users-changes">Should you poll peroidically to sync other users’ changes</a></h3>
 <p>The short answer is: <strong>No, you should still avoid client-side polling for this specific use case.</strong> It’s generally the wrong tool for this problem and creates more issues than it solves. The Optimistic UI approach is still preferable, but it needs to be combined with a robust backend and potentially other real-time technologies for a complete solution.</p>
@@ -10019,7 +11488,7 @@ The Importer processes the list in order:</p>
 <li><strong>Pros:</strong> 100% certainty that the data is valid according to the database schema.</li>
 <li><strong>Cons:</strong> Slightly heavier key locks, but acceptable for admin operations.</li>
 </ul>
-<h3 id="recommendation-3"><a class="header" href="#recommendation-3">Recommendation</a></h3>
+<h3 id="recommendation-6"><a class="header" href="#recommendation-6">Recommendation</a></h3>
 <p>Use <strong>Option 1 (App Simulation)</strong> for the UI preview to show the user “what will happen”.
 Use <strong>Option 2 (Transaction Rollback)</strong> immediately when the user clicks “Promote” (as a pre-flight check) or as an explicit “Verify” button to ensure deep integrity.</p>
 <h2 id="sibling-deletion-handling-orphaned-items"><a class="header" href="#sibling-deletion-handling-orphaned-items">Sibling Deletion: Handling Orphaned Items</a></h2>
@@ -10275,7 +11744,1254 @@ CREATE TABLE promotion_item_t (
 <li><strong>Phase 2 – Backend Services:</strong> Implement <code>exportSnapshot</code>, <code>importDryRun</code>, <code>importExecute</code> services, and <code>promotion_t</code>/<code>promotion_item_t</code> DDL.</li>
 <li><strong>Phase 3 – Same-Instance Promotion:</strong> Integrate promotion tracking tables, add “Promote to Host” flow, orphan detection.</li>
 <li><strong>Phase 4 – Additional Entity Types:</strong> Add support for <code>rule_t</code>, <code>schema_t</code>, <code>api_t</code>, <code>config_t</code> and extend the dependency resolver.</li>
+<li><strong>Phase 5 – Global Migration Export:</strong> Implement dynamic table discovery for full-database migration (see below).</li>
 </ol>
+<hr>
+<h2 id="global-migration-export"><a class="header" href="#global-migration-export">Global Migration Export</a></h2>
+<h3 id="motivation"><a class="header" href="#motivation">Motivation</a></h3>
+<p>The entity-level promotion (<code>ExportSnapshot</code>) is designed for <strong>selective promotion</strong> — the user picks specific entities (e.g., 3 instances) and promotes them from a lower environment to a higher one. For that use case, the export produces a rich nested JSON with children and dependencies, which requires hand-crafted <code>exportXxxSnapshot()</code> methods per entity type.</p>
+<p>However, a <strong>full database migration</strong> has fundamentally different requirements:</p>
+<ul>
+<li><strong>Scope:</strong> ALL entities across ALL entity types — not a user-selected subset.</li>
+<li><strong>Maintainability:</strong> When new tables are added to the system, the migration should work automatically without code changes.</li>
+<li><strong>Simplicity:</strong> A flat per-table export is sufficient since all data is exported together (no missing dependency risk).</li>
+</ul>
+<h3 id="design-dynamic-table-discovery"><a class="header" href="#design-dynamic-table-discovery">Design: Dynamic Table Discovery</a></h3>
+<p>Instead of maintaining a manual list of entity types and per-type export methods, the Global Migration Export uses PostgreSQL <code>DatabaseMetaData</code> to automatically discover and export all projection tables.</p>
+<h4 id="how-it-works-2"><a class="header" href="#how-it-works-2">How It Works</a></h4>
+<ol>
+<li><strong>Discover all tables</strong> ending in <code>_t</code> in the <code>public</code> schema via <code>DatabaseMetaData.getTables()</code>.</li>
+<li><strong>Skip infrastructure tables</strong> that should never be exported:
+<ul>
+<li><code>event_store_t</code> — immutable event log (events will be regenerated on import)</li>
+<li><code>outbox_message_t</code> — transient consumer outbox</li>
+<li><code>consumer_offsets</code> — operational state</li>
+<li><code>consumer_lock</code> — operational lock</li>
+<li><code>promotion_t</code>, <code>promotion_item_t</code> — promotion tracking (environment-specific)</li>
+</ul>
+</li>
+<li><strong>For each discovered table:</strong>
+<ul>
+<li>Inspect column metadata to detect if the table has <code>host_id</code> and <code>active</code> columns.</li>
+<li>If <code>active</code> column exists: <code>SELECT * FROM table_t WHERE active = TRUE [AND host_id = ?]</code>.</li>
+<li>If no <code>active</code> column: <code>SELECT * FROM table_t [WHERE host_id = ?]</code>.</li>
+<li>Convert each row to <code>Map&lt;String, Object&gt;</code> with <strong>camelCase</strong> key names.</li>
+</ul>
+</li>
+<li><strong>Record a consistency marker:</strong> <code>SELECT MAX(id) FROM event_store_t</code> at the start of the export transaction to stamp the snapshot with the <code>lastEventId</code>.</li>
+<li><strong>Use <code>REPEATABLE READ</code></strong> transaction isolation for consistency across all tables (PostgreSQL MVCC ensures a frozen-in-time view even if events are being processed concurrently).</li>
+</ol>
+<h4 id="data-consistency-strategy"><a class="header" href="#data-consistency-strategy">Data Consistency Strategy</a></h4>
+<p>Querying projection tables directly is safe because:</p>
+<ul>
+<li><strong>PostgreSQL MVCC:</strong> <code>REPEATABLE READ</code> provides a consistent snapshot at transaction start time. Concurrent event processing does not affect the exported data.</li>
+<li><strong>Atomic event application:</strong> Each event is applied via <code>handleEvent()</code> within its own transaction, so partial aggregate states are never visible.</li>
+<li><strong><code>lastEventId</code> marker:</strong> The export records the maximum event ID at transaction start, providing an auditable consistency boundary without the cost of event replay.</li>
+</ul>
+<p>Why not replay events from <code>event_store_t</code>?</p>
+<ul>
+<li>The projection tables <strong>are</strong> the replayed event result — re-replaying is redundant.</li>
+<li><code>handleEvent()</code> has 120+ event type cases — duplicating that logic in an in-memory replayer is impractical.</li>
+<li>Event replay would not unlock any consistency benefit beyond what MVCC already provides.</li>
+</ul>
+<h4 id="output-format"><a class="header" href="#output-format">Output Format</a></h4>
+<pre><code class="language-json">{
+  "exportVersion": "1.0",
+  "sourceHostId": "N2CMw0HGQXeLvC1wBfln2A",
+  "lastEventId": "abc123...",
+  "exportTs": "2026-04-09T20:00:00Z",
+  "tables": {
+    "config_t": {
+      "count": 5,
+      "rows": [
+        { "configId": "...", "configName": "...", "configPhase": "...", ... },
+        ...
+      ]
+    },
+    "user_t": {
+      "count": 12,
+      "rows": [
+        { "userId": "...", "email": "...", "firstName": "...", ... },
+        ...
+      ]
+    },
+    "role_t": { ... },
+    "instance_t": { ... },
+    ...
+  }
+}
+</code></pre>
+<p>Key differences from the per-entity promotion export:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Aspect</th><th>Per-Entity Promotion (<code>ExportSnapshot</code>)</th><th>Global Migration (<code>ExportGlobalSnapshot</code>)</th></tr>
+</thead>
+<tbody>
+<tr><td>Scope</td><td>User-selected entities</td><td>All active entities</td></tr>
+<tr><td>Structure</td><td>Nested (parent/children/dependencies)</td><td>Flat per-table</td></tr>
+<tr><td>New table support</td><td>Requires code changes</td><td>Automatic via <code>DatabaseMetaData</code></td></tr>
+<tr><td>Use case</td><td>Lower env → Higher env</td><td>Full database migration</td></tr>
+<tr><td>Output</td><td>Entity-centric JSON</td><td>Table-centric JSON</td></tr>
+<tr><td>Import mechanism</td><td>Same-instance via <code>promotion_t</code> or Cross-instance via JSON</td><td>Cross-instance via JSON only</td></tr>
+</tbody>
+</table>
+</div>
+<h4 id="import-event-based-migration-refined-in-phase-25"><a class="header" href="#import-event-based-migration-refined-in-phase-25">Import: Event-Based Migration (Refined in Phase 2.5)</a></h4>
+<p>To ensure maximum compatibility and maintain the integrity of the event-sourced system, the global import process follows a <strong>3-step pipeline</strong>:</p>
+<p><code>Source DB</code> → <code>Export</code> (Flat JSON) → <code>Convert to Events</code> (Ordered JSON) → <code>Import</code> (Target DB)</p>
+<h5 id="1-snapshot-to-events-conversion"><a class="header" href="#1-snapshot-to-events-conversion">1. Snapshot-to-Events Conversion</a></h5>
+<p>An intermediate step (<code>ConvertSnapshotToEvents</code>) transforms the flat table-centric snapshot into an ordered JSON array of CloudEvents. This format is 100% compatible with the existing <strong><code>event-importer</code></strong> CLI tool (matching the <code>00-bootstrap.json</code> structure).</p>
+<h5 id="2-topological-sequencing-dependency-awareness"><a class="header" href="#2-topological-sequencing-dependency-awareness">2. Topological Sequencing (Dependency Awareness)</a></h5>
+<p>Since a full migration often involves complex relationships, the converter is “Relationship Aware.” It uses <code>DatabaseMetaData.getImportedKeys()</code> to dynamically discover parent→child dependencies.</p>
+<ul>
+<li><strong>Topological Sort:</strong> It implements Kahn’s algorithm to order events such that parent entities (e.g., <code>Org</code>, <code>Host</code>, <code>User</code>, <code>Role</code>) are processed before their children (e.g., <code>UserHost</code>, <code>RoleUser</code>, <code>AuthProviderClient</code>).</li>
+<li><strong>Dynamic:</strong> This approach handles new tables and FK constraints automatically without requiring code changes to a “hard-coded” dependency list.</li>
+</ul>
+<h5 id="3-batch-replay--reconciliation"><a class="header" href="#3-batch-replay--reconciliation">3. Batch Replay &amp; Reconciliation</a></h5>
+<p>The import handler performs a batch insertion of these generated events into <code>event_store_t</code> and <code>outbox_message_t</code> within a single transaction.</p>
+<ul>
+<li><strong>Nonce Re-calculation:</strong> Nonces are re-calculated on the target system during import to ensure uniqueness.</li>
+<li><strong>Automatic Projections:</strong> Inserting into the outbox triggers the <code>DbEventConsumerStartupHook</code> to rebuild all materialized projection tables on the target system.</li>
+</ul>
+<h4 id="service-api-contract"><a class="header" href="#service-api-contract">Service API Contract</a></h4>
+<ul>
+<li>
+<p><strong>Export:</strong></p>
+<ul>
+<li><strong>Handler:</strong> <code>GlobalSnapshotExport</code> (user-query)</li>
+<li><strong>Service ID:</strong> <code>lightapi.net/user/exportGlobalSnapshot/0.1.0</code></li>
+<li><strong>Request:</strong> <code>{ "sourceHostId": "...", "entityTypes": [...] }</code></li>
+<li><strong>Response:</strong> Canonical snapshot JSON (flat tables)</li>
+</ul>
+</li>
+<li>
+<p><strong>Convert (New):</strong></p>
+<ul>
+<li><strong>Handler:</strong> <code>ConvertSnapshotToEvents</code> (user-query)</li>
+<li><strong>Service ID:</strong> <code>lightapi.net/user/convertSnapshotToEvents/0.1.0</code></li>
+<li><strong>Request:</strong> <code>{ "snapshot": "...", "targetHostId": "...", "adminUserId": "..." }</code></li>
+<li><strong>Response:</strong> JSON array of ordered CloudEvents (event-importer compatible)</li>
+</ul>
+</li>
+<li>
+<p><strong>Import:</strong></p>
+<ul>
+<li><strong>Handler:</strong> <code>GlobalSnapshotImport</code> (user-command)</li>
+<li><strong>Service ID:</strong> <code>lightapi.net/user/importGlobalSnapshot/0.1.0</code></li>
+<li><strong>Request:</strong> <code>{ "targetHostId": "...", "snapshot": "...", "entityTypes": [...] }</code></li>
+<li><strong>Response:</strong> <code>{ "imported": 42, "total": 42 }</code></li>
+</ul>
+</li>
+</ul>
+<h3 id="implementation-phases-updated"><a class="header" href="#implementation-phases-updated">Implementation Phases (Updated)</a></h3>
+<ol>
+<li><strong>Phase 1 – UI Foundation:</strong> Create promotion pages, sidebar menu entry. <em>(Completed)</em></li>
+<li><strong>Phase 2 – Global Export:</strong> Implement dynamic table discovery via JDBC metadata. <em>(Completed)</em></li>
+<li><strong>Phase 2.5 – Global Migration Step:</strong> Implement Topological Sorting and Snapshot-to-Events conversion for CLI compatibility. <em>(Completed)</em></li>
+<li><strong>Phase 3 – Entity Promotion (Selective):</strong> Implement recursive bundling for user-selected entities (e.g., Instance export).</li>
+<li><strong>Phase 4 – Same-Instance Tracking:</strong> Integrated <code>promotion_t</code> tracking for in-DB moves.</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="deployment-workflow"><a class="header" href="#deployment-workflow">Deployment Workflow</a></h1>
+<p>Light Portal manages product, API, application, instance, runtime
+configuration, and deployment metadata for multiple tenants. The deployment
+workflow extends that model so a user can deploy a configured instance to a
+Kubernetes cluster from the Instance Admin page.</p>
+<p>The goal is to provide a production-like deployment path for small businesses
+and enterprise tenants without requiring Light Portal to have direct network
+access to every customer cluster.</p>
+<h2 id="problem-3"><a class="header" href="#problem-3">Problem</a></h2>
+<p>Each API or application repository can contain a <code>k8s/</code> folder with Kubernetes
+deployment templates. The templates contain variables in the following format:</p>
+<pre><code class="language-text">${key:defaultValue}
+</code></pre>
+<p>For each configured portal instance, Light Portal can generate a <code>values.yml</code>
+document that contains deployment-time values such as image URL, namespace,
+replica count, service ports, config references, resource limits, ingress host,
+and rollout options.</p>
+<p>When a user clicks the Deployment button for an instance, the system should:</p>
+<ol>
+<li>Resolve the target instance and deployment environment.</li>
+<li>Generate or fetch the instance deployment <code>values.yml</code>.</li>
+<li>Send a deployment command to a deployer that can access the target
+Kubernetes cluster.</li>
+<li>Render the final Kubernetes manifests from the repository templates.</li>
+<li>Validate and apply the manifests.</li>
+<li>Track rollout status and return deployment results to Light Portal.</li>
+</ol>
+<h2 id="recommended-architecture"><a class="header" href="#recommended-architecture">Recommended Architecture</a></h2>
+<p>The recommended default is to run a small Rust deployer inside each target
+Kubernetes cluster.</p>
+<pre><code class="language-text">Light Portal
+  |
+  | deployment request / status query
+  v
+Light Controller
+  |
+  | outbound WebSocket session / MCP tool call
+  v
+In-cluster Rust Deployer Pod
+  |
+  | Kubernetes API via in-cluster ServiceAccount
+  v
+Customer Kubernetes Cluster
+</code></pre>
+<p>This is similar to the agent model used by GitOps and cloud management systems:
+the cluster-local agent connects outbound to the control plane and performs
+cluster operations using tightly scoped Kubernetes RBAC.</p>
+<h2 id="why-in-cluster-deployer"><a class="header" href="#why-in-cluster-deployer">Why In-Cluster Deployer</a></h2>
+<p>Running the deployer inside the cluster should be the default for production.</p>
+<h3 id="kubernetes-authentication"><a class="header" href="#kubernetes-authentication">Kubernetes Authentication</a></h3>
+<p>An in-cluster deployer can use Kubernetes in-cluster configuration. The Rust
+service can use <code>kube-rs</code> and call the equivalent of default client discovery.
+Kubernetes mounts a ServiceAccount token into the pod, so no external
+<code>kubeconfig</code> file needs to be copied, stored, rotated, or exposed.</p>
+<h3 id="least-privilege-rbac"><a class="header" href="#least-privilege-rbac">Least-Privilege RBAC</a></h3>
+<p>The deployer should run as a dedicated ServiceAccount with only the permissions
+needed for the namespaces and resources it manages. If a deployer is
+compromised, the blast radius is limited by Kubernetes RBAC.</p>
+<p>For a small-business deployment, the first version can bind the deployer to a
+dedicated namespace. For managed enterprise environments, the portal can create
+one deployer per cluster or per tenant namespace.</p>
+<h3 id="firewall-traversal"><a class="header" href="#firewall-traversal">Firewall Traversal</a></h3>
+<p>Many customer clusters are behind firewalls or corporate networks. An in-cluster
+deployer can open an outbound WebSocket connection to Light Controller. This
+avoids inbound firewall rules and allows Light Portal to manage deployments
+without direct access to the Kubernetes API server.</p>
+<h3 id="operational-simplicity"><a class="header" href="#operational-simplicity">Operational Simplicity</a></h3>
+<p>Customers do not need to run a separate VM or keep a standalone deployment
+process alive. They install the deployer with one Kubernetes YAML file or Helm
+chart, and Kubernetes restarts it if it fails.</p>
+<h2 id="deployment-transports"><a class="header" href="#deployment-transports">Deployment Transports</a></h2>
+<p>The deployment system should support two transports.</p>
+<h3 id="controller-mediated-websocket"><a class="header" href="#controller-mediated-websocket">Controller-Mediated WebSocket</a></h3>
+<p>This is the preferred transport for private customer environments.</p>
+<ol>
+<li>The deployer pod starts inside the customer cluster.</li>
+<li>It registers with Light Controller over an outbound WebSocket.</li>
+<li>The controller authenticates the deployer and records its tenant, cluster,
+environment, capabilities, and current status.</li>
+<li>Light Portal sends deployment commands to the controller.</li>
+<li>The controller forwards the command to the deployer using MCP-style tool
+calls over the existing session.</li>
+<li>The deployer streams status back through the controller.</li>
+</ol>
+<p>This mode works when Light Portal cannot reach the customer environment.</p>
+<h3 id="direct-deployer-url"><a class="header" href="#direct-deployer-url">Direct Deployer URL</a></h3>
+<p>This is useful for local MicroK8s, managed clusters, and environments where
+Light Portal can reach the deployer directly.</p>
+<p>The deployer URL can be stored in deployment configuration or config server
+metadata. Light Portal or the workflow engine can call the deployer’s API/MCP
+endpoint directly.</p>
+<p>Direct mode should be treated as an optimization, not the primary model for
+customer-managed private networks.</p>
+<h2 id="deployer-responsibilities"><a class="header" href="#deployer-responsibilities">Deployer Responsibilities</a></h2>
+<p>The deployer is intentionally narrow. It should not own tenant configuration or
+business workflow decisions. It executes deployment instructions and reports
+results.</p>
+<p>The deployer should support these actions:</p>
+<ul>
+<li><code>render</code>: Fetch templates and values, render manifests, and return a manifest
+summary.</li>
+<li><code>dryRun</code>: Render manifests and validate them against the Kubernetes API
+without applying changes.</li>
+<li><code>deploy</code>: Apply manifests and wait for rollout status.</li>
+<li><code>redeploy</code>: Re-apply manifests and trigger rollout if needed.</li>
+<li><code>undeploy</code>: Delete resources created by the deployment.</li>
+<li><code>status</code>: Return current Kubernetes resource and rollout status.</li>
+<li><code>logs</code>: Return recent pod logs for the deployed instance.</li>
+<li><code>rollback</code>: Redeploy a previous Light Portal deployment snapshot.</li>
+</ul>
+<p>The first implementation should include <code>dryRun</code>, <code>deploy</code>, <code>undeploy</code>, and
+<code>status</code>.</p>
+<p>Rollback should be implemented through Light Portal deployment history, not
+native Kubernetes rollout undo. Native Kubernetes rollback only reverts the
+Deployment pod template and does not reliably revert associated ConfigMaps,
+Secrets, or deployment values. A Light Portal rollback should redeploy a
+previous immutable deployment snapshot so pods, config, environment variables,
+and related resources return to the same known state.</p>
+<h2 id="deployment-request"><a class="header" href="#deployment-request">Deployment Request</a></h2>
+<p>A deployment request should be explicit and auditable.</p>
+<pre><code class="language-yaml">requestId: 01964b05-0000-7000-8000-000000000001
+hostId: 01964b05-552a-7c4b-9184-6857e7f3dc5f
+instanceId: petstore-dev
+environment: dev
+clusterId: microk8s-local
+namespace: petstore-dev
+action: deploy
+valuesRef:
+  source: config-server
+  path: /deployments/petstore-dev/values.yml
+template:
+  repoUrl: https://github.com/lightapi/petstore-api.git
+  ref: main
+  path: k8s
+options:
+  dryRun: false
+  waitForRollout: true
+  timeoutSeconds: 300
+</code></pre>
+<p>The request should be created by Light Portal and persisted as deployment
+history before it is sent to the deployer.</p>
+<h2 id="values-file"><a class="header" href="#values-file">Values File</a></h2>
+<p>The <code>values.yml</code> is instance-specific. It should contain all values needed to
+render Kubernetes templates for one deployment target.</p>
+<pre><code class="language-yaml">image:
+  repository: ghcr.io/lightapi/petstore-api
+  tag: 1.0.0
+deployment:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+service:
+  port: 8080
+ingress:
+  enabled: true
+  host: petstore-dev.example.com
+config:
+  snapshotId: petstore-dev-20260427
+  configServerUrl: https://config.lightapi.net
+template:
+  repoUrl: https://github.com/lightapi/petstore-api.git
+  ref: main
+  path: k8s
+</code></pre>
+<p>The deployer can receive the values inline or fetch them from config server
+using the <code>valuesRef</code> in the deployment request.</p>
+<p>Config Server should be the authoritative source of truth for deployment
+values. At deployment time, Light Portal should create an immutable snapshot of
+both the deployment <code>values.yml</code> and the runtime configuration <code>values.yml</code>.
+That snapshot is the deployment evidence. If a deployment fails or must be
+audited later, the team must be able to reconstruct exactly which values were
+used even if the current config has changed.</p>
+<p>Light Portal should persist the snapshot reference and hash in deployment
+history. It should not rely only on a mutable config path.</p>
+<h2 id="template-rendering"><a class="header" href="#template-rendering">Template Rendering</a></h2>
+<p>The initial template format can use simple placeholders:</p>
+<pre><code class="language-yaml">image: ${image.repository}:${image.tag}
+replicas: ${deployment.replicas:1}
+</code></pre>
+<p>The renderer should support nested keys and defaults. If a key is missing and no
+default is provided, rendering should fail.</p>
+<p>The deployer should render manifests in memory and avoid writing generated YAML
+to disk unless debug mode is explicitly enabled.</p>
+<p>Longer term, the deployer can support additional renderers:</p>
+<ul>
+<li>Built-in <code>${key:default}</code> renderer for simple service templates.</li>
+<li>Kustomize for standard Kubernetes overlays.</li>
+<li>Helm for teams that already maintain charts.</li>
+</ul>
+<p>The built-in renderer should be deterministic and small. It should not evaluate
+arbitrary code.</p>
+<p>Do not use raw string replacement or regex replacement against raw YAML text.
+YAML is indentation sensitive, and multi-line values, certificates, JSON
+strings, and embedded config blocks can break when substituted as plain text.</p>
+<p>The preferred first renderer is a constrained internal AST renderer:</p>
+<ol>
+<li>Parse each template document with <code>serde_yaml</code> into <code>serde_yaml::Value</code>.</li>
+<li>Recursively traverse the YAML value tree.</li>
+<li>Resolve placeholders only inside string scalar values.</li>
+<li>Replace <code>${key:default}</code> with values from the structured deployment values.</li>
+<li>Serialize the YAML value back to YAML or convert it directly to Kubernetes
+dynamic objects.</li>
+</ol>
+<p>This avoids most quoting, escaping, and indentation bugs because YAML parsing
+and serialization remain responsible for formatting. It also keeps the renderer
+small and prevents arbitrary code execution.</p>
+<p>The implementation must include tests for ConfigMap multi-line blocks, JSON
+strings, certificate-shaped values, and Secret references before production use.</p>
+<h2 id="kubernetes-execution"><a class="header" href="#kubernetes-execution">Kubernetes Execution</a></h2>
+<p>The Rust deployer should prefer <code>kube-rs</code> and the Kubernetes API over shelling
+out to <code>kubectl</code>.</p>
+<p>Benefits:</p>
+<ul>
+<li>no <code>kubectl</code> binary dependency</li>
+<li>structured errors</li>
+<li>easier dry-run and rollout status handling</li>
+<li>better control over authentication and namespaces</li>
+<li>safer request construction</li>
+</ul>
+<p><code>kubectl</code> can remain a diagnostic or fallback mode, but it should not be the
+default production implementation.</p>
+<p>The deployer should use Kubernetes server-side dry run for validation:</p>
+<pre><code class="language-text">dryRun=All
+</code></pre>
+<p>For apply, use server-side apply when possible so the deployer has a clear field
+manager identity.</p>
+<p>The field manager must be explicit, for example:</p>
+<pre><code class="language-text">fieldManager=light-deployer
+</code></pre>
+<p>Using a stable field manager is important for coexistence with other Kubernetes
+controllers. For example, a Horizontal Pod Autoscaler may own Deployment
+replica changes. Server-side apply helps the deployer avoid accidentally
+overwriting fields owned by other managers.</p>
+<p>For rollout status, the deployer should use the Kubernetes watch API rather
+than only polling logs. The portal user experience should show resource status
+transitions such as:</p>
+<pre><code class="language-text">Pending -&gt; ContainerCreating -&gt; Running -&gt; Ready
+</code></pre>
+<p>Streaming watch events through the deployer gives Light Portal a precise
+deployment timeline similar to a CI/CD job log while still preserving structured
+Kubernetes state.</p>
+<h2 id="security-model"><a class="header" href="#security-model">Security Model</a></h2>
+<p>Security is the central design constraint because this component can mutate a
+customer cluster.</p>
+<h3 id="authentication"><a class="header" href="#authentication">Authentication</a></h3>
+<p>The deployer must authenticate to Light Controller or Light Portal before it can
+receive commands. Recommended options:</p>
+<ul>
+<li>mTLS for deployer-to-controller registration</li>
+<li>signed JWT enrollment token for first registration</li>
+<li>short-lived command tokens issued by Light Portal</li>
+</ul>
+<p>The deployer should have a stable <code>deployerId</code> and should report cluster,
+namespace, version, and capability metadata during registration.</p>
+<h3 id="authorization"><a class="header" href="#authorization">Authorization</a></h3>
+<p>Light Portal must verify that the requesting user can deploy the target
+instance, environment, and tenant. The deployer must also enforce local
+constraints:</p>
+<ul>
+<li>allowed namespaces</li>
+<li>allowed repository hosts and repository names</li>
+<li>allowed image registries</li>
+<li>allowed Kubernetes resource kinds</li>
+<li>allowed actions</li>
+</ul>
+<p>The deployer should reject commands outside its configured policy even if the
+portal sends them.</p>
+<h3 id="rbac"><a class="header" href="#rbac">RBAC</a></h3>
+<p>For namespace-scoped deployments, prefer <code>Role</code> and <code>RoleBinding</code> over
+<code>ClusterRole</code> and <code>ClusterRoleBinding</code>.</p>
+<p>Version 1 should allow only application-level resource kinds:</p>
+<ul>
+<li><code>Deployment</code></li>
+<li><code>Service</code></li>
+<li><code>Ingress</code></li>
+<li><code>ConfigMap</code></li>
+<li><code>Secret</code></li>
+</ul>
+<p>Version 1 should explicitly block cluster-scoped and control-plane resources,
+including:</p>
+<ul>
+<li><code>Namespace</code></li>
+<li><code>ClusterRole</code></li>
+<li><code>ClusterRoleBinding</code></li>
+<li><code>CustomResourceDefinition</code></li>
+<li>admission webhooks</li>
+</ul>
+<p>This keeps the default deployer RBAC narrow and supports least-privilege
+customer installations.</p>
+<p>Example namespace-scoped installation:</p>
+<pre><code class="language-yaml">apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: light-portal-deployer
+  namespace: petstore-dev
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: light-portal-deployer
+  namespace: petstore-dev
+rules:
+  - apiGroups: ["", "apps", "networking.k8s.io"]
+    resources: ["deployments", "services", "ingresses", "configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: light-portal-deployer
+  namespace: petstore-dev
+subjects:
+  - kind: ServiceAccount
+    name: light-portal-deployer
+    namespace: petstore-dev
+roleRef:
+  kind: Role
+  name: light-portal-deployer
+  apiGroup: rbac.authorization.k8s.io
+</code></pre>
+<p>Secrets should be handled carefully. Avoid logging rendered manifests that
+contain secret values. Prefer references to existing Kubernetes Secrets,
+External Secrets, Sealed Secrets, or config-server secret references resolved
+inside the deployer.</p>
+<p>The Rust implementation must also avoid logging raw Kubernetes apply payloads.
+When using <code>tracing</code> or <code>log</code>, never log full <code>kube-rs</code> request objects,
+patches, or serialized manifests for <code>Secret</code> resources. Kubernetes Secret
+values are base64 encoded, not encrypted, and will leak credentials if written
+to pod stdout.</p>
+<h2 id="deployment-pod"><a class="header" href="#deployment-pod">Deployment Pod</a></h2>
+<p>The deployer can be installed as a Kubernetes Deployment.</p>
+<pre><code class="language-yaml">apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: light-portal-deployer
+  namespace: petstore-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: light-portal-deployer
+  template:
+    metadata:
+      labels:
+        app: light-portal-deployer
+    spec:
+      serviceAccountName: light-portal-deployer
+      containers:
+        - name: deployer
+          image: ghcr.io/lightapi/light-portal-deployer:0.1.0
+          env:
+            - name: LIGHT_CONTROLLER_WS_URL
+              value: wss://controller.lightapi.net/deployer/ws
+            - name: DEPLOYER_ID
+              value: petstore-dev-microk8s
+            - name: DEPLOYER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: light-portal-deployer-credentials
+                  key: token
+            - name: ALLOWED_NAMESPACES
+              value: petstore-dev
+</code></pre>
+<h2 id="portal-workflow"><a class="header" href="#portal-workflow">Portal Workflow</a></h2>
+<p>The Instance Admin Deployment button should not synchronously run deployment
+logic in the browser request. It should create a deployment request and trigger
+an asynchronous workflow.</p>
+<p>Recommended flow:</p>
+<ol>
+<li>User clicks Deployment for an instance.</li>
+<li>Portal validates authorization.</li>
+<li>Portal resolves instance, environment, product version, image, config
+snapshot, and template repository.</li>
+<li>Portal creates a deployment request row/event.</li>
+<li>Portal snapshots deployment values and runtime values.</li>
+<li>Portal or workflow engine runs <code>dryRun</code>.</li>
+<li>If the target environment requires approval, workflow waits for human
+approval.</li>
+<li>Workflow calls <code>deploy</code>.</li>
+<li>Deployer streams events: render complete, dry-run complete, apply started,
+pod phase changes, rollout progressing, rollout complete or failed.</li>
+<li>Portal updates deployment history and status.</li>
+<li>User can inspect rendered manifest summary, rollout status, pod status, and
+logs.</li>
+</ol>
+<p>This fits the agentic workflow model. The workflow can ask the user to approve
+the rendered changes before applying them.</p>
+<p>Approval should be configurable at the environment level. Development and test
+environments can allow automatic deployment. Production environments should
+normally require manual approval through Light Portal or an agentic workflow
+ask task.</p>
+<h2 id="status-and-audit"><a class="header" href="#status-and-audit">Status And Audit</a></h2>
+<p>Light Portal should persist deployment history.</p>
+<p>Suggested fields:</p>
+<ul>
+<li><code>deploymentId</code></li>
+<li><code>hostId</code></li>
+<li><code>instanceId</code></li>
+<li><code>environment</code></li>
+<li><code>clusterId</code></li>
+<li><code>namespace</code></li>
+<li><code>action</code></li>
+<li><code>status</code></li>
+<li><code>requestUser</code></li>
+<li><code>deployerId</code></li>
+<li><code>templateRepoUrl</code></li>
+<li><code>templateRef</code></li>
+<li><code>templatePath</code></li>
+<li><code>valuesHash</code></li>
+<li><code>valuesSnapshotId</code></li>
+<li><code>runtimeValuesHash</code></li>
+<li><code>runtimeValuesSnapshotId</code></li>
+<li><code>manifestHash</code></li>
+<li><code>templateCommitSha</code></li>
+<li><code>resourceSummary</code></li>
+<li><code>imageRepository</code></li>
+<li><code>imageTag</code></li>
+<li><code>startedTs</code></li>
+<li><code>completedTs</code></li>
+<li><code>errorMessage</code></li>
+</ul>
+<p>The deployer should return enough detail to reproduce the deployment intent
+without storing secrets.</p>
+<p>Light Portal should store only the rendered manifest hash, Git commit SHA, and a
+redacted resource summary. It should not store full rendered YAML in the
+database because rendered manifests can contain environment variables,
+connection strings, or credentials.</p>
+<p>Example resource summary:</p>
+<pre><code class="language-json">[
+  {"kind": "Deployment", "namespace": "petstore-dev", "name": "petstore"},
+  {"kind": "Service", "namespace": "petstore-dev", "name": "petstore"}
+]
+</code></pre>
+<h2 id="multi-tenant-considerations"><a class="header" href="#multi-tenant-considerations">Multi-Tenant Considerations</a></h2>
+<p>Small-business cloud service means multiple tenants may share Light Portal but
+deploy to separate clusters or namespaces.</p>
+<p>Rules:</p>
+<ul>
+<li>Tenant identity must be present in every deployment request.</li>
+<li>A deployer must be bound to one tenant boundary. In most installations, that
+means one tenant namespace or a tightly controlled set of namespaces owned by
+that tenant.</li>
+<li>Do not share one deployer across unrelated tenants.</li>
+<li>Namespace policy must be enforced both by portal authorization and deployer
+local policy.</li>
+<li>Deployment history must be filtered by <code>hostId</code>.</li>
+<li>A compromised deployer must not be able to receive commands for another
+tenant.</li>
+</ul>
+<h2 id="failure-handling"><a class="header" href="#failure-handling">Failure Handling</a></h2>
+<p>The deployer should classify failures:</p>
+<ul>
+<li>template repository fetch failure</li>
+<li>values file fetch failure</li>
+<li>render failure</li>
+<li>manifest validation failure</li>
+<li>Kubernetes API authorization failure</li>
+<li>apply failure</li>
+<li>rollout timeout</li>
+<li>health check failure</li>
+<li>controller WebSocket disconnected</li>
+<li>deployer registration rejected</li>
+</ul>
+<p>Each failure should include a safe message and diagnostic metadata. Secret
+values must be redacted.</p>
+<p>For controller-mediated deployments, the deployer must have a resilient
+WebSocket lifecycle. If Light Controller restarts or the network drops, the
+deployer should not crash. It should reconnect with exponential backoff and
+jitter, re-register after reconnecting, and resume accepting commands only after
+the controller confirms the deployer session.</p>
+<h2 id="first-implementation"><a class="header" href="#first-implementation">First Implementation</a></h2>
+<p>The first implementation should target local MicroK8s and direct feedback in
+Light Portal.</p>
+<p>Phase 1:</p>
+<ul>
+<li>Create Rust deployer service.</li>
+<li>Run it inside MicroK8s.</li>
+<li>Support direct API mode for local testing.</li>
+<li>Implement <code>render</code>, <code>dryRun</code>, <code>deploy</code>, <code>undeploy</code>, and <code>status</code>.</li>
+<li>Use <code>kube-rs</code> and in-cluster ServiceAccount authentication.</li>
+<li>Support built-in <code>${key:default}</code> rendering.</li>
+<li>Add deployment request and deployment history tables/events.</li>
+<li>Add Instance Admin deployment request flow.</li>
+</ul>
+<p>Phase 2:</p>
+<ul>
+<li>Add controller-mediated WebSocket registration.</li>
+<li>Expose deployer operations as MCP tools through the controller.</li>
+<li>Stream deployment progress and Kubernetes watch events to Light Portal.</li>
+<li>Implement exponential backoff reconnect and re-registration.</li>
+<li>Add approval step through agentic workflow.</li>
+</ul>
+<p>Phase 3:</p>
+<ul>
+<li>Add Helm/Kustomize renderer support if needed.</li>
+<li>Add rollback support.</li>
+<li>Add multi-cluster inventory and deployer health view.</li>
+<li>Add deployment policy and quota enforcement.</li>
+</ul>
+<h2 id="resolved-design-decisions"><a class="header" href="#resolved-design-decisions">Resolved Design Decisions</a></h2>
+<ul>
+<li>Config Server is the authoritative source of truth for values. Each
+deployment stores immutable deployment and runtime values snapshot references
+plus hashes.</li>
+<li>Light Portal stores rendered manifest hash, template Git commit SHA, and
+redacted resource summary. It does not store full rendered manifests by
+default.</li>
+<li>Regulated environments can add an opt-in enterprise artifact mode that stores
+the full rendered manifest in encrypted object storage with strict retention.
+Full manifests should stay out of the relational database.</li>
+<li>Deployment approval is configured at the environment level. Production should
+require approval by default.</li>
+<li>Deployers are installed per tenant boundary and should not be shared across
+unrelated tenants.</li>
+<li>Version 1 allows only application-level resources: Deployment, Service,
+Ingress, ConfigMap, and Secret.</li>
+<li>The first renderer should be a constrained internal AST renderer based on
+<code>serde_yaml</code>, not raw text replacement.</li>
+<li>The direct deployer URL mode should expose MCP immediately, using the same
+internal tool implementation that controller-mediated WebSocket mode will use
+later.</li>
+<li>Rollback is a redeploy of a previous Light Portal deployment snapshot, not a
+native Kubernetes rollout undo.</li>
+</ul>
+<h2 id="open-questions"><a class="header" href="#open-questions">Open Questions</a></h2>
+<ul>
+<li>Which object storage providers should enterprise artifact mode support first?</li>
+<li>What retention policies should be available for encrypted rendered manifest
+artifacts?</li>
+<li>Should direct MCP use streamable HTTP only, or should it also expose SSE for
+long-running deployment progress events?</li>
+<li>Should rollback require the same environment-level approval policy as deploy?</li>
+</ul>
+<h2 id="recommendation-7"><a class="header" href="#recommendation-7">Recommendation</a></h2>
+<p>Use an in-cluster Rust deployer as the default production model. The deployer
+should connect outbound to Light Controller and execute deployment commands via
+MCP-style tools. Direct deployer URL mode is useful for MicroK8s and managed
+environments but should be secondary. The MCP tool implementation should be
+shared by both transports from the beginning.</p>
+<p>Use <code>kube-rs</code> instead of shelling out to <code>kubectl</code> for the production execution
+path. Keep the deployer small, policy-bound, and auditable. Let Light Portal own
+deployment intent and history, while the deployer owns safe cluster-local
+execution.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="portal-view-help"><a class="header" href="#portal-view-help">Portal View Help</a></h1>
+<p>This is the fallback help page for <code>portal-view</code>.</p>
+<p>Use this section when a page, form, or task does not yet have a more specific
+help page. The contextual help design expects the portal UI to link here when a
+specific <code>helpPath</code> is missing.</p>
+<h2 id="common-starting-points"><a class="header" href="#common-starting-points">Common Starting Points</a></h2>
+<ul>
+<li>Pages explain what a screen is used for and which actions are available.</li>
+<li>Forms explain when to submit a command and what happens after submission.</li>
+<li>Tasks explain multi-step workflows that span pages and forms.</li>
+<li>Concepts explain reusable portal ideas such as ownership, hosts, and API
+versioning.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="portal-view-page-help"><a class="header" href="#portal-view-page-help">Portal View Page Help</a></h1>
+<p>This section contains page-level help for <code>portal-view</code>.</p>
+<p>Page help should explain what the screen is for, who can access it, which
+records are visible, and which common actions are available.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="api-admin"><a class="header" href="#api-admin">API Admin</a></h1>
+<p>Use API Admin to create, review, update, and retire APIs owned by your team or
+visible to your administrator role.</p>
+<p>This page is owner-aware. Regular users should see only APIs they own or can
+access through their position. API administrators can see all APIs for the host.</p>
+<p>Common actions:</p>
+<ul>
+<li>create a new API</li>
+<li>update API metadata</li>
+<li>open API versions</li>
+<li>link the API into onboarding or marketplace tasks</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="api-detail"><a class="header" href="#api-detail">API Detail</a></h1>
+<p>Use API Detail to review API versions and version-specific integration details.</p>
+<p>This page helps users move from a business API record to the concrete API
+versions that can be linked to instances, MCP tools, marketplace listings, or
+access control rules.</p>
+<p>Common actions:</p>
+<ul>
+<li>create an API version</li>
+<li>update version metadata</li>
+<li>review endpoint and scope details</li>
+<li>start related task flows from the selected API version</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="app-admin"><a class="header" href="#app-admin">App Admin</a></h1>
+<p>Use App Admin to manage client applications that own OAuth clients and instance
+application links.</p>
+<p>This page is owner-aware. Regular users should see only apps they own or can
+access through their position. App administrators can see all apps for the host.</p>
+<p>Common actions:</p>
+<ul>
+<li>create a client app</li>
+<li>update app metadata</li>
+<li>open OAuth clients for the app</li>
+<li>link the app to an instance</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="oauth-client"><a class="header" href="#oauth-client">OAuth Client</a></h1>
+<p>Use OAuth Client to create and manage OAuth clients for applications, APIs, or
+instances.</p>
+<p>This page is owner-aware. Regular users should see only OAuth clients they own
+or can access through their position. OAuth client administrators can see all
+OAuth clients for the host.</p>
+<p>Common actions:</p>
+<ul>
+<li>create an OAuth client</li>
+<li>update client metadata</li>
+<li>review scopes and token-exchange settings</li>
+<li>open client tokens</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="oauth-client-token"><a class="header" href="#oauth-client-token">OAuth Client Token</a></h1>
+<p>Use OAuth Client Token to create and review long-lived client tokens.</p>
+<p>Tokens are sensitive. Users should create tokens only for clients they own or
+are authorized to manage. Administrators can review all client tokens for the
+host when their role allows it.</p>
+<p>Common actions:</p>
+<ul>
+<li>create a client token</li>
+<li>review token metadata</li>
+<li>delete or rotate tokens according to operational policy</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="instance-admin"><a class="header" href="#instance-admin">Instance Admin</a></h1>
+<p>Use Instance Admin to manage service instances for the current host.</p>
+<p>This page is owner-aware. Regular users should see only instances they own or
+can access through their position. Instance administrators can see all instances
+for the host.</p>
+<p>Common actions:</p>
+<ul>
+<li>create an instance</li>
+<li>update instance metadata</li>
+<li>review linked APIs and apps</li>
+<li>open runtime endpoints and configuration links</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="runtime-instance"><a class="header" href="#runtime-instance">Runtime Instance</a></h1>
+<p>Use Runtime Instance to review runtime endpoints for services.</p>
+<p>Runtime instances describe where a service is running and how the portal can
+reach it for deployment, gateway, or operational workflows.</p>
+<p>Common actions:</p>
+<ul>
+<li>create a runtime endpoint</li>
+<li>update endpoint status and connection details</li>
+<li>review active runtime records for an instance or service</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="instance-api"><a class="header" href="#instance-api">Instance API</a></h1>
+<p>Use Instance API to link API versions to service instances.</p>
+<p>This relationship tells the portal which API version is served by which
+instance and is used by gateway, MCP, configuration, and access-control tasks.</p>
+<p>Common actions:</p>
+<ul>
+<li>link an API version to an instance</li>
+<li>review existing instance API links</li>
+<li>open path prefixes or MCP tool mappings</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="instance-api-path-prefix"><a class="header" href="#instance-api-path-prefix">Instance API Path Prefix</a></h1>
+<p>Use Instance API Path Prefix to manage route prefixes for an API version linked
+to an instance.</p>
+<p>Path prefixes help gateways and tools route traffic to the correct API surface.</p>
+<p>Common actions:</p>
+<ul>
+<li>add a path prefix</li>
+<li>update a path prefix ownership position</li>
+<li>review prefixes for an instance API link</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="instance-app"><a class="header" href="#instance-app">Instance App</a></h1>
+<p>Use Instance App to link client apps to service instances.</p>
+<p>This relationship is used when an application needs to interact with a deployed
+instance and related APIs.</p>
+<p>Common actions:</p>
+<ul>
+<li>link an app to an instance</li>
+<li>review app links for an instance</li>
+<li>open app API relationship records</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="instance-app-api"><a class="header" href="#instance-app-api">Instance App API</a></h1>
+<p>Use Instance App API to link an instance app relationship to an instance API
+relationship.</p>
+<p>This page connects which app can use which API on a specific service instance.</p>
+<p>Common actions:</p>
+<ul>
+<li>create an instance app API link</li>
+<li>review existing links</li>
+<li>open configuration for the relationship</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="schedule-admin"><a class="header" href="#schedule-admin">Schedule Admin</a></h1>
+<p>Use Schedule Admin to create and manage scheduled portal events.</p>
+<p>This page is owner-aware. Regular users should see only schedules they own or
+can access through their position. Schedule administrators can see all schedules
+for the host.</p>
+<p>Common actions:</p>
+<ul>
+<li>create a schedule</li>
+<li>update schedule timing or event data</li>
+<li>delete schedules no longer needed</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="workflow-definition"><a class="header" href="#workflow-definition">Workflow Definition</a></h1>
+<p>Use Workflow Definition to create and manage workflow definitions.</p>
+<p>Workflow definitions describe repeatable processes that can be started manually
+or triggered by other portal events.</p>
+<p>Common actions:</p>
+<ul>
+<li>create a workflow definition</li>
+<li>update workflow YAML</li>
+<li>start or review related workflow execution records</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="portal-view-form-help"><a class="header" href="#portal-view-form-help">Portal View Form Help</a></h1>
+<p>This section contains form-level help for generated and custom <code>portal-view</code>
+forms.</p>
+<p>Form help should explain when to use the form, what happens after submit,
+important required fields, important optional fields, ownership behavior, and
+common validation problems.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="create-api"><a class="header" href="#create-api">Create API</a></h1>
+<p>Use this form to register a new API record for the current host.</p>
+<p>After submission, the API becomes available for version creation, marketplace
+publishing, MCP onboarding, instance links, and access-control tasks.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>apiId</code>: stable API identifier for the host</li>
+<li><code>apiName</code>: user-facing API name</li>
+<li><code>apiStatus</code>: lifecycle status</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="update-api"><a class="header" href="#update-api">Update API</a></h1>
+<p>Use this form to update API metadata.</p>
+<p>Updating an API changes descriptive and ownership metadata for the API record.
+It does not replace the API version specification.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>apiName</code>: user-facing API name</li>
+<li><code>apiStatus</code>: lifecycle status</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="create-api-version"><a class="header" href="#create-api-version">Create API Version</a></h1>
+<p>Use this form to add a version to an existing API.</p>
+<p>After submission, the API version can be linked to instances, gateway flows,
+MCP tools, marketplace publishing, and access-control rules.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>apiId</code>: parent API</li>
+<li><code>apiVersion</code>: version label</li>
+<li><code>apiType</code>: API style such as OpenAPI, GraphQL, Hybrid, or MCP</li>
+<li><code>serviceId</code>: backing service identifier</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="update-api-version"><a class="header" href="#update-api-version">Update API Version</a></h1>
+<p>Use this form to update API version metadata and integration details.</p>
+<p>Updating a version can affect downstream instance links, gateway behavior, and
+task flows that reference the API version.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>apiVersion</code>: version label</li>
+<li><code>apiType</code>: API style</li>
+<li><code>serviceId</code>: backing service identifier</li>
+<li><code>protocol</code>, <code>envTag</code>, and <code>targetHost</code>: runtime routing details</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="create-app"><a class="header" href="#create-app">Create App</a></h1>
+<p>Use this form to register a client application.</p>
+<p>After submission, the app can own OAuth clients and can be linked to service
+instances.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>appId</code>: stable app identifier for the host</li>
+<li><code>appName</code>: user-facing app name</li>
+<li><code>isKafkaApp</code>: whether this app uses Kafka-specific behavior</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="update-app"><a class="header" href="#update-app">Update App</a></h1>
+<p>Use this form to update client application metadata.</p>
+<p>Updating an app does not automatically change OAuth clients or instance app
+links that reference the app.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>appName</code>: user-facing app name</li>
+<li><code>operationOwner</code> and <code>deliveryOwner</code>: business ownership metadata</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="create-client"><a class="header" href="#create-client">Create Client</a></h1>
+<p>Use this form to create an OAuth client.</p>
+<p>An OAuth client can be associated with an app, API version, or instance,
+depending on the selected ownership context.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>clientName</code>: user-facing client name</li>
+<li><code>clientType</code>: client type</li>
+<li><code>clientProfile</code>: OAuth profile</li>
+<li><code>providerId</code>: OAuth provider</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="update-client"><a class="header" href="#update-client">Update Client</a></h1>
+<p>Use this form to update OAuth client metadata.</p>
+<p>Changing client settings can affect token issuance, access scope, and
+downstream integrations that use the client.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>clientName</code>: user-facing client name</li>
+<li><code>clientScope</code>: requested scopes</li>
+<li><code>tokenExType</code>: token exchange type</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="create-client-token"><a class="header" href="#create-client-token">Create Client Token</a></h1>
+<p>Use this form to create a long-lived token for an OAuth client.</p>
+<p>Client tokens are sensitive. Create them only for clients you own or are
+authorized to manage.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>clientId</code>: OAuth client that will receive the token</li>
+<li><code>clientSecret</code>: client credential used for token creation</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="create-instance"><a class="header" href="#create-instance">Create Instance</a></h1>
+<p>Use this form to create a service instance.</p>
+<p>After submission, the instance can be linked to API versions, client apps,
+runtime endpoints, and configuration records.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>instanceName</code>: user-facing instance name</li>
+<li><code>productVersionId</code>: product version for the instance</li>
+<li><code>serviceId</code>: service identifier</li>
+<li><code>environment</code>, <code>region</code>, and <code>lob</code>: deployment metadata</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="update-instance"><a class="header" href="#update-instance">Update Instance</a></h1>
+<p>Use this form to update service instance metadata.</p>
+<p>Updating an instance can affect task context, instance links, and owner-scoped
+visibility.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>instanceName</code>: user-facing instance name</li>
+<li><code>serviceId</code>: service identifier</li>
+<li><code>current</code>: whether this instance is the current instance for the service</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="create-instance-api"><a class="header" href="#create-instance-api">Create Instance API</a></h1>
+<p>Use this form to link an API version to an instance.</p>
+<p>After submission, the relationship can be used for route prefixes, MCP tools,
+configuration, and access-control workflows.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>instanceId</code>: target instance</li>
+<li><code>apiVersionId</code>: API version to link</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="create-instance-api-path-prefix"><a class="header" href="#create-instance-api-path-prefix">Create Instance API Path Prefix</a></h1>
+<p>Use this form to add a path prefix to an instance API link.</p>
+<p>Path prefixes help map incoming gateway paths to the correct API surface.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>instanceApiId</code>: instance API relationship</li>
+<li><code>pathPrefix</code>: route prefix</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="update-instance-api-path-prefix"><a class="header" href="#update-instance-api-path-prefix">Update Instance API Path Prefix</a></h1>
+<p>Use this form to update ownership metadata for an instance API path prefix.</p>
+<p>The path prefix itself is part of the relationship key and should be treated as
+stable for the existing record.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>instanceApiId</code>: instance API relationship</li>
+<li><code>pathPrefix</code>: route prefix</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="create-instance-app"><a class="header" href="#create-instance-app">Create Instance App</a></h1>
+<p>Use this form to link a client app to an instance.</p>
+<p>After submission, the app can be connected to APIs exposed by the same
+instance.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>instanceId</code>: target instance</li>
+<li><code>appId</code>: client app</li>
+<li><code>appVersion</code>: app version</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="create-instance-app-api"><a class="header" href="#create-instance-app-api">Create Instance App API</a></h1>
+<p>Use this form to connect an instance app relationship to an instance API
+relationship.</p>
+<p>This link tells the portal which app can use which API on a specific instance.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>instanceAppId</code>: instance app relationship</li>
+<li><code>instanceApiId</code>: instance API relationship</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="create-runtime-instance"><a class="header" href="#create-runtime-instance">Create Runtime Instance</a></h1>
+<p>Use this form to create a runtime endpoint for a service.</p>
+<p>Runtime instances describe where a service is reachable and support operational
+workflows.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>serviceId</code>: service identifier</li>
+<li><code>protocol</code>: runtime protocol</li>
+<li><code>ipAddress</code> and <code>portNumber</code>: endpoint location</li>
+<li><code>instanceStatus</code>: runtime status</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="update-runtime-instance"><a class="header" href="#update-runtime-instance">Update Runtime Instance</a></h1>
+<p>Use this form to update a runtime endpoint.</p>
+<p>Updating runtime details can affect operational workflows that depend on the
+service endpoint.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>runtimeInstanceId</code>: runtime endpoint record</li>
+<li><code>serviceId</code>: service identifier</li>
+<li><code>ipAddress</code> and <code>portNumber</code>: endpoint location</li>
+<li><code>instanceStatus</code>: runtime status</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="create-schedule"><a class="header" href="#create-schedule">Create Schedule</a></h1>
+<p>Use this form to create a scheduled portal event.</p>
+<p>After submission, the scheduler can emit the configured event according to the
+selected frequency and start time.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>scheduleName</code>: user-facing schedule name</li>
+<li><code>frequencyUnit</code> and <code>frequencyTime</code>: schedule cadence</li>
+<li><code>startTs</code>: first scheduled time</li>
+<li><code>eventTopic</code>, <code>eventType</code>, and <code>eventData</code>: event payload</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="update-schedule"><a class="header" href="#update-schedule">Update Schedule</a></h1>
+<p>Use this form to update a scheduled portal event.</p>
+<p>Changing schedule timing or event data affects future executions.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>scheduleName</code>: user-facing schedule name</li>
+<li><code>frequencyUnit</code> and <code>frequencyTime</code>: schedule cadence</li>
+<li><code>eventTopic</code>, <code>eventType</code>, and <code>eventData</code>: event payload</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="create-workflow-definition"><a class="header" href="#create-workflow-definition">Create Workflow Definition</a></h1>
+<p>Use this form to create a workflow definition.</p>
+<p>After submission, the workflow definition can be started manually or referenced
+by task flows and automation.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>namespace</code>: workflow namespace</li>
+<li><code>name</code>: workflow name</li>
+<li><code>version</code>: workflow version</li>
+<li><code>definition</code>: workflow YAML</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="update-workflow-definition"><a class="header" href="#update-workflow-definition">Update Workflow Definition</a></h1>
+<p>Use this form to update workflow definition metadata and YAML.</p>
+<p>Updating the definition affects future workflow starts. Existing process
+instances may continue according to their already captured definition state.</p>
+<p>Important fields:</p>
+<ul>
+<li><code>wfDefId</code>: workflow definition record</li>
+<li><code>namespace</code>, <code>name</code>, and <code>version</code>: workflow identity</li>
+<li><code>definition</code>: workflow YAML</li>
+<li><code>ownerPositionId</code>: optional position owner for team access</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="portal-view-task-help"><a class="header" href="#portal-view-task-help">Portal View Task Help</a></h1>
+<p>This section contains task-level help for workflows that span multiple pages
+and forms.</p>
+<p>Task help should explain the goal, prerequisites, required steps, optional
+steps, and common next actions.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="onboard-api-to-mcp-gateway"><a class="header" href="#onboard-api-to-mcp-gateway">Onboard API to MCP Gateway</a></h1>
+<p>Use this task to expose an existing API through MCP Gateway.</p>
+<p>Typical steps:</p>
+<ul>
+<li>select or create an API</li>
+<li>select or create an API version</li>
+<li>choose a deployment mode</li>
+<li>link the API version to a gateway or sidecar instance</li>
+<li>select MCP tools</li>
+<li>configure access control when required</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="register-standalone-mcp-server"><a class="header" href="#register-standalone-mcp-server">Register Standalone MCP Server</a></h1>
+<p>Use this task to register an MCP server that is not derived from an existing
+API version.</p>
+<p>Typical steps:</p>
+<ul>
+<li>register the MCP server</li>
+<li>add a server version</li>
+<li>link the server to a gateway</li>
+<li>review MCP tools</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="publish-api"><a class="header" href="#publish-api">Publish API</a></h1>
+<p>Use this task to prepare an API for publication and review.</p>
+<p>Typical steps:</p>
+<ul>
+<li>create or select the API</li>
+<li>create or select an API version</li>
+<li>review the marketplace listing</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="manage-instance"><a class="header" href="#manage-instance">Manage Instance</a></h1>
+<p>Use this task to create, review, and connect service instances.</p>
+<p>Typical steps:</p>
+<ul>
+<li>create or review the instance</li>
+<li>create or review runtime endpoints</li>
+<li>link APIs to the instance</li>
+<li>link apps to the instance</li>
+<li>manage app API links and path prefixes</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="manage-client-app"><a class="header" href="#manage-client-app">Manage Client App</a></h1>
+<p>Use this task to manage a client app and its OAuth clients.</p>
+<p>Typical steps:</p>
+<ul>
+<li>create or review the client app</li>
+<li>create or review OAuth clients</li>
+<li>link the app to an instance</li>
+<li>create or review client tokens</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="manage-workflow"><a class="header" href="#manage-workflow">Manage Workflow</a></h1>
+<p>Use this task to create and operate workflow definitions.</p>
+<p>Typical steps:</p>
+<ul>
+<li>create or review workflow definitions</li>
+<li>start a workflow</li>
+<li>review process instances, tasks, assignments, worklists, and audit logs</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="portal-view-concepts"><a class="header" href="#portal-view-concepts">Portal View Concepts</a></h1>
+<p>This section contains reusable explanations for portal concepts referenced by
+many pages, forms, and tasks.</p>
+<p>Concept help should be linked from page or field-level help when a short label
+or tooltip is not enough.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="ownership-and-positions"><a class="header" href="#ownership-and-positions">Ownership And Positions</a></h1>
+<p>Portal records can have an individual owner and a position owner.</p>
+<p><code>owner_user_id</code> is derived from the authenticated user when a record is created.
+It should not be submitted from normal browser forms.</p>
+<p><code>owner_position_id</code> is optional and can be selected on owner-aware forms. It
+allows users with the matching effective position to see or manage the record
+when service-side authorization grants that scope.</p>
+<p>Rows with no owner user and no owner position are legacy or unassigned records.
+They should normally be visible only to all-scope administrators until ownership
+is assigned.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="hosts-and-user-hosts"><a class="header" href="#hosts-and-user-hosts">Hosts And User Hosts</a></h1>
+<p>A host is the tenant boundary for most portal records.</p>
+<p>User-host membership determines which host a user can work in. Most admin pages
+and generated forms operate against the currently selected host.</p>
+<p>When a user cannot see expected records, first confirm that the correct host is
+selected and that the user has membership for that host.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="api-versioning"><a class="header" href="#api-versioning">API Versioning</a></h1>
+<p>An API is the stable business record. An API version is the concrete version
+that can be linked to instances, MCP tools, marketplace listings, and access
+control rules.</p>
+<p>Create the API first, then create one or more API versions under it. Operational
+relationships should usually reference the API version instead of only the API.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="oauth-client-ownership"><a class="header" href="#oauth-client-ownership">OAuth Client Ownership</a></h1>
+<p>OAuth clients can be owned by apps, API versions, or instances depending on the
+selected creation context.</p>
+<p>Ownership affects which users can see or modify client records. Regular users
+should manage only clients they own or can access through their position.
+Administrators can manage all clients for the host when their role allows it.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="implementation"><a class="header" href="#implementation">Implementation</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
@@ -10919,8 +13635,6 @@ client.tokenCcClientSecret: f6h1FTI8Q3-7UScPZDzfXA
 client.tokenCcScope:
   - portal.r
   - portal.w
-  - ref.r
-  - ref.w
 </code></pre>
 <p>Add TokenHandler to the handler.yml section.</p>
 <pre><code class="language-yaml"># handler.yml
@@ -10962,6 +13676,107 @@ cors.enabled: false
 client.tokenKeyServerUrl: https://localhost:6881
 client.tokenKeyUri: /oauth2/N2CMw0HGQXeLvC1wBfln2A/keys
 </code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="test"><a class="header" href="#test">Test</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="automated-integration-testing--ai-agent-strategy-for-light-portal"><a class="header" href="#automated-integration-testing--ai-agent-strategy-for-light-portal">Automated Integration Testing &amp; AI Agent Strategy for Light-Portal</a></h1>
+<p><strong>Document Type:</strong> Engineering Strategy / Architecture<br><strong>System:</strong> Light-Portal (Multi-Service Architecture)</p>
+<hr>
+<h2 id="1-executive-summary"><a class="header" href="#1-executive-summary">1. Executive Summary</a></h2>
+<p>As <strong>Light-Portal</strong> scales into a complex multi-service ecosystem, traditional end-to-end (E2E) tests become too slow, brittle, and difficult to maintain. To enable rapid updates without fear of regression, we must adopt a <strong>Shift-Left Layered Integration Approach</strong>.</p>
+<p>Furthermore, to minimize the manual overhead of test creation and maintenance, this strategy incorporates <strong>AI QA Agents</strong> capable of autonomously generating, executing, and self-healing test suites based on structured declarative specifications.</p>
+<hr>
+<h2 id="2-core-automated-integration-strategy"><a class="header" href="#2-core-automated-integration-strategy">2. Core Automated Integration Strategy</a></h2>
+<p>To test inter-service communication reliably and rapidly, we will implement the following methodologies:</p>
+<h3 id="a-consumer-driven-contract-cdc-testing"><a class="header" href="#a-consumer-driven-contract-cdc-testing">A. Consumer-Driven Contract (CDC) Testing</a></h3>
+<p>Instead of spinning up the entire portal ecosystem to test a single integration, we will use <strong>Pact</strong>.</p>
+<ul>
+<li><strong>How it works:</strong> The “Consumer” service defines the expected API structure (the contract). The “Provider” service checks its responses against this contract during its CI pipeline.</li>
+<li><strong>Benefit:</strong> Catches breaking API changes instantaneously without requiring a full staging environment.</li>
+</ul>
+<h3 id="b-ephemeral-environments"><a class="header" href="#b-ephemeral-environments">B. Ephemeral Environments</a></h3>
+<p>Tests should never rely on shared, persistent environments which are prone to state pollution.</p>
+<ul>
+<li><strong>Tooling:</strong> <strong>Testcontainers</strong> or dynamic Docker Compose files.</li>
+<li><strong>Execution:</strong> During the CI/CD pipeline, isolated instances of necessary services (e.g., databases, message brokers like Kafka, OAuth providers) are spun up, tested against, and destroyed.</li>
+</ul>
+<h3 id="c-api-first-testing"><a class="header" href="#c-api-first-testing">C. API-First Testing</a></h3>
+<p>Because Light-Portal relies on strict API boundaries, UI-based testing should be minimized for integration validation.</p>
+<ul>
+<li><strong>Tooling:</strong> <strong>Karate DSL</strong> or <strong>REST Assured</strong>.</li>
+<li><strong>Benefit:</strong> Tests the actual data contracts and service boundaries directly, resulting in faster and more resilient tests.</li>
+</ul>
+<h3 id="d-mocking-external-dependencies"><a class="header" href="#d-mocking-external-dependencies">D. Mocking External Dependencies</a></h3>
+<ul>
+<li><strong>Tooling:</strong> <strong>WireMock</strong> or <strong>Mountebank</strong>.</li>
+<li><strong>Usage:</strong> Stub out third-party APIs or external legacy systems to ensure our integration tests are entirely deterministic and not subject to external network failures.</li>
+</ul>
+<hr>
+<h2 id="3-ai-agent-automation-capabilities"><a class="header" href="#3-ai-agent-automation-capabilities">3. AI Agent Automation Capabilities</a></h2>
+<p>Autonomous AI agents can significantly reduce the testing bottleneck. Within this architecture, AI agents will be utilized for the following tasks:</p>
+<ol>
+<li><strong>Test Generation:</strong> Automatically parse OpenAPI specifications to generate exhaustive test suites covering positive paths, edge cases, and error handling (400, 401, 429, 500).</li>
+<li><strong>Self-Healing Test Pipelines:</strong> When an engineer modifies an API schema intentionally, the AI agent will detect the resulting broken test, read the commit diff, and automatically generate a Pull Request to align the test with the new API schema.</li>
+<li><strong>Synthetic Data Generation:</strong> Generate realistic, schema-compliant JSON payloads for testing, avoiding hard-coded or outdated mock data.</li>
+<li><strong>State Machine Exploration:</strong> Execute multi-step user journeys by exploring the API state (e.g., <em>Authenticate -&gt; Register Service -&gt; Query Gateway -&gt; Validate Routing</em>).</li>
+</ol>
+<hr>
+<h2 id="4-ai-optimized-test-specifications--plans"><a class="header" href="#4-ai-optimized-test-specifications--plans">4. AI-Optimized Test Specifications &amp; Plans</a></h2>
+<p>AI agents require structured, semantic, and declarative inputs to function reliably. To direct the AI agent, we will provide test plans in the following formats:</p>
+<h3 id="a-openapi--asyncapi-specifications-the-golden-source"><a class="header" href="#a-openapi--asyncapi-specifications-the-golden-source">A. OpenAPI / AsyncAPI Specifications (The Golden Source)</a></h3>
+<p>The most effective way to instruct an AI is to provide the API design spec.</p>
+<ul>
+<li><strong>AI Action:</strong> The agent reads <code>openapi.yaml</code>, identifies required headers (e.g., JWT authorizations) and payload schemas, and writes the baseline integration code automatically.</li>
+</ul>
+<h3 id="b-behavior-driven-development-bdd--gherkin-syntax"><a class="header" href="#b-behavior-driven-development-bdd--gherkin-syntax">B. Behavior-Driven Development (BDD) / Gherkin Syntax</a></h3>
+<p>For complex business logic, engineers and product managers will write Gherkin specs. The AI agent translates this plain English into executable API scripts.</p>
+<p><strong>Example Spec:</strong></p>
+<pre><code class="language-gherkin">Feature: Light-Portal Service Registration
+
+  Scenario: Registering a new microservice routing path
+    Given the light-oauth2 service provides a valid admin JWT
+    When I send a POST request to "/portal/services" with the following payload:
+      """
+      {
+        "serviceId": "demo-service",
+        "route": "/api/v1/demo"
+      }
+      """
+    Then the response status should be 201
+    And the service should be discoverable via the light-router instance
+</code></pre>
+<h3 id="c-declarative-yaml-test-workflows"><a class="header" href="#c-declarative-yaml-test-workflows">C. Declarative YAML Test Workflows</a></h3>
+<p>Instead of writing imperative code (Java/Node.js), test workflows should be written in YAML. YAML is highly deterministic and minimizes AI syntax hallucinations.</p>
+<p><strong>Example Spec:</strong></p>
+<pre><code class="language-yaml"># AI Agent Workflow Instructions
+name: Developer Onboarding Flow
+steps:
+  - name: Get Token
+    api: POST /oauth/token
+    extract: 
+      token: response.body.access_token
+  - name: Register Service
+    api: POST /portal/services
+    headers:
+      Authorization: Bearer ${token}
+    assert:
+      status: 200
+</code></pre>
+<h3 id="d-flow-based-user-stories-agentic-prompting"><a class="header" href="#d-flow-based-user-stories-agentic-prompting">D. Flow-Based “User Stories” (Agentic Prompting)</a></h3>
+<p>For autonomous exploration, the AI can be given high-level flow objectives. The agent is responsible for breaking the flow into actual API requests.</p>
+<p><strong>Example Prompt to Agent:</strong></p>
+<blockquote>
+<p><em>“Simulate a developer onboarding flow for Light-Portal. 1. Request an OAuth token. 2. Register a new mock-service to the portal. 3. Update the rate-limiting configuration for that service to 5 requests per minute. 4. Send 10 concurrent requests to verify the rate limit correctly throws a 429 error.”</em></p>
+</blockquote>
+<hr>
+<h2 id="5-conclusion--next-steps"><a class="header" href="#5-conclusion--next-steps">5. Conclusion &amp; Next Steps</a></h2>
+<p>By combining <strong>Contract Testing (Pact)</strong>, <strong>Ephemeral Environments (Testcontainers)</strong>, and <strong>Declarative AI-driven Automation</strong>, Light-Portal can scale its microservices with confidence.</p>
+<p><strong>Immediate Action Items:</strong></p>
+<ol>
+<li>Standardize and centralize all <code>openapi.yaml</code> files for Light-Portal services.</li>
+<li>Integrate Testcontainers into the primary CI/CD pipeline.</li>
+<li>Select an AI testing tool/framework (e.g., CodiumAI, Postman Postbot, or a custom LLM script) and seed it with our initial Gherkin business flows.</li>
+</ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="license"><a class="header" href="#license">License</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>

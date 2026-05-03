@@ -35,10 +35,10 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-ecf30778.js";
+            window.path_to_searchindex_js = "../../searchindex-72ec6d25.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../toc-b1de0e59.js"></script>
+        <script src="../../toc-1d2c5f3e.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -192,23 +192,31 @@
 </table>
 </div>
 <h2 id="implementation-strategy"><a class="header" href="#implementation-strategy">Implementation Strategy</a></h2>
-<p>Our implementation in <code>ProviderIdTokenPostHandler</code> uses a hybrid approach:</p>
+<p>Our implementation in <code>ProviderIdTokenPostHandler</code> uses <strong>Option 4: Client Context</strong> as the primary strategy:</p>
 <ol>
-<li><strong><code>requested_token_type</code></strong>: Primary differentiator. We support <code>msal</code> (default) and <code>internal</code>.</li>
-<li><strong>Modular Handlers</strong>: Logic is delegated to <code>handleMsalTokenExchange</code> and <code>handleInternalTokenExchange</code>.</li>
-<li><strong>Internal Flow</strong>: Uses <code>jose4j</code> for transparent decoding of internal JWTs and verifies against host-specific keys.</li>
+<li><strong>Database-Driven Configuration</strong>: A new column <code>token_ex_type</code> has been added to the <code>auth_client_t</code> table to specify the supported exchange type for each client.
+<pre><code class="language-sql">ALTER TABLE auth_client_t ADD COLUMN token_ex_type VARCHAR(64);
+</code></pre>
+</li>
+<li><strong>Supported Exchange Types</strong>:
+<ul>
+<li><code>msal</code>: Microsoft Authentication Library based exchange.</li>
+<li><code>ccac</code>: Client Credentials to Authorization Code exchange.</li>
+</ul>
+</li>
+<li><strong>Flow Determination</strong>: Instead of relying on client-supplied parameters like <code>requested_token_type</code>, the server retrieves the <code>token_ex_type</code> from the client context in the database to decide which handler to use. This ensures that only authorized exchange types are performed for each specific client.</li>
 </ol>
 <h2 id="recommendation"><a class="header" href="#recommendation">Recommendation</a></h2>
-<p>For the current <code>light-portal</code> ecosystem:</p>
+<p>For the <code>light-portal</code> ecosystem:</p>
 <ul>
-<li><strong>JWT Peek (<code>iss</code>)</strong> is recommended for external OIDC providers (like MSAL) as it provides the best balance of user experience (no extra parameters) and reliability.</li>
-<li><strong><code>requested_token_type</code></strong> should be used for internal service-to-service exchanges where the flow is known and should be explicit.</li>
-<li><strong>Client Context</strong> should be considered for high-security environments where the server must dictate exactly which token sources are allowed for a given client.</li>
+<li><strong>Option 4: Client Context</strong> is the selected method. It provides the highest level of security by ensuring that token exchange flows are explicitly configured and restricted on a per-client basis in the database.</li>
+<li><strong><code>token_ex_type</code></strong> should be populated for any client that requires token exchange functionality. Clients without this configuration will not be allowed to perform token exchange.</li>
 </ul>
 <h2 id="future-considerations"><a class="header" href="#future-considerations">Future Considerations</a></h2>
 <ul>
 <li>Implement automated issuer discovery if the number of external providers grows.</li>
 <li>Support “opaque” token exchange by integrating with introspection endpoints of external IdPs.</li>
+<li>Extend the <code>auth_client_t</code> configuration to support multiple allowed exchange types per client if needed.</li>
 </ul>
 
                     </main>
@@ -219,7 +227,7 @@
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../../design/multi-tenant.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../../design/oauth-audit.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -233,7 +241,7 @@
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../../design/multi-tenant.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../../design/oauth-audit.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

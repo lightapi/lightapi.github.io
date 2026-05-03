@@ -1,0 +1,784 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Deployment Workflow - Light Portal Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-2459343d.css">
+        <link rel="stylesheet" href="../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex-72ec6d25.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc-1d2c5f3e.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Light Portal Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="deployment-workflow"><a class="header" href="#deployment-workflow">Deployment Workflow</a></h1>
+<p>Light Portal manages product, API, application, instance, runtime
+configuration, and deployment metadata for multiple tenants. The deployment
+workflow extends that model so a user can deploy a configured instance to a
+Kubernetes cluster from the Instance Admin page.</p>
+<p>The goal is to provide a production-like deployment path for small businesses
+and enterprise tenants without requiring Light Portal to have direct network
+access to every customer cluster.</p>
+<h2 id="problem"><a class="header" href="#problem">Problem</a></h2>
+<p>Each API or application repository can contain a <code>k8s/</code> folder with Kubernetes
+deployment templates. The templates contain variables in the following format:</p>
+<pre><code class="language-text">${key:defaultValue}
+</code></pre>
+<p>For each configured portal instance, Light Portal can generate a <code>values.yml</code>
+document that contains deployment-time values such as image URL, namespace,
+replica count, service ports, config references, resource limits, ingress host,
+and rollout options.</p>
+<p>When a user clicks the Deployment button for an instance, the system should:</p>
+<ol>
+<li>Resolve the target instance and deployment environment.</li>
+<li>Generate or fetch the instance deployment <code>values.yml</code>.</li>
+<li>Send a deployment command to a deployer that can access the target
+Kubernetes cluster.</li>
+<li>Render the final Kubernetes manifests from the repository templates.</li>
+<li>Validate and apply the manifests.</li>
+<li>Track rollout status and return deployment results to Light Portal.</li>
+</ol>
+<h2 id="recommended-architecture"><a class="header" href="#recommended-architecture">Recommended Architecture</a></h2>
+<p>The recommended default is to run a small Rust deployer inside each target
+Kubernetes cluster.</p>
+<pre><code class="language-text">Light Portal
+  |
+  | deployment request / status query
+  v
+Light Controller
+  |
+  | outbound WebSocket session / MCP tool call
+  v
+In-cluster Rust Deployer Pod
+  |
+  | Kubernetes API via in-cluster ServiceAccount
+  v
+Customer Kubernetes Cluster
+</code></pre>
+<p>This is similar to the agent model used by GitOps and cloud management systems:
+the cluster-local agent connects outbound to the control plane and performs
+cluster operations using tightly scoped Kubernetes RBAC.</p>
+<h2 id="why-in-cluster-deployer"><a class="header" href="#why-in-cluster-deployer">Why In-Cluster Deployer</a></h2>
+<p>Running the deployer inside the cluster should be the default for production.</p>
+<h3 id="kubernetes-authentication"><a class="header" href="#kubernetes-authentication">Kubernetes Authentication</a></h3>
+<p>An in-cluster deployer can use Kubernetes in-cluster configuration. The Rust
+service can use <code>kube-rs</code> and call the equivalent of default client discovery.
+Kubernetes mounts a ServiceAccount token into the pod, so no external
+<code>kubeconfig</code> file needs to be copied, stored, rotated, or exposed.</p>
+<h3 id="least-privilege-rbac"><a class="header" href="#least-privilege-rbac">Least-Privilege RBAC</a></h3>
+<p>The deployer should run as a dedicated ServiceAccount with only the permissions
+needed for the namespaces and resources it manages. If a deployer is
+compromised, the blast radius is limited by Kubernetes RBAC.</p>
+<p>For a small-business deployment, the first version can bind the deployer to a
+dedicated namespace. For managed enterprise environments, the portal can create
+one deployer per cluster or per tenant namespace.</p>
+<h3 id="firewall-traversal"><a class="header" href="#firewall-traversal">Firewall Traversal</a></h3>
+<p>Many customer clusters are behind firewalls or corporate networks. An in-cluster
+deployer can open an outbound WebSocket connection to Light Controller. This
+avoids inbound firewall rules and allows Light Portal to manage deployments
+without direct access to the Kubernetes API server.</p>
+<h3 id="operational-simplicity"><a class="header" href="#operational-simplicity">Operational Simplicity</a></h3>
+<p>Customers do not need to run a separate VM or keep a standalone deployment
+process alive. They install the deployer with one Kubernetes YAML file or Helm
+chart, and Kubernetes restarts it if it fails.</p>
+<h2 id="deployment-transports"><a class="header" href="#deployment-transports">Deployment Transports</a></h2>
+<p>The deployment system should support two transports.</p>
+<h3 id="controller-mediated-websocket"><a class="header" href="#controller-mediated-websocket">Controller-Mediated WebSocket</a></h3>
+<p>This is the preferred transport for private customer environments.</p>
+<ol>
+<li>The deployer pod starts inside the customer cluster.</li>
+<li>It registers with Light Controller over an outbound WebSocket.</li>
+<li>The controller authenticates the deployer and records its tenant, cluster,
+environment, capabilities, and current status.</li>
+<li>Light Portal sends deployment commands to the controller.</li>
+<li>The controller forwards the command to the deployer using MCP-style tool
+calls over the existing session.</li>
+<li>The deployer streams status back through the controller.</li>
+</ol>
+<p>This mode works when Light Portal cannot reach the customer environment.</p>
+<h3 id="direct-deployer-url"><a class="header" href="#direct-deployer-url">Direct Deployer URL</a></h3>
+<p>This is useful for local MicroK8s, managed clusters, and environments where
+Light Portal can reach the deployer directly.</p>
+<p>The deployer URL can be stored in deployment configuration or config server
+metadata. Light Portal or the workflow engine can call the deployer’s API/MCP
+endpoint directly.</p>
+<p>Direct mode should be treated as an optimization, not the primary model for
+customer-managed private networks.</p>
+<h2 id="deployer-responsibilities"><a class="header" href="#deployer-responsibilities">Deployer Responsibilities</a></h2>
+<p>The deployer is intentionally narrow. It should not own tenant configuration or
+business workflow decisions. It executes deployment instructions and reports
+results.</p>
+<p>The deployer should support these actions:</p>
+<ul>
+<li><code>render</code>: Fetch templates and values, render manifests, and return a manifest
+summary.</li>
+<li><code>dryRun</code>: Render manifests and validate them against the Kubernetes API
+without applying changes.</li>
+<li><code>deploy</code>: Apply manifests and wait for rollout status.</li>
+<li><code>redeploy</code>: Re-apply manifests and trigger rollout if needed.</li>
+<li><code>undeploy</code>: Delete resources created by the deployment.</li>
+<li><code>status</code>: Return current Kubernetes resource and rollout status.</li>
+<li><code>logs</code>: Return recent pod logs for the deployed instance.</li>
+<li><code>rollback</code>: Redeploy a previous Light Portal deployment snapshot.</li>
+</ul>
+<p>The first implementation should include <code>dryRun</code>, <code>deploy</code>, <code>undeploy</code>, and
+<code>status</code>.</p>
+<p>Rollback should be implemented through Light Portal deployment history, not
+native Kubernetes rollout undo. Native Kubernetes rollback only reverts the
+Deployment pod template and does not reliably revert associated ConfigMaps,
+Secrets, or deployment values. A Light Portal rollback should redeploy a
+previous immutable deployment snapshot so pods, config, environment variables,
+and related resources return to the same known state.</p>
+<h2 id="deployment-request"><a class="header" href="#deployment-request">Deployment Request</a></h2>
+<p>A deployment request should be explicit and auditable.</p>
+<pre><code class="language-yaml">requestId: 01964b05-0000-7000-8000-000000000001
+hostId: 01964b05-552a-7c4b-9184-6857e7f3dc5f
+instanceId: petstore-dev
+environment: dev
+clusterId: microk8s-local
+namespace: petstore-dev
+action: deploy
+valuesRef:
+  source: config-server
+  path: /deployments/petstore-dev/values.yml
+template:
+  repoUrl: https://github.com/lightapi/petstore-api.git
+  ref: main
+  path: k8s
+options:
+  dryRun: false
+  waitForRollout: true
+  timeoutSeconds: 300
+</code></pre>
+<p>The request should be created by Light Portal and persisted as deployment
+history before it is sent to the deployer.</p>
+<h2 id="values-file"><a class="header" href="#values-file">Values File</a></h2>
+<p>The <code>values.yml</code> is instance-specific. It should contain all values needed to
+render Kubernetes templates for one deployment target.</p>
+<pre><code class="language-yaml">image:
+  repository: ghcr.io/lightapi/petstore-api
+  tag: 1.0.0
+deployment:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+service:
+  port: 8080
+ingress:
+  enabled: true
+  host: petstore-dev.example.com
+config:
+  snapshotId: petstore-dev-20260427
+  configServerUrl: https://config.lightapi.net
+template:
+  repoUrl: https://github.com/lightapi/petstore-api.git
+  ref: main
+  path: k8s
+</code></pre>
+<p>The deployer can receive the values inline or fetch them from config server
+using the <code>valuesRef</code> in the deployment request.</p>
+<p>Config Server should be the authoritative source of truth for deployment
+values. At deployment time, Light Portal should create an immutable snapshot of
+both the deployment <code>values.yml</code> and the runtime configuration <code>values.yml</code>.
+That snapshot is the deployment evidence. If a deployment fails or must be
+audited later, the team must be able to reconstruct exactly which values were
+used even if the current config has changed.</p>
+<p>Light Portal should persist the snapshot reference and hash in deployment
+history. It should not rely only on a mutable config path.</p>
+<h2 id="template-rendering"><a class="header" href="#template-rendering">Template Rendering</a></h2>
+<p>The initial template format can use simple placeholders:</p>
+<pre><code class="language-yaml">image: ${image.repository}:${image.tag}
+replicas: ${deployment.replicas:1}
+</code></pre>
+<p>The renderer should support nested keys and defaults. If a key is missing and no
+default is provided, rendering should fail.</p>
+<p>The deployer should render manifests in memory and avoid writing generated YAML
+to disk unless debug mode is explicitly enabled.</p>
+<p>Longer term, the deployer can support additional renderers:</p>
+<ul>
+<li>Built-in <code>${key:default}</code> renderer for simple service templates.</li>
+<li>Kustomize for standard Kubernetes overlays.</li>
+<li>Helm for teams that already maintain charts.</li>
+</ul>
+<p>The built-in renderer should be deterministic and small. It should not evaluate
+arbitrary code.</p>
+<p>Do not use raw string replacement or regex replacement against raw YAML text.
+YAML is indentation sensitive, and multi-line values, certificates, JSON
+strings, and embedded config blocks can break when substituted as plain text.</p>
+<p>The preferred first renderer is a constrained internal AST renderer:</p>
+<ol>
+<li>Parse each template document with <code>serde_yaml</code> into <code>serde_yaml::Value</code>.</li>
+<li>Recursively traverse the YAML value tree.</li>
+<li>Resolve placeholders only inside string scalar values.</li>
+<li>Replace <code>${key:default}</code> with values from the structured deployment values.</li>
+<li>Serialize the YAML value back to YAML or convert it directly to Kubernetes
+dynamic objects.</li>
+</ol>
+<p>This avoids most quoting, escaping, and indentation bugs because YAML parsing
+and serialization remain responsible for formatting. It also keeps the renderer
+small and prevents arbitrary code execution.</p>
+<p>The implementation must include tests for ConfigMap multi-line blocks, JSON
+strings, certificate-shaped values, and Secret references before production use.</p>
+<h2 id="kubernetes-execution"><a class="header" href="#kubernetes-execution">Kubernetes Execution</a></h2>
+<p>The Rust deployer should prefer <code>kube-rs</code> and the Kubernetes API over shelling
+out to <code>kubectl</code>.</p>
+<p>Benefits:</p>
+<ul>
+<li>no <code>kubectl</code> binary dependency</li>
+<li>structured errors</li>
+<li>easier dry-run and rollout status handling</li>
+<li>better control over authentication and namespaces</li>
+<li>safer request construction</li>
+</ul>
+<p><code>kubectl</code> can remain a diagnostic or fallback mode, but it should not be the
+default production implementation.</p>
+<p>The deployer should use Kubernetes server-side dry run for validation:</p>
+<pre><code class="language-text">dryRun=All
+</code></pre>
+<p>For apply, use server-side apply when possible so the deployer has a clear field
+manager identity.</p>
+<p>The field manager must be explicit, for example:</p>
+<pre><code class="language-text">fieldManager=light-deployer
+</code></pre>
+<p>Using a stable field manager is important for coexistence with other Kubernetes
+controllers. For example, a Horizontal Pod Autoscaler may own Deployment
+replica changes. Server-side apply helps the deployer avoid accidentally
+overwriting fields owned by other managers.</p>
+<p>For rollout status, the deployer should use the Kubernetes watch API rather
+than only polling logs. The portal user experience should show resource status
+transitions such as:</p>
+<pre><code class="language-text">Pending -&gt; ContainerCreating -&gt; Running -&gt; Ready
+</code></pre>
+<p>Streaming watch events through the deployer gives Light Portal a precise
+deployment timeline similar to a CI/CD job log while still preserving structured
+Kubernetes state.</p>
+<h2 id="security-model"><a class="header" href="#security-model">Security Model</a></h2>
+<p>Security is the central design constraint because this component can mutate a
+customer cluster.</p>
+<h3 id="authentication"><a class="header" href="#authentication">Authentication</a></h3>
+<p>The deployer must authenticate to Light Controller or Light Portal before it can
+receive commands. Recommended options:</p>
+<ul>
+<li>mTLS for deployer-to-controller registration</li>
+<li>signed JWT enrollment token for first registration</li>
+<li>short-lived command tokens issued by Light Portal</li>
+</ul>
+<p>The deployer should have a stable <code>deployerId</code> and should report cluster,
+namespace, version, and capability metadata during registration.</p>
+<h3 id="authorization"><a class="header" href="#authorization">Authorization</a></h3>
+<p>Light Portal must verify that the requesting user can deploy the target
+instance, environment, and tenant. The deployer must also enforce local
+constraints:</p>
+<ul>
+<li>allowed namespaces</li>
+<li>allowed repository hosts and repository names</li>
+<li>allowed image registries</li>
+<li>allowed Kubernetes resource kinds</li>
+<li>allowed actions</li>
+</ul>
+<p>The deployer should reject commands outside its configured policy even if the
+portal sends them.</p>
+<h3 id="rbac"><a class="header" href="#rbac">RBAC</a></h3>
+<p>For namespace-scoped deployments, prefer <code>Role</code> and <code>RoleBinding</code> over
+<code>ClusterRole</code> and <code>ClusterRoleBinding</code>.</p>
+<p>Version 1 should allow only application-level resource kinds:</p>
+<ul>
+<li><code>Deployment</code></li>
+<li><code>Service</code></li>
+<li><code>Ingress</code></li>
+<li><code>ConfigMap</code></li>
+<li><code>Secret</code></li>
+</ul>
+<p>Version 1 should explicitly block cluster-scoped and control-plane resources,
+including:</p>
+<ul>
+<li><code>Namespace</code></li>
+<li><code>ClusterRole</code></li>
+<li><code>ClusterRoleBinding</code></li>
+<li><code>CustomResourceDefinition</code></li>
+<li>admission webhooks</li>
+</ul>
+<p>This keeps the default deployer RBAC narrow and supports least-privilege
+customer installations.</p>
+<p>Example namespace-scoped installation:</p>
+<pre><code class="language-yaml">apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: light-portal-deployer
+  namespace: petstore-dev
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: light-portal-deployer
+  namespace: petstore-dev
+rules:
+  - apiGroups: ["", "apps", "networking.k8s.io"]
+    resources: ["deployments", "services", "ingresses", "configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: light-portal-deployer
+  namespace: petstore-dev
+subjects:
+  - kind: ServiceAccount
+    name: light-portal-deployer
+    namespace: petstore-dev
+roleRef:
+  kind: Role
+  name: light-portal-deployer
+  apiGroup: rbac.authorization.k8s.io
+</code></pre>
+<p>Secrets should be handled carefully. Avoid logging rendered manifests that
+contain secret values. Prefer references to existing Kubernetes Secrets,
+External Secrets, Sealed Secrets, or config-server secret references resolved
+inside the deployer.</p>
+<p>The Rust implementation must also avoid logging raw Kubernetes apply payloads.
+When using <code>tracing</code> or <code>log</code>, never log full <code>kube-rs</code> request objects,
+patches, or serialized manifests for <code>Secret</code> resources. Kubernetes Secret
+values are base64 encoded, not encrypted, and will leak credentials if written
+to pod stdout.</p>
+<h2 id="deployment-pod"><a class="header" href="#deployment-pod">Deployment Pod</a></h2>
+<p>The deployer can be installed as a Kubernetes Deployment.</p>
+<pre><code class="language-yaml">apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: light-portal-deployer
+  namespace: petstore-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: light-portal-deployer
+  template:
+    metadata:
+      labels:
+        app: light-portal-deployer
+    spec:
+      serviceAccountName: light-portal-deployer
+      containers:
+        - name: deployer
+          image: ghcr.io/lightapi/light-portal-deployer:0.1.0
+          env:
+            - name: LIGHT_CONTROLLER_WS_URL
+              value: wss://controller.lightapi.net/deployer/ws
+            - name: DEPLOYER_ID
+              value: petstore-dev-microk8s
+            - name: DEPLOYER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: light-portal-deployer-credentials
+                  key: token
+            - name: ALLOWED_NAMESPACES
+              value: petstore-dev
+</code></pre>
+<h2 id="portal-workflow"><a class="header" href="#portal-workflow">Portal Workflow</a></h2>
+<p>The Instance Admin Deployment button should not synchronously run deployment
+logic in the browser request. It should create a deployment request and trigger
+an asynchronous workflow.</p>
+<p>Recommended flow:</p>
+<ol>
+<li>User clicks Deployment for an instance.</li>
+<li>Portal validates authorization.</li>
+<li>Portal resolves instance, environment, product version, image, config
+snapshot, and template repository.</li>
+<li>Portal creates a deployment request row/event.</li>
+<li>Portal snapshots deployment values and runtime values.</li>
+<li>Portal or workflow engine runs <code>dryRun</code>.</li>
+<li>If the target environment requires approval, workflow waits for human
+approval.</li>
+<li>Workflow calls <code>deploy</code>.</li>
+<li>Deployer streams events: render complete, dry-run complete, apply started,
+pod phase changes, rollout progressing, rollout complete or failed.</li>
+<li>Portal updates deployment history and status.</li>
+<li>User can inspect rendered manifest summary, rollout status, pod status, and
+logs.</li>
+</ol>
+<p>This fits the agentic workflow model. The workflow can ask the user to approve
+the rendered changes before applying them.</p>
+<p>Approval should be configurable at the environment level. Development and test
+environments can allow automatic deployment. Production environments should
+normally require manual approval through Light Portal or an agentic workflow
+ask task.</p>
+<h2 id="status-and-audit"><a class="header" href="#status-and-audit">Status And Audit</a></h2>
+<p>Light Portal should persist deployment history.</p>
+<p>Suggested fields:</p>
+<ul>
+<li><code>deploymentId</code></li>
+<li><code>hostId</code></li>
+<li><code>instanceId</code></li>
+<li><code>environment</code></li>
+<li><code>clusterId</code></li>
+<li><code>namespace</code></li>
+<li><code>action</code></li>
+<li><code>status</code></li>
+<li><code>requestUser</code></li>
+<li><code>deployerId</code></li>
+<li><code>templateRepoUrl</code></li>
+<li><code>templateRef</code></li>
+<li><code>templatePath</code></li>
+<li><code>valuesHash</code></li>
+<li><code>valuesSnapshotId</code></li>
+<li><code>runtimeValuesHash</code></li>
+<li><code>runtimeValuesSnapshotId</code></li>
+<li><code>manifestHash</code></li>
+<li><code>templateCommitSha</code></li>
+<li><code>resourceSummary</code></li>
+<li><code>imageRepository</code></li>
+<li><code>imageTag</code></li>
+<li><code>startedTs</code></li>
+<li><code>completedTs</code></li>
+<li><code>errorMessage</code></li>
+</ul>
+<p>The deployer should return enough detail to reproduce the deployment intent
+without storing secrets.</p>
+<p>Light Portal should store only the rendered manifest hash, Git commit SHA, and a
+redacted resource summary. It should not store full rendered YAML in the
+database because rendered manifests can contain environment variables,
+connection strings, or credentials.</p>
+<p>Example resource summary:</p>
+<pre><code class="language-json">[
+  {"kind": "Deployment", "namespace": "petstore-dev", "name": "petstore"},
+  {"kind": "Service", "namespace": "petstore-dev", "name": "petstore"}
+]
+</code></pre>
+<h2 id="multi-tenant-considerations"><a class="header" href="#multi-tenant-considerations">Multi-Tenant Considerations</a></h2>
+<p>Small-business cloud service means multiple tenants may share Light Portal but
+deploy to separate clusters or namespaces.</p>
+<p>Rules:</p>
+<ul>
+<li>Tenant identity must be present in every deployment request.</li>
+<li>A deployer must be bound to one tenant boundary. In most installations, that
+means one tenant namespace or a tightly controlled set of namespaces owned by
+that tenant.</li>
+<li>Do not share one deployer across unrelated tenants.</li>
+<li>Namespace policy must be enforced both by portal authorization and deployer
+local policy.</li>
+<li>Deployment history must be filtered by <code>hostId</code>.</li>
+<li>A compromised deployer must not be able to receive commands for another
+tenant.</li>
+</ul>
+<h2 id="failure-handling"><a class="header" href="#failure-handling">Failure Handling</a></h2>
+<p>The deployer should classify failures:</p>
+<ul>
+<li>template repository fetch failure</li>
+<li>values file fetch failure</li>
+<li>render failure</li>
+<li>manifest validation failure</li>
+<li>Kubernetes API authorization failure</li>
+<li>apply failure</li>
+<li>rollout timeout</li>
+<li>health check failure</li>
+<li>controller WebSocket disconnected</li>
+<li>deployer registration rejected</li>
+</ul>
+<p>Each failure should include a safe message and diagnostic metadata. Secret
+values must be redacted.</p>
+<p>For controller-mediated deployments, the deployer must have a resilient
+WebSocket lifecycle. If Light Controller restarts or the network drops, the
+deployer should not crash. It should reconnect with exponential backoff and
+jitter, re-register after reconnecting, and resume accepting commands only after
+the controller confirms the deployer session.</p>
+<h2 id="first-implementation"><a class="header" href="#first-implementation">First Implementation</a></h2>
+<p>The first implementation should target local MicroK8s and direct feedback in
+Light Portal.</p>
+<p>Phase 1:</p>
+<ul>
+<li>Create Rust deployer service.</li>
+<li>Run it inside MicroK8s.</li>
+<li>Support direct API mode for local testing.</li>
+<li>Implement <code>render</code>, <code>dryRun</code>, <code>deploy</code>, <code>undeploy</code>, and <code>status</code>.</li>
+<li>Use <code>kube-rs</code> and in-cluster ServiceAccount authentication.</li>
+<li>Support built-in <code>${key:default}</code> rendering.</li>
+<li>Add deployment request and deployment history tables/events.</li>
+<li>Add Instance Admin deployment request flow.</li>
+</ul>
+<p>Phase 2:</p>
+<ul>
+<li>Add controller-mediated WebSocket registration.</li>
+<li>Expose deployer operations as MCP tools through the controller.</li>
+<li>Stream deployment progress and Kubernetes watch events to Light Portal.</li>
+<li>Implement exponential backoff reconnect and re-registration.</li>
+<li>Add approval step through agentic workflow.</li>
+</ul>
+<p>Phase 3:</p>
+<ul>
+<li>Add Helm/Kustomize renderer support if needed.</li>
+<li>Add rollback support.</li>
+<li>Add multi-cluster inventory and deployer health view.</li>
+<li>Add deployment policy and quota enforcement.</li>
+</ul>
+<h2 id="resolved-design-decisions"><a class="header" href="#resolved-design-decisions">Resolved Design Decisions</a></h2>
+<ul>
+<li>Config Server is the authoritative source of truth for values. Each
+deployment stores immutable deployment and runtime values snapshot references
+plus hashes.</li>
+<li>Light Portal stores rendered manifest hash, template Git commit SHA, and
+redacted resource summary. It does not store full rendered manifests by
+default.</li>
+<li>Regulated environments can add an opt-in enterprise artifact mode that stores
+the full rendered manifest in encrypted object storage with strict retention.
+Full manifests should stay out of the relational database.</li>
+<li>Deployment approval is configured at the environment level. Production should
+require approval by default.</li>
+<li>Deployers are installed per tenant boundary and should not be shared across
+unrelated tenants.</li>
+<li>Version 1 allows only application-level resources: Deployment, Service,
+Ingress, ConfigMap, and Secret.</li>
+<li>The first renderer should be a constrained internal AST renderer based on
+<code>serde_yaml</code>, not raw text replacement.</li>
+<li>The direct deployer URL mode should expose MCP immediately, using the same
+internal tool implementation that controller-mediated WebSocket mode will use
+later.</li>
+<li>Rollback is a redeploy of a previous Light Portal deployment snapshot, not a
+native Kubernetes rollout undo.</li>
+</ul>
+<h2 id="open-questions"><a class="header" href="#open-questions">Open Questions</a></h2>
+<ul>
+<li>Which object storage providers should enterprise artifact mode support first?</li>
+<li>What retention policies should be available for encrypted rendered manifest
+artifacts?</li>
+<li>Should direct MCP use streamable HTTP only, or should it also expose SSE for
+long-running deployment progress events?</li>
+<li>Should rollback require the same environment-level approval policy as deploy?</li>
+</ul>
+<h2 id="recommendation"><a class="header" href="#recommendation">Recommendation</a></h2>
+<p>Use an in-cluster Rust deployer as the default production model. The deployer
+should connect outbound to Light Controller and execute deployment commands via
+MCP-style tools. Direct deployer URL mode is useful for MicroK8s and managed
+environments but should be secondary. The MCP tool implementation should be
+shared by both transports from the beginning.</p>
+<p>Use <code>kube-rs</code> instead of shelling out to <code>kubectl</code> for the production execution
+path. Keep the deployer small, policy-bound, and auditable. Let Light Portal own
+deployment intent and history, while the deployer owns safe cluster-local
+execution.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../design/event-promotion.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../help/portal-view/index.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../design/event-promotion.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../help/portal-view/index.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-c2a407aa.js"></script>
+
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-a0b12cfe.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../mermaid-3a6b472a.min.js"></script>
+        <script src="../mermaid-init-025d9952.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

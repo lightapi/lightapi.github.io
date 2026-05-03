@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-ecf30778.js";
+            window.path_to_searchindex_js = "../searchindex-72ec6d25.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-b1de0e59.js"></script>
+        <script src="../toc-1d2c5f3e.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -549,6 +549,153 @@ CREATE TABLE promotion_item_t (
 <li><strong>Phase 2 – Backend Services:</strong> Implement <code>exportSnapshot</code>, <code>importDryRun</code>, <code>importExecute</code> services, and <code>promotion_t</code>/<code>promotion_item_t</code> DDL.</li>
 <li><strong>Phase 3 – Same-Instance Promotion:</strong> Integrate promotion tracking tables, add “Promote to Host” flow, orphan detection.</li>
 <li><strong>Phase 4 – Additional Entity Types:</strong> Add support for <code>rule_t</code>, <code>schema_t</code>, <code>api_t</code>, <code>config_t</code> and extend the dependency resolver.</li>
+<li><strong>Phase 5 – Global Migration Export:</strong> Implement dynamic table discovery for full-database migration (see below).</li>
+</ol>
+<hr>
+<h2 id="global-migration-export"><a class="header" href="#global-migration-export">Global Migration Export</a></h2>
+<h3 id="motivation"><a class="header" href="#motivation">Motivation</a></h3>
+<p>The entity-level promotion (<code>ExportSnapshot</code>) is designed for <strong>selective promotion</strong> — the user picks specific entities (e.g., 3 instances) and promotes them from a lower environment to a higher one. For that use case, the export produces a rich nested JSON with children and dependencies, which requires hand-crafted <code>exportXxxSnapshot()</code> methods per entity type.</p>
+<p>However, a <strong>full database migration</strong> has fundamentally different requirements:</p>
+<ul>
+<li><strong>Scope:</strong> ALL entities across ALL entity types — not a user-selected subset.</li>
+<li><strong>Maintainability:</strong> When new tables are added to the system, the migration should work automatically without code changes.</li>
+<li><strong>Simplicity:</strong> A flat per-table export is sufficient since all data is exported together (no missing dependency risk).</li>
+</ul>
+<h3 id="design-dynamic-table-discovery"><a class="header" href="#design-dynamic-table-discovery">Design: Dynamic Table Discovery</a></h3>
+<p>Instead of maintaining a manual list of entity types and per-type export methods, the Global Migration Export uses PostgreSQL <code>DatabaseMetaData</code> to automatically discover and export all projection tables.</p>
+<h4 id="how-it-works"><a class="header" href="#how-it-works">How It Works</a></h4>
+<ol>
+<li><strong>Discover all tables</strong> ending in <code>_t</code> in the <code>public</code> schema via <code>DatabaseMetaData.getTables()</code>.</li>
+<li><strong>Skip infrastructure tables</strong> that should never be exported:
+<ul>
+<li><code>event_store_t</code> — immutable event log (events will be regenerated on import)</li>
+<li><code>outbox_message_t</code> — transient consumer outbox</li>
+<li><code>consumer_offsets</code> — operational state</li>
+<li><code>consumer_lock</code> — operational lock</li>
+<li><code>promotion_t</code>, <code>promotion_item_t</code> — promotion tracking (environment-specific)</li>
+</ul>
+</li>
+<li><strong>For each discovered table:</strong>
+<ul>
+<li>Inspect column metadata to detect if the table has <code>host_id</code> and <code>active</code> columns.</li>
+<li>If <code>active</code> column exists: <code>SELECT * FROM table_t WHERE active = TRUE [AND host_id = ?]</code>.</li>
+<li>If no <code>active</code> column: <code>SELECT * FROM table_t [WHERE host_id = ?]</code>.</li>
+<li>Convert each row to <code>Map&lt;String, Object&gt;</code> with <strong>camelCase</strong> key names.</li>
+</ul>
+</li>
+<li><strong>Record a consistency marker:</strong> <code>SELECT MAX(id) FROM event_store_t</code> at the start of the export transaction to stamp the snapshot with the <code>lastEventId</code>.</li>
+<li><strong>Use <code>REPEATABLE READ</code></strong> transaction isolation for consistency across all tables (PostgreSQL MVCC ensures a frozen-in-time view even if events are being processed concurrently).</li>
+</ol>
+<h4 id="data-consistency-strategy"><a class="header" href="#data-consistency-strategy">Data Consistency Strategy</a></h4>
+<p>Querying projection tables directly is safe because:</p>
+<ul>
+<li><strong>PostgreSQL MVCC:</strong> <code>REPEATABLE READ</code> provides a consistent snapshot at transaction start time. Concurrent event processing does not affect the exported data.</li>
+<li><strong>Atomic event application:</strong> Each event is applied via <code>handleEvent()</code> within its own transaction, so partial aggregate states are never visible.</li>
+<li><strong><code>lastEventId</code> marker:</strong> The export records the maximum event ID at transaction start, providing an auditable consistency boundary without the cost of event replay.</li>
+</ul>
+<p>Why not replay events from <code>event_store_t</code>?</p>
+<ul>
+<li>The projection tables <strong>are</strong> the replayed event result — re-replaying is redundant.</li>
+<li><code>handleEvent()</code> has 120+ event type cases — duplicating that logic in an in-memory replayer is impractical.</li>
+<li>Event replay would not unlock any consistency benefit beyond what MVCC already provides.</li>
+</ul>
+<h4 id="output-format"><a class="header" href="#output-format">Output Format</a></h4>
+<pre><code class="language-json">{
+  "exportVersion": "1.0",
+  "sourceHostId": "N2CMw0HGQXeLvC1wBfln2A",
+  "lastEventId": "abc123...",
+  "exportTs": "2026-04-09T20:00:00Z",
+  "tables": {
+    "config_t": {
+      "count": 5,
+      "rows": [
+        { "configId": "...", "configName": "...", "configPhase": "...", ... },
+        ...
+      ]
+    },
+    "user_t": {
+      "count": 12,
+      "rows": [
+        { "userId": "...", "email": "...", "firstName": "...", ... },
+        ...
+      ]
+    },
+    "role_t": { ... },
+    "instance_t": { ... },
+    ...
+  }
+}
+</code></pre>
+<p>Key differences from the per-entity promotion export:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Aspect</th><th>Per-Entity Promotion (<code>ExportSnapshot</code>)</th><th>Global Migration (<code>ExportGlobalSnapshot</code>)</th></tr>
+</thead>
+<tbody>
+<tr><td>Scope</td><td>User-selected entities</td><td>All active entities</td></tr>
+<tr><td>Structure</td><td>Nested (parent/children/dependencies)</td><td>Flat per-table</td></tr>
+<tr><td>New table support</td><td>Requires code changes</td><td>Automatic via <code>DatabaseMetaData</code></td></tr>
+<tr><td>Use case</td><td>Lower env → Higher env</td><td>Full database migration</td></tr>
+<tr><td>Output</td><td>Entity-centric JSON</td><td>Table-centric JSON</td></tr>
+<tr><td>Import mechanism</td><td>Same-instance via <code>promotion_t</code> or Cross-instance via JSON</td><td>Cross-instance via JSON only</td></tr>
+</tbody>
+</table>
+</div>
+<h4 id="import-event-based-migration-refined-in-phase-25"><a class="header" href="#import-event-based-migration-refined-in-phase-25">Import: Event-Based Migration (Refined in Phase 2.5)</a></h4>
+<p>To ensure maximum compatibility and maintain the integrity of the event-sourced system, the global import process follows a <strong>3-step pipeline</strong>:</p>
+<p><code>Source DB</code> → <code>Export</code> (Flat JSON) → <code>Convert to Events</code> (Ordered JSON) → <code>Import</code> (Target DB)</p>
+<h5 id="1-snapshot-to-events-conversion"><a class="header" href="#1-snapshot-to-events-conversion">1. Snapshot-to-Events Conversion</a></h5>
+<p>An intermediate step (<code>ConvertSnapshotToEvents</code>) transforms the flat table-centric snapshot into an ordered JSON array of CloudEvents. This format is 100% compatible with the existing <strong><code>event-importer</code></strong> CLI tool (matching the <code>00-bootstrap.json</code> structure).</p>
+<h5 id="2-topological-sequencing-dependency-awareness"><a class="header" href="#2-topological-sequencing-dependency-awareness">2. Topological Sequencing (Dependency Awareness)</a></h5>
+<p>Since a full migration often involves complex relationships, the converter is “Relationship Aware.” It uses <code>DatabaseMetaData.getImportedKeys()</code> to dynamically discover parent→child dependencies.</p>
+<ul>
+<li><strong>Topological Sort:</strong> It implements Kahn’s algorithm to order events such that parent entities (e.g., <code>Org</code>, <code>Host</code>, <code>User</code>, <code>Role</code>) are processed before their children (e.g., <code>UserHost</code>, <code>RoleUser</code>, <code>AuthProviderClient</code>).</li>
+<li><strong>Dynamic:</strong> This approach handles new tables and FK constraints automatically without requiring code changes to a “hard-coded” dependency list.</li>
+</ul>
+<h5 id="3-batch-replay--reconciliation"><a class="header" href="#3-batch-replay--reconciliation">3. Batch Replay &amp; Reconciliation</a></h5>
+<p>The import handler performs a batch insertion of these generated events into <code>event_store_t</code> and <code>outbox_message_t</code> within a single transaction.</p>
+<ul>
+<li><strong>Nonce Re-calculation:</strong> Nonces are re-calculated on the target system during import to ensure uniqueness.</li>
+<li><strong>Automatic Projections:</strong> Inserting into the outbox triggers the <code>DbEventConsumerStartupHook</code> to rebuild all materialized projection tables on the target system.</li>
+</ul>
+<h4 id="service-api-contract"><a class="header" href="#service-api-contract">Service API Contract</a></h4>
+<ul>
+<li>
+<p><strong>Export:</strong></p>
+<ul>
+<li><strong>Handler:</strong> <code>GlobalSnapshotExport</code> (user-query)</li>
+<li><strong>Service ID:</strong> <code>lightapi.net/user/exportGlobalSnapshot/0.1.0</code></li>
+<li><strong>Request:</strong> <code>{ "sourceHostId": "...", "entityTypes": [...] }</code></li>
+<li><strong>Response:</strong> Canonical snapshot JSON (flat tables)</li>
+</ul>
+</li>
+<li>
+<p><strong>Convert (New):</strong></p>
+<ul>
+<li><strong>Handler:</strong> <code>ConvertSnapshotToEvents</code> (user-query)</li>
+<li><strong>Service ID:</strong> <code>lightapi.net/user/convertSnapshotToEvents/0.1.0</code></li>
+<li><strong>Request:</strong> <code>{ "snapshot": "...", "targetHostId": "...", "adminUserId": "..." }</code></li>
+<li><strong>Response:</strong> JSON array of ordered CloudEvents (event-importer compatible)</li>
+</ul>
+</li>
+<li>
+<p><strong>Import:</strong></p>
+<ul>
+<li><strong>Handler:</strong> <code>GlobalSnapshotImport</code> (user-command)</li>
+<li><strong>Service ID:</strong> <code>lightapi.net/user/importGlobalSnapshot/0.1.0</code></li>
+<li><strong>Request:</strong> <code>{ "targetHostId": "...", "snapshot": "...", "entityTypes": [...] }</code></li>
+<li><strong>Response:</strong> <code>{ "imported": 42, "total": 42 }</code></li>
+</ul>
+</li>
+</ul>
+<h3 id="implementation-phases-updated"><a class="header" href="#implementation-phases-updated">Implementation Phases (Updated)</a></h3>
+<ol>
+<li><strong>Phase 1 – UI Foundation:</strong> Create promotion pages, sidebar menu entry. <em>(Completed)</em></li>
+<li><strong>Phase 2 – Global Export:</strong> Implement dynamic table discovery via JDBC metadata. <em>(Completed)</em></li>
+<li><strong>Phase 2.5 – Global Migration Step:</strong> Implement Topological Sorting and Snapshot-to-Events conversion for CLI compatibility. <em>(Completed)</em></li>
+<li><strong>Phase 3 – Entity Promotion (Selective):</strong> Implement recursive bundling for user-selected entities (e.g., Instance export).</li>
+<li><strong>Phase 4 – Same-Instance Tracking:</strong> Integrated <code>promotion_t</code> tracking for in-DB moves.</li>
 </ol>
 
                     </main>
@@ -559,7 +706,7 @@ CREATE TABLE promotion_item_t (
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../implementation.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../design/deployment-workflow.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -573,7 +720,7 @@ CREATE TABLE promotion_item_t (
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../implementation.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../design/deployment-workflow.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
