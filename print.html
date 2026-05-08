@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-72ec6d25.js";
+            window.path_to_searchindex_js = "searchindex-520f3793.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-1d2c5f3e.js"></script>
+        <script src="toc-7b5c4f12.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -1920,6 +1920,483 @@ enterprise deployments a path to version-matched help without changing
 publishable while allowing every page, form, and task to provide context-aware
 help from the UI.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="event-processing-notifications"><a class="header" href="#event-processing-notifications">Event Processing Notifications</a></h1>
+<p>Portal commands are event driven. After a command is submitted, one or more
+CloudEvents are written to <code>event_store_t</code> and <code>outbox_message_t</code>. The
+hybrid-query event consumer later processes the outbox rows and updates the
+projection tables used by <code>portal-view</code>.</p>
+<p>The notification page in the user profile is intended to show the user the
+recent processing result for those events. Today the table and read path exist,
+but <code>notification_t</code> is not populated consistently, so the page cannot provide
+meaningful status.</p>
+<h2 id="current-state"><a class="header" href="#current-state">Current State</a></h2>
+<p>The command path already writes events through the common command handler:</p>
+<ol>
+<li>The command handler validates and enriches the request.</li>
+<li>It builds one or more CloudEvents.</li>
+<li>It inserts those events into <code>event_store_t</code> and <code>outbox_message_t</code>.</li>
+<li>The command returns before the query-side projection has necessarily run.</li>
+</ol>
+<p>The query side can run through either event-processing pipeline, selected by
+configuration:</p>
+<ul>
+<li>Pg-notify pipeline: <code>DbEventConsumerStartupHook</code> polls <code>outbox_message_t</code>,
+uses the table’s gapless <code>c_offset</code>, groups rows by <code>transaction_id</code>, and
+writes failed transactions to the database <code>dead_letter_queue</code>.</li>
+<li>Kafka pipeline: a connector publishes rows from <code>outbox_message_t</code> to Kafka.
+<code>PortalEventConsumerStartupHook</code> consumes those records, groups records by the
+command-side <code>transaction_id</code>, and produces failed transactions to the Kafka
+DLQ topic when DLQ is enabled.</li>
+</ul>
+<p>Both pipelines eventually call <code>PortalDbProvider.handleEvent(conn, event)</code>.
+<code>handleEvent</code> dispatches the event to the projection method for that event type.
+Because both pipelines process the same outbox-backed events, they should share
+the same user-facing notification status model.</p>
+<p>The notification pieces are partially present:</p>
+<ul>
+<li><code>notification_t</code> exists in <code>portal-db</code>.</li>
+<li><code>NotificationDataPersistenceImpl</code> can query <code>notification_t</code>.</li>
+<li><code>NotificationServiceImpl</code> can insert a notification row.</li>
+<li><code>user-query</code> exposes <code>getNotification</code>.</li>
+<li><code>portal-view</code> has a notification table page.</li>
+</ul>
+<p>The current gap is that notification rows are not created at the central event
+processing boundary.</p>
+<p>There is also a separate UI error in <code>MailMenu</code>: it calls <code>getPrivateMessage</code>,
+whose handler currently returns an empty response. That explains the browser
+error <code>Unexpected end of JSON input</code>, but it is separate from the notification
+status design.</p>
+<h2 id="goals"><a class="header" href="#goals">Goals</a></h2>
+<ul>
+<li>Show the current user the latest event processing results in the profile
+notification page.</li>
+<li>Record both successful and failed projection processing.</li>
+<li>Preserve event processing correctness even if notification insertion fails.</li>
+<li>Keep notification creation centralized instead of adding calls to every
+projection method.</li>
+<li>Support commands that emit multiple events.</li>
+<li>Make the read API filter by host and user by default.</li>
+<li>Keep enough diagnostic data to debug failed projections.</li>
+<li>Keep notification writes idempotent so event replay is safe.</li>
+</ul>
+<h2 id="non-goals-3"><a class="header" href="#non-goals-3">Non-Goals</a></h2>
+<ul>
+<li>Do not replace <code>event_store_t</code>, <code>outbox_message_t</code>, or <code>dead_letter_queue</code>.</li>
+<li>Do not use notifications as the source of truth for projection state.</li>
+<li>Do not build a real-time push channel in the first phase.</li>
+<li>Do not add notification logic manually to every projection method.</li>
+<li>Do not expose other users’ processing history to non-admin users.</li>
+</ul>
+<h2 id="recommended-design"><a class="header" href="#recommended-design">Recommended Design</a></h2>
+<p>Use <code>notification_t</code> as an operational projection-status table. The command
+side creates <code>PENDING</code> rows at the central event publication boundary, and the
+hybrid-query event consumer updates those rows with the processing result.</p>
+<p>The primary processing-result write point should be the centralized outbox
+consumer path, around the call to <code>PortalDbProvider.handleEvent(conn, event)</code>.</p>
+<p>Recommended lifecycle:</p>
+<pre><code class="language-text">command handler
+  -&gt; event_store_t
+  -&gt; outbox_message_t
+  -&gt; notification_t PENDING row
+  -&gt; response to caller
+
+hybrid-query consumer
+  -&gt; read outbox_message_t
+  -&gt; handleEvent(conn, event)
+  -&gt; projection table write
+  -&gt; notification_t status row
+</code></pre>
+<p>For command-side publication, insert or update one notification row for each
+CloudEvent with status <code>PENDING</code> in the same transaction that writes
+<code>event_store_t</code> and <code>outbox_message_t</code>. Leave <code>event_partition</code> and
+<code>event_offset</code> null for this first insert, because the consumer has not observed
+the event position yet.</p>
+<p>For successful projection processing, update the notification row for the
+CloudEvent to status <code>SUCCEEDED</code> and populate <code>event_partition</code> and
+<code>event_offset</code> from the active processor’s outbox position.</p>
+<p>For failed projection processing, insert or update one notification row for each
+failed CloudEvent with status <code>FAILED</code> or <code>DLQ</code>, and store the exception
+message. Populate <code>event_partition</code> and <code>event_offset</code> when the processor has
+that information.</p>
+<h2 id="status-model"><a class="header" href="#status-model">Status Model</a></h2>
+<p>Use one explicit <code>status</code> field. Do not keep <code>is_processed</code>; this feature is
+being implemented for the first time, and a boolean cannot distinguish pending,
+success, retry, DLQ, and skipped outcomes.</p>
+<p>Recommended statuses:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Status</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>PENDING</code></td><td>Event accepted into <code>event_store_t</code> and <code>outbox_message_t</code>, but the active event consumer has not recorded a processing result yet.</td></tr>
+<tr><td><code>SUCCEEDED</code></td><td>Event was applied to projection tables and the projection transaction committed.</td></tr>
+<tr><td><code>FAILED</code></td><td>Event processing failed before the failed transaction was durably written to the configured DLQ, or the DLQ write itself failed.</td></tr>
+<tr><td><code>DLQ</code></td><td>Event transaction failed in fallback mode and was durably written to the configured DLQ.</td></tr>
+<tr><td><code>SKIPPED</code></td><td>Event was read by the active event consumer but intentionally ignored, such as an unhandled event type.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The UI should show the status labels, not the underlying event pipeline. The
+same status meanings apply to both pg-notify and Kafka processing.</p>
+<h2 id="schema"><a class="header" href="#schema">Schema</a></h2>
+<p>The existing table is close, but it is too small for operational status and has
+<code>nonce</code> as <code>INTEGER</code> while event tables use <code>BIGINT</code>.</p>
+<p>Recommended table shape:</p>
+<pre><code class="language-sql">CREATE TABLE notification_t (
+    id                  UUID NOT NULL,
+    host_id             UUID NOT NULL,
+    user_id             UUID NOT NULL,
+    nonce               BIGINT NOT NULL,
+    event_class         VARCHAR(255) NOT NULL,
+    event_json          TEXT NOT NULL,
+    event_ts            TIMESTAMP WITH TIME ZONE NULL,
+    process_ts          TIMESTAMP WITH TIME ZONE NOT NULL,
+    status              VARCHAR(16) NOT NULL,
+    error               VARCHAR(2048) NULL,
+    aggregate_id        VARCHAR(255) NULL,
+    aggregate_type      VARCHAR(255) NULL,
+    aggregate_version   BIGINT NULL,
+    event_partition     INTEGER NULL,
+    event_offset        BIGINT NULL,
+    transaction_id      UUID NULL,
+    read_ts             TIMESTAMP WITH TIME ZONE NULL,
+    PRIMARY KEY (host_id, id),
+    FOREIGN KEY (host_id) REFERENCES host_t(host_id) ON DELETE CASCADE
+);
+</code></pre>
+<p><code>user_id</code> is intentionally not a foreign key to <code>user_t</code>. <code>PENDING</code> rows are
+inserted on the command side before projection tables are updated, so enforcing
+that projection FK would break commands such as user creation before the
+projection catches up.</p>
+<p>Recommended indexes:</p>
+<pre><code class="language-sql">CREATE INDEX idx_notification_user_process_ts
+    ON notification_t (host_id, user_id, process_ts DESC);
+
+CREATE INDEX idx_notification_status_process_ts
+    ON notification_t (host_id, status, process_ts DESC);
+
+CREATE INDEX idx_notification_transaction
+    ON notification_t (host_id, transaction_id);
+
+CREATE INDEX idx_notification_event_position
+    ON notification_t (host_id, event_partition, event_offset);
+
+CREATE INDEX idx_notification_unread_failure
+    ON notification_t (host_id, user_id, process_ts DESC)
+    WHERE read_ts IS NULL AND status IN ('FAILED', 'DLQ');
+</code></pre>
+<p><code>event_partition</code> and <code>event_offset</code> are intentionally generic processing
+position fields. They are useful for operator diagnostics, but the UI should not
+label them as pg-notify or Kafka details. In the pg-notify processor,
+<code>event_partition</code> is the configured logical consumer partition and
+<code>event_offset</code> is <code>outbox_message_t.c_offset</code>. In the Kafka processor,
+<code>event_partition</code> and <code>event_offset</code> are the consumed Kafka record partition and
+offset.</p>
+<p>Both columns are nullable. <code>PENDING</code> rows should leave them empty at initial
+insert time. They are filled later by the pg-notify or Kafka processor when the
+processing result changes the row to <code>SUCCEEDED</code>, <code>FAILED</code>, <code>DLQ</code>, or <code>SKIPPED</code>.</p>
+<p><code>transaction_id</code> remains a UUID because it is generated by the command side and
+used by both event processors.</p>
+<p>Do not store pipeline name, source topic/channel name, or DLQ destination in
+<code>notification_t</code>. Those are implementation details of the configured event
+pipeline. Operators can use service configuration and logs when they need
+pipeline-specific diagnostics.</p>
+<p>For existing installations, ship this as a patch:</p>
+<pre><code class="language-sql">ALTER TABLE notification_t ALTER COLUMN nonce TYPE BIGINT;
+ALTER TABLE notification_t ADD COLUMN IF NOT EXISTS status VARCHAR(16);
+ALTER TABLE notification_t ADD COLUMN IF NOT EXISTS event_ts TIMESTAMP WITH TIME ZONE;
+ALTER TABLE notification_t ADD COLUMN IF NOT EXISTS aggregate_id VARCHAR(255);
+ALTER TABLE notification_t ADD COLUMN IF NOT EXISTS aggregate_type VARCHAR(255);
+ALTER TABLE notification_t ADD COLUMN IF NOT EXISTS aggregate_version BIGINT;
+ALTER TABLE notification_t ADD COLUMN IF NOT EXISTS event_partition INTEGER;
+ALTER TABLE notification_t ADD COLUMN IF NOT EXISTS event_offset BIGINT;
+ALTER TABLE notification_t ADD COLUMN IF NOT EXISTS transaction_id UUID;
+ALTER TABLE notification_t ADD COLUMN IF NOT EXISTS read_ts TIMESTAMP WITH TIME ZONE;
+
+ALTER TABLE notification_t DROP CONSTRAINT IF EXISTS notification_t_user_id_fkey;
+ALTER TABLE notification_t DROP COLUMN IF EXISTS is_processed;
+ALTER TABLE notification_t ALTER COLUMN status SET NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_notification_unread_failure
+    ON notification_t (host_id, user_id, process_ts DESC)
+    WHERE read_ts IS NULL AND status IN ('FAILED', 'DLQ');
+</code></pre>
+<h2 id="write-path"><a class="header" href="#write-path">Write Path</a></h2>
+<p>Notification writes need an explicit transaction policy. A single rule cannot
+cover every status:</p>
+<ul>
+<li>Failure and DLQ notifications must be durable even when projection writes are
+rolled back.</li>
+<li>Success notifications must not claim success until the projection write has
+committed.</li>
+<li>Notification write failures should not break projection processing.</li>
+</ul>
+<p>Use a <code>REQUIRES_NEW</code> style helper for notification writes that must survive a
+projection rollback. In plain JDBC, this means opening a separate connection
+with its own commit/rollback boundary.</p>
+<p>For success rows, there are two safe options:</p>
+<ol>
+<li>Commit the projection transaction first, then write <code>SUCCEEDED</code> in a separate
+notification transaction.</li>
+<li>Write <code>SUCCEEDED</code> inside the projection transaction, but wrap it in a
+savepoint and treat notification insert failure as non-fatal.</li>
+</ol>
+<p>The first option is the recommended default because notification failures cannot
+roll back projection updates. The tradeoff is a small window where projection
+has committed but the success notification is missing. That is acceptable
+because <code>event_store_t</code> remains the source of truth and success notifications
+are user feedback, not projection correctness.</p>
+<p>Recommended service methods:</p>
+<pre><code class="language-java">void recordPending(Map&lt;String, Object&gt; event, UUID transactionId);
+
+void recordSuccess(Map&lt;String, Object&gt; event, EventMetadata metadata);
+
+void recordFailure(Map&lt;String, Object&gt; event, EventMetadata metadata, String error, String status);
+</code></pre>
+<p><code>recordPending</code> should participate in the command-side transaction that writes
+<code>event_store_t</code> and <code>outbox_message_t</code>. It may store <code>transaction_id</code>, because
+that value is generated by the command side, but it must leave
+<code>event_partition</code> and <code>event_offset</code> null. <code>recordSuccess</code> and <code>recordFailure</code>
+should use the event-processing transaction policy described below.</p>
+<p><code>EventMetadata</code> should carry only pipeline-neutral data that is not inside the
+CloudEvent map:</p>
+<ul>
+<li><code>eventPartition</code>: the active processor’s partition value. For pg-notify this
+is the configured logical consumer partition; for Kafka this is the consumed
+Kafka record partition.</li>
+<li><code>eventOffset</code>: the active processor’s offset value. For pg-notify this is
+<code>outbox_message_t.c_offset</code>; for Kafka this is the consumed Kafka record
+offset.</li>
+<li><code>transactionId</code>: the command-side transaction UUID used by both processors.</li>
+</ul>
+<p>Both consumers should build this metadata before calling <code>handleEvent</code>, so the
+failure path still has offset and transaction context after the projection
+transaction is rolled back.</p>
+<p>Use an idempotent upsert:</p>
+<pre><code class="language-sql">INSERT INTO notification_t (...)
+VALUES (...)
+ON CONFLICT (host_id, id) DO UPDATE SET
+    process_ts = EXCLUDED.process_ts,
+    status = EXCLUDED.status,
+    error = EXCLUDED.error,
+    event_partition = EXCLUDED.event_partition,
+    event_offset = EXCLUDED.event_offset,
+    transaction_id = EXCLUDED.transaction_id;
+</code></pre>
+<p>This makes replay and fallback processing safe.</p>
+<h3 id="success-handling"><a class="header" href="#success-handling">Success Handling</a></h3>
+<p>In the normal batch path:</p>
+<pre><code class="language-text">begin projection transaction
+for each event from the active pipeline:
+  parse CloudEvent
+  handleEvent(conn, event)
+commit projection transaction
+
+for each successfully committed event:
+  recordSuccess(event, metadata) in separate notification transaction
+</code></pre>
+<p>Do not write <code>SUCCEEDED</code> before the projection transaction commits unless it is
+part of the same transaction. If it is written in the same transaction, a
+projection rollback must roll back the success row too.</p>
+<p>The implementation can keep an in-memory list of successfully applied events
+while processing the batch. After commit, loop through that list and upsert the
+success notifications. If a success notification write fails, log it and
+continue; do not retry the projection.</p>
+<h3 id="failure-handling"><a class="header" href="#failure-handling">Failure Handling</a></h3>
+<p>Failure rows must be written outside the failed projection transaction.</p>
+<p>In fallback mode, processing is retried per transaction. For a failed transaction:</p>
+<pre><code class="language-text">begin projection transaction
+savepoint projection_attempt
+  process transaction events
+on exception:
+  rollback to projection_attempt or rollback projection transaction
+  write failed events to database DLQ or Kafka DLQ topic
+  recordFailure(event, metadata, error, "DLQ") in separate notification transaction
+</code></pre>
+<p>For pg-notify, the DLQ destination is the database <code>dead_letter_queue</code> table.
+For Kafka, the DLQ destination is the configured Kafka DLQ topic. The failure
+notification can be committed with the database DLQ transaction for pg-notify,
+or in a separate notification transaction immediately after the Kafka DLQ
+produce request is accepted. The key requirement is that it must not be part of
+the projection work that is being rolled back.</p>
+<p>If the database connection enters an unrecoverable error state, close it and
+open a fresh connection for the DLQ and failure notification writes.</p>
+<p>If the payload cannot be parsed as a CloudEvent, the consumer may not know the
+CloudEvent id or event type. In that case, the DLQ remains the primary failure
+record. If the consumer metadata still has host, user, partition, offset, and
+transaction id, the consumer can create a diagnostic notification with a
+generated id, but this should be treated as a best-effort operational row.</p>
+<h3 id="pending-handling"><a class="header" href="#pending-handling">Pending Handling</a></h3>
+<p><code>PENDING</code> is part of phase one. Add pending rows at the central command-side
+publication boundary that writes <code>event_store_t</code> and <code>outbox_message_t</code>.</p>
+<p>The pending notification should be written in the same command-side transaction
+as the event-store and outbox rows. If the command rolls back, the pending
+notification must roll back too. Do not add pending writes to individual command
+handlers.</p>
+<p>At this stage, the notification row should contain command-known fields only:
+CloudEvent id, host id, user id, nonce, event class, event JSON, event timestamp,
+and transaction id. The processor-owned <code>event_partition</code> and <code>event_offset</code>
+fields remain null until event processing updates the row.</p>
+<h2 id="read-api"><a class="header" href="#read-api">Read API</a></h2>
+<p>Keep <code>getNotification</code> as the main query endpoint, but tighten its contract.</p>
+<p>Recommended request fields:</p>
+<pre><code class="language-json">{
+  "hostId": "uuid",
+  "userId": "uuid",
+  "offset": 0,
+  "limit": 25,
+  "status": "SUCCEEDED",
+  "eventClass": "ClientCreatedEvent",
+  "nonce": "123",
+  "fromTs": "2026-05-08T00:00:00Z",
+  "toTs": "2026-05-08T23:59:59Z",
+  "error": "duplicate key"
+}
+</code></pre>
+<p>Recommended response:</p>
+<pre><code class="language-json">{
+  "total": 1,
+  "notifications": [
+    {
+      "id": "uuid",
+      "hostId": "uuid",
+      "userId": "uuid",
+      "nonce": 123,
+      "eventClass": "ClientCreatedEvent",
+      "status": "SUCCEEDED",
+      "processTs": "2026-05-08T16:12:00Z",
+      "aggregateId": "host|client",
+      "aggregateType": "Client",
+      "aggregateVersion": 2,
+      "transactionId": "uuid",
+      "eventPartition": 0,
+      "eventOffset": 1001,
+      "error": null,
+      "eventJson": "{...}"
+    }
+  ]
+}
+</code></pre>
+<p><code>eventPartition</code> and <code>eventOffset</code> are intentionally displayed as generic
+position fields regardless of which event pipeline is configured. The main list
+can hide them by default and show them in the detail view.</p>
+<p>Authorization rules:</p>
+<ul>
+<li>Normal users can query only their own <code>userId</code> within the selected <code>hostId</code>.</li>
+<li>Admin users can query all users for the host.</li>
+<li>The backend should enforce this using token claims, not only UI filters.</li>
+</ul>
+<h2 id="portal-view-1"><a class="header" href="#portal-view-1">Portal View</a></h2>
+<p>The profile notification page should become a processing-status view.</p>
+<p>Recommended columns:</p>
+<ul>
+<li>Time</li>
+<li>Status</li>
+<li>Event</li>
+<li>Aggregate</li>
+<li>Nonce</li>
+<li>Error</li>
+<li>Details</li>
+</ul>
+<p>Recommended default filters:</p>
+<ul>
+<li><code>hostId</code> from the selected host.</li>
+<li><code>userId</code> from the logged-in user.</li>
+<li>No default <code>status</code> filter.</li>
+<li>Most recent first.</li>
+<li>Last 25 rows.</li>
+</ul>
+<p>The UI should display concise summaries and keep full <code>eventJson</code> behind an
+expandable detail row or dialog.</p>
+<p>Show all events associated with the user, including successful, failed, and
+derived events. Derived events should be visible as their own rows instead of
+being collapsed under the original command transaction.</p>
+<p>The current <code>processFlag</code> filter should be replaced by <code>status</code>. No
+<code>is_processed</code> compatibility mapping is needed because this feature has not yet
+started populating <code>notification_t</code>.</p>
+<p>The header <code>MailMenu</code> should not call <code>getPrivateMessage</code> unless that handler is
+restored. For notification status, add a small notification badge endpoint or
+reuse <code>getNotification</code> with <code>limit = 5</code>.</p>
+<p>The header badge should count only unread failure notifications, such as
+<code>FAILED</code> and <code>DLQ</code>, and display the count in red when the count is greater than
+zero.</p>
+<p>In the list, <code>FAILED</code> and <code>DLQ</code> status badges should also use red styling.</p>
+<p>Phase 2 adds two narrow user-query RPCs:</p>
+<ul>
+<li><code>getUnreadNotificationCount</code>: returns unread <code>FAILED</code> and <code>DLQ</code>
+notifications for the current <code>hostId</code> and <code>userId</code>.</li>
+<li><code>markFailureNotificationsRead</code>: sets <code>read_ts</code> on unread <code>FAILED</code> and <code>DLQ</code>
+notifications for the current <code>hostId</code> and <code>userId</code>.</li>
+</ul>
+<p>The header uses the count endpoint for its badge and marks failures read when
+the user opens the notification menu. The notification page also marks failures
+read when it is opened.</p>
+<h2 id="retention"><a class="header" href="#retention">Retention</a></h2>
+<p>Notifications are operational history. They should not grow forever.</p>
+<p>Recommended retention:</p>
+<ul>
+<li>Keep successful notifications for 30 to 90 days.</li>
+<li>Keep failed and DLQ notifications longer, such as 180 days.</li>
+<li>Allow host-level configuration later if needed.</li>
+</ul>
+<p>Retention can be handled by a scheduled cleanup task:</p>
+<pre><code class="language-sql">DELETE FROM notification_t
+WHERE status = 'SUCCEEDED'
+  AND process_ts &lt; now() - interval '90 days';
+</code></pre>
+<h2 id="snapshot-and-promotion"><a class="header" href="#snapshot-and-promotion">Snapshot and Promotion</a></h2>
+<p><code>notification_t</code> should be treated as an operational table, not a promoted
+projection table.</p>
+<p>It should be excluded from global snapshot export and conversion alongside
+<code>event_store_t</code>, <code>outbox_message_t</code>, <code>dead_letter_queue</code>, <code>log_counter</code>, and
+<code>consumer_offsets</code>.</p>
+<h2 id="rollout-plan-2"><a class="header" href="#rollout-plan-2">Rollout Plan</a></h2>
+<h3 id="phase-1-make-notifications-useful"><a class="header" href="#phase-1-make-notifications-useful">Phase 1: Make Notifications Useful</a></h3>
+<ul>
+<li>Add <code>status</code> and diagnostic columns to <code>notification_t</code>.</li>
+<li>Add pipeline-neutral <code>event_partition</code>, <code>event_offset</code>, and
+<code>transaction_id</code> metadata.</li>
+<li>Change <code>NotificationService</code> to support separate notification transactions.</li>
+<li>Insert <code>PENDING</code> rows at the central command-side outbox publication boundary.</li>
+<li>Insert <code>SUCCEEDED</code> rows after successful <code>handleEvent</code>.</li>
+<li>Insert <code>DLQ</code> rows in fallback failure handling.</li>
+<li>Update <code>getNotification</code> to support <code>status</code> and correct timestamp fields.</li>
+<li>Update <code>portal-view</code> to use <code>status</code>, default to the current user, and show
+all user-associated events including derived events.</li>
+</ul>
+<h3 id="phase-2-improve-user-feedback"><a class="header" href="#phase-2-improve-user-feedback">Phase 2: Improve User Feedback</a></h3>
+<ul>
+<li>Add an unread marker with <code>read_ts</code>.</li>
+<li>Add a small header badge query for unread <code>FAILED</code> and <code>DLQ</code> notifications
+and render the badge in red.</li>
+<li>Mark unread failure notifications as read when the user opens the header menu
+or the notification page.</li>
+</ul>
+<h3 id="phase-3-operations"><a class="header" href="#phase-3-operations">Phase 3: Operations</a></h3>
+<ul>
+<li>Add retention cleanup.</li>
+<li>Add admin filters for host-wide failures.</li>
+<li>Add dashboards or alerts for repeated DLQ statuses.</li>
+</ul>
+<h2 id="risks-and-mitigations-2"><a class="header" href="#risks-and-mitigations-2">Risks and Mitigations</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Risk</th><th>Mitigation</th></tr>
+</thead>
+<tbody>
+<tr><td>Notification write failure breaks event processing</td><td>Write notifications in a separate transaction after projection commit, or use savepoints for same-transaction success rows.</td></tr>
+<tr><td>Failure notifications are rolled back with projection failures</td><td>Write <code>FAILED</code> and <code>DLQ</code> rows outside the failed projection transaction.</td></tr>
+<tr><td>False success rows after projection rollback</td><td>Write <code>SUCCEEDED</code> only after projection commit, or keep same-transaction success rows rollback-safe.</td></tr>
+<tr><td>Duplicate rows on replay</td><td>Use <code>ON CONFLICT (host_id, id) DO UPDATE</code>.</td></tr>
+<tr><td>Users see other users’ events</td><td>Enforce token-based authorization in <code>getNotification</code>.</td></tr>
+<tr><td>Table grows without bound</td><td>Add retention cleanup and indexes.</td></tr>
+<tr><td>Status meaning stays ambiguous</td><td>Use <code>status</code> as the only outcome field for both pg-notify and Kafka processing.</td></tr>
+</tbody>
+</table>
+</div>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="oauth-kafka"><a class="header" href="#oauth-kafka">OAuth Kafka</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="token-exchange"><a class="header" href="#token-exchange">Token Exchange</a></h1>
@@ -1970,7 +2447,7 @@ help from the UI.</p>
 <h1 id="oauth-audit"><a class="header" href="#oauth-audit">OAuth Audit</a></h1>
 <p>The OAuth services keep authorization codes and refresh tokens as operational state. These rows are short lived and are now written directly to <code>auth_code_t</code> and <code>auth_refresh_token_t</code> instead of being created through the general event store. This avoids high-volume login and refresh-token churn in <code>event_store_t</code> and <code>outbox_message_t</code>.</p>
 <p>Audit and login history are recorded separately in append-oriented OAuth audit tables.</p>
-<h2 id="goals"><a class="header" href="#goals">Goals</a></h2>
+<h2 id="goals-1"><a class="header" href="#goals-1">Goals</a></h2>
 <ul>
 <li>Show administrators who is currently online.</li>
 <li>Show a user the last login time and session history.</li>
@@ -2066,7 +2543,7 @@ FROM auth_session_t
 WHERE host_id = $1
   AND session_id = $2;
 </code></pre>
-<h2 id="retention"><a class="header" href="#retention">Retention</a></h2>
+<h2 id="retention-1"><a class="header" href="#retention-1">Retention</a></h2>
 <p><code>auth_session_t</code> can be retained longer than operational token tables. <code>auth_session_audit_t</code> should use a retention policy appropriate for the deployment, for example 90 days or one year. Retention jobs should delete audit rows by <code>event_ts</code> and optionally archive them before deletion.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="multi-tenant"><a class="header" href="#multi-tenant">Multi-Tenant</a></h1>
@@ -4010,6 +4487,349 @@ GROUP BY
 <li>The <strong>portal-view</strong> reads the <code>roles</code> field from the cookie to filter menu items appropriately.</li>
 </ol>
 <p>This approach provides a seamless experience while maintaining compatibility with applications requiring roles for authorization or UI customization.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="private-messages"><a class="header" href="#private-messages">Private Messages</a></h1>
+<h2 id="problem-3"><a class="header" href="#problem-3">Problem</a></h2>
+<p>Portal users need a way to exchange private messages from the user profile
+without exposing email addresses to each other. The sender should only need a
+recipient user id or a display-safe user label. The backend can resolve email
+internally when it needs to send an external notification, but email must not be
+part of the user-facing message contract.</p>
+<h2 id="current-state-1"><a class="header" href="#current-state-1">Current State</a></h2>
+<p>The current codebase already has a partial private-message skeleton:</p>
+<ul>
+<li><code>user-command</code> exposes <code>lightapi.net/user/sendMessage/0.1.0</code>.</li>
+<li>The <code>sendMessage</code> request contains <code>userId</code>, <code>subject</code>, and <code>content</code>.</li>
+<li><code>light-portal</code> defines <code>PrivateMessageSentEvent</code>.</li>
+<li><code>portal-db</code> defines <code>message_t</code>.</li>
+<li><code>portal-view</code> has a mail menu, a private messages page, and a
+<code>privateMessage</code> form.</li>
+<li><code>user-query</code> exposes <code>lightapi.net/user/getPrivateMessage/0.1.0</code>.</li>
+</ul>
+<p>The current implementation is not complete enough to support production use:</p>
+<ul>
+<li><code>GetPrivateMessage</code> has its real implementation commented out and currently
+returns <code>null</code>.</li>
+<li><code>SendMessage</code> resolves the recipient through <code>queryUserById</code>, then stores the
+whole response as <code>toEmail</code>. That lookup currently returns too much user data,
+including email and sensitive fields that should not be exposed through a
+peer messaging flow.</li>
+<li><code>SendMessage</code> does not put <code>fromId</code> into event data, but the projection code
+reads <code>fromId</code> from event data.</li>
+<li>The <code>message_t</code> table now has <code>host_id NOT NULL</code>, but the projection insert
+does not write <code>host_id</code>.</li>
+<li>The table is inbox-style storage, keyed by sender and nonce, and does not
+model conversations, read state, participant visibility, or per-user delete.</li>
+<li>The UI mostly relies on the mail menu response and navigation state. The
+messages page should load its own data from the query API.</li>
+<li>The existing private-message tests are disabled stubs.</li>
+</ul>
+<h2 id="goals-2"><a class="header" href="#goals-2">Goals</a></h2>
+<ul>
+<li>Let one logged-in user send a message to another portal user without knowing
+or seeing the recipient email.</li>
+<li>Keep the message model host-scoped so tenant boundaries are explicit.</li>
+<li>Derive sender identity from the authorization token, not from form input.</li>
+<li>Store user ids in message records and events. Do not store recipient email in
+the message projection unless a short migration bridge requires it.</li>
+<li>Support an inbox page, unread badge, conversation view, reply, read state, and
+per-user hide/delete.</li>
+<li>Keep email notification as an optional side effect that resolves the
+recipient email internally.</li>
+<li>Provide a path from the existing <code>message_t</code> skeleton to a conversation-based
+model without breaking existing UI routes immediately.</li>
+</ul>
+<h2 id="non-goals-4"><a class="header" href="#non-goals-4">Non-Goals</a></h2>
+<ul>
+<li>Do not build group chat in the first phase.</li>
+<li>Do not expose email addresses in message APIs, events, UI state, or task
+context.</li>
+<li>Do not use private messages as an audit or support-ticket system.</li>
+<li>Do not implement WebSocket or SSE push in the first phase. Polling is enough
+until the read/write model is stable.</li>
+<li>Do not make public user lookup broader as part of this feature.</li>
+</ul>
+<h2 id="privacy-rules"><a class="header" href="#privacy-rules">Privacy Rules</a></h2>
+<p>Private messages should be user-id based at every external boundary.</p>
+<p>The UI may show:</p>
+<ul>
+<li>Display name.</li>
+<li>Avatar or initials.</li>
+<li>User id when no better label exists.</li>
+<li>Message subject, preview, content, and timestamps.</li>
+</ul>
+<p>The UI must not show:</p>
+<ul>
+<li>Sender email.</li>
+<li>Recipient email.</li>
+<li>Password, token, nonce, or other profile internals from <code>user_t</code>.</li>
+</ul>
+<p>The backend may resolve recipient email only inside trusted server code for
+external email notification. That internal lookup should return the minimum
+fields required, ideally <code>user_id</code>, <code>email</code>, current host membership, and a
+display label.</p>
+<h2 id="recommended-data-model"><a class="header" href="#recommended-data-model">Recommended Data Model</a></h2>
+<p>For a chat-like experience, introduce conversation identity instead of treating
+each message as an isolated inbox row.</p>
+<pre><code class="language-sql">CREATE TABLE private_conversation_t (
+    host_id              UUID NOT NULL,
+    conversation_id      UUID NOT NULL,
+    participant_low_id   UUID NOT NULL,
+    participant_high_id  UUID NOT NULL,
+    created_ts           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_message_id      UUID NULL,
+    last_message_ts      TIMESTAMP WITH TIME ZONE NULL,
+    PRIMARY KEY (host_id, conversation_id),
+    UNIQUE (host_id, participant_low_id, participant_high_id),
+    FOREIGN KEY (host_id) REFERENCES host_t(host_id) ON DELETE CASCADE
+);
+</code></pre>
+<p><code>participant_low_id</code> and <code>participant_high_id</code> are the two sorted user ids. This
+gives each pair of users one stable conversation per host without relying on
+email.</p>
+<pre><code class="language-sql">CREATE TABLE private_message_t (
+    host_id          UUID NOT NULL,
+    message_id       UUID NOT NULL,
+    conversation_id  UUID NOT NULL,
+    from_user_id     UUID NOT NULL,
+    to_user_id       UUID NOT NULL,
+    subject          VARCHAR(256) NULL,
+    content          TEXT NOT NULL,
+    send_ts          TIMESTAMP WITH TIME ZONE NOT NULL,
+    PRIMARY KEY (host_id, message_id),
+    FOREIGN KEY (host_id, conversation_id)
+        REFERENCES private_conversation_t(host_id, conversation_id)
+        ON DELETE CASCADE
+);
+</code></pre>
+<pre><code class="language-sql">CREATE TABLE private_message_state_t (
+    host_id      UUID NOT NULL,
+    message_id   UUID NOT NULL,
+    user_id      UUID NOT NULL,
+    read_ts      TIMESTAMP WITH TIME ZONE NULL,
+    deleted_ts   TIMESTAMP WITH TIME ZONE NULL,
+    PRIMARY KEY (host_id, message_id, user_id),
+    FOREIGN KEY (host_id, message_id)
+        REFERENCES private_message_t(host_id, message_id)
+        ON DELETE CASCADE
+);
+</code></pre>
+<p>The state table keeps read and delete behavior per participant. A user deleting
+a message should hide it from that user only. It should not erase the other
+participant’s copy.</p>
+<p>Recommended indexes:</p>
+<pre><code class="language-sql">CREATE INDEX idx_private_conversation_last_message
+    ON private_conversation_t (host_id, participant_low_id, participant_high_id, last_message_ts DESC);
+
+CREATE INDEX idx_private_message_conversation_ts
+    ON private_message_t (host_id, conversation_id, send_ts DESC);
+
+CREATE INDEX idx_private_message_to_user_ts
+    ON private_message_t (host_id, to_user_id, send_ts DESC);
+
+CREATE INDEX idx_private_message_state_unread
+    ON private_message_state_t (host_id, user_id)
+    WHERE read_ts IS NULL AND deleted_ts IS NULL;
+</code></pre>
+<p>If the first implementation needs to reuse <code>message_t</code>, treat it as a migration
+bridge only. Add <code>from_user_id</code>, <code>to_user_id</code>, <code>message_id</code>, <code>read_ts</code>, and
+per-user delete columns, then migrate to the conversation tables once the API
+contract is stable.</p>
+<h2 id="event-model"><a class="header" href="#event-model">Event Model</a></h2>
+<p>Keep the event-driven command/query pattern. A message send should create a
+CloudEvent and the query-side projection should update the private-message
+tables.</p>
+<p>Recommended event data:</p>
+<pre><code class="language-json">{
+  "hostId": "019...",
+  "conversationId": "019...",
+  "messageId": "019...",
+  "fromUserId": "019...",
+  "toUserId": "019...",
+  "subject": "Question about the API",
+  "content": "Can you take a look at this?"
+}
+</code></pre>
+<p><code>fromUserId</code> and <code>hostId</code> are derived from the token. <code>toUserId</code>, <code>subject</code>, and
+<code>content</code> come from validated request data. <code>conversationId</code> can be generated by
+the command side after looking up or creating the pair conversation, or it can
+be derived during projection from the participant pair.</p>
+<p>Do not put <code>toEmail</code> into <code>PrivateMessageSentEvent</code>. Email notification should
+be a separate trusted server-side action.</p>
+<h2 id="api-contracts"><a class="header" href="#api-contracts">API Contracts</a></h2>
+<h3 id="send-message"><a class="header" href="#send-message">Send Message</a></h3>
+<p>Keep the existing <code>sendMessage</code> action name for compatibility, but change the
+contract to be user-id based.</p>
+<pre><code class="language-json">{
+  "toUserId": "019...",
+  "conversationId": "019...",
+  "subject": "Question about the API",
+  "content": "Can you take a look at this?"
+}
+</code></pre>
+<p><code>conversationId</code> is optional. If absent, the backend resolves or creates the
+conversation for the current user and <code>toUserId</code>.</p>
+<p>Server responsibilities:</p>
+<ul>
+<li>Require an authorization-code token.</li>
+<li>Derive <code>fromUserId</code> from the token.</li>
+<li>Derive <code>hostId</code> from the active user host.</li>
+<li>Validate that <code>toUserId</code> belongs to the same host.</li>
+<li>Reject empty content and enforce size limits.</li>
+<li>Optionally reject self-messages unless a product decision allows notes to
+self.</li>
+<li>Write the event through the existing command event-store path.</li>
+<li>Send optional external email notification after the command is accepted.</li>
+</ul>
+<h3 id="conversation-list"><a class="header" href="#conversation-list">Conversation List</a></h3>
+<p>Add or evolve a query endpoint for the inbox list.</p>
+<pre><code class="language-json">{
+  "offset": 0,
+  "limit": 25
+}
+</code></pre>
+<p>The backend derives <code>hostId</code> and <code>userId</code> from the token. The response should
+include only conversations involving the current user.</p>
+<pre><code class="language-json">{
+  "total": 1,
+  "conversations": [
+    {
+      "conversationId": "019...",
+      "otherUserId": "019...",
+      "otherUserLabel": "Jane Smith",
+      "lastMessageTs": "2026-05-08T13:30:00Z",
+      "lastMessagePreview": "Can you take a look at this?",
+      "unreadCount": 2
+    }
+  ]
+}
+</code></pre>
+<h3 id="conversation-messages"><a class="header" href="#conversation-messages">Conversation Messages</a></h3>
+<pre><code class="language-json">{
+  "conversationId": "019...",
+  "offset": 0,
+  "limit": 50
+}
+</code></pre>
+<p>The backend validates that the current user is one of the participants.</p>
+<pre><code class="language-json">{
+  "conversationId": "019...",
+  "messages": [
+    {
+      "messageId": "019...",
+      "fromUserId": "019...",
+      "fromUserLabel": "Jane Smith",
+      "subject": "Question about the API",
+      "content": "Can you take a look at this?",
+      "sendTs": "2026-05-08T13:30:00Z",
+      "read": false
+    }
+  ]
+}
+</code></pre>
+<h3 id="unread-count"><a class="header" href="#unread-count">Unread Count</a></h3>
+<p>The mail badge should call a count endpoint instead of loading all messages.</p>
+<pre><code class="language-json">{
+  "count": 3
+}
+</code></pre>
+<h3 id="mark-read-and-delete"><a class="header" href="#mark-read-and-delete">Mark Read and Delete</a></h3>
+<p><code>markPrivateConversationRead</code> should mark unread rows in
+<code>private_message_state_t</code> for the current user and conversation.</p>
+<p><code>deletePrivateMessage</code> or <code>hidePrivateConversation</code> should set <code>deleted_ts</code> for
+the current user only.</p>
+<h2 id="authorization"><a class="header" href="#authorization">Authorization</a></h2>
+<p>The command and query handlers must not trust user ids supplied by the client
+for the current user. The current user is always the token subject.</p>
+<p>Rules:</p>
+<ul>
+<li>A sender can send only as themself.</li>
+<li>A user can read only conversations where they are a participant.</li>
+<li>A user can mark read or delete only their own state rows.</li>
+<li>Admin visibility should be a separate explicit support/admin endpoint if it
+is needed later.</li>
+<li>Cross-host messaging should be rejected in the first phase. If cross-host
+messaging is later needed, the contract must model the recipient host
+explicitly and pass a product/security review.</li>
+</ul>
+<h2 id="portal-view-2"><a class="header" href="#portal-view-2">Portal View</a></h2>
+<p>Use the current profile surfaces but make them data-driven:</p>
+<ul>
+<li><code>MailMenu</code> should poll unread count and show a small list of recent
+conversations only after the menu opens.</li>
+<li><code>/app/messages</code> should fetch conversation data directly. It should not depend
+on <code>location.state</code> from <code>MailMenu</code>.</li>
+<li>The <code>privateMessage</code> form should use <code>toUserId</code>, not <code>userId</code>, to avoid
+confusing recipient identity with the current user.</li>
+<li>Reply should prefill <code>toUserId</code> and optionally <code>conversationId</code>.</li>
+<li>User-facing labels should come from a display-safe user label endpoint.</li>
+<li>Empty inbox, loading, and error states should be explicit.</li>
+</ul>
+<p>The first UI can be an inbox plus conversation thread. Real-time typing,
+presence, attachments, and rich-text editing are later enhancements.</p>
+<h2 id="migration-plan"><a class="header" href="#migration-plan">Migration Plan</a></h2>
+<h3 id="phase-0-stop-the-broken-behavior"><a class="header" href="#phase-0-stop-the-broken-behavior">Phase 0: Stop the Broken Behavior</a></h3>
+<ul>
+<li>Make <code>GetPrivateMessage</code> return valid JSON even before the new model is
+complete.</li>
+<li>Fix the existing projection insert to include <code>host_id</code> if <code>message_t</code> remains
+in use.</li>
+<li>Ensure <code>SendMessage</code> stores sender identity from the token.</li>
+<li>Stop using broad <code>queryUserById</code> output as a recipient email value.</li>
+</ul>
+<h3 id="phase-1-user-id-based-backend"><a class="header" href="#phase-1-user-id-based-backend">Phase 1: User-ID Based Backend</a></h3>
+<ul>
+<li>Add the conversation/message/state tables.</li>
+<li>Update <code>PrivateMessageSentEvent</code> to use <code>fromUserId</code> and <code>toUserId</code>.</li>
+<li>Add a trusted recipient resolver that returns only internal fields needed for
+validation and optional email notification.</li>
+<li>Implement conversation list, conversation messages, unread count, mark-read,
+and hide/delete APIs.</li>
+</ul>
+<h3 id="phase-2-portal-view"><a class="header" href="#phase-2-portal-view">Phase 2: Portal View</a></h3>
+<ul>
+<li>Update the mail badge to use unread count.</li>
+<li>Update <code>/app/messages</code> to load data directly.</li>
+<li>Update the <code>privateMessage</code> form and reply paths to use <code>toUserId</code>.</li>
+<li>Remove email assumptions from task context and UI state.</li>
+</ul>
+<h3 id="phase-3-cleanup"><a class="header" href="#phase-3-cleanup">Phase 3: Cleanup</a></h3>
+<ul>
+<li>Migrate or archive old <code>message_t</code> rows.</li>
+<li>Remove <code>to_email</code> from the active private-message path.</li>
+<li>Remove disabled private-message tests and replace them with focused coverage.</li>
+<li>Add optional push delivery later if polling becomes insufficient.</li>
+</ul>
+<h2 id="testing"><a class="header" href="#testing">Testing</a></h2>
+<p>Backend tests should cover:</p>
+<ul>
+<li>Sender is derived from token and cannot be spoofed.</li>
+<li>Recipient must belong to the current host.</li>
+<li>Message event contains user ids, not emails.</li>
+<li>Projection writes host-scoped conversation and message rows.</li>
+<li>Inbox query returns only conversations for the current user.</li>
+<li>Conversation query rejects non-participants.</li>
+<li>Unread count increments for the recipient and clears after mark-read.</li>
+<li>Delete/hide affects only the current user’s state.</li>
+</ul>
+<p>Frontend tests should cover:</p>
+<ul>
+<li>Mail menu shows unread count without loading full inbox.</li>
+<li>Messages page fetches its own data.</li>
+<li>Reply pre-populates recipient context without email.</li>
+<li>Empty and error states do not produce JSON parse failures.</li>
+</ul>
+<h2 id="open-questions"><a class="header" href="#open-questions">Open Questions</a></h2>
+<ul>
+<li>Should users be able to send messages to themselves as private notes?</li>
+<li>Should profile pages expose a “Message” action only for users in the same
+host, or should some cross-host flows be allowed?</li>
+<li>Should email notification include the sender display label, or only say that a
+portal message was received?</li>
+<li>What retention policy should apply to private messages?</li>
+<li>Should administrators have a separate support/audit view, and under what
+permission?</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="config-server"><a class="header" href="#config-server">Config Server</a></h1>
 <h3 id="default-config-properties"><a class="header" href="#default-config-properties">Default Config Properties</a></h3>
@@ -10860,7 +11680,7 @@ SELECT start_offset, end_offset FROM upd;
 </ul>
 <h3 id="dead-letter-queue-dlq"><a class="header" href="#dead-letter-queue-dlq">Dead Letter Queue (DLQ)</a></h3>
 <p>When event processing fails, the system implements a <strong>granular fallback mechanism</strong> to prevent the entire batch from being blocked:</p>
-<h4 id="schema"><a class="header" href="#schema">Schema</a></h4>
+<h4 id="schema-1"><a class="header" href="#schema-1">Schema</a></h4>
 <pre><code class="language-sql">CREATE TABLE IF NOT EXISTS dead_letter_queue (
   group_id VARCHAR(255),
   host_id UUID,
@@ -11901,7 +12721,7 @@ Kubernetes cluster from the Instance Admin page.</p>
 <p>The goal is to provide a production-like deployment path for small businesses
 and enterprise tenants without requiring Light Portal to have direct network
 access to every customer cluster.</p>
-<h2 id="problem-3"><a class="header" href="#problem-3">Problem</a></h2>
+<h2 id="problem-4"><a class="header" href="#problem-4">Problem</a></h2>
 <p>Each API or application repository can contain a <code>k8s/</code> folder with Kubernetes
 deployment templates. The templates contain variables in the following format:</p>
 <pre><code class="language-text">${key:defaultValue}
@@ -12152,7 +12972,7 @@ receive commands. Recommended options:</p>
 </ul>
 <p>The deployer should have a stable <code>deployerId</code> and should report cluster,
 namespace, version, and capability metadata during registration.</p>
-<h3 id="authorization"><a class="header" href="#authorization">Authorization</a></h3>
+<h3 id="authorization-1"><a class="header" href="#authorization-1">Authorization</a></h3>
 <p>Light Portal must verify that the requesting user can deploy the target
 instance, environment, and tenant. The deployer must also enforce local
 constraints:</p>
@@ -12347,7 +13167,7 @@ local policy.</li>
 <li>A compromised deployer must not be able to receive commands for another
 tenant.</li>
 </ul>
-<h2 id="failure-handling"><a class="header" href="#failure-handling">Failure Handling</a></h2>
+<h2 id="failure-handling-1"><a class="header" href="#failure-handling-1">Failure Handling</a></h2>
 <p>The deployer should classify failures:</p>
 <ul>
 <li>template repository fetch failure</li>
@@ -12422,7 +13242,7 @@ later.</li>
 <li>Rollback is a redeploy of a previous Light Portal deployment snapshot, not a
 native Kubernetes rollout undo.</li>
 </ul>
-<h2 id="open-questions"><a class="header" href="#open-questions">Open Questions</a></h2>
+<h2 id="open-questions-1"><a class="header" href="#open-questions-1">Open Questions</a></h2>
 <ul>
 <li>Which object storage providers should enterprise artifact mode support first?</li>
 <li>What retention policies should be available for encrypted rendered manifest
@@ -13117,7 +13937,7 @@ Administrators can manage all clients for the host when their role allows it.</p
 <p>It processes the MarketCodeCreatedEvent and calls dbProvider.createMarketCode with the event.</p>
 <h2 id="createmarketcode"><a class="header" href="#createmarketcode">createMarketCode</a></h2>
 <p>This method in dbProvider will put the event value into cacheManager cache named “auth_code”. Now, the code is ready to be query from the market-query.</p>
-<h2 id="portal-view-1"><a class="header" href="#portal-view-1">Portal View</a></h2>
+<h2 id="portal-view-3"><a class="header" href="#portal-view-3">Portal View</a></h2>
 <p>The HostIdCodePostHandler redirects the code to the Portal View with /authorization?code=??? and this request will be sent to the light-gateway StatelessAuthHandler.</p>
 <h2 id="statelessauthhandler"><a class="header" href="#statelessauthhandler">StatelessAuthHandler</a></h2>
 <p>If the request path matches to the configured authPath, it will retrieve the code from the query parameter. Then create a csrf UUID token and an AuthorizationCodeRequest to get a token via OauthHelper. This request will have the auth code, the csrf token and other properties from the configuration. The request is sent to the HostIdTokenPostHandler to create the authorization code token.</p>
@@ -13521,7 +14341,7 @@ Administrators can manage all clients for the host when their role allows it.</p
 <li><code>service-query</code></li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="portal-view-2"><a class="header" href="#portal-view-2">Portal View</a></h1>
+<h1 id="portal-view-4"><a class="header" href="#portal-view-4">Portal View</a></h1>
 <ul>
 <li><a href="#oauth-20-state-verification">OAuth 2.0 State Verification</a></li>
 </ul>

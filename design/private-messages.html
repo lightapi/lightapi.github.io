@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Silver - Light Portal Documentation</title>
+        <title>Private Messages - Light Portal Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -174,17 +174,358 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="silver"><a class="header" href="#silver">Silver</a></h1>
+                        <h1 id="private-messages"><a class="header" href="#private-messages">Private Messages</a></h1>
+<h2 id="problem"><a class="header" href="#problem">Problem</a></h2>
+<p>Portal users need a way to exchange private messages from the user profile
+without exposing email addresses to each other. The sender should only need a
+recipient user id or a display-safe user label. The backend can resolve email
+internally when it needs to send an external notification, but email must not be
+part of the user-facing message contract.</p>
+<h2 id="current-state"><a class="header" href="#current-state">Current State</a></h2>
+<p>The current codebase already has a partial private-message skeleton:</p>
+<ul>
+<li><code>user-command</code> exposes <code>lightapi.net/user/sendMessage/0.1.0</code>.</li>
+<li>The <code>sendMessage</code> request contains <code>userId</code>, <code>subject</code>, and <code>content</code>.</li>
+<li><code>light-portal</code> defines <code>PrivateMessageSentEvent</code>.</li>
+<li><code>portal-db</code> defines <code>message_t</code>.</li>
+<li><code>portal-view</code> has a mail menu, a private messages page, and a
+<code>privateMessage</code> form.</li>
+<li><code>user-query</code> exposes <code>lightapi.net/user/getPrivateMessage/0.1.0</code>.</li>
+</ul>
+<p>The current implementation is not complete enough to support production use:</p>
+<ul>
+<li><code>GetPrivateMessage</code> has its real implementation commented out and currently
+returns <code>null</code>.</li>
+<li><code>SendMessage</code> resolves the recipient through <code>queryUserById</code>, then stores the
+whole response as <code>toEmail</code>. That lookup currently returns too much user data,
+including email and sensitive fields that should not be exposed through a
+peer messaging flow.</li>
+<li><code>SendMessage</code> does not put <code>fromId</code> into event data, but the projection code
+reads <code>fromId</code> from event data.</li>
+<li>The <code>message_t</code> table now has <code>host_id NOT NULL</code>, but the projection insert
+does not write <code>host_id</code>.</li>
+<li>The table is inbox-style storage, keyed by sender and nonce, and does not
+model conversations, read state, participant visibility, or per-user delete.</li>
+<li>The UI mostly relies on the mail menu response and navigation state. The
+messages page should load its own data from the query API.</li>
+<li>The existing private-message tests are disabled stubs.</li>
+</ul>
+<h2 id="goals"><a class="header" href="#goals">Goals</a></h2>
+<ul>
+<li>Let one logged-in user send a message to another portal user without knowing
+or seeing the recipient email.</li>
+<li>Keep the message model host-scoped so tenant boundaries are explicit.</li>
+<li>Derive sender identity from the authorization token, not from form input.</li>
+<li>Store user ids in message records and events. Do not store recipient email in
+the message projection unless a short migration bridge requires it.</li>
+<li>Support an inbox page, unread badge, conversation view, reply, read state, and
+per-user hide/delete.</li>
+<li>Keep email notification as an optional side effect that resolves the
+recipient email internally.</li>
+<li>Provide a path from the existing <code>message_t</code> skeleton to a conversation-based
+model without breaking existing UI routes immediately.</li>
+</ul>
+<h2 id="non-goals"><a class="header" href="#non-goals">Non-Goals</a></h2>
+<ul>
+<li>Do not build group chat in the first phase.</li>
+<li>Do not expose email addresses in message APIs, events, UI state, or task
+context.</li>
+<li>Do not use private messages as an audit or support-ticket system.</li>
+<li>Do not implement WebSocket or SSE push in the first phase. Polling is enough
+until the read/write model is stable.</li>
+<li>Do not make public user lookup broader as part of this feature.</li>
+</ul>
+<h2 id="privacy-rules"><a class="header" href="#privacy-rules">Privacy Rules</a></h2>
+<p>Private messages should be user-id based at every external boundary.</p>
+<p>The UI may show:</p>
+<ul>
+<li>Display name.</li>
+<li>Avatar or initials.</li>
+<li>User id when no better label exists.</li>
+<li>Message subject, preview, content, and timestamps.</li>
+</ul>
+<p>The UI must not show:</p>
+<ul>
+<li>Sender email.</li>
+<li>Recipient email.</li>
+<li>Password, token, nonce, or other profile internals from <code>user_t</code>.</li>
+</ul>
+<p>The backend may resolve recipient email only inside trusted server code for
+external email notification. That internal lookup should return the minimum
+fields required, ideally <code>user_id</code>, <code>email</code>, current host membership, and a
+display label.</p>
+<h2 id="recommended-data-model"><a class="header" href="#recommended-data-model">Recommended Data Model</a></h2>
+<p>For a chat-like experience, introduce conversation identity instead of treating
+each message as an isolated inbox row.</p>
+<pre><code class="language-sql">CREATE TABLE private_conversation_t (
+    host_id              UUID NOT NULL,
+    conversation_id      UUID NOT NULL,
+    participant_low_id   UUID NOT NULL,
+    participant_high_id  UUID NOT NULL,
+    created_ts           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_message_id      UUID NULL,
+    last_message_ts      TIMESTAMP WITH TIME ZONE NULL,
+    PRIMARY KEY (host_id, conversation_id),
+    UNIQUE (host_id, participant_low_id, participant_high_id),
+    FOREIGN KEY (host_id) REFERENCES host_t(host_id) ON DELETE CASCADE
+);
+</code></pre>
+<p><code>participant_low_id</code> and <code>participant_high_id</code> are the two sorted user ids. This
+gives each pair of users one stable conversation per host without relying on
+email.</p>
+<pre><code class="language-sql">CREATE TABLE private_message_t (
+    host_id          UUID NOT NULL,
+    message_id       UUID NOT NULL,
+    conversation_id  UUID NOT NULL,
+    from_user_id     UUID NOT NULL,
+    to_user_id       UUID NOT NULL,
+    subject          VARCHAR(256) NULL,
+    content          TEXT NOT NULL,
+    send_ts          TIMESTAMP WITH TIME ZONE NOT NULL,
+    PRIMARY KEY (host_id, message_id),
+    FOREIGN KEY (host_id, conversation_id)
+        REFERENCES private_conversation_t(host_id, conversation_id)
+        ON DELETE CASCADE
+);
+</code></pre>
+<pre><code class="language-sql">CREATE TABLE private_message_state_t (
+    host_id      UUID NOT NULL,
+    message_id   UUID NOT NULL,
+    user_id      UUID NOT NULL,
+    read_ts      TIMESTAMP WITH TIME ZONE NULL,
+    deleted_ts   TIMESTAMP WITH TIME ZONE NULL,
+    PRIMARY KEY (host_id, message_id, user_id),
+    FOREIGN KEY (host_id, message_id)
+        REFERENCES private_message_t(host_id, message_id)
+        ON DELETE CASCADE
+);
+</code></pre>
+<p>The state table keeps read and delete behavior per participant. A user deleting
+a message should hide it from that user only. It should not erase the other
+participant’s copy.</p>
+<p>Recommended indexes:</p>
+<pre><code class="language-sql">CREATE INDEX idx_private_conversation_last_message
+    ON private_conversation_t (host_id, participant_low_id, participant_high_id, last_message_ts DESC);
+
+CREATE INDEX idx_private_message_conversation_ts
+    ON private_message_t (host_id, conversation_id, send_ts DESC);
+
+CREATE INDEX idx_private_message_to_user_ts
+    ON private_message_t (host_id, to_user_id, send_ts DESC);
+
+CREATE INDEX idx_private_message_state_unread
+    ON private_message_state_t (host_id, user_id)
+    WHERE read_ts IS NULL AND deleted_ts IS NULL;
+</code></pre>
+<p>If the first implementation needs to reuse <code>message_t</code>, treat it as a migration
+bridge only. Add <code>from_user_id</code>, <code>to_user_id</code>, <code>message_id</code>, <code>read_ts</code>, and
+per-user delete columns, then migrate to the conversation tables once the API
+contract is stable.</p>
+<h2 id="event-model"><a class="header" href="#event-model">Event Model</a></h2>
+<p>Keep the event-driven command/query pattern. A message send should create a
+CloudEvent and the query-side projection should update the private-message
+tables.</p>
+<p>Recommended event data:</p>
+<pre><code class="language-json">{
+  "hostId": "019...",
+  "conversationId": "019...",
+  "messageId": "019...",
+  "fromUserId": "019...",
+  "toUserId": "019...",
+  "subject": "Question about the API",
+  "content": "Can you take a look at this?"
+}
+</code></pre>
+<p><code>fromUserId</code> and <code>hostId</code> are derived from the token. <code>toUserId</code>, <code>subject</code>, and
+<code>content</code> come from validated request data. <code>conversationId</code> can be generated by
+the command side after looking up or creating the pair conversation, or it can
+be derived during projection from the participant pair.</p>
+<p>Do not put <code>toEmail</code> into <code>PrivateMessageSentEvent</code>. Email notification should
+be a separate trusted server-side action.</p>
+<h2 id="api-contracts"><a class="header" href="#api-contracts">API Contracts</a></h2>
+<h3 id="send-message"><a class="header" href="#send-message">Send Message</a></h3>
+<p>Keep the existing <code>sendMessage</code> action name for compatibility, but change the
+contract to be user-id based.</p>
+<pre><code class="language-json">{
+  "toUserId": "019...",
+  "conversationId": "019...",
+  "subject": "Question about the API",
+  "content": "Can you take a look at this?"
+}
+</code></pre>
+<p><code>conversationId</code> is optional. If absent, the backend resolves or creates the
+conversation for the current user and <code>toUserId</code>.</p>
+<p>Server responsibilities:</p>
+<ul>
+<li>Require an authorization-code token.</li>
+<li>Derive <code>fromUserId</code> from the token.</li>
+<li>Derive <code>hostId</code> from the active user host.</li>
+<li>Validate that <code>toUserId</code> belongs to the same host.</li>
+<li>Reject empty content and enforce size limits.</li>
+<li>Optionally reject self-messages unless a product decision allows notes to
+self.</li>
+<li>Write the event through the existing command event-store path.</li>
+<li>Send optional external email notification after the command is accepted.</li>
+</ul>
+<h3 id="conversation-list"><a class="header" href="#conversation-list">Conversation List</a></h3>
+<p>Add or evolve a query endpoint for the inbox list.</p>
+<pre><code class="language-json">{
+  "offset": 0,
+  "limit": 25
+}
+</code></pre>
+<p>The backend derives <code>hostId</code> and <code>userId</code> from the token. The response should
+include only conversations involving the current user.</p>
+<pre><code class="language-json">{
+  "total": 1,
+  "conversations": [
+    {
+      "conversationId": "019...",
+      "otherUserId": "019...",
+      "otherUserLabel": "Jane Smith",
+      "lastMessageTs": "2026-05-08T13:30:00Z",
+      "lastMessagePreview": "Can you take a look at this?",
+      "unreadCount": 2
+    }
+  ]
+}
+</code></pre>
+<h3 id="conversation-messages"><a class="header" href="#conversation-messages">Conversation Messages</a></h3>
+<pre><code class="language-json">{
+  "conversationId": "019...",
+  "offset": 0,
+  "limit": 50
+}
+</code></pre>
+<p>The backend validates that the current user is one of the participants.</p>
+<pre><code class="language-json">{
+  "conversationId": "019...",
+  "messages": [
+    {
+      "messageId": "019...",
+      "fromUserId": "019...",
+      "fromUserLabel": "Jane Smith",
+      "subject": "Question about the API",
+      "content": "Can you take a look at this?",
+      "sendTs": "2026-05-08T13:30:00Z",
+      "read": false
+    }
+  ]
+}
+</code></pre>
+<h3 id="unread-count"><a class="header" href="#unread-count">Unread Count</a></h3>
+<p>The mail badge should call a count endpoint instead of loading all messages.</p>
+<pre><code class="language-json">{
+  "count": 3
+}
+</code></pre>
+<h3 id="mark-read-and-delete"><a class="header" href="#mark-read-and-delete">Mark Read and Delete</a></h3>
+<p><code>markPrivateConversationRead</code> should mark unread rows in
+<code>private_message_state_t</code> for the current user and conversation.</p>
+<p><code>deletePrivateMessage</code> or <code>hidePrivateConversation</code> should set <code>deleted_ts</code> for
+the current user only.</p>
+<h2 id="authorization"><a class="header" href="#authorization">Authorization</a></h2>
+<p>The command and query handlers must not trust user ids supplied by the client
+for the current user. The current user is always the token subject.</p>
+<p>Rules:</p>
+<ul>
+<li>A sender can send only as themself.</li>
+<li>A user can read only conversations where they are a participant.</li>
+<li>A user can mark read or delete only their own state rows.</li>
+<li>Admin visibility should be a separate explicit support/admin endpoint if it
+is needed later.</li>
+<li>Cross-host messaging should be rejected in the first phase. If cross-host
+messaging is later needed, the contract must model the recipient host
+explicitly and pass a product/security review.</li>
+</ul>
+<h2 id="portal-view"><a class="header" href="#portal-view">Portal View</a></h2>
+<p>Use the current profile surfaces but make them data-driven:</p>
+<ul>
+<li><code>MailMenu</code> should poll unread count and show a small list of recent
+conversations only after the menu opens.</li>
+<li><code>/app/messages</code> should fetch conversation data directly. It should not depend
+on <code>location.state</code> from <code>MailMenu</code>.</li>
+<li>The <code>privateMessage</code> form should use <code>toUserId</code>, not <code>userId</code>, to avoid
+confusing recipient identity with the current user.</li>
+<li>Reply should prefill <code>toUserId</code> and optionally <code>conversationId</code>.</li>
+<li>User-facing labels should come from a display-safe user label endpoint.</li>
+<li>Empty inbox, loading, and error states should be explicit.</li>
+</ul>
+<p>The first UI can be an inbox plus conversation thread. Real-time typing,
+presence, attachments, and rich-text editing are later enhancements.</p>
+<h2 id="migration-plan"><a class="header" href="#migration-plan">Migration Plan</a></h2>
+<h3 id="phase-0-stop-the-broken-behavior"><a class="header" href="#phase-0-stop-the-broken-behavior">Phase 0: Stop the Broken Behavior</a></h3>
+<ul>
+<li>Make <code>GetPrivateMessage</code> return valid JSON even before the new model is
+complete.</li>
+<li>Fix the existing projection insert to include <code>host_id</code> if <code>message_t</code> remains
+in use.</li>
+<li>Ensure <code>SendMessage</code> stores sender identity from the token.</li>
+<li>Stop using broad <code>queryUserById</code> output as a recipient email value.</li>
+</ul>
+<h3 id="phase-1-user-id-based-backend"><a class="header" href="#phase-1-user-id-based-backend">Phase 1: User-ID Based Backend</a></h3>
+<ul>
+<li>Add the conversation/message/state tables.</li>
+<li>Update <code>PrivateMessageSentEvent</code> to use <code>fromUserId</code> and <code>toUserId</code>.</li>
+<li>Add a trusted recipient resolver that returns only internal fields needed for
+validation and optional email notification.</li>
+<li>Implement conversation list, conversation messages, unread count, mark-read,
+and hide/delete APIs.</li>
+</ul>
+<h3 id="phase-2-portal-view"><a class="header" href="#phase-2-portal-view">Phase 2: Portal View</a></h3>
+<ul>
+<li>Update the mail badge to use unread count.</li>
+<li>Update <code>/app/messages</code> to load data directly.</li>
+<li>Update the <code>privateMessage</code> form and reply paths to use <code>toUserId</code>.</li>
+<li>Remove email assumptions from task context and UI state.</li>
+</ul>
+<h3 id="phase-3-cleanup"><a class="header" href="#phase-3-cleanup">Phase 3: Cleanup</a></h3>
+<ul>
+<li>Migrate or archive old <code>message_t</code> rows.</li>
+<li>Remove <code>to_email</code> from the active private-message path.</li>
+<li>Remove disabled private-message tests and replace them with focused coverage.</li>
+<li>Add optional push delivery later if polling becomes insufficient.</li>
+</ul>
+<h2 id="testing"><a class="header" href="#testing">Testing</a></h2>
+<p>Backend tests should cover:</p>
+<ul>
+<li>Sender is derived from token and cannot be spoofed.</li>
+<li>Recipient must belong to the current host.</li>
+<li>Message event contains user ids, not emails.</li>
+<li>Projection writes host-scoped conversation and message rows.</li>
+<li>Inbox query returns only conversations for the current user.</li>
+<li>Conversation query rejects non-participants.</li>
+<li>Unread count increments for the recipient and clears after mark-read.</li>
+<li>Delete/hide affects only the current user’s state.</li>
+</ul>
+<p>Frontend tests should cover:</p>
+<ul>
+<li>Mail menu shows unread count without loading full inbox.</li>
+<li>Messages page fetches its own data.</li>
+<li>Reply pre-populates recipient context without email.</li>
+<li>Empty and error states do not produce JSON parse failures.</li>
+</ul>
+<h2 id="open-questions"><a class="header" href="#open-questions">Open Questions</a></h2>
+<ul>
+<li>Should users be able to send messages to themselves as private notes?</li>
+<li>Should profile pages expose a “Message” action only for users in the same
+host, or should some cross-host flows be allowed?</li>
+<li>Should email notification include the sender display label, or only say that a
+portal message was received?</li>
+<li>What retention policy should apply to private messages?</li>
+<li>Should administrators have a separate support/audit view, and under what
+permission?</li>
+</ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../license/bronze.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../design/user-management.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../license/gold.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../design/config-server.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -194,11 +535,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../license/bronze.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../design/user-management.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../license/gold.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../design/config-server.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
