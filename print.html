@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-520f3793.js";
+            window.path_to_searchindex_js = "searchindex-3506f4fb.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-7b5c4f12.js"></script>
@@ -2281,10 +2281,18 @@ fields remain null until event processing updates the row.</p>
 <p><code>eventPartition</code> and <code>eventOffset</code> are intentionally displayed as generic
 position fields regardless of which event pipeline is configured. The main list
 can hide them by default and show them in the detail view.</p>
+<p><code>userId</code> is a filter on <code>getNotification</code>, not a separate endpoint contract. The
+profile notification page should always send the logged-in user’s <code>userId</code>. The
+admin notification page can omit <code>userId</code> to request host-wide results, or pass a
+specific <code>userId</code> to narrow the host-wide view to one user.</p>
 <p>Authorization rules:</p>
 <ul>
-<li>Normal users can query only their own <code>userId</code> within the selected <code>hostId</code>.</li>
-<li>Admin users can query all users for the host.</li>
+<li>Normal users can query only their own token <code>user_id</code> within the selected
+<code>hostId</code>. If the request omits <code>userId</code>, the backend should apply the token
+<code>user_id</code>; if the request supplies another <code>userId</code>, the backend should reject
+it or override it with the token <code>user_id</code>.</li>
+<li>Admin users can query all users for the host by omitting <code>userId</code>, or filter
+to a specific user by providing <code>userId</code>.</li>
 <li>The backend should enforce this using token claims, not only UI filters.</li>
 </ul>
 <h2 id="portal-view-1"><a class="header" href="#portal-view-1">Portal View</a></h2>
@@ -2332,7 +2340,28 @@ notifications for the current <code>hostId</code> and <code>userId</code>.</li>
 <p>The header uses the count endpoint for its badge and marks failures read when
 the user opens the notification menu. The notification page also marks failures
 read when it is opened.</p>
-<h2 id="retention"><a class="header" href="#retention">Retention</a></h2>
+<h3 id="admin-notification-page"><a class="header" href="#admin-notification-page">Admin Notification Page</a></h3>
+<p>Phase 3 should add a separate admin notification page instead of overloading the
+profile notification page. The recommended location is:</p>
+<ul>
+<li>Route: <code>/app/event/notifications</code></li>
+<li>Menu: <code>Administration</code> -&gt; <code>Event Admin</code> -&gt; <code>Notifications</code></li>
+</ul>
+<p>This page should reuse the same notification table and <code>getNotification</code> read
+API, but with admin defaults:</p>
+<ul>
+<li><code>hostId</code> from the selected host.</li>
+<li>No default <code>userId</code> filter, so admins see host-wide results.</li>
+<li>Default status filter for <code>FAILED</code> and <code>DLQ</code>, with an option to show all
+statuses.</li>
+<li>Filters for <code>userId</code>, <code>eventClass</code>, <code>status</code>, <code>transactionId</code>, <code>aggregateId</code>,
+processing position, time range, and error text.</li>
+<li>No unread badge behavior and no call to <code>markFailureNotificationsRead</code>.</li>
+</ul>
+<p>The page should clearly identify itself as an admin view, such as “Admin View:
+Host Notifications”. Host-wide access must still be enforced by the backend
+using token roles.</p>
+<h2 id="operational-cleanup"><a class="header" href="#operational-cleanup">Operational Cleanup</a></h2>
 <p>Notifications are operational history. They should not grow forever.</p>
 <p>Recommended retention:</p>
 <ul>
@@ -2340,11 +2369,74 @@ read when it is opened.</p>
 <li>Keep failed and DLQ notifications longer, such as 180 days.</li>
 <li>Allow host-level configuration later if needed.</li>
 </ul>
-<p>Retention can be handled by a scheduled cleanup task:</p>
-<pre><code class="language-sql">DELETE FROM notification_t
-WHERE status = 'SUCCEEDED'
-  AND process_ts &lt; now() - interval '90 days';
+<p>Cleanup should be implemented as a generic operational cleanup process, not as
+notification-specific UI or command-handler logic. The first cleanup target is
+<code>notification_t</code>, but the same framework should also support other operational
+tables such as <code>message_t</code> for private messages.</p>
+<p>Recommended implementation:</p>
+<ul>
+<li>Add an <code>OperationalCleanupStartupHook</code> on the query side.</li>
+<li>Run cleanup on a fixed interval, such as daily, with config-driven enablement,
+interval, batch size, and per-target retention days.</li>
+<li>Use a single cleanup coordinator that owns multiple cleanup targets. Each
+target defines its table, timestamp column, status/type conditions if needed,
+retention duration, and batch delete SQL.</li>
+<li>Use a database lock, such as a PostgreSQL advisory lock or a dedicated cleanup
+lock row, so only one service instance performs cleanup at a time.</li>
+<li>Delete in bounded batches to avoid long table locks and large transactions.</li>
+<li>Use a separate database connection and transaction for cleanup work.</li>
+<li>Log cleanup failures and continue service startup; cleanup failure must not
+block query APIs or event processing.</li>
+</ul>
+<p>Do not use <code>schedule_t</code> directly for this cleanup. That scheduler is business
+workflow infrastructure that emits events into <code>event_store_t</code> and
+<code>outbox_message_t</code>. Operational cleanup is local maintenance and should stay out
+of the event-processing path.</p>
+<p>Example notification cleanup:</p>
+<pre><code class="language-sql">WITH doomed AS (
+    SELECT host_id, id
+    FROM notification_t
+    WHERE (status IN ('SUCCEEDED', 'SKIPPED') AND process_ts &lt; ?)
+       OR (status IN ('FAILED', 'DLQ') AND process_ts &lt; ?)
+    ORDER BY process_ts
+    LIMIT ?
+)
+DELETE FROM notification_t n
+USING doomed d
+WHERE n.host_id = d.host_id
+  AND n.id = d.id;
 </code></pre>
+<p>Private-message cleanup can be another target using <code>message_t.send_time</code>:</p>
+<pre><code class="language-sql">WITH doomed AS (
+    SELECT host_id, from_id, nonce
+    FROM message_t
+    WHERE send_time &lt; ?
+    ORDER BY send_time
+    LIMIT ?
+)
+DELETE FROM message_t m
+USING doomed d
+WHERE m.host_id = d.host_id
+  AND m.from_id = d.from_id
+  AND m.nonce = d.nonce;
+</code></pre>
+<p>Recommended default cleanup targets:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Target</th><th>Table</th><th>Retention</th></tr>
+</thead>
+<tbody>
+<tr><td>Successful notification history</td><td><code>notification_t</code> where <code>status IN ('SUCCEEDED', 'SKIPPED')</code></td><td>90 days</td></tr>
+<tr><td>Failed notification history</td><td><code>notification_t</code> where <code>status IN ('FAILED', 'DLQ')</code></td><td>180 days</td></tr>
+<tr><td>Private messages</td><td><code>message_t</code></td><td>180 days</td></tr>
+</tbody>
+</table>
+</div>
+<p>Do not delete recent <code>PENDING</code> notifications. Old <code>PENDING</code> rows should be
+treated as an operational signal first because they may indicate that the event
+consumer is stopped or lagging. If a hard cap is needed later, make it a
+separate, longer retention policy.</p>
 <h2 id="snapshot-and-promotion"><a class="header" href="#snapshot-and-promotion">Snapshot and Promotion</a></h2>
 <p><code>notification_t</code> should be treated as an operational table, not a promoted
 projection table.</p>
@@ -2375,8 +2467,13 @@ or the notification page.</li>
 </ul>
 <h3 id="phase-3-operations"><a class="header" href="#phase-3-operations">Phase 3: Operations</a></h3>
 <ul>
-<li>Add retention cleanup.</li>
-<li>Add admin filters for host-wide failures.</li>
+<li>Add a generic operational cleanup startup hook with retention targets for
+<code>notification_t</code> and <code>message_t</code>.</li>
+<li>Make cleanup configurable by enablement, interval, batch size, and per-target
+retention days.</li>
+<li>Add a database lock so only one service instance runs cleanup at a time.</li>
+<li>Add an admin notification page under Event Admin that uses <code>getNotification</code>
+without a <code>userId</code> filter for host-wide failures.</li>
 <li>Add dashboards or alerts for repeated DLQ statuses.</li>
 </ul>
 <h2 id="risks-and-mitigations-2"><a class="header" href="#risks-and-mitigations-2">Risks and Mitigations</a></h2>
@@ -2391,7 +2488,9 @@ or the notification page.</li>
 <tr><td>False success rows after projection rollback</td><td>Write <code>SUCCEEDED</code> only after projection commit, or keep same-transaction success rows rollback-safe.</td></tr>
 <tr><td>Duplicate rows on replay</td><td>Use <code>ON CONFLICT (host_id, id) DO UPDATE</code>.</td></tr>
 <tr><td>Users see other users’ events</td><td>Enforce token-based authorization in <code>getNotification</code>.</td></tr>
-<tr><td>Table grows without bound</td><td>Add retention cleanup and indexes.</td></tr>
+<tr><td>Operational tables grow without bound</td><td>Add generic operational cleanup targets and supporting indexes.</td></tr>
+<tr><td>Cleanup runs concurrently on multiple instances</td><td>Use a database lock so only one instance runs cleanup at a time.</td></tr>
+<tr><td>Cleanup failure blocks query service startup</td><td>Log cleanup failures and continue startup; cleanup is maintenance, not correctness-critical.</td></tr>
 <tr><td>Status meaning stays ambiguous</td><td>Use <code>status</code> as the only outcome field for both pg-notify and Kafka processing.</td></tr>
 </tbody>
 </table>
@@ -2543,7 +2642,7 @@ FROM auth_session_t
 WHERE host_id = $1
   AND session_id = $2;
 </code></pre>
-<h2 id="retention-1"><a class="header" href="#retention-1">Retention</a></h2>
+<h2 id="retention"><a class="header" href="#retention">Retention</a></h2>
 <p><code>auth_session_t</code> can be retained longer than operational token tables. <code>auth_session_audit_t</code> should use a retention policy appropriate for the deployment, for example 90 days or one year. Retention jobs should delete audit rows by <code>event_ts</code> and optionally archive them before deletion.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="multi-tenant"><a class="header" href="#multi-tenant">Multi-Tenant</a></h1>
