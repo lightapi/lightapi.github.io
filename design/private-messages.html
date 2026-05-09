@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-3506f4fb.js";
+            window.path_to_searchindex_js = "../searchindex-aec838b1.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-7b5c4f12.js"></script>
+        <script src="../toc-afe39ce7.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -424,6 +424,30 @@ include only conversations involving the current user.</p>
 <code>private_message_state_t</code> for the current user and conversation.</p>
 <p><code>deletePrivateMessage</code> or <code>hidePrivateConversation</code> should set <code>deleted_ts</code> for
 the current user only.</p>
+<h2 id="operational-cleanup"><a class="header" href="#operational-cleanup">Operational Cleanup</a></h2>
+<p>Private messages are user content, not operational status rows. They should not
+be hard-deleted only because they are old while either participant can still see
+them.</p>
+<p>The operational cleanup job may purge active private-message rows only when all
+participant state rows for the message have <code>deleted_ts</code> set and the latest
+<code>deleted_ts</code> is older than <code>privateMessageRetentionDays</code>.</p>
+<p>Cleanup responsibilities:</p>
+<ul>
+<li>Select purge candidates from <code>private_message_t</code> joined to
+<code>private_message_state_t</code>.</li>
+<li>Require every participant state row for the message to have <code>deleted_ts</code> set.</li>
+<li>Use <code>MAX(deleted_ts)</code> as the retention clock so the grace period starts after
+the last participant deletes the message.</li>
+<li>Delete <code>private_message_state_t</code> rows first, then delete the
+<code>private_message_t</code> row in the same transaction.</li>
+<li>Leave <code>private_conversation_t</code> rows in place so the participant pair keeps a
+stable conversation identity if a new message is sent later.</li>
+<li>Skip private-message cleanup when <code>privateMessageRetentionDays</code> is less than
+or equal to zero.</li>
+</ul>
+<p>The cleanup job should not purge visible messages, partially deleted messages,
+or recently deleted-by-all messages. A separate maximum retention policy for
+undeleted private messages would need an explicit product/security decision.</p>
 <h2 id="authorization"><a class="header" href="#authorization">Authorization</a></h2>
 <p>The command and query handlers must not trust user ids supplied by the client
 for the current user. The current user is always the token subject.</p>
@@ -481,9 +505,10 @@ and hide/delete APIs.</li>
 </ul>
 <h3 id="phase-3-cleanup"><a class="header" href="#phase-3-cleanup">Phase 3: Cleanup</a></h3>
 <ul>
-<li>Migrate or archive old <code>message_t</code> rows.</li>
 <li>Remove <code>to_email</code> from the active private-message path.</li>
 <li>Remove disabled private-message tests and replace them with focused coverage.</li>
+<li>Ensure operational cleanup targets the active private-message tables and
+purges only messages deleted by all participants after the retention window.</li>
 <li>Add optional push delivery later if polling becomes insufficient.</li>
 </ul>
 <h2 id="testing"><a class="header" href="#testing">Testing</a></h2>
@@ -497,6 +522,8 @@ and hide/delete APIs.</li>
 <li>Conversation query rejects non-participants.</li>
 <li>Unread count increments for the recipient and clears after mark-read.</li>
 <li>Delete/hide affects only the current user’s state.</li>
+<li>Operational cleanup purges only messages deleted by all participants after
+retention and keeps visible, partially deleted, and recently deleted messages.</li>
 </ul>
 <p>Frontend tests should cover:</p>
 <ul>
@@ -512,7 +539,7 @@ and hide/delete APIs.</li>
 host, or should some cross-host flows be allowed?</li>
 <li>Should email notification include the sender display label, or only say that a
 portal message was received?</li>
-<li>What retention policy should apply to private messages?</li>
+<li>Should any maximum retention policy apply to undeleted private messages?</li>
 <li>Should administrators have a separate support/audit view, and under what
 permission?</li>
 </ul>

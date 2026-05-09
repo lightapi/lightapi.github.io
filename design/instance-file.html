@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>OAuth Kafka - Light Portal Documentation</title>
+        <title>Instance File Config Phase - Light Portal Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -174,17 +174,208 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="oauth-kafka"><a class="header" href="#oauth-kafka">OAuth Kafka</a></h1>
+                        <h1 id="instance-file-config-phase"><a class="header" href="#instance-file-config-phase">Instance File Config Phase</a></h1>
+<h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
+<p><code>instance_file_t</code> stores instance-specific files that are not modeled as standard <code>config_property_t</code> rows. Examples include API specifications such as <code>openapi.yaml</code> and custom certificates or supporting files.</p>
+<p>The config snapshot model currently separates two kinds of file data:</p>
+<ul>
+<li>Standard files are flattened into <code>config_snapshot_property_t</code>.</li>
+<li>Non-standard instance files are copied into <code>snapshot_instance_file_t</code>.</li>
+</ul>
+<p>The <code>/config-server/files</code> endpoint must return both sets. It already filters standard files by <code>config_phase</code> through <code>config_snapshot_property_t.config_phase</code>, but <code>instance_file_t</code> and <code>snapshot_instance_file_t</code> do not currently carry <code>config_phase</code>. That makes it impossible to union the two sources while preserving runtime, deployment, and generator phase semantics.</p>
+<h2 id="problem"><a class="header" href="#problem">Problem</a></h2>
+<p>When a service starts through <code>DefaultConfigLoader</code>, it calls <code>/config-server/files</code> with <code>host</code>, <code>serviceId</code>, and <code>envTag</code>. The endpoint resolves the current snapshot and returns the files that should be written into <code>/config</code>.</p>
+<p>For the sidecar case, <code>openapi.yaml</code> exists in both <code>instance_file_t</code> and <code>snapshot_instance_file_t</code>, but it does not exist in <code>config_snapshot_property_t</code>. Since the current <code>/files</code> query reads only <code>config_snapshot_property_t</code>, the response does not include <code>openapi.yaml</code>, and the sidecar cannot write it to <code>/config</code>.</p>
+<p>The correct endpoint behavior is:</p>
+<ol>
+<li>Read standard files from <code>config_snapshot_property_t</code>.</li>
+<li>Read non-standard files from <code>snapshot_instance_file_t</code>.</li>
+<li>Filter both sources by the requested config phase.</li>
+<li>Return one filename-to-base64-content map.</li>
+</ol>
+<h2 id="decision"><a class="header" href="#decision">Decision</a></h2>
+<p>Add <code>config_phase</code> to both runtime and snapshot instance file tables:</p>
+<ul>
+<li><code>instance_file_t.config_phase</code></li>
+<li><code>snapshot_instance_file_t.config_phase</code></li>
+</ul>
+<p>The allowed values should match <code>config_t.config_phase</code>:</p>
+<ul>
+<li><code>G</code>: generator</li>
+<li><code>D</code>: deployment</li>
+<li><code>R</code>: runtime</li>
+</ul>
+<p>The default value for existing and new rows should be <code>R</code>, because current instance files are consumed by runtime startup unless explicitly marked otherwise.</p>
+<h2 id="schema-changes"><a class="header" href="#schema-changes">Schema Changes</a></h2>
+<h3 id="runtime-table"><a class="header" href="#runtime-table">Runtime Table</a></h3>
+<pre><code class="language-sql">ALTER TABLE instance_file_t
+  ADD COLUMN config_phase CHAR(1) NOT NULL DEFAULT 'R';
+
+ALTER TABLE instance_file_t
+  ADD CHECK (config_phase IN ('G', 'D', 'R'));
+
+ALTER TABLE instance_file_t
+  DROP CONSTRAINT IF EXISTS instance_file_uk;
+
+ALTER TABLE instance_file_t
+  ADD CONSTRAINT instance_file_uk
+    UNIQUE (host_id, instance_id, config_phase, v_file_name);
+</code></pre>
+<p>The unique constraint must include <code>config_phase</code> so the same filename can exist separately for runtime and deployment if needed.</p>
+<h3 id="snapshot-table"><a class="header" href="#snapshot-table">Snapshot Table</a></h3>
+<pre><code class="language-sql">ALTER TABLE snapshot_instance_file_t
+  ADD COLUMN config_phase CHAR(1) NOT NULL DEFAULT 'R';
+
+ALTER TABLE snapshot_instance_file_t
+  ADD CHECK (config_phase IN ('G', 'D', 'R'));
+
+CREATE INDEX idx_snap_inst_file_phase
+  ON snapshot_instance_file_t (snapshot_id, config_phase, file_type, active);
+</code></pre>
+<p>The primary key can remain <code>(snapshot_id, host_id, instance_file_id)</code> because <code>instance_file_id</code> identifies the copied runtime row. The phase-aware index supports config-server lookups.</p>
+<h2 id="migration"><a class="header" href="#migration">Migration</a></h2>
+<p>Existing rows should be backfilled to runtime:</p>
+<pre><code class="language-sql">UPDATE instance_file_t
+SET config_phase = 'R'
+WHERE config_phase IS NULL;
+
+UPDATE snapshot_instance_file_t
+SET config_phase = 'R'
+WHERE config_phase IS NULL;
+</code></pre>
+<p>If a historical custom file was actually intended for deployment or generator use, it must be corrected explicitly after migration. There is no reliable way to infer that from the current schema.</p>
+<h2 id="snapshot-creation"><a class="header" href="#snapshot-creation">Snapshot Creation</a></h2>
+<p><code>create_snapshot</code> must copy <code>config_phase</code> from <code>instance_file_t</code> into <code>snapshot_instance_file_t</code>.</p>
+<p>Current copy shape:</p>
+<pre><code class="language-sql">INSERT INTO snapshot_instance_file_t (
+    snapshot_id, host_id, instance_file_id, instance_id, file_type,
+    file_name, file_value, file_desc, expiration_ts,
+    aggregate_version, active, update_user, update_ts
+)
+SELECT
+    p_snapshot_id, t.host_id, t.instance_file_id, t.instance_id, t.file_type,
+    t.file_name, t.file_value, t.file_desc, t.expiration_ts,
+    t.aggregate_version, t.active, t.update_user, t.update_ts
+FROM instance_file_t t
+WHERE t.host_id = p_host_id
+  AND t.instance_id = p_instance_id
+  AND t.active = TRUE;
+</code></pre>
+<p>Target copy shape:</p>
+<pre><code class="language-sql">INSERT INTO snapshot_instance_file_t (
+    snapshot_id, host_id, instance_file_id, instance_id, config_phase,
+    file_type, file_name, file_value, file_desc, expiration_ts,
+    aggregate_version, active, update_user, update_ts
+)
+SELECT
+    p_snapshot_id, t.host_id, t.instance_file_id, t.instance_id, t.config_phase,
+    t.file_type, t.file_name, t.file_value, t.file_desc, t.expiration_ts,
+    t.aggregate_version, t.active, t.update_user, t.update_ts
+FROM instance_file_t t
+WHERE t.host_id = p_host_id
+  AND t.instance_id = p_instance_id
+  AND t.active = TRUE;
+</code></pre>
+<p>Snapshot creation should continue copying all active instance files for the instance. Consumers filter by phase when reading.</p>
+<h2 id="config-server-query"><a class="header" href="#config-server-query">Config Server Query</a></h2>
+<p>The <code>/files</code> endpoint should union standard files and non-standard instance files for the current snapshot.</p>
+<p>Standard files:</p>
+<pre><code class="language-sql">SELECT
+    p.source_level AS source,
+    c.config_name,
+    p.property_name,
+    p.value_type,
+    p.property_value,
+    10 AS source_rank
+FROM config_snapshot_property_t p
+JOIN config_snapshot_t cs ON cs.snapshot_id = p.snapshot_id
+JOIN config_t c ON c.config_id = p.config_id
+JOIN host_t h ON cs.host_id = h.host_id
+WHERE h.sub_domain || '.' || h.domain = ?
+  AND cs.current = TRUE
+  AND p.config_phase = ?
+  AND p.property_type = 'File'
+  AND cs.service_id = ?
+  AND cs.environment = ?
+</code></pre>
+<p>Non-standard instance files:</p>
+<pre><code class="language-sql">SELECT
+    'instance_file' AS source,
+    'files' AS config_name,
+    f.file_name AS property_name,
+    'string' AS value_type,
+    f.file_value AS property_value,
+    100 AS source_rank
+FROM snapshot_instance_file_t f
+JOIN config_snapshot_t cs
+  ON cs.snapshot_id = f.snapshot_id
+ AND cs.host_id = f.host_id
+ AND cs.instance_id = f.instance_id
+JOIN host_t h ON h.host_id = cs.host_id
+WHERE h.sub_domain || '.' || h.domain = ?
+  AND cs.current = TRUE
+  AND f.config_phase = ?
+  AND f.file_type = 'File'
+  AND f.active = TRUE
+  AND cs.service_id = ?
+  AND cs.environment = ?
+</code></pre>
+<p>The implementation can combine these with <code>UNION ALL</code>. If the same filename appears in both sources, the instance file should win because it is the instance-specific override. Java can enforce this by inserting standard rows first and custom rows second into the response map. SQL can enforce it with <code>source_rank</code> and <code>DISTINCT ON (property_name)</code> if the response is assembled directly from a result set.</p>
+<p>The same model should be applied to <code>/certs</code> with <code>property_type = 'Cert'</code> and <code>file_type = 'Cert'</code>, because <code>instance_file_t.file_type</code> already supports certificates.</p>
+<h2 id="api-and-event-changes"><a class="header" href="#api-and-event-changes">API and Event Changes</a></h2>
+<p>All create, update, query, and replay paths for instance files should include <code>configPhase</code>.</p>
+<p>Required behavior:</p>
+<ul>
+<li>New create/update requests accept <code>configPhase</code>.</li>
+<li>Missing <code>configPhase</code> defaults to <code>R</code> for backward compatibility.</li>
+<li>Created and updated events include <code>configPhase</code>.</li>
+<li>Replay of historical events defaults missing <code>configPhase</code> to <code>R</code>.</li>
+<li>Query responses expose <code>configPhase</code>.</li>
+<li>UI forms and grids allow the operator to choose or filter by phase.</li>
+</ul>
+<h2 id="code-impact"><a class="header" href="#code-impact">Code Impact</a></h2>
+<p>Expected implementation surfaces:</p>
+<ul>
+<li><code>portal-db/postgres/ddl.sql</code></li>
+<li><code>portal-db/postgres/ddl-dbvis.sql</code></li>
+<li>New <code>portal-db/postgres/patch_*.sql</code></li>
+<li><code>portal-db/postgres/sp_tr_fn.sql</code></li>
+<li><code>light-portal/db-provider</code> persistence for create, update, query, snapshot, clone, and replay flows</li>
+<li><code>light-config-server</code> snapshot <code>/files</code> and <code>/certs</code> query behavior through <code>ConfigServerQueryPersistenceImpl</code></li>
+<li><code>portal-service/crates/portal-core</code> snapshot file and cert queries</li>
+<li><code>portal-service/apps/config-server</code> response assembly if duplicate precedence is handled outside SQL</li>
+<li><code>portal-view</code> schemas/forms/pages for instance files</li>
+</ul>
+<h2 id="validation"><a class="header" href="#validation">Validation</a></h2>
+<p>Minimum checks:</p>
+<ol>
+<li>Create or migrate an instance file named <code>openapi.yaml</code> with <code>config_phase = 'R'</code>.</li>
+<li>Create a snapshot for the instance.</li>
+<li>Verify <code>snapshot_instance_file_t</code> has the same <code>config_phase</code>.</li>
+<li>Call <code>/config-server/files?host=dev.lightapi.net&amp;serviceId=...&amp;envTag=dev</code>.</li>
+<li>Confirm the response contains both standard files such as <code>logback.xml</code> and non-standard files such as <code>openapi.yaml</code>.</li>
+<li>Start a sidecar with <code>DefaultConfigLoader</code> and confirm <code>/config/openapi.yaml</code> is written.</li>
+</ol>
+<p>Regression tests should cover:</p>
+<ul>
+<li>Existing instance files default to runtime.</li>
+<li>Same filename can exist in different phases.</li>
+<li><code>/files</code> filters out non-matching phases.</li>
+<li>Custom instance files override standard files with the same filename.</li>
+<li>Java and Rust config-server implementations return the same file keys.</li>
+</ul>
+<h2 id="out-of-scope"><a class="header" href="#out-of-scope">Out of Scope</a></h2>
+<p>This change does not move non-standard files into <code>config_snapshot_property_t</code>. Keeping them in <code>snapshot_instance_file_t</code> preserves the distinction between modeled config properties and instance-specific file artifacts.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../design/portal-view/event-processing-notifications.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../design/config-server.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../design/oauth-kafka/token-exchange.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../design/deployment.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -194,11 +385,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../design/portal-view/event-processing-notifications.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../design/config-server.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../design/oauth-kafka/token-exchange.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../design/deployment.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
