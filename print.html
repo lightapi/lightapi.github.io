@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-aec838b1.js";
+            window.path_to_searchindex_js = "searchindex-3918ae5e.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-afe39ce7.js"></script>
+        <script src="toc-902f57c2.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -2495,6 +2495,8 @@ without a <code>userId</code> filter for host-wide failures.</li>
 </tbody>
 </table>
 </div>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="agent-skill-and-tool-discovery"><a class="header" href="#agent-skill-and-tool-discovery">Agent Skill And Tool Discovery</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="oauth-kafka"><a class="header" href="#oauth-kafka">OAuth Kafka</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
@@ -13796,8 +13798,89 @@ MCP tools, marketplace publishing, and access-control rules.</p>
 <li><code>apiVersion</code>: version label</li>
 <li><code>apiType</code>: API style such as OpenAPI, GraphQL, Hybrid, or MCP</li>
 <li><code>serviceId</code>: backing service identifier</li>
+<li><code>spec</code>: API specification text, or MCP <code>tools/list</code> JSON output for MCP API versions</li>
+<li><code>transportConfig</code>: MCP transport and URL when <code>apiType</code> is MCP</li>
 <li><code>ownerPositionId</code>: optional position owner for team access</li>
 </ul>
+<h2 id="mcp-tool-discovery"><a class="header" href="#mcp-tool-discovery">MCP Tool Discovery</a></h2>
+<p>For MCP API versions, there are two ways to populate tools:</p>
+<ul>
+<li>If the portal service can reach the MCP server, select <code>MCP</code> as the API Type and fill <code>transportConfig</code>, for example <code>{"transport":"streamable http","url":"http://localhost:5000/mcp"}</code>.</li>
+<li>If the portal service cannot reach the MCP server because of firewall or security boundaries, call the MCP server yourself and paste the response into <code>spec</code>.</li>
+</ul>
+<p>Example manual discovery call:</p>
+<pre><code class="language-bash">curl --location --request POST 'http://localhost:5000/mcp' \
+  --header 'Content-Type: application/json' \
+  --data-raw '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+</code></pre>
+<p>Paste the response into <code>Spec / MCP Tools JSON</code>. The form accepts any of these
+payload shapes.</p>
+<p>Full JSON-RPC response:</p>
+<pre><code class="language-json">{
+  "jsonrpc": "2.0",
+  "result": {
+    "tools": [
+      {
+        "name": "echo",
+        "description": "Echoes back the input",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "message"
+          ]
+        }
+      }
+    ]
+  },
+  "id": 1
+}
+</code></pre>
+<p>Object with a top-level <code>tools</code> array:</p>
+<pre><code class="language-json">{
+  "tools": [
+    {
+      "name": "echo",
+      "description": "Echoes back the input",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      }
+    }
+  ]
+}
+</code></pre>
+<p>Raw tools array:</p>
+<pre><code class="language-json">[
+  {
+    "name": "echo",
+    "description": "Echoes back the input",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message"
+      ]
+    }
+  }
+]
+</code></pre>
+<p>Keep <code>transportConfig</code> populated with the real MCP transport and URL when the runtime still needs it for invocation.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="update-api-version"><a class="header" href="#update-api-version">Update API Version</a></h1>
 <p>Use this form to update API version metadata and integration details.</p>
@@ -13808,9 +13891,90 @@ task flows that reference the API version.</p>
 <li><code>apiVersion</code>: version label</li>
 <li><code>apiType</code>: API style</li>
 <li><code>serviceId</code>: backing service identifier</li>
+<li><code>spec</code>: API specification text, or MCP <code>tools/list</code> JSON output for MCP API versions</li>
+<li><code>transportConfig</code>: MCP transport and URL when <code>apiType</code> is MCP</li>
 <li><code>protocol</code>, <code>envTag</code>, and <code>targetHost</code>: runtime routing details</li>
 <li><code>ownerPositionId</code>: optional position owner for team access</li>
 </ul>
+<h2 id="mcp-tool-discovery-1"><a class="header" href="#mcp-tool-discovery-1">MCP Tool Discovery</a></h2>
+<p>For MCP API versions, there are two ways to refresh tools:</p>
+<ul>
+<li>If the portal service can reach the MCP server, select <code>MCP</code> as the API Type and fill <code>transportConfig</code>, for example <code>{"transport":"streamable http","url":"http://localhost:5000/mcp"}</code>.</li>
+<li>If the portal service cannot reach the MCP server because of firewall or security boundaries, call the MCP server yourself and paste the response into <code>spec</code>.</li>
+</ul>
+<p>Example manual discovery call:</p>
+<pre><code class="language-bash">curl --location --request POST 'http://localhost:5000/mcp' \
+  --header 'Content-Type: application/json' \
+  --data-raw '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+</code></pre>
+<p>Paste the response into <code>Spec / MCP Tools JSON</code>. The form accepts any of these
+payload shapes.</p>
+<p>Full JSON-RPC response:</p>
+<pre><code class="language-json">{
+  "jsonrpc": "2.0",
+  "result": {
+    "tools": [
+      {
+        "name": "echo",
+        "description": "Echoes back the input",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "message"
+          ]
+        }
+      }
+    ]
+  },
+  "id": 1
+}
+</code></pre>
+<p>Object with a top-level <code>tools</code> array:</p>
+<pre><code class="language-json">{
+  "tools": [
+    {
+      "name": "echo",
+      "description": "Echoes back the input",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      }
+    }
+  ]
+}
+</code></pre>
+<p>Raw tools array:</p>
+<pre><code class="language-json">[
+  {
+    "name": "echo",
+    "description": "Echoes back the input",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message"
+      ]
+    }
+  }
+]
+</code></pre>
+<p>Keep <code>transportConfig</code> populated with the real MCP transport and URL when the runtime still needs it for invocation.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="create-app"><a class="header" href="#create-app">Create App</a></h1>
 <p>Use this form to register a client application.</p>
