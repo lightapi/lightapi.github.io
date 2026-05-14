@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-3918ae5e.js";
+            window.path_to_searchindex_js = "searchindex-ec206509.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-902f57c2.js"></script>
+        <script src="toc-f81584e8.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -2496,7 +2496,827 @@ without a <code>userId</code> filter for host-wide failures.</li>
 </table>
 </div>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="agent-skill-and-tool-discovery"><a class="header" href="#agent-skill-and-tool-discovery">Agent Skill And Tool Discovery</a></h1>
+<h1 id="agent-skill-and-api-endpoint-discovery"><a class="header" href="#agent-skill-and-api-endpoint-discovery">Agent Skill And API Endpoint Discovery</a></h1>
+<h2 id="problem-3"><a class="header" href="#problem-3">Problem</a></h2>
+<p>The GenAI chat flow has two separate concepts that are easy to confuse:</p>
+<ul>
+<li>The <code>light-gateway</code> MCP endpoint is the runtime server that lists and executes
+tools. An agent should call the gateway for <code>tools/list</code> and <code>tools/call</code>.
+A listed tool may be backed by a downstream MCP server or by a gateway-routed
+HTTP/OpenAPI endpoint.</li>
+<li>Portal-query is the catalog service for skills, tools, and agent
+assignments. The agent should read this catalog through the <code>genai-query</code>
+API, cache it locally, and search it during chat.</li>
+<li>The controller registry remains a runtime control-plane service for
+registration, discovery, and cache-management commands. It should not own the
+portal skill/tool catalog and should not execute downstream MCP or REST calls.</li>
+</ul>
+<p>During chat, <code>light-agent</code> should use its local catalog cache to find relevant
+skills, then call <code>tools/list</code> on the gateway to verify executable tools. Tool
+execution still goes through the gateway. If the catalog cache is empty or
+stale, the agent should refresh it from portal-query. If portal-query is
+temporarily unavailable, the agent should still be able to use the gateway tool
+list directly.</p>
+<p>The missing piece is a portal-managed catalog that explains which API endpoints
+exist, which endpoint projections are invokable by agents, which skills they
+belong to, and which agents are allowed or expected to use those skills. Without
+that catalog, the agent can list executable gateway tools, but it has no domain
+guidance beyond each tool description.</p>
+<h2 id="goals-1"><a class="header" href="#goals-1">Goals</a></h2>
+<ul>
+<li>Keep the gateway as the runtime source of truth for MCP tool execution.</li>
+<li>Keep direct gateway <code>tools/list</code> and <code>tools/call</code> working even when no skills
+have been authored.</li>
+<li>Treat API endpoints as the generic capability unit. MCP tools, OpenAPI
+operations, JSON-RPC methods, and future protocol operations should all become
+endpoint-level capabilities before they are exposed to agents.</li>
+<li>Populate a portal endpoint and tool catalog from API version parsing,
+LightAPI descriptions, gateway-discovered MCP tools, manually pasted MCP
+<code>tools/list</code> payloads, and gateway-routed REST tools.</li>
+<li>Let portal users create skills that contain instructions and curated tool
+selections.</li>
+<li>Let portal users assign skills to agent definitions.</li>
+<li>Use the <code>genai-query</code> API and spec as the portal-query access surface for
+skills, tools, and agent assignments.</li>
+<li>Let the agent cache the effective catalog locally and reload it when
+controller cache-management invalidation is triggered.</li>
+<li>Make skills useful for progressive disclosure without requiring every MCP tool
+to be wrapped before it can be called.</li>
+<li>Store semantic routing metadata for endpoint capabilities so the agent or
+portal-query can perform macro-filtering, keyword search, vector ranking,
+context viability checks, and safety filtering.</li>
+</ul>
+<h2 id="non-goals-4"><a class="header" href="#non-goals-4">Non-Goals</a></h2>
+<ul>
+<li>Do not move MCP request routing or downstream REST calls into the controller.</li>
+<li>Do not implement <code>skill/search</code> in controller-rs. Controller-rs can
+invalidate the agent cache, but portal-query owns catalog reads.</li>
+<li>Do not use config-server as the first delivery path for the skills/tools
+catalog. The agent can fetch from portal-query and cache locally.</li>
+<li>Do not require every gateway tool to have a skill before it is executable.</li>
+<li>Do not replace the existing MCP Gateway registry design. This design extends
+it with agent-facing skill curation.</li>
+<li>Do not implement embeddings in the first phase. Keyword search is enough for
+the initial local catalog search.</li>
+<li>Do not limit the catalog to MCP tools. The UI may use “tool” when referring
+to LLM tool-calling, but the persistent capability model should be endpoint
+first.</li>
+<li>Do not use skill assignments as the only authorization control. Gateway
+policy and downstream authorization still apply at execution time.</li>
+</ul>
+<h2 id="concepts"><a class="header" href="#concepts">Concepts</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Concept</th><th>Responsibility</th><th>Example</th></tr>
+</thead>
+<tbody>
+<tr><td>API Endpoint</td><td>Canonical endpoint-level capability stored by API version. It may come from OpenAPI, MCP <code>tools/list</code>, LightAPI, JSON-RPC, or another protocol.</td><td><code>/v1/accounts@get</code>, <code>getRandomNumber@call</code></td></tr>
+<tr><td>Tool</td><td>Agent-facing projection of an endpoint as an executable LLM function. The runtime call is made by name through the gateway.</td><td><code>getAccounts</code> calling <code>GET /v1/accounts</code></td></tr>
+<tr><td>Skill</td><td>Domain guidance plus a curated set of tools. It helps an agent decide what to expose and how to reason.</td><td>“Account Management” using account read and create tools</td></tr>
+<tr><td>Agent</td><td>Runtime worker that receives a user prompt, discovers skills and tools, calls the LLM, then executes requested tools through the gateway.</td><td><code>account-agent</code></td></tr>
+<tr><td>Gateway</td><td>MCP server and router. It owns runtime <code>tools/list</code> and <code>tools/call</code> behavior.</td><td><code>light-gateway</code> <code>/mcp</code></td></tr>
+<tr><td>Portal Query</td><td>Catalog API service for reading skills, tools, tool params, skill-tool mappings, and agent-skill assignments.</td><td><code>genai-query</code> API</td></tr>
+<tr><td>Controller Registry</td><td>Runtime control-plane service for service metadata, discovery, and cache invalidation.</td><td>cache-management MCP tool</td></tr>
+<tr><td>Portal</td><td>Authoring UI and persistence layer for tools, skills, and agent assignments.</td><td>Tool Catalog, Skill Editor, Agent Skill Assignment</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="target-architecture"><a class="header" href="#target-architecture">Target Architecture</a></h2>
+<p>The target flow keeps runtime execution and control-plane metadata separate.</p>
+<pre><code class="language-text">Portal UI
+  -&gt; writes api_endpoint_t, tool_t, tool_param_t, skill_t, skill_tool_t, agent_skill_t
+
+light-gateway /mcp
+  -&gt; lists executable tools from mcp-router.tools and downstream MCP servers
+  -&gt; executes tools/call against downstream MCP or REST services
+
+portal-query genai-query API
+  -&gt; serves skill/tool/agent-skill catalog reads from portal data
+
+controller-rs portal registry
+  -&gt; registers agents and sends cache-management invalidation commands
+
+light-agent
+  -&gt; loads assigned skills and mapped tools from portal-query
+  -&gt; caches the effective catalog locally
+  -&gt; searches cached skills during chat
+  -&gt; lists executable tools from light-gateway
+  -&gt; calls selected tools through light-gateway
+</code></pre>
+<p>For the account-agent example:</p>
+<ol>
+<li>The gateway exposes account tools such as <code>getAccounts</code> and
+<code>getAccountByNo</code>.</li>
+<li>Portal stores the canonical endpoint rows in <code>api_endpoint_t</code>.</li>
+<li>Portal publishes selected endpoint rows into <code>tool_t</code> as agent-invokable
+capabilities.</li>
+<li>An operator creates an “Account Management” skill in <code>skill_t</code>.</li>
+<li>Portal links that skill to the account tools through <code>skill_tool_t</code>.</li>
+<li>Portal assigns the skill to the account agent through <code>agent_skill_t</code>.</li>
+<li>At startup or cache reload, the agent reads the assigned catalog through
+<code>genai-query</code> and caches it locally.</li>
+<li>At chat time, the agent searches its local catalog cache.</li>
+<li>The agent combines matched skill instructions with the gateway tool
+definitions.</li>
+<li>Any tool call still goes to <code>light-gateway</code> <code>tools/call</code>.</li>
+</ol>
+<h2 id="source-of-truth"><a class="header" href="#source-of-truth">Source Of Truth</a></h2>
+<p>The gateway is the runtime source of truth for executable tools. If a tool is
+not available from the gateway, the agent should not be able to execute it just
+because it exists in the portal database.</p>
+<p><code>api_endpoint_t</code> is the canonical portal endpoint catalog. It stores the
+endpoint identity, protocol method, path, logical tool schema, endpoint
+description, and raw tool metadata for one API version.</p>
+<p><code>tool_t</code> is the agent-facing projection of an endpoint. It stores the tool name,
+agent description, implementation type, optional endpoint reference, response
+schema, active flag, semantic routing fields, and semantic embedding. The full
+metadata object should still be preserved in <code>api_endpoint_t.tool_metadata</code> for
+import/export and agent cache payloads.</p>
+<p>The portal database is the control-plane catalog. It stores:</p>
+<ul>
+<li>operator-friendly descriptions,</li>
+<li>skill instructions,</li>
+<li>agent assignments,</li>
+<li>governance metadata,</li>
+<li>cached or imported tool schemas.</li>
+</ul>
+<p>Tool sync should be idempotent. The recommended unique identity is:</p>
+<pre><code class="language-text">host_id + api_version_id + endpoint
+</code></pre>
+<p>Gateway exposure is a separate deployment selection. The catalog should sync all
+endpoint rows for an API version, then let the user choose which endpoint/tool
+projections are deployed to a specific gateway instance.</p>
+<p>For runtime-executable projections, the gateway identity is:</p>
+<pre><code class="language-text">hostId + serviceId + envTag
+</code></pre>
+<p>The access token used for portal catalog or gateway deployment APIs should carry
+matching <code>host</code>, <code>sid</code>, and <code>env</code> claims. Portal-query must verify those claims
+against the requested <code>hostId</code>, <code>serviceId</code>, and <code>envTag</code> before returning or
+changing catalog data.</p>
+<p>Runtime verification means checking whether an endpoint projection is actually
+listed by a deployed gateway through <code>tools/list</code>. This should be done against
+the selected gateway instance when an operator is preparing or reviewing a
+gateway deployment. A later host-wide diagnostics view can aggregate all
+registered gateways, but phase 2 does not need host-wide verification as the
+default.</p>
+<p>If a previously imported endpoint or tool disappears from the gateway, the sync
+process should mark the catalog projection inactive instead of deleting it
+immediately. This preserves skill mappings and gives operators a clear drift
+signal.</p>
+<h2 id="current-data-model"><a class="header" href="#current-data-model">Current Data Model</a></h2>
+<p>The database already has the main tables needed for this design:</p>
+<ul>
+<li><code>skill_t</code>: skill name, description, <code>content_markdown</code>, embedding placeholder,
+version, and active flag.</li>
+<li><code>tool_t</code>: agent-facing tool catalog with name, description, implementation
+metadata, endpoint reference, and response schema.</li>
+<li><code>tool_param_t</code>: parameter-level metadata and validation schema.</li>
+<li><code>agent_skill_t</code>: maps agent definitions to skills.</li>
+<li><code>skill_tool_t</code>: maps skills to tools for progressive disclosure.</li>
+<li><code>api_endpoint_t</code>: MCP or REST endpoint metadata, including <code>tool_schema</code> and
+<code>tool_metadata</code>.</li>
+</ul>
+<p>The existing MCP Registry design already maps MCP tools into <code>api_endpoint_t</code>.
+OpenAPI parsing also creates endpoint rows. This design uses <code>tool_t</code> as the
+agent-facing catalog row and links it back to <code>api_endpoint_t</code> when the tool
+originates from an API endpoint.</p>
+<p>Recommended mapping for gateway-imported tools:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Gateway tool field</th><th>Portal storage</th></tr>
+</thead>
+<tbody>
+<tr><td><code>name</code></td><td><code>tool_t.name</code> and <code>api_endpoint_t.endpoint_name</code></td></tr>
+<tr><td><code>description</code></td><td><code>tool_t.description</code> and <code>api_endpoint_t.endpoint_desc</code></td></tr>
+<tr><td><code>inputSchema</code></td><td><code>api_endpoint_t.tool_schema</code> and generated <code>tool_param_t</code> rows</td></tr>
+<tr><td>Gateway route metadata</td><td>gateway exposure metadata keyed by <code>hostId</code>, <code>serviceId</code>, and <code>envTag</code></td></tr>
+<tr><td>Downstream REST path</td><td><code>tool_t.api_endpoint</code> and <code>api_endpoint_t.endpoint_path</code></td></tr>
+<tr><td>Downstream method</td><td><code>tool_t.api_method</code> and <code>api_endpoint_t.http_method</code></td></tr>
+<tr><td>Safety flags</td><td>indexed tool metadata plus <code>api_endpoint_t.tool_metadata.safety</code></td></tr>
+</tbody>
+</table>
+</div>
+<p><code>tool_t.implementation_type</code> should be a standardized enum aligned with the
+LightAPI Description execution model. Endpoint-backed tools should use a
+LightAPI endpoint implementation type rather than preserving every downstream
+transport as a different tool implementation. The downstream protocol remains
+in the endpoint and LightAPI request metadata.</p>
+<p>Recommended first enum values:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Implementation type</th><th>Use</th></tr>
+</thead>
+<tbody>
+<tr><td><code>lightapi_endpoint</code></td><td>Any agent-invokable API endpoint described by <code>api_endpoint_t</code> and LightAPI metadata.</td></tr>
+<tr><td><code>java</code></td><td>In-process Java implementation.</td></tr>
+<tr><td><code>python</code></td><td>Script-backed Python implementation.</td></tr>
+<tr><td><code>javascript</code></td><td>Script-backed JavaScript implementation.</td></tr>
+</tbody>
+</table>
+</div>
+<p>For <code>lightapi_endpoint</code>, execution still goes through gateway <code>tools/call</code> when
+the endpoint is exposed to a gateway. The source protocol, such as MCP,
+OpenAPI, JSON-RPC, OpenRPC, or gRPC, belongs in <code>api_endpoint_t</code>,
+<code>tool_metadata</code>, and the LightAPI request description.</p>
+<h2 id="endpoint-first-capability-model"><a class="header" href="#endpoint-first-capability-model">Endpoint-First Capability Model</a></h2>
+<p>Agents and skills should operate over endpoint capabilities, not only over MCP
+tools. MCP remains the runtime protocol for tool-calling through the gateway,
+but the catalog should support any endpoint that can be represented as an
+agent-invokable capability.</p>
+<p>Recommended capability layers:</p>
+<ol>
+<li><code>api_endpoint_t</code>: canonical endpoint row for the API version.</li>
+<li><code>tool_t</code>: agent-facing executable projection of the endpoint.</li>
+<li><code>tool_param_t</code>: normalized top-level input parameters derived from the
+endpoint’s JSON Schema.</li>
+<li><code>skill_tool_t</code>: curated relationship between a skill and a tool projection,
+including per-skill overrides such as priority, examples, or approval notes.</li>
+<li><code>agent_skill_t</code>: assignment of skills to agent definitions.</li>
+</ol>
+<p>This model supports these source types:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Source</th><th>Endpoint identity</th><th>Tool projection</th></tr>
+</thead>
+<tbody>
+<tr><td>MCP <code>tools/list</code></td><td><code>&lt;toolName&gt;@call</code></td><td>Tool name is the MCP tool name; method is <code>call</code>.</td></tr>
+<tr><td>OpenAPI</td><td><code>&lt;path&gt;@&lt;method&gt;</code></td><td>Tool name comes from operation id or generated endpoint name.</td></tr>
+<tr><td>LightAPI Description</td><td><code>operation.endpointId</code> or <code>&lt;operationId&gt;@&lt;method&gt;</code></td><td>Tool name comes from operation id or curated agent metadata.</td></tr>
+<tr><td>JSON-RPC/OpenRPC</td><td><code>&lt;method&gt;@call</code></td><td>Tool name is the method or curated operation name.</td></tr>
+<tr><td>gRPC</td><td><code>&lt;service&gt;/&lt;method&gt;@call</code></td><td>Tool name is the curated operation name.</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>tool_param_t</code> should be generated from the logical input schema, not from wire
+transport details alone. For OpenAPI, the logical input schema should merge
+path parameters, query parameters, and request body into one object. For MCP,
+the logical input schema is the MCP <code>inputSchema</code>. For JSON-RPC, it is the
+logical params schema.</p>
+<h2 id="semantic-routing-metadata"><a class="header" href="#semantic-routing-metadata">Semantic Routing Metadata</a></h2>
+<p>The customer-required semantic routing fields should be first-class indexed
+catalog data, not only JSON metadata. They are used for macro-filtering before
+expensive keyword, vector, or LLM ranking, so the common filter fields must be
+queryable through normal portal-query indexes.</p>
+<p>Recommended indexed fields or relationships:</p>
+<ul>
+<li>domain and semantic namespace,</li>
+<li>sensitivity tier,</li>
+<li>semantic weight,</li>
+<li>target personas,</li>
+<li>active state,</li>
+<li>source protocol and implementation type,</li>
+<li>portal category and tag relationships.</li>
+</ul>
+<p>The full structured payload should still be preserved in
+<code>api_endpoint_t.tool_metadata</code> so LightAPI import/export, gateway config
+generation, and agent cache payloads have one portable metadata object.</p>
+<p>Recommended <code>api_endpoint_t.tool_metadata</code> shape:</p>
+<pre><code class="language-json">{
+  "routing": {
+    "domain": "finance.accounts",
+    "category": "account-management",
+    "semanticNamespace": "prod.accounts.core",
+    "targetPersonas": ["account-agent", "customer-support-agent"],
+    "semanticDescription": "Retrieves account profile and status information when a user asks about an existing account.",
+    "semanticKeywords": ["account lookup", "customer account", "balance", "status"],
+    "contextRequirements": {
+      "requiredInputs": ["accountNo"],
+      "requiredContext": ["host_id"]
+    },
+    "dependencies": [
+      {
+        "endpoint": "/v1/accounts/{accountNo}@get",
+        "relation": "frequently_chained_after"
+      }
+    ],
+    "semanticWeight": 0.75,
+    "sensitivityTier": "Internal-Only",
+    "fallbackEndpoint": "/v1/accounts@get",
+    "embedding": {
+      "model": "tool-description-embedding",
+      "source": "semanticDescription"
+    }
+  },
+  "safety": {
+    "read_only": true,
+    "destructive": false,
+    "humanApprovalRequired": false
+  }
+}
+</code></pre>
+<p>Recommended ownership:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Metadata</th><th>Primary storage</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td>Domain and namespace</td><td>Indexed endpoint/tool columns plus <code>tool_metadata.routing</code></td><td>Used for macro-filtering before vector ranking.</td></tr>
+<tr><td>Categories and tags</td><td>Existing portal tag/category tables plus <code>tool_metadata.routing</code></td><td>Reuse the portal taxonomy instead of creating a separate endpoint taxonomy.</td></tr>
+<tr><td>Target personas</td><td>Indexed mapping or array plus <code>tool_metadata.routing.targetPersonas</code></td><td>Used to filter the effective catalog for the current agent.</td></tr>
+<tr><td>Rich capability description</td><td><code>tool_t.description</code> plus <code>tool_metadata.routing.semanticDescription</code></td><td><code>tool_t.description</code> should be the concise LLM-facing description.</td></tr>
+<tr><td>Synonyms and keywords</td><td><code>tool_metadata.routing.semanticKeywords</code></td><td>Used by keyword search and embedding source text.</td></tr>
+<tr><td>Embedding vector</td><td><code>tool_t.description_embedding</code></td><td>The embedding provider must produce the configured vector dimension, currently 384, or the column must be migrated.</td></tr>
+<tr><td>Required state/context locks</td><td><code>tool_metadata.routing.contextRequirements</code></td><td>The router should exclude non-viable tools before LLM tool injection.</td></tr>
+<tr><td>Dependency mappings</td><td><code>tool_metadata.routing.dependencies</code></td><td>Used for chain suggestions, prefetch, or warm-up.</td></tr>
+<tr><td>Priority score</td><td>Indexed column plus <code>tool_metadata.routing.semanticWeight</code></td><td>Numeric multiplier for ranking ties.</td></tr>
+<tr><td>Sensitivity tier</td><td>Indexed column plus <code>tool_metadata.routing.sensitivityTier</code></td><td>Used before disclosure and before execution.</td></tr>
+<tr><td>Fallback target</td><td><code>tool_metadata.routing.fallbackEndpoint</code></td><td>Runtime fallback should still respect gateway policy.</td></tr>
+<tr><td>Destructive/read-only flags</td><td><code>tool_metadata.safety</code> and existing gateway <code>toolMetadata</code></td><td>Runtime enforcement belongs in gateway or policy, not only in prompts.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The first semantic search implementation can work from the agent’s local cache:</p>
+<ol>
+<li>Filter by host, active flag, assigned skill, domain, namespace, target
+persona, and sensitivity tier.</li>
+<li>Exclude endpoints whose required context is not available in the current
+workflow or chat state.</li>
+<li>Rank by keyword matches over skill text, endpoint name, tool name,
+description, semantic keywords, and LightAPI capability text.</li>
+<li>When embeddings are populated, combine vector similarity with the keyword
+score and multiply by <code>semanticWeight</code>.</li>
+<li>Call gateway <code>tools/list</code> and intersect the ranked set with currently
+executable tools before exposing schemas to the LLM.</li>
+</ol>
+<h2 id="embedding-recommendation"><a class="header" href="#embedding-recommendation">Embedding Recommendation</a></h2>
+<p>Keep the first production embedding dimension at 384 because the current
+Postgres vector column is already <code>VECTOR(384)</code> and the first catalog use case
+is routing over short endpoint descriptions, not long document retrieval.</p>
+<p>Recommended model strategy:</p>
+<ul>
+<li>Use a provider abstraction with configured <code>embedding_model</code>,
+<code>embedding_dimension</code>, and <code>embedding_source</code>.</li>
+<li>For OpenAI-hosted embeddings, use <code>text-embedding-3-small</code> with the
+dimensions parameter set to 384.</li>
+<li>For on-prem or firewall-restricted deployments, use a local embedding service
+that is configured to emit 384-dimensional vectors.</li>
+<li>Store enough metadata to know how a vector was created: model, dimension,
+source text hash, source field, and generated timestamp.</li>
+<li>Re-embed when the semantic description, keywords, domain, or model config
+changes.</li>
+</ul>
+<p>The portal catalog write path should remain in the portal service layer that
+owns <code>api_endpoint_t</code> and <code>tool_t</code> persistence. Because the current portal
+command/query services are Java, the Java side should own transactions,
+versioning, and persistence of embedding results. A Rust service or worker can
+still generate embeddings behind an internal API or queue consumer, especially
+if local model performance is better there. In that model, Java requests or
+consumes the vector and writes it through the normal portal persistence path.</p>
+<h2 id="lightapi-description-enrichment"><a class="header" href="#lightapi-description-enrichment">LightAPI Description Enrichment</a></h2>
+<p>LightAPI Description should be the preferred enrichment source for endpoint
+capabilities. OpenAPI and MCP <code>tools/list</code> are good at initial extraction, but
+LightAPI adds the agent-oriented context needed for high-accuracy routing:</p>
+<ul>
+<li>endpoint identity and stable <code>endpointId</code></li>
+<li>domain, tags, lifecycle, visibility, and capability group</li>
+<li>logical input schema and request mapping</li>
+<li>result schema and result cases</li>
+<li>examples and behavior notes</li>
+<li>progressive disclosure metadata</li>
+<li>agent-facing descriptions, personas, keywords, context requirements, and
+guardrails</li>
+</ul>
+<p>Recommended merge priority for endpoint metadata:</p>
+<ol>
+<li>Portal operator overrides.</li>
+<li>Endpoint-level LightAPI Description.</li>
+<li>API-level inherited LightAPI Description context.</li>
+<li>OpenAPI/OpenRPC/protobuf/MCP source extraction.</li>
+<li>Gateway runtime <code>tools/list</code> discovery.</li>
+</ol>
+<p>This keeps runtime discovery useful while letting curated LightAPI descriptions
+provide richer semantic routing without hand-authoring every endpoint as an
+independent skill.</p>
+<h2 id="portal-catalog-contract"><a class="header" href="#portal-catalog-contract">Portal Catalog Contract</a></h2>
+<p>The agent should read skills and tools through the <code>genai-query</code> API in
+portal-query. The source spec is:</p>
+<pre><code class="language-text">genai-query/src/main/resources/spec.yaml
+</code></pre>
+<p>The current spec already includes catalog endpoints for the main entities:</p>
+<ul>
+<li><code>getAgentSkill</code> and <code>getFreshAgentSkill</code></li>
+<li><code>getSkill</code> and <code>getFreshSkill</code></li>
+<li><code>getSkillTool</code> and <code>getFreshSkillTool</code></li>
+<li><code>getSkillDependency</code> and <code>getFreshSkillDependency</code></li>
+<li><code>getTool</code> and <code>getFreshTool</code></li>
+<li><code>getToolParam</code> and <code>getFreshToolParam</code></li>
+</ul>
+<p>Phase 2 should add a dedicated effective catalog endpoint instead of forcing the
+agent to compose many generic query endpoints. The endpoint should still live in
+<code>genai-query</code>, not controller-rs.</p>
+<p>Recommended endpoint behavior:</p>
+<ul>
+<li>verify the caller’s token claims before reading catalog rows,</li>
+<li>require request <code>host_id</code>, <code>service_id</code>, and <code>env_tag</code>,</li>
+<li>match token <code>host</code>, <code>sid</code>, and <code>env</code> claims to those request values,</li>
+<li>return only endpoint/tool projections valid for that host, service, and
+environment,</li>
+<li>include active endpoint metadata, tool schemas, safety metadata, routing
+metadata, and skill mappings relevant to the agent,</li>
+<li>support a freshness or version field so the agent can cache the result.</li>
+</ul>
+<p>The agent should cache the returned structure locally:</p>
+<pre><code class="language-json">{
+  "host_id": "00000000-0000-0000-0000-000000000000",
+  "agent_def_id": "00000000-0000-0000-0000-000000000000",
+  "catalog_version": 42,
+  "skills": [
+    {
+      "skill_id": "00000000-0000-0000-0000-000000000000",
+      "name": "Account Management",
+      "description": "Use account tools to inspect and manage customer accounts.",
+      "content_markdown": "Prefer read-only tools before create or update tools.",
+      "tools": [
+        {
+          "tool_id": "00000000-0000-0000-0000-000000000000",
+          "endpoint_id": "00000000-0000-0000-0000-000000000000",
+          "name": "getAccounts",
+          "endpoint": "/v1/accounts@get",
+          "api_type": "openapi",
+          "description": "List account summaries.",
+          "input_schema": {
+            "type": "object",
+            "properties": {}
+          },
+          "routing_metadata": {
+            "domain": "finance.accounts",
+            "semanticNamespace": "prod.accounts",
+            "semanticKeywords": ["account list", "customer accounts"],
+            "sensitivityTier": "Internal-Only"
+          },
+          "safety": {
+            "read_only": true,
+            "destructive": false
+          }
+        }
+      ]
+    }
+  ]
+}
+</code></pre>
+<p>For phase 2, the agent definition identity is the agent API version identity.
+<code>agent_definition_t.agent_def_id</code> stores the same UUID as
+<code>api_version_t.api_version_id</code>; the table is an agent-specific profile extension
+for model and runtime settings, not a second standalone agent registry. The
+agent display name comes from <code>api_t.api_name</code>, so <code>agent_definition_t</code> does not
+duplicate the API name. API Admin continues to own the API/API-version
+lifecycle, Instance Admin continues to own deployed instances, and the Agent
+Definition page edits the profile for that API version.</p>
+<p>The previous registry <code>skill/search</code> response shape was:</p>
+<pre><code class="language-json">{
+  "skills": [
+    {
+      "skill_id": "00000000-0000-0000-0000-000000000000",
+      "name": "Account Management",
+      "description": "Use account tools to inspect and manage customer accounts.",
+      "tool_name": "getAccounts",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}
+</code></pre>
+<p>That flattened shape can remain as an internal compatibility DTO while the
+agent is migrated, but it should not be the long-term external contract. The
+target cache shape should support a skill with multiple tools:</p>
+<pre><code class="language-json">{
+  "skills": [
+    {
+      "skill_id": "00000000-0000-0000-0000-000000000000",
+      "name": "Account Management",
+      "description": "Use account tools to inspect and manage customer accounts.",
+      "content_markdown": "Prefer read-only tools before create or update tools.",
+      "tools": [
+        {
+          "name": "getAccounts",
+          "description": "List account summaries.",
+          "input_schema": {
+            "type": "object",
+            "properties": {}
+          }
+        }
+      ]
+    }
+  ]
+}
+</code></pre>
+<p>Migration rule:</p>
+<ul>
+<li>Remove the controller-rs <code>skill/search</code> placeholder.</li>
+<li>The agent can temporarily accept both the flattened shape and the nested
+<code>tools</code> shape while its portal-query client is being migrated.</li>
+<li>After migration, the nested effective catalog shape becomes the preferred
+internal cache contract.</li>
+</ul>
+<p>Agent identity can come from token claims, configured agent definition, or
+request fields. If inference is not enough, pass explicit fields to the
+portal-query catalog call:</p>
+<pre><code class="language-json">{
+  "agent_def_id": "00000000-0000-0000-0000-000000000000",
+  "host_id": "00000000-0000-0000-0000-000000000000",
+  "service_id": "com.networknt.account-agent-1.0.0",
+  "env_tag": "dev"
+}
+</code></pre>
+<h2 id="runtime-behavior"><a class="header" href="#runtime-behavior">Runtime Behavior</a></h2>
+<p>The agent should treat the portal catalog as helpful guidance, not as a hard
+dependency for basic tool use.</p>
+<p>Recommended behavior:</p>
+<ol>
+<li>At startup, call the <code>genai-query</code> API to load the effective agent catalog.</li>
+<li>Cache the catalog locally under <code>host_id</code>, agent identity, and catalog
+version.</li>
+<li>During chat, search the local catalog with the user prompt.</li>
+<li>If matched skills are returned, add skill instructions to the prompt context.</li>
+<li>If matched skills include tool mappings, prefer those tools for the LLM tool
+list.</li>
+<li>Call gateway <code>tools/list</code> to verify executable tools and obtain the current
+runtime schemas.</li>
+<li>Intersect skill-selected tool names with gateway-listed tools.</li>
+<li>If no skills match, or the local catalog is unavailable, fall back to gateway
+<code>tools/list</code>.</li>
+<li>Execute all LLM tool calls through gateway <code>tools/call</code>.</li>
+</ol>
+<p>When portal data changes, controller cache management can invalidate the
+agent’s local catalog cache. Reload behavior should match the agent’s initial
+loading strategy:</p>
+<ul>
+<li>if the agent loads the catalog during startup, invalidation should trigger an
+eager reload so the next chat request sees current metadata;</li>
+<li>if the agent loads the catalog on the first request, invalidation can clear
+the cache and let the next request reload lazily.</li>
+</ul>
+<p>This keeps the account-agent usable before the portal skill catalog is fully
+populated and avoids making controller-rs part of the catalog query or execution
+path.</p>
+<h2 id="portal-ui"><a class="header" href="#portal-ui">Portal UI</a></h2>
+<h3 id="endpoint-catalog-and-tool-projection"><a class="header" href="#endpoint-catalog-and-tool-projection">Endpoint Catalog And Tool Projection</a></h3>
+<p>The catalog UI should be endpoint-first but still show the tool projection that
+agents will see. It should let operators:</p>
+<ul>
+<li>browse <code>api_endpoint_t</code> rows by API, API version, endpoint, method, source,
+and active state,</li>
+<li>import or resync endpoint capabilities from OpenAPI, MCP <code>tools/list</code>,
+manually pasted MCP tools payloads, LightAPI descriptions, and selected
+gateway runtime surfaces,</li>
+<li>publish selected endpoint rows into <code>tool_t</code> as agent-invokable tools,</li>
+<li>generate or refresh <code>tool_param_t</code> rows from the logical input schema,</li>
+<li>see tool name, description, input schema, downstream endpoint, API type,
+semantic namespace, domain, personas, sensitivity tier, and runtime
+executable state,</li>
+<li>compare catalog metadata against source specs and current gateway
+<code>tools/list</code>,</li>
+<li>mark missing endpoint projections inactive,</li>
+<li>override operator-facing descriptions without changing gateway config,</li>
+<li>review and edit semantic routing metadata such as keywords, context
+requirements, fallback endpoint, priority weight, read-only, destructive,
+sensitive, or human-approval-required.</li>
+</ul>
+<p>The first implementation should not depend only on live gateway access. It can
+import from the endpoint rows produced by API version parsing, including manual
+MCP <code>tools/list</code> JSON pasted into the API version spec field. Gateway
+<code>tools/list</code> should then be used to verify which imported projections are
+currently executable by a deployed gateway.</p>
+<h3 id="skill-editor"><a class="header" href="#skill-editor">Skill Editor</a></h3>
+<p>The Skill Editor should let operators:</p>
+<ul>
+<li>create and update <code>skill_t</code> rows,</li>
+<li>write <code>content_markdown</code> instructions,</li>
+<li>link tools through <code>skill_tool_t</code>,</li>
+<li>set tool access level and per-skill config,</li>
+<li>preview which tools the skill would expose for a sample prompt,</li>
+<li>activate or deactivate skills.</li>
+</ul>
+<p>Skill content should be short and operational. It should describe when to use
+the skill, how to interpret the tools, and any sequencing rules. It should not
+contain secrets.</p>
+<h3 id="agent-skill-assignment"><a class="header" href="#agent-skill-assignment">Agent Skill Assignment</a></h3>
+<p>The Agent Skill Assignment UI should let operators:</p>
+<ul>
+<li>select an agent definition,</li>
+<li>assign one or more active skills through <code>agent_skill_t</code>,</li>
+<li>set priority and sequence,</li>
+<li>preview the final skill list for that agent,</li>
+<li>verify that each assigned skill still has at least one executable gateway
+tool.</li>
+</ul>
+<h2 id="portal-query-and-agent-cache-implementation"><a class="header" href="#portal-query-and-agent-cache-implementation">Portal-query And Agent Cache Implementation</a></h2>
+<p>Catalog lookup should be implemented through the <code>genai-query</code> API. The agent
+should fetch the assigned active catalog, cache it locally, and run progressive
+disclosure search against the cache.</p>
+<p>Initial algorithm:</p>
+<ol>
+<li>Resolve <code>host_id</code> and agent identity from token claims, configured agent
+definition, service registration metadata, or request fields.</li>
+<li>Use <code>genai-query</code> endpoints to load active <code>agent_skill_t</code> rows for the
+agent.</li>
+<li>Load the linked active <code>skill_t</code>, <code>skill_tool_t</code>, <code>tool_t</code>,
+<code>tool_param_t</code>, and related <code>api_endpoint_t</code> data.</li>
+<li>Build a nested effective catalog grouped by skill, with each skill carrying
+its mapped tools, schemas, endpoint identity, safety flags, and routing
+metadata.</li>
+<li>Cache the effective catalog locally with a catalog version or max aggregate
+version.</li>
+<li>During chat, macro-filter cached entries by agent persona, domain,
+namespace, sensitivity tier, active state, and available workflow context.</li>
+<li>Rank cached entries by simple text matching over
+<code>skill_t.name</code>, <code>skill_t.description</code>, <code>skill_t.content_markdown</code>,
+<code>tool_t.name</code>, <code>tool_t.description</code>, endpoint name, endpoint description,
+and semantic keywords.</li>
+<li>Intersect the final candidate list with gateway <code>tools/list</code> before
+exposing tool schemas to the LLM.</li>
+</ol>
+<p>Controller cache management should invalidate this local cache when portal
+catalog data changes. After invalidation, the agent reloads from portal-query.</p>
+<p>Later algorithm:</p>
+<ul>
+<li>Add vector search over <code>skill_t.description_embedding</code> and
+<code>tool_t.description_embedding</code>.</li>
+<li>Add vector search over endpoint semantic descriptions and LightAPI
+capability text.</li>
+<li>Include skill dependency expansion from <code>skill_dependency_t</code>.</li>
+<li>Use dependency mappings and fallback endpoints for chain planning, prefetch,
+and failure repair.</li>
+<li>Include inactive or missing-tool diagnostics for portal admin views, not for
+normal agent search.</li>
+</ul>
+<h2 id="gateway-implementation"><a class="header" href="#gateway-implementation">Gateway Implementation</a></h2>
+<p>The gateway should keep the MCP data-plane contract stable:</p>
+<ul>
+<li><code>tools/list</code> returns the executable tool set for the caller.</li>
+<li><code>tools/call</code> routes by tool name to downstream MCP servers or REST services.</li>
+<li>Gateway policy remains authoritative at execution time.</li>
+<li>Gateway does not depend on <code>skill_t</code> or <code>agent_skill_t</code> to execute tools.</li>
+</ul>
+<p>The gateway can expose an administrative sync endpoint later, but the first
+portal sync can call the existing MCP <code>tools/list</code> endpoint with an operator or
+service credential.</p>
+<p><code>mcp-router.tools</code> in <code>values.yml</code> should stay a runtime execution projection,
+not the full semantic registry. It should include the fields the gateway needs
+to list and call tools, plus safety metadata that must be enforced at runtime.
+Richer semantic routing metadata should stay in portal-query and the agent
+cache unless the gateway needs it for a concrete runtime policy decision.</p>
+<h2 id="security-rules"><a class="header" href="#security-rules">Security Rules</a></h2>
+<ul>
+<li>Skill assignment narrows what the agent should offer to the LLM, but it does
+not grant runtime authorization by itself.</li>
+<li>Gateway access control, endpoint scopes, OAuth token claims, and downstream
+service authorization still decide whether a tool call is allowed.</li>
+<li>Tool schemas and descriptions are not trusted input. They should be validated
+before storing and escaped when rendered.</li>
+<li>Skill content must not contain secrets, tokens, private keys, or passwords.</li>
+<li>A stale catalog row must not make a removed gateway tool executable.</li>
+<li>A stale local agent cache must be intersected with gateway <code>tools/list</code>
+before exposing tools to the LLM.</li>
+<li>Controller cache invalidation only forces reload; it does not grant access to
+catalog rows or executable tools.</li>
+<li>Sensitive or destructive tool metadata should be enforced by the gateway or a
+policy layer, not only by prompt instructions.</li>
+<li>Sensitivity tier must be checked before catalog disclosure. An agent without
+clearance for <code>Restricted-PII</code> should not receive the endpoint description or
+schema even if a skill references it.</li>
+<li>Context requirements are not only prompt hints. If required context is
+missing, the endpoint should be excluded or routed to an ask/workflow step
+that obtains the missing value.</li>
+</ul>
+<h2 id="failure-handling-1"><a class="header" href="#failure-handling-1">Failure Handling</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Failure</th><th>Expected behavior</th></tr>
+</thead>
+<tbody>
+<tr><td>Portal-query catalog load fails at startup</td><td>Start with an empty catalog cache and fall back to gateway <code>tools/list</code>.</td></tr>
+<tr><td>Portal-query catalog reload fails after invalidation</td><td>Keep the previous cache if available, mark it stale, retry with backoff, and still verify tools through gateway <code>tools/list</code>.</td></tr>
+<tr><td>Gateway <code>tools/list</code> fails</td><td>Continue chat without tools or return a clear tool-unavailable response.</td></tr>
+<tr><td>Skill references missing tool</td><td>Omit the missing tool from the runtime tool list and surface drift in portal admin UI.</td></tr>
+<tr><td>Gateway rejects <code>tools/call</code></td><td>Return the tool error to the LLM loop and log the gateway response.</td></tr>
+<tr><td>Catalog sync sees changed schema</td><td>Update catalog schema, mark the tool as changed, and preserve operator metadata.</td></tr>
+<tr><td>LightAPI enrichment conflicts with source spec</td><td>Preserve the source invocation contract, mark the semantic metadata conflict for review, and do not overwrite operator overrides.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="phased-implementation"><a class="header" href="#phased-implementation">Phased Implementation</a></h2>
+<h3 id="phase-1-preserve-direct-mcp-baseline"><a class="header" href="#phase-1-preserve-direct-mcp-baseline">Phase 1: Preserve Direct MCP Baseline</a></h3>
+<ul>
+<li>Keep agent tool execution through gateway <code>tools/call</code>.</li>
+<li>Remove the controller-rs <code>skill/search</code> placeholder before it becomes a
+dependency.</li>
+<li>Ensure agent falls back to gateway <code>tools/list</code> when no catalog cache is
+available.</li>
+<li>Keep direct gateway <code>tools/list</code> and <code>tools/call</code> working without portal
+skills.</li>
+</ul>
+<h3 id="phase-2-api-endpoint-catalog-sync"><a class="header" href="#phase-2-api-endpoint-catalog-sync">Phase 2: API Endpoint Catalog Sync</a></h3>
+<ul>
+<li>Add portal UI for endpoint-first import and resync.</li>
+<li>Use existing API version parsing to populate <code>api_endpoint_t</code> for OpenAPI and
+MCP tools, including manual MCP <code>tools/list</code> payloads accepted in the API
+version spec field.</li>
+<li>Sync all endpoint rows for the API version into the endpoint catalog. Do not
+limit the catalog to the endpoints currently selected for one gateway
+instance.</li>
+<li>Import or refresh LightAPI Description metadata for endpoint enrichment.</li>
+<li>Publish selected endpoint rows into <code>tool_t</code> as agent-facing tool
+projections.</li>
+<li>Generate <code>tool_param_t</code> from each endpoint’s logical input schema.</li>
+<li>Link every API-origin tool projection back to <code>api_endpoint_t.endpoint_id</code>.</li>
+<li>Store semantic routing metadata in indexed endpoint/tool fields and preserve
+the full metadata payload in <code>api_endpoint_t.tool_metadata</code>.</li>
+<li>Let users select which endpoint projections should be exposed to a specific
+gateway instance. This deployment selection is separate from endpoint catalog
+sync.</li>
+<li>Verify runtime executability with gateway <code>tools/list</code> for the selected
+gateway instance when a gateway is reachable.</li>
+<li>Mark disappeared or non-executable projections inactive instead of deleting
+them.</li>
+<li>Add drift indicators for schema, description, safety metadata, and semantic
+routing metadata changes.</li>
+</ul>
+<h3 id="phase-3-skill-authoring"><a class="header" href="#phase-3-skill-authoring">Phase 3: Skill Authoring</a></h3>
+<ul>
+<li>Add portal UI for <code>skill_t</code>.</li>
+<li>Add tool linking through <code>skill_tool_t</code>.</li>
+<li>Add preview of selected tools and effective prompt instructions.</li>
+<li>Keep embeddings optional.</li>
+</ul>
+<h3 id="phase-4-agent-assignment"><a class="header" href="#phase-4-agent-assignment">Phase 4: Agent Assignment</a></h3>
+<ul>
+<li>Add portal UI for <code>agent_skill_t</code>.</li>
+<li>Let operators assign active skills to agent definitions.</li>
+<li>Add validation that assigned skills have active tools.</li>
+</ul>
+<h3 id="phase-5-real-skill-search"><a class="header" href="#phase-5-real-skill-search">Phase 5: Real Skill Search</a></h3>
+<ul>
+<li>Add the dedicated <code>genai-query</code> effective catalog endpoint with token
+verification against <code>host</code>, <code>sid</code>, and <code>env</code> claims.</li>
+<li>Implement the agent portal-query client using that endpoint.</li>
+<li>Build and cache the nested effective catalog for the agent.</li>
+<li>Start with local macro-filtering and keyword matching over cached skills,
+endpoint metadata, and tool projections.</li>
+<li>Wire controller cache-management invalidation to clear or reload the agent
+catalog cache.</li>
+<li>Add vector ranking after 384-dimensional embeddings are populated and combine
+it with <code>semanticWeight</code>.</li>
+</ul>
+<h3 id="phase-6-semantic-routing-and-governance"><a class="header" href="#phase-6-semantic-routing-and-governance">Phase 6: Semantic Routing And Governance</a></h3>
+<ul>
+<li>Add approval, ownership, audit, and versioning around tool imports and skill
+changes.</li>
+<li>Add safety-policy enforcement for destructive or sensitive tools.</li>
+<li>Add sensitivity-tier disclosure checks, context-lock validation, fallback
+routing, and dependency-aware prefetch or warm-up where the runtime supports
+it.</li>
+<li>Add reports for agents with no skills, skills with no tools, and catalog
+tools not executable by the gateway.</li>
+</ul>
+<h2 id="resolved-phase-2-decisions"><a class="header" href="#resolved-phase-2-decisions">Resolved Phase 2 Decisions</a></h2>
+<ul>
+<li>Phase 2 endpoint catalog sync covers all endpoint rows for an API version.
+Gateway exposure is a separate step where users select which endpoint/tool
+projections to deploy to a specific gateway instance.</li>
+<li>Runtime verification means checking the selected gateway instance’s
+<code>tools/list</code> response to confirm that a deployed endpoint projection is
+executable there. It is not the same as endpoint catalog sync.</li>
+<li>Gateway exposure identity is <code>hostId + serviceId + envTag</code>. The token used
+for portal APIs must carry matching <code>host</code>, <code>sid</code>, and <code>env</code> claims.</li>
+<li><code>tool_t.implementation_type</code> should be standardized and aligned with the
+LightAPI Description execution model. Endpoint-backed tools should use the
+standardized endpoint implementation type, with downstream protocol stored in
+endpoint and LightAPI metadata.</li>
+<li>High-use semantic routing fields should be indexed columns or indexed
+relationships, with the full structured payload preserved in
+<code>api_endpoint_t.tool_metadata</code>.</li>
+<li>Endpoint category and tag classification should reuse the existing portal tag
+and category system.</li>
+<li>Embeddings should start at 384 dimensions to match the current <code>VECTOR(384)</code>
+schema. Use a provider abstraction so hosted OpenAI embeddings or local
+embedding services can be swapped without changing the catalog schema.</li>
+<li><code>genai-query</code> should expose a dedicated effective catalog endpoint. Its token
+verification must match request <code>host_id</code>, <code>service_id</code>, and <code>env_tag</code>
+against token <code>host</code>, <code>sid</code>, and <code>env</code> claims.</li>
+<li>Cache reload behavior depends on the loading strategy. Startup-loaded
+catalogs should eagerly reload after invalidation. First-request-loaded
+catalogs can reload lazily on the next request.</li>
+<li>Phase 2 focuses on tool and endpoint metadata. Skill-specific metadata and
+per-skill tool config should be designed later with the skill authoring
+phase.</li>
+</ul>
+<h2 id="recommendation-3"><a class="header" href="#recommendation-3">Recommendation</a></h2>
+<p>Implement this as a progressive control-plane enhancement. The gateway remains
+the execution path, and portal-authored skills become the agent guidance layer
+served by portal-query. The agent should cache the effective catalog locally and
+reload it after controller cache-management invalidation. This lets MCP tools
+work immediately through <code>tools/list</code> and <code>tools/call</code>, while still giving
+portal operators a clean path to organize tools into skills, assign those
+skills to agents, and improve retrieval over time.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="oauth-kafka"><a class="header" href="#oauth-kafka">OAuth Kafka</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
@@ -2532,7 +3352,7 @@ without a <code>userId</code> filter for host-wide failures.</li>
 </li>
 <li><strong>Flow Determination</strong>: Instead of relying on client-supplied parameters like <code>requested_token_type</code>, the server retrieves the <code>token_ex_type</code> from the client context in the database to decide which handler to use. This ensures that only authorized exchange types are performed for each specific client.</li>
 </ol>
-<h2 id="recommendation-3"><a class="header" href="#recommendation-3">Recommendation</a></h2>
+<h2 id="recommendation-4"><a class="header" href="#recommendation-4">Recommendation</a></h2>
 <p>For the <code>light-portal</code> ecosystem:</p>
 <ul>
 <li><strong>Option 4: Client Context</strong> is the selected method. It provides the highest level of security by ensuring that token exchange flows are explicitly configured and restricted on a per-client basis in the database.</li>
@@ -2548,7 +3368,7 @@ without a <code>userId</code> filter for host-wide failures.</li>
 <h1 id="oauth-audit"><a class="header" href="#oauth-audit">OAuth Audit</a></h1>
 <p>The OAuth services keep authorization codes and refresh tokens as operational state. These rows are short lived and are now written directly to <code>auth_code_t</code> and <code>auth_refresh_token_t</code> instead of being created through the general event store. This avoids high-volume login and refresh-token churn in <code>event_store_t</code> and <code>outbox_message_t</code>.</p>
 <p>Audit and login history are recorded separately in append-oriented OAuth audit tables.</p>
-<h2 id="goals-1"><a class="header" href="#goals-1">Goals</a></h2>
+<h2 id="goals-2"><a class="header" href="#goals-2">Goals</a></h2>
 <ul>
 <li>Show administrators who is currently online.</li>
 <li>Show a user the last login time and session history.</li>
@@ -2857,7 +3677,7 @@ CREATE TABLE tenant_resource_t(
 <p>Azure CosmosDB for PostgreSQL (Managed Citus): Microsoft offers a fully managed cloud service called Azure CosmosDB for PostgreSQL, which is built on Citus. This service has usage-based pricing, and the cost depends on factors like the number of nodes, storage, and compute resources used. This managed option reduces the operational overhead of managing Citus yourself.</p>
 </li>
 </ul>
-<h4 id="recommendation-4"><a class="header" href="#recommendation-4">Recommendation:</a></h4>
+<h4 id="recommendation-5"><a class="header" href="#recommendation-5">Recommendation:</a></h4>
 <p>Don’t automatically add host_id to every table just because we are using Citus. Carefully analyze the data model, query patterns, and multi-tenancy requirements.</p>
 <ul>
 <li>
@@ -4590,7 +5410,7 @@ GROUP BY
 <p>This approach provides a seamless experience while maintaining compatibility with applications requiring roles for authorization or UI customization.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="private-messages"><a class="header" href="#private-messages">Private Messages</a></h1>
-<h2 id="problem-3"><a class="header" href="#problem-3">Problem</a></h2>
+<h2 id="problem-4"><a class="header" href="#problem-4">Problem</a></h2>
 <p>Portal users need a way to exchange private messages from the user profile
 without exposing email addresses to each other. The sender should only need a
 recipient user id or a display-safe user label. The backend can resolve email
@@ -4625,7 +5445,7 @@ model conversations, read state, participant visibility, or per-user delete.</li
 messages page should load its own data from the query API.</li>
 <li>The existing private-message tests are disabled stubs.</li>
 </ul>
-<h2 id="goals-2"><a class="header" href="#goals-2">Goals</a></h2>
+<h2 id="goals-3"><a class="header" href="#goals-3">Goals</a></h2>
 <ul>
 <li>Let one logged-in user send a message to another portal user without knowing
 or seeing the recipient email.</li>
@@ -4640,7 +5460,7 @@ recipient email internally.</li>
 <li>Provide a path from the existing <code>message_t</code> skeleton to a conversation-based
 model without breaking existing UI routes immediately.</li>
 </ul>
-<h2 id="non-goals-4"><a class="header" href="#non-goals-4">Non-Goals</a></h2>
+<h2 id="non-goals-5"><a class="header" href="#non-goals-5">Non-Goals</a></h2>
 <ul>
 <li>Do not build group chat in the first phase.</li>
 <li>Do not expose email addresses in message APIs, events, UI state, or task
@@ -6788,7 +7608,7 @@ public class ConfigRollbackService {
 <li>Non-standard instance files are copied into <code>snapshot_instance_file_t</code>.</li>
 </ul>
 <p>The <code>/config-server/files</code> endpoint must return both sets. It already filters standard files by <code>config_phase</code> through <code>config_snapshot_property_t.config_phase</code>, but <code>instance_file_t</code> and <code>snapshot_instance_file_t</code> do not currently carry <code>config_phase</code>. That makes it impossible to union the two sources while preserving runtime, deployment, and generator phase semantics.</p>
-<h2 id="problem-4"><a class="header" href="#problem-4">Problem</a></h2>
+<h2 id="problem-5"><a class="header" href="#problem-5">Problem</a></h2>
 <p>When a service starts through <code>DefaultConfigLoader</code>, it calls <code>/config-server/files</code> with <code>host</code>, <code>serviceId</code>, and <code>envTag</code>. The endpoint resolves the current snapshot and returns the files that should be written into <code>/config</code>.</p>
 <p>For the sidecar case, <code>openapi.yaml</code> exists in both <code>instance_file_t</code> and <code>snapshot_instance_file_t</code>, but it does not exist in <code>config_snapshot_property_t</code>. Since the current <code>/files</code> query reads only <code>config_snapshot_property_t</code>, the response does not include <code>openapi.yaml</code>, and the sidecar cannot write it to <code>/config</code>.</p>
 <p>The correct endpoint behavior is:</p>
@@ -10111,7 +10931,7 @@ function MyComponent() {
 <li>Add a timeout to stop polling after ~10-15 seconds to prevent infinite loops.</li>
 </ol>
 <p>As you can see, this is much more complicated than the optimistic update.</p>
-<h3 id="recommendation-5"><a class="header" href="#recommendation-5">Recommendation</a></h3>
+<h3 id="recommendation-6"><a class="header" href="#recommendation-6">Recommendation</a></h3>
 <p><strong>Adopt the Optimistic UI pattern (Option 1).</strong> It provides the best user experience, is resilient to timing issues caused by eventual consistency, and the implementation is clean and modern. The code provided for the optimistic <code>handleDelete</code> is a drop-in replacement that will solve your problem robustly.</p>
 <h3 id="should-you-poll-peroidically-to-sync-other-users-changes"><a class="header" href="#should-you-poll-peroidically-to-sync-other-users-changes">Should you poll peroidically to sync other users’ changes</a></h3>
 <p>The short answer is: <strong>No, you should still avoid client-side polling for this specific use case.</strong> It’s generally the wrong tool for this problem and creates more issues than it solves. The Optimistic UI approach is still preferable, but it needs to be combined with a robust backend and potentially other real-time technologies for a complete solution.</p>
@@ -12629,7 +13449,7 @@ The Importer processes the list in order:</p>
 <li><strong>Pros:</strong> 100% certainty that the data is valid according to the database schema.</li>
 <li><strong>Cons:</strong> Slightly heavier key locks, but acceptable for admin operations.</li>
 </ul>
-<h3 id="recommendation-6"><a class="header" href="#recommendation-6">Recommendation</a></h3>
+<h3 id="recommendation-7"><a class="header" href="#recommendation-7">Recommendation</a></h3>
 <p>Use <strong>Option 1 (App Simulation)</strong> for the UI preview to show the user “what will happen”.
 Use <strong>Option 2 (Transaction Rollback)</strong> immediately when the user clicks “Promote” (as a pre-flight check) or as an explicit “Verify” button to ensure deep integrity.</p>
 <h2 id="sibling-deletion-handling-orphaned-items"><a class="header" href="#sibling-deletion-handling-orphaned-items">Sibling Deletion: Handling Orphaned Items</a></h2>
@@ -13042,7 +13862,7 @@ Kubernetes cluster from the Instance Admin page.</p>
 <p>The goal is to provide a production-like deployment path for small businesses
 and enterprise tenants without requiring Light Portal to have direct network
 access to every customer cluster.</p>
-<h2 id="problem-5"><a class="header" href="#problem-5">Problem</a></h2>
+<h2 id="problem-6"><a class="header" href="#problem-6">Problem</a></h2>
 <p>Each API or application repository can contain a <code>k8s/</code> folder with Kubernetes
 deployment templates. The templates contain variables in the following format:</p>
 <pre><code class="language-text">${key:defaultValue}
@@ -13488,7 +14308,7 @@ local policy.</li>
 <li>A compromised deployer must not be able to receive commands for another
 tenant.</li>
 </ul>
-<h2 id="failure-handling-1"><a class="header" href="#failure-handling-1">Failure Handling</a></h2>
+<h2 id="failure-handling-2"><a class="header" href="#failure-handling-2">Failure Handling</a></h2>
 <p>The deployer should classify failures:</p>
 <ul>
 <li>template repository fetch failure</li>
@@ -13572,7 +14392,7 @@ artifacts?</li>
 long-running deployment progress events?</li>
 <li>Should rollback require the same environment-level approval policy as deploy?</li>
 </ul>
-<h2 id="recommendation-7"><a class="header" href="#recommendation-7">Recommendation</a></h2>
+<h2 id="recommendation-8"><a class="header" href="#recommendation-8">Recommendation</a></h2>
 <p>Use an in-cluster Rust deployer as the default production model. The deployer
 should connect outbound to Light Controller and execute deployment commands via
 MCP-style tools. Direct deployer URL mode is useful for MicroK8s and managed
