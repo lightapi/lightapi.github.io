@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-ec206509.js";
+            window.path_to_searchindex_js = "../searchindex-53071e4e.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-f81584e8.js"></script>
+        <script src="../toc-a988febc.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -338,6 +338,12 @@ the selected gateway instance when an operator is preparing or reviewing a
 gateway deployment. A later host-wide diagnostics view can aggregate all
 registered gateways, but phase 2 does not need host-wide verification as the
 default.</p>
+<p>Runtime verification is not part of the persistence projection. The persistence
+layer should store catalog state, endpoint/tool metadata, and inactive drift
+state, but it should not call a live gateway. The portal UI, deployment review
+flow, or a diagnostics endpoint should call the selected gateway’s <code>tools/list</code>
+with the operator or service credential, compare the returned tool names and
+schemas with the catalog, and surface the result as deployment drift.</p>
 <p>If a previously imported endpoint or tool disappears from the gateway, the sync
 process should mark the catalog projection inactive instead of deleting it
 immediately. This preserves skill mappings and gives operators a clear drift
@@ -355,6 +361,14 @@ metadata, endpoint reference, and response schema.</li>
 <li><code>api_endpoint_t</code>: MCP or REST endpoint metadata, including <code>tool_schema</code> and
 <code>tool_metadata</code>.</li>
 </ul>
+<p>The current phase 2 persistence path can preserve semantic metadata in
+<code>api_endpoint_t.tool_metadata</code> before dedicated routing columns exist. That is
+acceptable for import/export compatibility and for small catalogs searched from
+the agent’s local cache. It should not be treated as the final indexed search
+shape. Before portal-query performs database-side macro-filtering over large
+catalogs or before vector ranking becomes a production dependency, promote the
+high-use routing fields to first-class columns or indexed relationships and
+backfill them from <code>tool_metadata</code>.</p>
 <p>The existing MCP Registry design already maps MCP tools into <code>api_endpoint_t</code>.
 OpenAPI parsing also creates endpoint rows. This design uses <code>tool_t</code> as the
 agent-facing catalog row and links it back to <code>api_endpoint_t</code> when the tool
@@ -449,6 +463,22 @@ queryable through normal portal-query indexes.</p>
 <li>source protocol and implementation type,</li>
 <li>portal category and tag relationships.</li>
 </ul>
+<p>Recommended phase 2 column names for endpoint and tool projections:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Suggested column or relationship</th><th>Source fallback</th></tr>
+</thead>
+<tbody>
+<tr><td>Domain</td><td><code>routing_domain</code></td><td><code>tool_metadata.routing.domain</code>, LightAPI capability group, OpenAPI tag.</td></tr>
+<tr><td>Semantic namespace</td><td><code>semantic_namespace</code></td><td><code>tool_metadata.routing.semanticNamespace</code>, LightAPI <code>info.namespace</code>.</td></tr>
+<tr><td>Sensitivity tier</td><td><code>sensitivity_tier</code></td><td><code>tool_metadata.routing.sensitivityTier</code>, LightAPI visibility or safety metadata.</td></tr>
+<tr><td>Semantic weight</td><td><code>semantic_weight</code></td><td><code>tool_metadata.routing.semanticWeight</code>, default <code>1.0</code>.</td></tr>
+<tr><td>Source protocol</td><td><code>source_protocol</code></td><td>LightAPI operation protocol, OpenAPI, MCP, JSON-RPC, gRPC.</td></tr>
+<tr><td>Target personas</td><td>join table or indexed array</td><td><code>tool_metadata.routing.targetPersonas</code>, LightAPI agent metadata.</td></tr>
+</tbody>
+</table>
+</div>
 <p>The full structured payload should still be preserved in
 <code>api_endpoint_t.tool_metadata</code> so LightAPI import/export, gateway config
 generation, and agent cache payloads have one portable metadata object.</p>
@@ -570,6 +600,25 @@ guardrails</li>
 <p>This keeps runtime discovery useful while letting curated LightAPI descriptions
 provide richer semantic routing without hand-authoring every endpoint as an
 independent skill.</p>
+<p>Phase 2 persistence should be treated as the receiver for this metadata, not as
+the extractor. The openapi-parser, a LightAPI Description parser, or a dedicated
+ingestion worker must emit the enriched endpoint payload on the API version
+event. At minimum, the event payload for each endpoint should include:</p>
+<ul>
+<li><code>endpointId</code>, endpoint identity, protocol, method, path, name, and
+description,</li>
+<li>logical <code>toolSchema</code> generated from the LightAPI operation input contract,</li>
+<li><code>toolMetadata.routing</code> with namespace, domain, capability group, personas,
+keywords, context requirements, sensitivity tier, and semantic weight where
+present,</li>
+<li><code>toolMetadata.safety</code> from LightAPI safety, visibility, idempotency, and
+destructive-operation hints,</li>
+<li>response schema or result metadata when it is available for the tool
+projection.</li>
+</ul>
+<p>If the parser only emits the base OpenAPI or MCP fields, the catalog remains
+valid but only has low-enrichment metadata. The phase 2 implementation should
+record that as an ingestion gap, not as a persistence defect.</p>
 <h2 id="portal-catalog-contract"><a class="header" href="#portal-catalog-contract">Portal Catalog Contract</a></h2>
 <p>The agent should read skills and tools through the <code>genai-query</code> API in
 portal-query. The source spec is:</p>
@@ -908,11 +957,14 @@ projections.</li>
 <li>Link every API-origin tool projection back to <code>api_endpoint_t.endpoint_id</code>.</li>
 <li>Store semantic routing metadata in indexed endpoint/tool fields and preserve
 the full metadata payload in <code>api_endpoint_t.tool_metadata</code>.</li>
+<li>If the first code slice only writes <code>tool_metadata</code>, keep that as a
+compatibility step and add the indexed routing-column migration before
+database-side macro-filtering or production vector ranking is enabled.</li>
 <li>Let users select which endpoint projections should be exposed to a specific
 gateway instance. This deployment selection is separate from endpoint catalog
 sync.</li>
-<li>Verify runtime executability with gateway <code>tools/list</code> for the selected
-gateway instance when a gateway is reachable.</li>
+<li>Verify runtime executability outside persistence with gateway <code>tools/list</code>
+for the selected gateway instance when a gateway is reachable.</li>
 <li>Mark disappeared or non-executable projections inactive instead of deleting
 them.</li>
 <li>Add drift indicators for schema, description, safety metadata, and semantic
@@ -962,7 +1014,9 @@ Gateway exposure is a separate step where users select which endpoint/tool
 projections to deploy to a specific gateway instance.</li>
 <li>Runtime verification means checking the selected gateway instance’s
 <code>tools/list</code> response to confirm that a deployed endpoint projection is
-executable there. It is not the same as endpoint catalog sync.</li>
+executable there. It is not the same as endpoint catalog sync and should be
+implemented in the portal UI, deployment review flow, or diagnostics layer,
+not inside the persistence projection.</li>
 <li>Gateway exposure identity is <code>hostId + serviceId + envTag</code>. The token used
 for portal APIs must carry matching <code>host</code>, <code>sid</code>, and <code>env</code> claims.</li>
 <li><code>tool_t.implementation_type</code> should be standardized and aligned with the
@@ -971,7 +1025,12 @@ standardized endpoint implementation type, with downstream protocol stored in
 endpoint and LightAPI metadata.</li>
 <li>High-use semantic routing fields should be indexed columns or indexed
 relationships, with the full structured payload preserved in
-<code>api_endpoint_t.tool_metadata</code>.</li>
+<code>api_endpoint_t.tool_metadata</code>. JSON-only persistence is only an interim
+import/export-compatible shape for small catalogs or local-cache search.</li>
+<li>LightAPI Description enrichment requires an upstream parser or ingestion
+worker to emit enriched endpoint payloads. The persistence layer can store
+<code>tool_schema</code>, <code>tool_metadata.routing</code>, and <code>tool_metadata.safety</code>, but it
+does not derive those fields from the raw LightAPI document by itself.</li>
 <li>Endpoint category and tag classification should reuse the existing portal tag
 and category system.</li>
 <li>Embeddings should start at 384 dimensions to match the current <code>VECTOR(384)</code>
@@ -1004,7 +1063,7 @@ skills to agents, and improve retrieval over time.</p>
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../design/oauth-kafka.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../design/catalog-scope.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -1018,7 +1077,7 @@ skills to agents, and improve retrieval over time.</p>
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../design/oauth-kafka.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../design/catalog-scope.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

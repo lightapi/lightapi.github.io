@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-ec206509.js";
+            window.path_to_searchindex_js = "searchindex-53071e4e.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-f81584e8.js"></script>
+        <script src="toc-a988febc.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -2660,6 +2660,12 @@ the selected gateway instance when an operator is preparing or reviewing a
 gateway deployment. A later host-wide diagnostics view can aggregate all
 registered gateways, but phase 2 does not need host-wide verification as the
 default.</p>
+<p>Runtime verification is not part of the persistence projection. The persistence
+layer should store catalog state, endpoint/tool metadata, and inactive drift
+state, but it should not call a live gateway. The portal UI, deployment review
+flow, or a diagnostics endpoint should call the selected gateway’s <code>tools/list</code>
+with the operator or service credential, compare the returned tool names and
+schemas with the catalog, and surface the result as deployment drift.</p>
 <p>If a previously imported endpoint or tool disappears from the gateway, the sync
 process should mark the catalog projection inactive instead of deleting it
 immediately. This preserves skill mappings and gives operators a clear drift
@@ -2677,6 +2683,14 @@ metadata, endpoint reference, and response schema.</li>
 <li><code>api_endpoint_t</code>: MCP or REST endpoint metadata, including <code>tool_schema</code> and
 <code>tool_metadata</code>.</li>
 </ul>
+<p>The current phase 2 persistence path can preserve semantic metadata in
+<code>api_endpoint_t.tool_metadata</code> before dedicated routing columns exist. That is
+acceptable for import/export compatibility and for small catalogs searched from
+the agent’s local cache. It should not be treated as the final indexed search
+shape. Before portal-query performs database-side macro-filtering over large
+catalogs or before vector ranking becomes a production dependency, promote the
+high-use routing fields to first-class columns or indexed relationships and
+backfill them from <code>tool_metadata</code>.</p>
 <p>The existing MCP Registry design already maps MCP tools into <code>api_endpoint_t</code>.
 OpenAPI parsing also creates endpoint rows. This design uses <code>tool_t</code> as the
 agent-facing catalog row and links it back to <code>api_endpoint_t</code> when the tool
@@ -2771,6 +2785,22 @@ queryable through normal portal-query indexes.</p>
 <li>source protocol and implementation type,</li>
 <li>portal category and tag relationships.</li>
 </ul>
+<p>Recommended phase 2 column names for endpoint and tool projections:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Suggested column or relationship</th><th>Source fallback</th></tr>
+</thead>
+<tbody>
+<tr><td>Domain</td><td><code>routing_domain</code></td><td><code>tool_metadata.routing.domain</code>, LightAPI capability group, OpenAPI tag.</td></tr>
+<tr><td>Semantic namespace</td><td><code>semantic_namespace</code></td><td><code>tool_metadata.routing.semanticNamespace</code>, LightAPI <code>info.namespace</code>.</td></tr>
+<tr><td>Sensitivity tier</td><td><code>sensitivity_tier</code></td><td><code>tool_metadata.routing.sensitivityTier</code>, LightAPI visibility or safety metadata.</td></tr>
+<tr><td>Semantic weight</td><td><code>semantic_weight</code></td><td><code>tool_metadata.routing.semanticWeight</code>, default <code>1.0</code>.</td></tr>
+<tr><td>Source protocol</td><td><code>source_protocol</code></td><td>LightAPI operation protocol, OpenAPI, MCP, JSON-RPC, gRPC.</td></tr>
+<tr><td>Target personas</td><td>join table or indexed array</td><td><code>tool_metadata.routing.targetPersonas</code>, LightAPI agent metadata.</td></tr>
+</tbody>
+</table>
+</div>
 <p>The full structured payload should still be preserved in
 <code>api_endpoint_t.tool_metadata</code> so LightAPI import/export, gateway config
 generation, and agent cache payloads have one portable metadata object.</p>
@@ -2892,6 +2922,25 @@ guardrails</li>
 <p>This keeps runtime discovery useful while letting curated LightAPI descriptions
 provide richer semantic routing without hand-authoring every endpoint as an
 independent skill.</p>
+<p>Phase 2 persistence should be treated as the receiver for this metadata, not as
+the extractor. The openapi-parser, a LightAPI Description parser, or a dedicated
+ingestion worker must emit the enriched endpoint payload on the API version
+event. At minimum, the event payload for each endpoint should include:</p>
+<ul>
+<li><code>endpointId</code>, endpoint identity, protocol, method, path, name, and
+description,</li>
+<li>logical <code>toolSchema</code> generated from the LightAPI operation input contract,</li>
+<li><code>toolMetadata.routing</code> with namespace, domain, capability group, personas,
+keywords, context requirements, sensitivity tier, and semantic weight where
+present,</li>
+<li><code>toolMetadata.safety</code> from LightAPI safety, visibility, idempotency, and
+destructive-operation hints,</li>
+<li>response schema or result metadata when it is available for the tool
+projection.</li>
+</ul>
+<p>If the parser only emits the base OpenAPI or MCP fields, the catalog remains
+valid but only has low-enrichment metadata. The phase 2 implementation should
+record that as an ingestion gap, not as a persistence defect.</p>
 <h2 id="portal-catalog-contract"><a class="header" href="#portal-catalog-contract">Portal Catalog Contract</a></h2>
 <p>The agent should read skills and tools through the <code>genai-query</code> API in
 portal-query. The source spec is:</p>
@@ -3230,11 +3279,14 @@ projections.</li>
 <li>Link every API-origin tool projection back to <code>api_endpoint_t.endpoint_id</code>.</li>
 <li>Store semantic routing metadata in indexed endpoint/tool fields and preserve
 the full metadata payload in <code>api_endpoint_t.tool_metadata</code>.</li>
+<li>If the first code slice only writes <code>tool_metadata</code>, keep that as a
+compatibility step and add the indexed routing-column migration before
+database-side macro-filtering or production vector ranking is enabled.</li>
 <li>Let users select which endpoint projections should be exposed to a specific
 gateway instance. This deployment selection is separate from endpoint catalog
 sync.</li>
-<li>Verify runtime executability with gateway <code>tools/list</code> for the selected
-gateway instance when a gateway is reachable.</li>
+<li>Verify runtime executability outside persistence with gateway <code>tools/list</code>
+for the selected gateway instance when a gateway is reachable.</li>
 <li>Mark disappeared or non-executable projections inactive instead of deleting
 them.</li>
 <li>Add drift indicators for schema, description, safety metadata, and semantic
@@ -3284,7 +3336,9 @@ Gateway exposure is a separate step where users select which endpoint/tool
 projections to deploy to a specific gateway instance.</li>
 <li>Runtime verification means checking the selected gateway instance’s
 <code>tools/list</code> response to confirm that a deployed endpoint projection is
-executable there. It is not the same as endpoint catalog sync.</li>
+executable there. It is not the same as endpoint catalog sync and should be
+implemented in the portal UI, deployment review flow, or diagnostics layer,
+not inside the persistence projection.</li>
 <li>Gateway exposure identity is <code>hostId + serviceId + envTag</code>. The token used
 for portal APIs must carry matching <code>host</code>, <code>sid</code>, and <code>env</code> claims.</li>
 <li><code>tool_t.implementation_type</code> should be standardized and aligned with the
@@ -3293,7 +3347,12 @@ standardized endpoint implementation type, with downstream protocol stored in
 endpoint and LightAPI metadata.</li>
 <li>High-use semantic routing fields should be indexed columns or indexed
 relationships, with the full structured payload preserved in
-<code>api_endpoint_t.tool_metadata</code>.</li>
+<code>api_endpoint_t.tool_metadata</code>. JSON-only persistence is only an interim
+import/export-compatible shape for small catalogs or local-cache search.</li>
+<li>LightAPI Description enrichment requires an upstream parser or ingestion
+worker to emit enriched endpoint payloads. The persistence layer can store
+<code>tool_schema</code>, <code>tool_metadata.routing</code>, and <code>tool_metadata.safety</code>, but it
+does not derive those fields from the raw LightAPI document by itself.</li>
 <li>Endpoint category and tag classification should reuse the existing portal tag
 and category system.</li>
 <li>Embeddings should start at 384 dimensions to match the current <code>VECTOR(384)</code>
@@ -3317,6 +3376,314 @@ reload it after controller cache-management invalidation. This lets MCP tools
 work immediately through <code>tools/list</code> and <code>tools/call</code>, while still giving
 portal operators a clean path to organize tools into skills, assign those
 skills to agents, and improve retrieval over time.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="portal-catalog-scope"><a class="header" href="#portal-catalog-scope">Portal Catalog Scope</a></h1>
+<h2 id="problem-4"><a class="header" href="#problem-4">Problem</a></h2>
+<p>Light Portal supports multiple tenants through <code>host_id</code> and can also host
+multiple runtime environments in one portal instance. A common deployment shape
+is:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Portal instance</th><th>Runtime environments</th></tr>
+</thead>
+<tbody>
+<tr><td>Instance A</td><td>dev, sit</td></tr>
+<tr><td>Instance B</td><td>stg, prd</td></tr>
+</tbody>
+</table>
+</div>
+<p>Within an organization or a cloud deployment, operators need a catalog for APIs,
+API endpoints, tools, skills, schemas, rules, workflows, categories, and tags.
+Some catalog entries are reusable platform knowledge. Other entries are
+tenant-owned, environment-bound, or tied to a concrete gateway deployment.</p>
+<p>The main design question is whether Light Portal should clone catalog rows into
+every host/tenant, or maintain one shared catalog per portal instance and expose
+it through a separate single page application and virtual host.</p>
+<p>The recommended answer is neither full cloning nor a UI-only split. The portal
+should model catalog scope explicitly:</p>
+<ul>
+<li>shared catalog definitions use global scope,</li>
+<li>tenant-specific definitions and overrides use host scope,</li>
+<li>environment-specific runtime bindings use host plus environment scope,</li>
+<li>a separate SPA may expose the same backend catalog, but it should not become
+the catalog authority.</li>
+</ul>
+<h2 id="goals-2"><a class="header" href="#goals-2">Goals</a></h2>
+<ul>
+<li>Avoid duplicating the full catalog for every tenant.</li>
+<li>Prevent catalog drift between tenants and between portal instances.</li>
+<li>Preserve tenant isolation for private APIs, private skills, secrets, access
+control, and runtime bindings.</li>
+<li>Let dev and sit share one portal instance while still keeping their runtime
+endpoint targets separate.</li>
+<li>Let stg and prd share another portal instance while keeping production
+controls stricter.</li>
+<li>Support an effective catalog query that combines global definitions with
+host-specific rows and environment-specific bindings.</li>
+<li>Reuse existing portal-query APIs and the <code>genai-query</code> catalog direction for
+agent-facing skills and tools.</li>
+<li>Keep <code>light-gateway</code> as the runtime MCP execution path for <code>tools/list</code> and
+<code>tools/call</code>.</li>
+<li>Support promotion or import/export between portal instances instead of
+relying on ad hoc row copies.</li>
+</ul>
+<h2 id="non-goals-5"><a class="header" href="#non-goals-5">Non-Goals</a></h2>
+<ul>
+<li>Do not clone every global catalog row into every tenant by default.</li>
+<li>Do not make a separate SPA the source of truth for catalog data.</li>
+<li>Do not bypass host-scoped authorization just because a catalog item is global.</li>
+<li>Do not put secrets, client credentials, runtime tokens, or deployment state in
+global catalog rows.</li>
+<li>Do not move MCP tool execution from <code>light-gateway</code> into portal-query,
+controller-rs, or the catalog UI.</li>
+<li>Do not require every MCP or API endpoint to be wrapped in a skill before the
+gateway can expose it as a runtime tool.</li>
+</ul>
+<h2 id="current-model"><a class="header" href="#current-model">Current Model</a></h2>
+<p>The database already contains both global-capable and host-scoped patterns.</p>
+<p><code>category_t</code> and <code>tag_t</code> have nullable <code>host_id</code>. A null <code>host_id</code> means the
+category or tag is global. A non-null <code>host_id</code> means the row belongs to one
+host. Their unique indexes already separate global uniqueness from host-specific
+uniqueness.</p>
+<p>The query behavior for category and tag labels returns both host-specific rows
+and global rows for a host. This is the right shape for taxonomy and catalog
+organization metadata.</p>
+<p>Other catalog entities are currently host-scoped:</p>
+<ul>
+<li><code>api_t</code></li>
+<li><code>api_version_t</code></li>
+<li><code>api_endpoint_t</code></li>
+<li><code>agent_definition_t</code></li>
+<li><code>skill_t</code></li>
+<li><code>tool_t</code></li>
+<li><code>tool_param_t</code></li>
+<li><code>agent_skill_t</code></li>
+<li><code>skill_tool_t</code></li>
+<li><code>skill_dependency_t</code></li>
+</ul>
+<p>Those tables use <code>host_id NOT NULL</code> and most query paths filter by
+<code>host_id = ?</code>. This is correct for private tenant data and runtime-bound data,
+but it is too narrow for reusable platform catalog definitions if the only
+sharing mechanism is row replication.</p>
+<h2 id="design-decision"><a class="header" href="#design-decision">Design Decision</a></h2>
+<p>Use a scoped catalog inside Light Portal.</p>
+<p>The portal backend remains the source of truth. The catalog UI can be part of
+the existing portal SPA or exposed through another SPA/virtual host, but both UI
+surfaces must read and write through the same portal-query and command APIs.</p>
+<p>The durable model is:</p>
+<pre><code class="language-text">global catalog definition
+  -&gt; host enablement or host override
+    -&gt; environment runtime binding
+</code></pre>
+<p>This model allows one shared definition for reusable knowledge and separate
+tenant or environment controls where isolation matters.</p>
+<h2 id="scope-types"><a class="header" href="#scope-types">Scope Types</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Scope</th><th>Storage meaning</th><th>Typical data</th></tr>
+</thead>
+<tbody>
+<tr><td>Global</td><td><code>host_id IS NULL</code> or a dedicated global definition row</td><td>Shared categories, tags, reusable schemas, rule templates, workflow templates, public tool definitions, shared skill templates</td></tr>
+<tr><td>Host</td><td><code>host_id = ?</code></td><td>Tenant-owned APIs, private schemas, tenant skills, tenant tools, host-level enablement, access rules</td></tr>
+<tr><td>Environment</td><td><code>host_id = ?</code> plus <code>env_tag</code>, service id, target host, instance, or deployment binding</td><td>dev/sit/stg/prd endpoint targets, gateway exposure, runtime service bindings, deployment state</td></tr>
+<tr><td>Instance</td><td>Separate portal database or portal deployment</td><td>Promotion boundary between dev/sit instance and stg/prd instance</td></tr>
+</tbody>
+</table>
+</div>
+<p>Global rows are reusable definitions. Host rows are ownership and isolation.
+Environment rows are runtime selection.</p>
+<h2 id="catalog-entity-guidance"><a class="header" href="#catalog-entity-guidance">Catalog Entity Guidance</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Entity</th><th>Recommended scope</th><th>Reason</th></tr>
+</thead>
+<tbody>
+<tr><td>Category</td><td>Global by default, host-specific when private taxonomy is needed</td><td>Existing schema already supports nullable <code>host_id</code></td></tr>
+<tr><td>Tag</td><td>Global by default, host-specific when private taxonomy is needed</td><td>Existing schema already supports nullable <code>host_id</code></td></tr>
+<tr><td>API</td><td>Host-scoped, with optional shared template support later</td><td>API ownership, lifecycle, and visibility are usually tenant-specific</td></tr>
+<tr><td>API version</td><td>Host-scoped</td><td>Carries <code>env_tag</code>, <code>target_host</code>, service id, spec, and runtime-facing version metadata</td></tr>
+<tr><td>API endpoint</td><td>Host-scoped for concrete API versions; may be generated from shared templates</td><td>Endpoint availability depends on the owning API version and runtime</td></tr>
+<tr><td>Tool</td><td>Shared definition when generic; host-scoped projection when executable for a tenant</td><td>Runtime execution still depends on gateway, endpoint, policy, and service binding</td></tr>
+<tr><td>Skill</td><td>Shared template when reusable; host-scoped copy or override when edited by a tenant</td><td>Skills contain prompt guidance that tenants may customize</td></tr>
+<tr><td>Schema</td><td>Global when it is a reusable contract; host-scoped when it contains tenant-private fields or lifecycle</td><td>Avoid cloning standard contracts but protect tenant-specific schemas</td></tr>
+<tr><td>Rule</td><td>Global template or host-specific rule</td><td>A reusable rule definition is different from enabling that rule for a host</td></tr>
+<tr><td>Workflow</td><td>Global template or host-specific workflow</td><td>Templates can be shared, execution bindings should be host or environment scoped</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="effective-catalog"><a class="header" href="#effective-catalog">Effective Catalog</a></h2>
+<p>Consumers should not need to manually merge global and host rows. Portal-query
+should expose an effective catalog read model for each host and runtime context.</p>
+<p>The effective catalog request should include:</p>
+<ul>
+<li><code>hostId</code></li>
+<li><code>serviceId</code> when the catalog is for a gateway, agent, or runtime service</li>
+<li><code>envTag</code> when the result is environment-specific</li>
+<li>optional <code>agentDefId</code> when the result is for an agent</li>
+<li>optional filters for entity type, category, tag, protocol, routing domain, or
+capability</li>
+</ul>
+<p>The effective catalog response should include:</p>
+<ul>
+<li>global definitions visible to the caller,</li>
+<li>host-specific definitions visible to the caller,</li>
+<li>host overrides that shadow global defaults,</li>
+<li>environment bindings for the requested <code>envTag</code>,</li>
+<li>active state and catalog version or freshness metadata,</li>
+<li>category and tag labels from both global and host-specific taxonomy rows,</li>
+<li>enough provenance to show whether a row came from global scope, host scope, or
+an environment binding.</li>
+</ul>
+<p>Recommended precedence:</p>
+<pre><code class="language-text">environment binding &gt; host override &gt; global definition
+</code></pre>
+<p>This keeps shared definitions stable while allowing host and environment
+customization.</p>
+<h2 id="data-model-direction"><a class="header" href="#data-model-direction">Data Model Direction</a></h2>
+<p>For tables that already support nullable <code>host_id</code>, keep the current pattern:</p>
+<pre><code class="language-text">host_id IS NULL  -&gt; global/shared row
+host_id = ?      -&gt; host-specific row
+</code></pre>
+<p>For strictly host-scoped catalog tables, do not simply make every <code>host_id</code>
+nullable without checking foreign keys and runtime assumptions. Some tables are
+correctly host-scoped because they point to tenant-owned APIs, credentials,
+gateway endpoints, or agent assignments.</p>
+<p>Use one of these patterns per entity:</p>
+<ol>
+<li>Nullable <code>host_id</code> on the definition table when the entity can safely be
+global and all references can resolve global plus host rows.</li>
+<li>Separate template and binding tables when the definition is global but
+enablement is tenant-specific.</li>
+<li>Keep the current host-scoped table when the entity is inherently tenant or
+runtime bound.</li>
+</ol>
+<p>For reusable skills and tools, the safest long-term shape is template plus
+binding:</p>
+<pre><code class="language-text">catalog_skill_template_t
+  -&gt; host_skill_t or skill_t host override
+    -&gt; agent_skill_t assignment
+
+catalog_tool_template_t
+  -&gt; host tool projection
+    -&gt; skill_tool_t mapping
+    -&gt; gateway runtime tools/list verification
+</code></pre>
+<p>If the implementation starts smaller, it can add nullable global scope to
+selected catalog definition tables first, but the query contract must still
+return the effective catalog and indicate scope provenance.</p>
+<h2 id="separate-spa-or-virtual-host"><a class="header" href="#separate-spa-or-virtual-host">Separate SPA Or Virtual Host</a></h2>
+<p>A separate SPA deployed with LightAPI and sign-in as another BFF virtual host is
+useful as a catalog presentation surface. It can provide a marketplace-style
+view for shared APIs, tools, skills, schemas, rules, and workflows.</p>
+<p>It should not own separate catalog state.</p>
+<p>Recommended use:</p>
+<ul>
+<li>browse global catalog definitions,</li>
+<li>request enablement for a host,</li>
+<li>compare host overrides with global definitions,</li>
+<li>review environment bindings,</li>
+<li>publish or promote catalog versions between portal instances.</li>
+</ul>
+<p>Avoid using the separate SPA to bypass tenant-aware portal APIs. The BFF should
+still pass authenticated requests to portal-query or command APIs, and those
+APIs must enforce host, service, environment, and role checks.</p>
+<h2 id="environment-handling"><a class="header" href="#environment-handling">Environment Handling</a></h2>
+<p>Within one portal instance, environments should be runtime bindings, not cloned
+catalog universes.</p>
+<p>For a dev/sit instance:</p>
+<ul>
+<li>one shared catalog can describe a capability,</li>
+<li>dev and sit get separate <code>env_tag</code> bindings,</li>
+<li>runtime endpoints can differ through <code>target_host</code>, <code>service_id</code>, instance,
+deployment, or gateway registration,</li>
+<li>a tool can be visible in both environments but executable only where the
+gateway lists it.</li>
+</ul>
+<p>For a stg/prd instance:</p>
+<ul>
+<li>stg and prd can share approved global definitions,</li>
+<li>production enablement should require stricter workflow or authorization,</li>
+<li>secrets, tokens, OAuth clients, runtime instances, and deployment state remain
+environment-specific,</li>
+<li>catalog promotion into prd should preserve stable IDs and versions.</li>
+</ul>
+<h2 id="promotion-between-portal-instances"><a class="header" href="#promotion-between-portal-instances">Promotion Between Portal Instances</a></h2>
+<p>The boundary between dev/sit and stg/prd is an instance boundary. Treat it as a
+promotion boundary, not as live replication between tenants.</p>
+<p>Recommended promotion flow:</p>
+<ol>
+<li>Author or import catalog definitions in the lower portal instance.</li>
+<li>Review and approve the global or host-scoped definitions.</li>
+<li>Export selected catalog rows with their versions and dependencies.</li>
+<li>Import into the target portal instance.</li>
+<li>Resolve environment bindings for stg or prd.</li>
+<li>Verify runtime exposure through the selected <code>light-gateway</code> <code>tools/list</code>.</li>
+<li>Activate the target bindings.</li>
+</ol>
+<p>Promotion should be idempotent. A repeated import of the same catalog version
+should update or confirm the same target definition instead of creating
+duplicates.</p>
+<h2 id="security-and-authorization"><a class="header" href="#security-and-authorization">Security And Authorization</a></h2>
+<p>Global catalog visibility does not mean global execution permission.</p>
+<p>Authorization must be checked at these layers:</p>
+<ul>
+<li>portal UI and BFF authentication,</li>
+<li>portal-query read authorization,</li>
+<li>command API write authorization,</li>
+<li>host and environment claim matching,</li>
+<li>category/tag visibility when private taxonomy is used,</li>
+<li>gateway <code>tools/list</code> availability,</li>
+<li>gateway <code>tools/call</code> policy,</li>
+<li>downstream service authorization.</li>
+</ul>
+<p>For runtime catalog reads used by gateways and agents, the token should include
+<code>host</code>, <code>sid</code>, and, when environment-specific data is requested, <code>env</code>. The
+query handler should compare those claims with the requested <code>hostId</code>,
+<code>serviceId</code>, and <code>envTag</code>.</p>
+<h2 id="ui-guidance"><a class="header" href="#ui-guidance">UI Guidance</a></h2>
+<p>The portal UI should show catalog scope explicitly:</p>
+<ul>
+<li><code>Global</code></li>
+<li><code>Host</code></li>
+<li><code>Environment</code></li>
+</ul>
+<p>For list pages, include filters for scope, environment, category, tag, active
+state, and source protocol. For detail pages, show whether a host row inherits
+from a global definition, overrides it, or is private to the host.</p>
+<p>For destructive changes, make the target scope clear. Updating a global catalog
+definition can affect many hosts, while updating a host override should affect
+only that host.</p>
+<h2 id="migration-approach"><a class="header" href="#migration-approach">Migration Approach</a></h2>
+<ol>
+<li>Keep the existing category and tag nullable <code>host_id</code> behavior.</li>
+<li>Add effective catalog read APIs before broad schema changes so callers have a
+stable contract.</li>
+<li>Identify which catalog entities need global definitions versus host-only
+rows.</li>
+<li>Add template or nullable-scope tables for reusable definitions.</li>
+<li>Add host enablement or override tables for tenant-specific activation.</li>
+<li>Add environment binding views or APIs for dev, sit, stg, and prd.</li>
+<li>Add import/export or snapshot support for promotion between portal
+instances.</li>
+<li>Update portal-view to expose scope and provenance.</li>
+<li>Keep existing host-scoped APIs working during the migration.</li>
+</ol>
+<h2 id="open-questions"><a class="header" href="#open-questions">Open Questions</a></h2>
+<ul>
+<li>Should global reusable skills and tools use nullable <code>host_id</code> in the
+existing tables, or separate template tables with host bindings?</li>
+<li>Which catalog entities require approval workflow before production
+activation?</li>
+<li>Should category and tag assignment tables store additional scope metadata, or
+is scope fully inherited from the referenced category or tag?</li>
+<li>What stable external identity should be used during cross-instance catalog
+promotion when UUIDs differ between portal databases?</li>
+<li>Should portal-query expose one broad effective catalog endpoint or multiple
+entity-specific effective endpoints?</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="oauth-kafka"><a class="header" href="#oauth-kafka">OAuth Kafka</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
@@ -3368,7 +3735,7 @@ skills to agents, and improve retrieval over time.</p>
 <h1 id="oauth-audit"><a class="header" href="#oauth-audit">OAuth Audit</a></h1>
 <p>The OAuth services keep authorization codes and refresh tokens as operational state. These rows are short lived and are now written directly to <code>auth_code_t</code> and <code>auth_refresh_token_t</code> instead of being created through the general event store. This avoids high-volume login and refresh-token churn in <code>event_store_t</code> and <code>outbox_message_t</code>.</p>
 <p>Audit and login history are recorded separately in append-oriented OAuth audit tables.</p>
-<h2 id="goals-2"><a class="header" href="#goals-2">Goals</a></h2>
+<h2 id="goals-3"><a class="header" href="#goals-3">Goals</a></h2>
 <ul>
 <li>Show administrators who is currently online.</li>
 <li>Show a user the last login time and session history.</li>
@@ -3795,6 +4162,110 @@ CREATE INDEX idx_category_host_id ON category_t (host_id);
 <p>They should only be able to create/edit categories associated with their specific host_id.</p>
 <p>The UI should not offer them the option to create/edit global categories or categories for other hosts. The host_id is implicitly set or displayed as read-only based on their logged-in context.</p>
 <p>When viewing categories, they should see their own tenant-specific categories plus all applicable global categories. The UI should clearly differentiate between these (e.g., using grouping, labels, icons).</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="system-integration"><a class="header" href="#system-integration">System Integration</a></h1>
+<p>System integrations must preserve the same identity and tenant boundaries as
+interactive portal workflows. The integration token is not only an access
+credential; it is also the source of audit metadata, event metadata, row
+filtering, and host scoping.</p>
+<h2 id="command-side"><a class="header" href="#command-side">Command Side</a></h2>
+<p>The command side uses event sourcing. Every accepted command writes one or more
+domain events, and those events are later projected into query-side tables.
+Because events become the durable system of record, command calls need a stable
+user identity and host identity.</p>
+<p>For command APIs, use an authorization code token whenever possible. The token
+must contain the real portal user id so command handlers can derive the correct
+<code>userId</code>, host, nonce, and CloudEvent metadata. This is the preferred path for
+browser flows, operator tools, and integrations that can act on behalf of a
+known user.</p>
+<p>If the integration has no user session in the request context, do not submit
+anonymous command events. First onboard a real user in the system for the
+integration actor or service account. That user becomes the durable audit
+principal for the commands emitted by the integration.</p>
+<p>After the user is onboarded, create an auth client for the integration and set
+custom claims that carry the command identity:</p>
+<pre><code class="language-json">{
+  "host": "&lt;host-id&gt;",
+  "elm": "&lt;integration-user-email&gt;",
+  "uid": "&lt;integration-user-id&gt;",
+  "uty": "&lt;user-type&gt;"
+}
+</code></pre>
+<p>The <code>uid</code> claim must reference the onboarded user. The <code>host</code> claim must match
+the tenant boundary where commands are allowed to run. The <code>elm</code> and <code>uty</code>
+claims should match the onboarded user’s email and user type so downstream
+authorization, audit, and support workflows can identify the actor without
+guessing.</p>
+<p>For an integration auth client whose type is trusted, the client application can
+call Light OAuth with the <code>client_credentials</code> grant type when the auth client
+has these custom claims configured. Light OAuth issues a token that carries the
+custom claims, allowing the token to act as an id-token-like access token for
+command APIs, similar to the user-bearing token produced by the authorization
+code grant. This path is only acceptable for trusted client types because the
+client, not an interactive browser session, is asserting the user and host
+identity through the auth client configuration.</p>
+<p>Command-side integration rules:</p>
+<ul>
+<li>Prefer an authorization code token tied to the real interactive user.</li>
+<li>Use a dedicated onboarded integration user only when no user session exists.</li>
+<li>For non-session integrations, use a trusted auth client with custom claims and
+request the token from Light OAuth with <code>grant_type=client_credentials</code>.</li>
+<li>Do not use a token that lacks a usable <code>userId</code>/<code>uid</code> for event-sourced
+commands.</li>
+<li>Do not allow non-trusted clients to mint user-bearing command tokens from
+client credentials.</li>
+<li>Keep host ownership explicit; never infer host scope from the client id alone.</li>
+<li>Treat the auth client and custom claims as deployment configuration, not as a
+substitute for user onboarding.</li>
+</ul>
+<h2 id="query-side"><a class="header" href="#query-side">Query Side</a></h2>
+<p>The query side serves read models built from command-side events and operational
+tables. Query APIs do not create domain events, do not allocate command nonces,
+and should not mutate event-sourced state.</p>
+<p>Query integrations still need authorization and tenant scoping. The request
+token must provide enough identity to determine the host and the effective user
+or service account. For user-scoped reads, use the same authorization code token
+or integration-user token described for the command side so row and column
+filters can apply consistently.</p>
+<p>If authorization code flow is not available for a query integration, the
+<code>client_credentials</code> flow is acceptable only for auth clients whose type is
+trusted. The token must carry <code>host</code>, <code>sid</code>, and, when environment-specific data
+is requested, <code>env</code>. Here <code>sid</code> is the service id for the gateway, agent, or
+other Light-Fabric runtime calling portal-query. Query handlers must compare
+these claims with the requested <code>hostId</code>, <code>serviceId</code>, and optional <code>envTag</code>
+before returning service-scoped data.</p>
+<p>Light-Fabric ecosystem components such as gateways and agents may use a
+long-lived token for query-side access when the token was issued through this
+trusted <code>client_credentials</code> path. That access is not general portal read
+access. It is limited to query endpoints built for those runtime components,
+such as gateway, agent, discovery, or catalog endpoints, and those endpoints
+must enforce the claim match before returning data.</p>
+<p>For host-scoped or service-level reads, a client token can be used only when the
+auth client type is trusted and the token carries the required host, service,
+and environment claims. The query service should apply the same host boundary as
+the command side and return only data visible to that actor. A missing user
+session may reduce the allowed result set, but it must not broaden access.</p>
+<p>Query-side integration rules:</p>
+<ul>
+<li>Read from projected/query tables; do not write command events from query
+handlers.</li>
+<li>Resolve host scope from the validated token claims and request parameters.</li>
+<li>When authorization code flow is unavailable, accept <code>client_credentials</code> only
+from auth clients whose type is trusted.</li>
+<li>Require <code>host</code> and <code>sid</code> token claims; require <code>env</code> when the endpoint or
+request is environment-scoped.</li>
+<li>Match token <code>host</code>, <code>sid</code>, and optional <code>env</code> to requested <code>hostId</code>,
+<code>serviceId</code>, and optional <code>envTag</code>.</li>
+<li>Allow long-lived Light-Fabric runtime tokens only on endpoints designed for
+gateways, agents, and similar ecosystem components.</li>
+<li>Do not use long-lived runtime tokens for broad user-facing query access.</li>
+<li>Apply user, role, position, group, attribute, and fine-grained filters when
+the endpoint requires them.</li>
+<li>Use the onboarded integration user for auditability when a human user is not
+present.</li>
+<li>Keep query tokens least-privileged; read-only integrations should not receive
+command scopes.</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="portal-event"><a class="header" href="#portal-event">Portal Event</a></h1>
 <p>Light Portal is using event sourcing and CQRS. Any update to the system will generate an event and there are hundreds of event types.</p>
@@ -5410,7 +5881,7 @@ GROUP BY
 <p>This approach provides a seamless experience while maintaining compatibility with applications requiring roles for authorization or UI customization.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="private-messages"><a class="header" href="#private-messages">Private Messages</a></h1>
-<h2 id="problem-4"><a class="header" href="#problem-4">Problem</a></h2>
+<h2 id="problem-5"><a class="header" href="#problem-5">Problem</a></h2>
 <p>Portal users need a way to exchange private messages from the user profile
 without exposing email addresses to each other. The sender should only need a
 recipient user id or a display-safe user label. The backend can resolve email
@@ -5445,7 +5916,7 @@ model conversations, read state, participant visibility, or per-user delete.</li
 messages page should load its own data from the query API.</li>
 <li>The existing private-message tests are disabled stubs.</li>
 </ul>
-<h2 id="goals-3"><a class="header" href="#goals-3">Goals</a></h2>
+<h2 id="goals-4"><a class="header" href="#goals-4">Goals</a></h2>
 <ul>
 <li>Let one logged-in user send a message to another portal user without knowing
 or seeing the recipient email.</li>
@@ -5460,7 +5931,7 @@ recipient email internally.</li>
 <li>Provide a path from the existing <code>message_t</code> skeleton to a conversation-based
 model without breaking existing UI routes immediately.</li>
 </ul>
-<h2 id="non-goals-5"><a class="header" href="#non-goals-5">Non-Goals</a></h2>
+<h2 id="non-goals-6"><a class="header" href="#non-goals-6">Non-Goals</a></h2>
 <ul>
 <li>Do not build group chat in the first phase.</li>
 <li>Do not expose email addresses in message APIs, events, UI state, or task
@@ -5767,7 +6238,7 @@ retention and keeps visible, partially deleted, and recently deleted messages.</
 <li>Reply pre-populates recipient context without email.</li>
 <li>Empty and error states do not produce JSON parse failures.</li>
 </ul>
-<h2 id="open-questions"><a class="header" href="#open-questions">Open Questions</a></h2>
+<h2 id="open-questions-1"><a class="header" href="#open-questions-1">Open Questions</a></h2>
 <ul>
 <li>Should users be able to send messages to themselves as private notes?</li>
 <li>Should profile pages expose a “Message” action only for users in the same
@@ -7608,7 +8079,7 @@ public class ConfigRollbackService {
 <li>Non-standard instance files are copied into <code>snapshot_instance_file_t</code>.</li>
 </ul>
 <p>The <code>/config-server/files</code> endpoint must return both sets. It already filters standard files by <code>config_phase</code> through <code>config_snapshot_property_t.config_phase</code>, but <code>instance_file_t</code> and <code>snapshot_instance_file_t</code> do not currently carry <code>config_phase</code>. That makes it impossible to union the two sources while preserving runtime, deployment, and generator phase semantics.</p>
-<h2 id="problem-5"><a class="header" href="#problem-5">Problem</a></h2>
+<h2 id="problem-6"><a class="header" href="#problem-6">Problem</a></h2>
 <p>When a service starts through <code>DefaultConfigLoader</code>, it calls <code>/config-server/files</code> with <code>host</code>, <code>serviceId</code>, and <code>envTag</code>. The endpoint resolves the current snapshot and returns the files that should be written into <code>/config</code>.</p>
 <p>For the sidecar case, <code>openapi.yaml</code> exists in both <code>instance_file_t</code> and <code>snapshot_instance_file_t</code>, but it does not exist in <code>config_snapshot_property_t</code>. Since the current <code>/files</code> query reads only <code>config_snapshot_property_t</code>, the response does not include <code>openapi.yaml</code>, and the sidecar cannot write it to <code>/config</code>.</p>
 <p>The correct endpoint behavior is:</p>
@@ -13862,7 +14333,7 @@ Kubernetes cluster from the Instance Admin page.</p>
 <p>The goal is to provide a production-like deployment path for small businesses
 and enterprise tenants without requiring Light Portal to have direct network
 access to every customer cluster.</p>
-<h2 id="problem-6"><a class="header" href="#problem-6">Problem</a></h2>
+<h2 id="problem-7"><a class="header" href="#problem-7">Problem</a></h2>
 <p>Each API or application repository can contain a <code>k8s/</code> folder with Kubernetes
 deployment templates. The templates contain variables in the following format:</p>
 <pre><code class="language-text">${key:defaultValue}
@@ -14383,7 +14854,7 @@ later.</li>
 <li>Rollback is a redeploy of a previous Light Portal deployment snapshot, not a
 native Kubernetes rollout undo.</li>
 </ul>
-<h2 id="open-questions-1"><a class="header" href="#open-questions-1">Open Questions</a></h2>
+<h2 id="open-questions-2"><a class="header" href="#open-questions-2">Open Questions</a></h2>
 <ul>
 <li>Which object storage providers should enterprise artifact mode support first?</li>
 <li>What retention policies should be available for encrypted rendered manifest
