@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-fd8383fa.js";
+            window.path_to_searchindex_js = "../searchindex-6c960690.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-30d64436.js"></script>
@@ -175,6 +175,319 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="workflow-editor"><a class="header" href="#workflow-editor">Workflow Editor</a></h1>
+<h2 id="purpose"><a class="header" href="#purpose">Purpose</a></h2>
+<p>The Workflow Editor is the generic Portal authoring surface for
+<code>light-workflow</code> definitions. It should replace the raw textarea-only workflow
+definition experience with a structured editor that still preserves YAML as the
+canonical workflow definition stored in <code>wf_definition_t.definition</code>.</p>
+<p>The editor is reusable. It can be opened from the Workflow Definition page,
+embedded in the Skill Workspace, or used by future task-specific authoring
+flows such as API onboarding, scheduled live tests, and remediation playbooks.</p>
+<h2 id="design-boundary"><a class="header" href="#design-boundary">Design Boundary</a></h2>
+<p><code>light-workflow</code> owns workflow execution, task state, retries, waiting human
+tasks, and audit events. The Portal editor authors definitions and starts test
+runs, but it must not implement its own workflow runtime.</p>
+<p>The gateway remains the runtime tool execution path. Workflow steps that invoke
+tools should reference gateway-visible tools or endpoint descriptions and then
+execute through the same runtime path used by agents.</p>
+<p>The editor should not duplicate endpoint contracts. API, MCP, JSON-RPC, gRPC,
+and other endpoint details belong in LightAPI descriptions, OpenAPI/OpenRPC
+documents, protobuf metadata, or the portal endpoint catalog. Workflow tasks
+reference those descriptions and provide step-level wiring, guards, exports,
+and error handling.</p>
+<h2 id="current-state"><a class="header" href="#current-state">Current State</a></h2>
+<p>The current Portal implementation already has the persistence and generic CRUD
+surface needed for a first editor:</p>
+<ul>
+<li><code>wf_definition_t</code> stores <code>namespace</code>, <code>name</code>, <code>version</code>, and <code>definition</code>.</li>
+<li><code>workflow-command</code> exposes create, update, delete, and start workflow
+commands.</li>
+<li><code>workflow-query</code> exposes workflow definition reads.</li>
+<li><code>portal-view</code> has a Workflow Definition table and generic create/update
+forms whose <code>definition</code> field is a YAML textarea.</li>
+</ul>
+<p>The first Workflow Editor can therefore be an incremental UI improvement over
+the existing definition CRUD and start workflow command.</p>
+<h2 id="goals"><a class="header" href="#goals">Goals</a></h2>
+<ul>
+<li>Keep workflow YAML as the canonical persisted artifact.</li>
+<li>Provide a readable step outline or graph next to the YAML editor.</li>
+<li>Validate definitions before save and before test runs.</li>
+<li>Let users discover and reference endpoint descriptions, gateway tools,
+skills, rules, and human task types from a side panel.</li>
+<li>Support workflow definition create, update, import, export, and start-test
+flows.</li>
+<li>Make the editor embeddable so skill authoring can use the same workflow
+authoring component with skill-specific constraints.</li>
+<li>Preserve owner scoping and existing Portal command/query conventions.</li>
+</ul>
+<h2 id="non-goals"><a class="header" href="#non-goals">Non-Goals</a></h2>
+<ul>
+<li>Do not execute workflow logic in Portal View.</li>
+<li>Do not make skills the workflow runtime.</li>
+<li>Do not store workflow YAML in <code>skill_t</code>.</li>
+<li>Do not require a visual drag-and-drop graph before the editor is useful.</li>
+<li>Do not copy full API contracts into workflow steps when endpoint
+descriptions can be referenced.</li>
+<li>Do not fork or embed the Apache KIE Serverless Logic Web Tools as the first
+implementation path. They are useful reference material for CNCF Serverless
+Workflow concepts, but they are tightly coupled to the strict upstream spec
+and would be expensive to adapt for Light-Fabric agentic extensions.</li>
+</ul>
+<h2 id="authoring-model"><a class="header" href="#authoring-model">Authoring Model</a></h2>
+<p>The editor should maintain two synchronized representations:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Representation</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td>YAML source</td><td>Canonical text saved to <code>wf_definition_t.definition</code>.</td></tr>
+<tr><td>Parsed view model</td><td>UI-only representation used for step outline, validation, references, and property panels.</td></tr>
+</tbody>
+</table>
+</div>
+<p>All saves should serialize from the YAML source or from a parsed model that
+round-trips to the same specification format. If the visual editor changes a
+step, it should update the YAML and keep the YAML visible.</p>
+<p>The editor should support progressive enhancement:</p>
+<ol>
+<li>YAML editor plus parsed step outline.</li>
+<li>Step palette and property panel that edit YAML safely.</li>
+<li>Read-only graph preview.</li>
+<li>Drag-and-drop graph editing once round-trip behavior is reliable.</li>
+</ol>
+<h2 id="implementation-architecture"><a class="header" href="#implementation-architecture">Implementation Architecture</a></h2>
+<p>The recommended implementation is a custom React editor built from focused
+building blocks:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Component</th><th>Recommended library</th><th>Responsibility</th></tr>
+</thead>
+<tbody>
+<tr><td>Source editor</td><td>Monaco Editor with YAML support</td><td>Edit YAML/JSON, validate against the Light-Fabric workflow schema, provide autocomplete and hover help.</td></tr>
+<tr><td>Visual graph</td><td>React Flow / xyflow</td><td>Render workflow states as nodes and transitions as edges, with custom node components for agentic task types.</td></tr>
+<tr><td>Property panels</td><td>Schema-backed React forms, optionally JSONForms</td><td>Edit selected node/task properties without forcing users to hand-edit every YAML field.</td></tr>
+<tr><td>State manager</td><td>Existing portal state pattern or Zustand if a local editor store is needed</td><td>Hold the canonical workflow document, parsed model, diagnostics, selected node, dirty state, and test run state.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The workflow YAML or JSON document remains the source of truth. Monaco edits
+parse into the editor store. The parsed workflow model is then projected into
+React Flow nodes and edges. React Flow edits update the same model and then
+serialize back to the YAML document.</p>
+<p>This avoids fighting a visualizer that only understands the strict CNCF
+Serverless Workflow schema. It also lets Portal define first-class visual
+treatments for Light-Fabric task types such as <code>agent</code>, <code>mcp</code>, <code>ask</code>,
+<code>assert</code>, <code>rule</code>, <code>switch</code>, and future LLM or approval-oriented steps.</p>
+<p>Monaco should use a custom JSON Schema derived from the CNCF Serverless
+Workflow schema plus Light-Fabric agentic extensions. For YAML editing, the
+schema should be registered through a YAML-aware Monaco integration so users
+get validation, completions, and hover descriptions that match the actual
+runtime contract.</p>
+<p>React Flow should not own the persisted shape. It owns layout, selection, edge
+creation, and node interaction. The persisted workflow definition should remain
+independent of the canvas library so a future editor or CLI can read the same
+definitions.</p>
+<p>Recommended sync behavior:</p>
+<ol>
+<li>Parse Monaco content into a typed workflow model when the YAML is valid.</li>
+<li>Preserve text edits and show problems when YAML is invalid; do not destroy
+the user’s in-progress text.</li>
+<li>Project valid workflow models to React Flow nodes and edges.</li>
+<li>Let graph edge changes update transition targets in the model.</li>
+<li>Let property-panel changes update the model through schema-aware controls.</li>
+<li>Serialize model changes back into the YAML document using stable formatting.</li>
+<li>Keep conflict handling explicit when source edits and graph edits race.</li>
+</ol>
+<p>Mermaid can be used for documentation or a lightweight read-only preview, but
+it is not the long-term authoring surface. JSONForms can be useful inside
+property panels, but it should not replace the graph/source editor combination.</p>
+<h2 id="layout"><a class="header" href="#layout">Layout</a></h2>
+<p>Recommended first layout:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Region</th><th>Contents</th></tr>
+</thead>
+<tbody>
+<tr><td>Header</td><td>Namespace, name, version, owner, active state, save, validate, import, export, and test actions.</td></tr>
+<tr><td>Left panel</td><td>Step outline, problems, references, and search.</td></tr>
+<tr><td>Main panel</td><td>YAML editor with syntax highlighting and parse markers.</td></tr>
+<tr><td>Right panel</td><td>Selected step properties, input/output/export preview, and endpoint/tool metadata.</td></tr>
+<tr><td>Bottom panel</td><td>Test input, validation results, workflow events, waiting tasks, and output.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The generic Workflow Definition page can use the full layout. The Skill
+Workspace can embed the same editor with a narrower reference scope and a
+skill-aware validation profile.</p>
+<h2 id="step-palette"><a class="header" href="#step-palette">Step Palette</a></h2>
+<p>The editor should understand the task types defined by the Light-Fabric
+agentic workflow design:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Step type</th><th>Use</th></tr>
+</thead>
+<tbody>
+<tr><td><code>ask</code></td><td>Pause for human input, approval, or missing values.</td></tr>
+<tr><td><code>assert</code></td><td>Validate context, API results, or business rules.</td></tr>
+<tr><td><code>http</code> / <code>openapi</code></td><td>Invoke HTTP endpoints directly or through cataloged descriptions.</td></tr>
+<tr><td><code>jsonrpc</code> / <code>openrpc</code></td><td>Invoke JSON-RPC methods directly or through OpenRPC descriptions.</td></tr>
+<tr><td><code>grpc</code></td><td>Invoke cataloged gRPC methods.</td></tr>
+<tr><td><code>mcp</code></td><td>Invoke gateway-visible MCP tools, resources, or prompts.</td></tr>
+<tr><td><code>rule</code></td><td>Delegate complex checks to Light-Rule.</td></tr>
+<tr><td><code>agent</code></td><td>Delegate a bounded task to an agent worker.</td></tr>
+<tr><td><code>switch</code> / <code>condition</code></td><td>Branch based on workflow context or task output.</td></tr>
+<tr><td><code>set</code> / <code>export</code></td><td>Move task results into workflow context.</td></tr>
+<tr><td><code>wait</code></td><td>Represent a durable wait, timeout, or externally completed task.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The palette should create minimal valid YAML fragments. Users can then edit the
+full YAML when advanced options are needed.</p>
+<h2 id="reference-panel"><a class="header" href="#reference-panel">Reference Panel</a></h2>
+<p>The editor should help authors reference existing catalog objects instead of
+typing fragile identifiers by hand:</p>
+<ul>
+<li>workflow definitions and versions,</li>
+<li>LightAPI endpoint descriptions,</li>
+<li>API endpoints and tool projections,</li>
+<li>gateway-visible MCP tools,</li>
+<li>rule definitions,</li>
+<li>agent definitions,</li>
+<li>skills and skill-linked tools when the editor is embedded in the Skill
+Workspace.</li>
+</ul>
+<p>For generic workflow authoring, the reference panel can show all objects the
+current user is allowed to read. For skill authoring, it should filter tools to
+the skill’s linked tools and flag references outside that set.</p>
+<h2 id="validation"><a class="header" href="#validation">Validation</a></h2>
+<p>Validation should run in layers:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Layer</th><th>Checks</th></tr>
+</thead>
+<tbody>
+<tr><td>Syntax</td><td>YAML parses, document shape is valid, and duplicate keys are rejected when possible.</td></tr>
+<tr><td>Specification</td><td>Required workflow fields, step IDs, task type structure, branch targets, exports, and inputs are valid.</td></tr>
+<tr><td>Catalog references</td><td>Referenced endpoint descriptions, tools, rules, agents, and child workflows exist and are active.</td></tr>
+<tr><td>Security</td><td>Sensitive or destructive steps have required approval, visibility, and ownership metadata.</td></tr>
+<tr><td>Skill embedding</td><td>Workflow tool calls are linked through <code>skill_tool_t</code> when editing a workflow-backed skill.</td></tr>
+<tr><td>Runtime diagnostics</td><td>Optional gateway <code>tools/list</code> checks compare cataloged tool names with deployed gateway availability.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Runtime diagnostics should be separate from persistence validation. A workflow
+definition can be saved before a gateway is reachable, but the editor should
+make missing runtime executability visible before test or deployment.</p>
+<h2 id="test-runner"><a class="header" href="#test-runner">Test Runner</a></h2>
+<p>The editor should support a test panel that starts a workflow instance through
+the existing workflow start command and then reads instance events and task
+state through the workflow query APIs.</p>
+<p>The test panel should support:</p>
+<ul>
+<li>JSON workflow input,</li>
+<li>start run,</li>
+<li>event stream or polling view,</li>
+<li>current context and output preview,</li>
+<li>waiting task completion for <code>ask</code> or approval steps,</li>
+<li>assertion and rule failure display,</li>
+<li>gateway or endpoint call failure display,</li>
+<li>rerun with the same input.</li>
+</ul>
+<p>The test runner is a client of <code>light-workflow</code>; it does not execute workflow
+steps in the browser.</p>
+<h2 id="skill-workspace-integration"><a class="header" href="#skill-workspace-integration">Skill Workspace Integration</a></h2>
+<p>Phase 3.5 skill authoring should embed the Workflow Editor rather than create a
+second skill-specific workflow UI.</p>
+<p>Recommended integration:</p>
+<ol>
+<li>The Skill Workspace has a Workflow tab.</li>
+<li>The tab lets the user choose <code>none</code> or <code>workflow-backed</code>.</li>
+<li>In workflow-backed mode, the user can select an existing workflow definition
+or create a draft definition.</li>
+<li>The link is stored in <code>skill_workflow_t</code>.</li>
+<li>The editor reference panel filters tool references to the tools linked by
+<code>skill_tool_t</code>.</li>
+<li>Validation rejects or warns on workflow tool calls not present in the
+skill’s allowed tool set.</li>
+<li>The Test tab starts the linked workflow with sample JSON input and displays
+the same workflow events used by the generic editor.</li>
+</ol>
+<p>This keeps the skill as a discovery and guidance artifact while <code>light-workflow</code>
+owns deterministic orchestration.</p>
+<h2 id="data-and-api-changes"><a class="header" href="#data-and-api-changes">Data And API Changes</a></h2>
+<p>The first generic editor can reuse existing workflow definition APIs. Later
+phases should add editor-friendly endpoints only when they remove real UI
+complexity.</p>
+<p>Recommended future additions:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>API or table</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>validateWfDefinition</code></td><td>Server-side validation using the same parser and schema as <code>light-workflow</code>.</td></tr>
+<tr><td><code>formatWfDefinition</code></td><td>Optional canonical formatting if the workflow parser supports round-trip formatting.</td></tr>
+<tr><td><code>getWorkflowReferenceCatalog</code></td><td>One call to fetch endpoint, tool, rule, agent, and workflow labels for the reference panel.</td></tr>
+<tr><td><code>skill_workflow_t</code></td><td>Link skills to workflow definitions without embedding workflow YAML in skills.</td></tr>
+<tr><td><code>saveSkillWorkspace</code></td><td>Composite command that saves skill metadata, taxonomy, tool links, workflow links, and optional draft workflow updates from one workspace action.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Server-side validation should be authoritative. Client-side validation is useful
+for responsiveness but should not be the only guard before saving or testing a
+workflow definition.</p>
+<h2 id="phased-implementation"><a class="header" href="#phased-implementation">Phased Implementation</a></h2>
+<h3 id="phase-a-structured-yaml-editor"><a class="header" href="#phase-a-structured-yaml-editor">Phase A: Structured YAML Editor</a></h3>
+<ul>
+<li>Add a generic Workflow Editor component and route.</li>
+<li>Replace create/update workflow definition textarea navigation with the editor
+where practical.</li>
+<li>Keep YAML visible and canonical.</li>
+<li>Use Monaco Editor with the Light-Fabric workflow schema for YAML/JSON
+validation, autocomplete, hover help, and parse markers.</li>
+<li>Parse YAML client-side to render a step outline and problems panel.</li>
+<li>Add import/export and basic validation before save.</li>
+</ul>
+<h3 id="phase-b-catalog-aware-authoring"><a class="header" href="#phase-b-catalog-aware-authoring">Phase B: Catalog-Aware Authoring</a></h3>
+<ul>
+<li>Add a reference panel for endpoint descriptions, tools, rules, agents, and
+workflow definitions.</li>
+<li>Add a step palette that inserts valid YAML snippets.</li>
+<li>Add schema-backed property panels for selected steps. Use dropdowns for
+catalog references and constrained enums instead of free-text fields where
+Portal already has authoritative labels.</li>
+<li>Add server-side validation through <code>validateWfDefinition</code>.</li>
+<li>Add runtime diagnostics that compare MCP tool references with gateway
+<code>tools/list</code> when a gateway target is selected.</li>
+</ul>
+<h3 id="phase-c-test-and-worklist-integration"><a class="header" href="#phase-c-test-and-worklist-integration">Phase C: Test And Worklist Integration</a></h3>
+<ul>
+<li>Add a test runner panel backed by <code>light-workflow</code> start and query APIs.</li>
+<li>Show workflow events, current task state, waiting human tasks, assertions,
+and final output.</li>
+<li>Let users complete <code>ask</code> tasks from the test panel.</li>
+<li>Link failed test runs to remediation tasks or worklist entries.</li>
+</ul>
+<h3 id="phase-d-visual-graph-editing"><a class="header" href="#phase-d-visual-graph-editing">Phase D: Visual Graph Editing</a></h3>
+<ul>
+<li>Add a React Flow graph preview after the outline is stable.</li>
+<li>Represent Light-Fabric task types with custom React Flow nodes and explicit
+transition edges.</li>
+<li>Add drag-and-drop graph editing only after YAML/model round-trip behavior is
+reliable.</li>
+<li>Keep YAML as the source of truth even when visual editing is enabled.</li>
+</ul>
+<h2 id="recommendation"><a class="header" href="#recommendation">Recommendation</a></h2>
+<p>Build the generic Workflow Editor before the Skill Workspace embeds workflow
+authoring. The skill UI should provide context and constraints, while the
+workflow editor provides YAML editing, step preview, validation, and test runs
+for every workflow authoring use case in Portal.</p>
 
                     </main>
 
