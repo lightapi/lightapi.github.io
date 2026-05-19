@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-7dc70760.js";
+            window.path_to_searchindex_js = "searchindex-8204dede.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-30d64436.js"></script>
+        <script src="toc-54e80872.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -2496,6 +2496,318 @@ without a <code>userId</code> filter for host-wide failures.</li>
 </table>
 </div>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="api-marketplace-catalog"><a class="header" href="#api-marketplace-catalog">API Marketplace Catalog</a></h1>
+<h2 id="context"><a class="header" href="#context">Context</a></h2>
+<p>The portal already has a Marketplace navigation group and an <code>api-marketplace</code>
+page registry entry. The current API administration page is table-oriented and
+is useful for owners, but it is not a consumer catalog. A Marketplace API
+catalog should let users discover APIs by business category, capability,
+protocol, lifecycle status, and governance metadata.</p>
+<p>API create and update forms already use the standardized taxonomy fields:</p>
+<ul>
+<li><code>categoryIds</code> for selected category identifiers.</li>
+<li><code>tagIds</code> for selected tag identifiers.</li>
+<li><code>getCategoryLabelByType</code> with <code>entityType = "api"</code> for category options.</li>
+<li><code>getTagLabelByType</code> with <code>entityType = "api"</code> for tag options.</li>
+</ul>
+<p>The service query layer also returns <code>categoryIds</code>, <code>categories</code>, <code>tagIds</code>, and
+<code>tags</code> for API rows. The catalog should use those fields for display and
+filtering instead of reintroducing the legacy <code>apiTags</code> string field.</p>
+<h2 id="goals-1"><a class="header" href="#goals-1">Goals</a></h2>
+<ul>
+<li>Add a Marketplace menu entry for an API catalog.</li>
+<li>Use database-backed categories and tags, not hard-coded UI lists.</li>
+<li>Keep categories and tags reusable across future catalog pages.</li>
+<li>Keep API create/update forms as the source of truth for taxonomy assignment.</li>
+<li>Give consumers a browse-first experience instead of an admin table.</li>
+<li>Support deep links from a catalog listing to API detail, versions, endpoints,
+runtime bindings, and owner actions.</li>
+<li>Preserve host scope and ownership rules already used by API administration.</li>
+</ul>
+<h2 id="non-goals-4"><a class="header" href="#non-goals-4">Non-Goals</a></h2>
+<ul>
+<li>Do not replace API administration pages with the catalog.</li>
+<li>Do not store display names in API rows when they can be resolved from
+<code>category_t</code>, <code>tag_t</code>, <code>entity_category_t</code>, and <code>entity_tag_t</code>.</li>
+<li>Do not use the old <code>apiTags</code> field for catalog filtering.</li>
+<li>Do not make taxonomy values static frontend constants.</li>
+<li>Do not expose private tenant APIs through a public catalog without an
+explicit visibility and authorization decision.</li>
+</ul>
+<h2 id="current-building-blocks"><a class="header" href="#current-building-blocks">Current Building Blocks</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Area</th><th>Current shape</th><th>Catalog use</th></tr>
+</thead>
+<tbody>
+<tr><td>Portal navigation</td><td>Marketplace group already exists in the sidebar</td><td>Add an API Catalog child item under Marketplace</td></tr>
+<tr><td>Page registry</td><td><code>api-marketplace</code> points to <code>/app/marketplace</code>, while the app route still needs a real catalog page</td><td>Keep a registry entry for search, task links, and help links</td></tr>
+<tr><td>API admin page</td><td><code>Service.tsx</code> calls <code>service/getApi</code> and displays <code>categories</code> and <code>tags</code></td><td>Reuse its query contract but present catalog cards/list views</td></tr>
+<tr><td>API detail page</td><td><code>ApiDetail.tsx</code> shows API versions and action links</td><td>Catalog detail can deep-link to this page</td></tr>
+<tr><td>Forms</td><td><code>createApi</code> and <code>updateApi</code> submit <code>categoryIds</code> and <code>tagIds</code></td><td>Catalog reads the same assignments</td></tr>
+<tr><td>Category labels</td><td><code>category/getCategoryLabelByType</code> returns <code>id</code> and <code>label</code></td><td>Use for category tabs, filters, and chips</td></tr>
+<tr><td>Tag labels</td><td><code>tag/getTagLabelByType</code> returns id, label, value, group code, group label, group sort order, and tag sort order</td><td>Use for grouped tag filters and grouped multi-select controls</td></tr>
+<tr><td>Database</td><td><code>category_t</code>, <code>tag_t</code>, <code>entity_category_t</code>, and <code>entity_tag_t</code> are entity-type scoped</td><td>Use <code>entity_type = 'api'</code> for API catalog taxonomy</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="user-experience"><a class="header" href="#user-experience">User Experience</a></h2>
+<p>The first screen under Marketplace should be the usable catalog, not a landing
+page. The recommended route is:</p>
+<pre><code class="language-text">/app/marketplace/api
+</code></pre>
+<p>The sidebar can keep the existing Marketplace group, but its children should
+move from API-type-only links to intent-based entries:</p>
+<ul>
+<li>API Catalog</li>
+<li>API Clients</li>
+<li>JSON Schema</li>
+<li>YAML Rule</li>
+<li>Schema Form</li>
+</ul>
+<p>The API Catalog page should provide:</p>
+<ul>
+<li>Search across API id, name, description, business group, line of business,
+capability, platform, git repository, categories, and tags.</li>
+<li>Category tabs or a category rail based on <code>getCategoryLabelByType</code>.</li>
+<li>Grouped tag filters based on <code>getTagLabelByType</code>.</li>
+<li>Filter chips for active category and tag selections.</li>
+<li>A compact card or list row per API with name, description, status,
+categories, tags, owner, business group, and latest version summary.</li>
+<li>Actions to view details, review versions, create a new version, update the
+API metadata, and open related runtime or access-control pages when the user
+has permission.</li>
+</ul>
+<p>The catalog should support an <code>Uncategorized</code> bucket for active APIs without
+category assignments. This avoids hiding incomplete data and gives admins an
+easy cleanup target.</p>
+<h2 id="categories-and-tags"><a class="header" href="#categories-and-tags">Categories And Tags</a></h2>
+<p>Categories should be stable browse buckets. Tags should be flexible facets.
+Both are stored with <code>entityType = "api"</code> so the same tag names can be reused
+for other entity types without forcing cross-catalog semantics.</p>
+<p>Recommended initial API categories:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Category value</th><th>Label</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>public-api</code></td><td>Public API</td><td>External developer-facing APIs</td></tr>
+<tr><td><code>partner-api</code></td><td>Partner API</td><td>APIs shared with business partners</td></tr>
+<tr><td><code>internal-api</code></td><td>Internal API</td><td>Organization-internal service APIs</td></tr>
+<tr><td><code>platform-service</code></td><td>Platform Service</td><td>Shared platform or infrastructure APIs</td></tr>
+<tr><td><code>data-api</code></td><td>Data API</td><td>Data access, analytics, reporting, and query APIs</td></tr>
+<tr><td><code>ai-automation-api</code></td><td>AI / Automation API</td><td>Agent, workflow, automation, or AI-facing APIs</td></tr>
+<tr><td><code>security-compliance-api</code></td><td>Security / Compliance API</td><td>Identity, audit, policy, compliance, and control APIs</td></tr>
+<tr><td><code>developer-tooling-api</code></td><td>Developer Tooling API</td><td>Build, test, deployment, and developer-experience APIs</td></tr>
+<tr><td><code>legacy-modernization-api</code></td><td>Legacy / Modernization API</td><td>Legacy integration and modernization APIs</td></tr>
+</tbody>
+</table>
+</div>
+<p>The stored <code>category_name</code> must stay lower-case and URL-friendly. The display
+labels above are UI labels derived from those values.</p>
+<p>Recommended initial API tag groups:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Group code</th><th>Group label</th><th>Example tag values</th></tr>
+</thead>
+<tbody>
+<tr><td><code>protocol</code></td><td>Protocol</td><td><code>openapi</code>, <code>graphql</code>, <code>hybrid</code>, <code>mcp</code>, <code>rest</code>, <code>event-driven</code></td></tr>
+<tr><td><code>lifecycle</code></td><td>Lifecycle</td><td><code>draft</code>, <code>review</code>, <code>implemented</code>, <code>deprecated</code>, <code>beta</code>, <code>ga</code></td></tr>
+<tr><td><code>security</code></td><td>Security</td><td><code>oauth2</code>, <code>jwt</code>, <code>mtls</code>, <code>pii</code>, <code>hipaa</code>, <code>pci</code>, <code>read-only</code></td></tr>
+<tr><td><code>runtime</code></td><td>Runtime</td><td><code>gateway</code>, <code>sidecar</code>, <code>kubernetes</code>, <code>serverless</code>, <code>multi-region</code></td></tr>
+<tr><td><code>domain</code></td><td>Domain</td><td><code>customer</code>, <code>order</code>, <code>payment</code>, <code>inventory</code>, <code>tax</code>, <code>billing</code></td></tr>
+<tr><td><code>consumer</code></td><td>Consumer</td><td><code>public</code>, <code>partner</code>, <code>internal</code>, <code>agent-facing</code>, <code>mobile</code>, <code>web</code></td></tr>
+<tr><td><code>operations</code></td><td>Operations</td><td><code>high-traffic</code>, <code>low-latency</code>, <code>batch</code>, <code>streaming</code>, <code>critical</code></td></tr>
+<tr><td><code>integration</code></td><td>Integration</td><td><code>database</code>, <code>kafka</code>, <code>s3</code>, <code>third-party</code>, <code>mainframe</code>, <code>saas</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Stored tag names must stay lower-case and URL-friendly. If a display label needs
+capitalization, the UI should format it or the label endpoint should provide a
+separate display field later.</p>
+<p>Tags without <code>tag_group_code</code> or <code>tag_group_label</code> should be shown under a
+<code>General</code> filter group in the catalog UI. Configured groups should appear first
+by <code>group_sort_order</code>; the <code>General</code> group should appear after configured
+groups, matching the current label query behavior where null group sort values
+sort last.</p>
+<h2 id="data-flow"><a class="header" href="#data-flow">Data Flow</a></h2>
+<p>Catalog filter option loading:</p>
+<pre><code class="language-text">portal-view
+  -&gt; category/getCategoryLabelByType(hostId, entityType = "api")
+  -&gt; tag/getTagLabelByType(hostId, entityType = "api")
+</code></pre>
+<p>Catalog result loading:</p>
+<pre><code class="language-text">portal-view
+  -&gt; service/getApi(hostId, offset, limit, active, filters, globalFilter, sorting)
+  -&gt; api rows with categoryIds, categories, tagIds, tags
+</code></pre>
+<p>The catalog should prefer server-side pagination and filtering. Client-side
+filtering is acceptable only for a small first pass because it breaks as soon as
+the API count exceeds one fetched page.</p>
+<h2 id="query-contract"><a class="header" href="#query-contract">Query Contract</a></h2>
+<p>The existing <code>getApi</code> contract already supports <code>filters</code>, <code>globalFilter</code>,
+<code>sorting</code>, <code>offset</code>, <code>limit</code>, <code>hostId</code>, and <code>active</code>. To make the catalog work
+well at scale, add first-class filter support for taxonomy fields:</p>
+<pre><code class="language-json">{
+  "hostId": "01964b05-552a-7c4b-9184-6857e7f3dc5f",
+  "offset": 0,
+  "limit": 20,
+  "active": true,
+  "categoryIds": ["..."],
+  "tagIds": ["..."],
+  "tagMatch": "all",
+  "globalFilter": "payment"
+}
+</code></pre>
+<p>Recommended semantics:</p>
+<ul>
+<li><code>categoryIds</code> uses OR semantics by default. An API in any selected category
+is returned.</li>
+<li><code>tagIds</code> should support <code>tagMatch = "all"</code> and <code>tagMatch = "any"</code>.</li>
+<li>Category and tag filters should use <code>EXISTS</code> against <code>entity_category_t</code> and
+<code>entity_tag_t</code> with <code>entity_type = 'api'</code> and <code>active = TRUE</code>.</li>
+<li>Display arrays should continue to be returned as <code>categories</code> and <code>tags</code>.</li>
+<li>Form update payloads should continue to submit identifiers only through
+<code>categoryIds</code> and <code>tagIds</code>.</li>
+</ul>
+<h2 id="page-design"><a class="header" href="#page-design">Page Design</a></h2>
+<p>The API Catalog page can be implemented as a dedicated page rather than trying
+to stretch the current API admin table.</p>
+<p>Proposed files:</p>
+<pre><code class="language-text">src/pages/marketplace/ApiCatalog.tsx
+src/pages/marketplace/components/ApiCatalogFilters.tsx
+src/pages/marketplace/components/ApiCatalogCard.tsx
+src/pages/marketplace/hooks/useApiCatalog.ts
+</code></pre>
+<p>Page state:</p>
+<ul>
+<li>search text</li>
+<li>selected category ids</li>
+<li>selected tag ids</li>
+<li>tag match mode</li>
+<li>active status</li>
+<li>pagination</li>
+<li>sorting</li>
+<li>view mode, either compact list or card grid</li>
+</ul>
+<p>Catalog state should be URL-driven from Phase 1. Search text, selected
+categories, selected tags, tag match mode, active status, sorting, and
+pagination should be encoded in the query string so users can refresh the page,
+use browser navigation, and share filtered catalog URLs. Example:</p>
+<pre><code class="language-text">/app/marketplace/api?q=payment&amp;category=public-api&amp;tag=oauth2&amp;tag=mtls&amp;tagMatch=all&amp;page=1
+</code></pre>
+<p>The page should still reuse existing infrastructure:</p>
+<ul>
+<li><code>fetchClient</code> for portal query calls.</li>
+<li><code>useUserState</code> for host and user context.</li>
+<li><code>buildTaskAwareRoute</code> for deep links.</li>
+<li>ownership utilities for update/delete action visibility.</li>
+<li><code>TaskActionPanel</code> for publisher/admin next actions.</li>
+<li><code>pageRegistry</code> and contextual help metadata.</li>
+</ul>
+<h2 id="routing-and-navigation"><a class="header" href="#routing-and-navigation">Routing And Navigation</a></h2>
+<p>Add or update these portal-view entries:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Location</th><th>Change</th></tr>
+</thead>
+<tbody>
+<tr><td><code>Sidebar.tsx</code></td><td>Add <code>API Catalog</code> under Marketplace with route <code>/app/marketplace/api</code></td></tr>
+<tr><td><code>App.tsx</code></td><td>Route <code>/app/marketplace/api</code> to <code>ApiCatalog</code></td></tr>
+<tr><td><code>pageRegistry.ts</code></td><td>Add or update API Catalog metadata, keywords, and help path</td></tr>
+<tr><td><code>taskRegistry.ts</code></td><td>Update publish/review steps to point to <code>/app/marketplace/api</code></td></tr>
+<tr><td>Help docs</td><td>Add a user-facing help page after the UI settles</td></tr>
+</tbody>
+</table>
+</div>
+<p>The existing <code>/app/marketplace</code> route can redirect to <code>/app/marketplace/api</code> or
+remain a broader Marketplace landing page later. For the first API catalog
+implementation, redirecting keeps the behavior simple.</p>
+<h2 id="backend-changes"><a class="header" href="#backend-changes">Backend Changes</a></h2>
+<p>The backend already persists API category and tag relationships. The main
+backend change is query filtering:</p>
+<ol>
+<li>Extend <code>service-query</code> spec for optional <code>categoryIds</code>, <code>tagIds</code>, and
+<code>tagMatch</code>.</li>
+<li>Update <code>GetApi</code> to pass those optional fields to the DB provider.</li>
+<li>Update <code>PortalDbProvider#getApi</code> and <code>ApiServicePersistenceImpl#getApi</code>.</li>
+<li>Add SQL predicates over <code>entity_category_t</code> and <code>entity_tag_t</code>.</li>
+<li>Verify or add compound indexes for taxonomy filtering.</li>
+<li>Add tests for category-only, tag-any, tag-all, combined taxonomy filters,
+and APIs with no taxonomy assignments.</li>
+</ol>
+<p>The existing join-table indexes are useful for entity lookups and label
+resolution, but catalog filtering also needs indexes that start with filter
+fields. Before implementing Phase 2, verify the query plan and add indexes if
+needed:</p>
+<pre><code class="language-sql">CREATE INDEX idx_entity_tag_filter
+ON entity_tag_t (entity_type, tag_id, entity_id)
+WHERE active = TRUE;
+
+CREATE INDEX idx_entity_category_filter
+ON entity_category_t (entity_type, category_id, entity_id)
+WHERE active = TRUE;
+</code></pre>
+<p>For <code>tagMatch = "all"</code>, prefer a single grouped subquery over generating one
+<code>EXISTS</code> predicate per selected tag when the selected tag set can grow. A common
+shape is to filter <code>entity_tag_t</code> by selected tag ids, group by <code>entity_id</code>, and
+require <code>COUNT(DISTINCT tag_id) = selectedTagCount</code>.</p>
+<p>The query response should continue to include both identifiers and labels:</p>
+<pre><code class="language-json">{
+  "apiId": "0001",
+  "apiName": "Petstore",
+  "categoryIds": ["..."],
+  "categories": ["public-api"],
+  "tagIds": ["..."],
+  "tags": ["openapi", "oauth2"]
+}
+</code></pre>
+<h2 id="implementation-phases"><a class="header" href="#implementation-phases">Implementation Phases</a></h2>
+<h3 id="phase-1-catalog-page"><a class="header" href="#phase-1-catalog-page">Phase 1: Catalog Page</a></h3>
+<ul>
+<li>Add the API Catalog route and Marketplace menu entry.</li>
+<li>Load category and tag options from the existing label endpoints.</li>
+<li>Load APIs with <code>service/getApi</code>.</li>
+<li>Render search, category filter, grouped tag filter, and API list/card results.</li>
+<li>Store catalog filters, search text, sorting, and pagination in the URL query
+string.</li>
+<li>Use current query response labels for display.</li>
+<li>Deep-link to existing API detail and update forms.</li>
+</ul>
+<h3 id="phase-2-server-side-taxonomy-filters"><a class="header" href="#phase-2-server-side-taxonomy-filters">Phase 2: Server-Side Taxonomy Filters</a></h3>
+<ul>
+<li>Add <code>categoryIds</code>, <code>tagIds</code>, and <code>tagMatch</code> to <code>service-query</code>.</li>
+<li>Implement SQL filtering in <code>ApiServicePersistenceImpl</code>.</li>
+<li>Keep current table filtering support for admin use.</li>
+<li>Add DB provider and handler tests.</li>
+</ul>
+<h3 id="phase-3-catalog-polish"><a class="header" href="#phase-3-catalog-polish">Phase 3: Catalog Polish</a></h3>
+<ul>
+<li>Add API detail summary panels with versions, endpoint count, runtime exposure,
+and access-control hints.</li>
+<li>Add help docs and task links.</li>
+<li>Add optional counts per category and tag if the catalog needs faceted counts.</li>
+</ul>
+<h2 id="open-questions"><a class="header" href="#open-questions">Open Questions</a></h2>
+<ul>
+<li>Should Marketplace API Catalog show only active APIs by default? The
+recommendation is yes, with an admin-visible inactive filter.</li>
+<li>Should unauthenticated users ever see catalog data? The recommendation is no
+until a separate public visibility model is designed.</li>
+<li>Should category selection be single-select or multi-select? The
+recommendation is multi-select OR semantics for flexibility.</li>
+<li>Should tags use all-match or any-match by default? The recommendation is
+<code>all</code> for precision, with a visible toggle if users need broader searches.</li>
+<li>Should OpenAPI tags imported from specs automatically create API catalog
+tags? The recommendation is no for the first pass. Spec tags are often
+endpoint-level groupings and should not automatically become curated catalog
+taxonomy.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="agent-skill-and-api-endpoint-discovery"><a class="header" href="#agent-skill-and-api-endpoint-discovery">Agent Skill And API Endpoint Discovery</a></h1>
 <h2 id="problem-3"><a class="header" href="#problem-3">Problem</a></h2>
 <p>The GenAI chat flow has two separate concepts that are easy to confuse:</p>
@@ -2522,7 +2834,7 @@ exist, which endpoint projections are invokable by agents, which skills they
 belong to, and which agents are allowed or expected to use those skills. Without
 that catalog, the agent can list executable gateway tools, but it has no domain
 guidance beyond each tool description.</p>
-<h2 id="goals-1"><a class="header" href="#goals-1">Goals</a></h2>
+<h2 id="goals-2"><a class="header" href="#goals-2">Goals</a></h2>
 <ul>
 <li>Keep the gateway as the runtime source of truth for MCP tool execution.</li>
 <li>Keep direct gateway <code>tools/list</code> and <code>tools/call</code> working even when no skills
@@ -2546,7 +2858,7 @@ to be wrapped before it can be called.</li>
 portal-query can perform macro-filtering, keyword search, vector ranking,
 context viability checks, and safety filtering.</li>
 </ul>
-<h2 id="non-goals-4"><a class="header" href="#non-goals-4">Non-Goals</a></h2>
+<h2 id="non-goals-5"><a class="header" href="#non-goals-5">Non-Goals</a></h2>
 <ul>
 <li>Do not move MCP request routing or downstream REST calls into the controller.</li>
 <li>Do not implement <code>skill/search</code> in controller-rs. Controller-rs can
@@ -3603,7 +3915,7 @@ forms whose <code>definition</code> field is a YAML textarea.</li>
 </ul>
 <p>The first Workflow Editor can therefore be an incremental UI improvement over
 the existing definition CRUD and start workflow command.</p>
-<h2 id="goals-2"><a class="header" href="#goals-2">Goals</a></h2>
+<h2 id="goals-3"><a class="header" href="#goals-3">Goals</a></h2>
 <ul>
 <li>Keep workflow YAML as the canonical persisted artifact.</li>
 <li>Provide a readable step outline or graph next to the YAML editor.</li>
@@ -3616,7 +3928,7 @@ flows.</li>
 authoring component with skill-specific constraints.</li>
 <li>Preserve owner scoping and existing Portal command/query conventions.</li>
 </ul>
-<h2 id="non-goals-5"><a class="header" href="#non-goals-5">Non-Goals</a></h2>
+<h2 id="non-goals-6"><a class="header" href="#non-goals-6">Non-Goals</a></h2>
 <ul>
 <li>Do not execute workflow logic in Portal View.</li>
 <li>Do not make skills the workflow runtime.</li>
@@ -3957,7 +4269,7 @@ should model catalog scope explicitly:</p>
 <li>a separate SPA may expose the same backend catalog, but it should not become
 the catalog authority.</li>
 </ul>
-<h2 id="goals-3"><a class="header" href="#goals-3">Goals</a></h2>
+<h2 id="goals-4"><a class="header" href="#goals-4">Goals</a></h2>
 <ul>
 <li>Avoid duplicating the full catalog for every tenant.</li>
 <li>Prevent catalog drift between tenants and between portal instances.</li>
@@ -3976,7 +4288,7 @@ agent-facing skills and tools.</li>
 <li>Support promotion or import/export between portal instances instead of
 relying on ad hoc row copies.</li>
 </ul>
-<h2 id="non-goals-6"><a class="header" href="#non-goals-6">Non-Goals</a></h2>
+<h2 id="non-goals-7"><a class="header" href="#non-goals-7">Non-Goals</a></h2>
 <ul>
 <li>Do not clone every global catalog row into every tenant by default.</li>
 <li>Do not make a separate SPA the source of truth for catalog data.</li>
@@ -4219,7 +4531,7 @@ instances.</li>
 <li>Update portal-view to expose scope and provenance.</li>
 <li>Keep existing host-scoped APIs working during the migration.</li>
 </ol>
-<h2 id="open-questions"><a class="header" href="#open-questions">Open Questions</a></h2>
+<h2 id="open-questions-1"><a class="header" href="#open-questions-1">Open Questions</a></h2>
 <ul>
 <li>Should global reusable skills and tools use nullable <code>host_id</code> in the
 existing tables, or separate template tables with host bindings?</li>
@@ -4283,7 +4595,7 @@ entity-specific effective endpoints?</li>
 <h1 id="oauth-audit"><a class="header" href="#oauth-audit">OAuth Audit</a></h1>
 <p>The OAuth services keep authorization codes and refresh tokens as operational state. These rows are short lived and are now written directly to <code>auth_code_t</code> and <code>auth_refresh_token_t</code> instead of being created through the general event store. This avoids high-volume login and refresh-token churn in <code>event_store_t</code> and <code>outbox_message_t</code>.</p>
 <p>Audit and login history are recorded separately in append-oriented OAuth audit tables.</p>
-<h2 id="goals-4"><a class="header" href="#goals-4">Goals</a></h2>
+<h2 id="goals-5"><a class="header" href="#goals-5">Goals</a></h2>
 <ul>
 <li>Show administrators who is currently online.</li>
 <li>Show a user the last login time and session history.</li>
@@ -6464,7 +6776,7 @@ model conversations, read state, participant visibility, or per-user delete.</li
 messages page should load its own data from the query API.</li>
 <li>The existing private-message tests are disabled stubs.</li>
 </ul>
-<h2 id="goals-5"><a class="header" href="#goals-5">Goals</a></h2>
+<h2 id="goals-6"><a class="header" href="#goals-6">Goals</a></h2>
 <ul>
 <li>Let one logged-in user send a message to another portal user without knowing
 or seeing the recipient email.</li>
@@ -6479,7 +6791,7 @@ recipient email internally.</li>
 <li>Provide a path from the existing <code>message_t</code> skeleton to a conversation-based
 model without breaking existing UI routes immediately.</li>
 </ul>
-<h2 id="non-goals-7"><a class="header" href="#non-goals-7">Non-Goals</a></h2>
+<h2 id="non-goals-8"><a class="header" href="#non-goals-8">Non-Goals</a></h2>
 <ul>
 <li>Do not build group chat in the first phase.</li>
 <li>Do not expose email addresses in message APIs, events, UI state, or task
@@ -6786,7 +7098,7 @@ retention and keeps visible, partially deleted, and recently deleted messages.</
 <li>Reply pre-populates recipient context without email.</li>
 <li>Empty and error states do not produce JSON parse failures.</li>
 </ul>
-<h2 id="open-questions-1"><a class="header" href="#open-questions-1">Open Questions</a></h2>
+<h2 id="open-questions-2"><a class="header" href="#open-questions-2">Open Questions</a></h2>
 <ul>
 <li>Should users be able to send messages to themselves as private notes?</li>
 <li>Should profile pages expose a “Message” action only for users in the same
@@ -14718,7 +15030,7 @@ CREATE TABLE promotion_item_t (
 <p>A standard <code>MaterialReactTable</code> listing past promotions with columns: Source Host, Target Host, Entity Type, Status (color-coded chip), Created By, Timestamp, Promotion ID. Row action: View Details (navigates to diff view).</p>
 <h4 id="promotiondiffviewtsx-apppromotiondiff"><a class="header" href="#promotiondiffviewtsx-apppromotiondiff">PromotionDiffView.tsx (<code>/app/promotion/diff</code>)</a></h4>
 <p>Displays detailed promotion metadata (source/target hosts, status, timestamps) and a table of all promotion items with expandable field-level diffs showing source vs. target values and per-item execution status.</p>
-<h3 id="implementation-phases"><a class="header" href="#implementation-phases">Implementation Phases</a></h3>
+<h3 id="implementation-phases-1"><a class="header" href="#implementation-phases-1">Implementation Phases</a></h3>
 <ol>
 <li><strong>Phase 1 – UI Foundation:</strong> Create promotion pages, sidebar menu entry, route registration. <em>(Completed)</em></li>
 <li><strong>Phase 2 – Backend Services:</strong> Implement <code>exportSnapshot</code>, <code>importDryRun</code>, <code>importExecute</code> services, and <code>promotion_t</code>/<code>promotion_item_t</code> DDL.</li>
@@ -15402,7 +15714,7 @@ later.</li>
 <li>Rollback is a redeploy of a previous Light Portal deployment snapshot, not a
 native Kubernetes rollout undo.</li>
 </ul>
-<h2 id="open-questions-2"><a class="header" href="#open-questions-2">Open Questions</a></h2>
+<h2 id="open-questions-3"><a class="header" href="#open-questions-3">Open Questions</a></h2>
 <ul>
 <li>Which object storage providers should enterprise artifact mode support first?</li>
 <li>What retention policies should be available for encrypted rendered manifest
@@ -15440,6 +15752,36 @@ versioning.</li>
 <p>This section contains page-level help for <code>portal-view</code>.</p>
 <p>Page help should explain what the screen is for, who can access it, which
 records are visible, and which common actions are available.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="api-catalog"><a class="header" href="#api-catalog">API Catalog</a></h1>
+<p>Use API Catalog to browse APIs that are ready for consumer discovery.</p>
+<p>The catalog is backed by the same API records, categories, and tags used by API
+Admin and the API create/update forms. It is intended for browse and discovery,
+not bulk administration.</p>
+<p>Common filters:</p>
+<ul>
+<li>search text for API name, id, and description</li>
+<li>categories for stable browse buckets</li>
+<li>grouped tags for capability, protocol, lifecycle, security, runtime, domain,
+consumer, operations, and integration facets</li>
+<li>active or inactive status</li>
+<li>sort and card/list view options</li>
+</ul>
+<p>Catalog cards show a compact operational summary:</p>
+<ul>
+<li>active API version count and latest version</li>
+<li>endpoint count across active versions</li>
+<li>runtime bindings through instance APIs</li>
+<li>access-control coverage from active endpoint rules</li>
+</ul>
+<p>Common actions:</p>
+<ul>
+<li>open API details and versions</li>
+<li>open endpoints for the latest active version</li>
+<li>create a new API version</li>
+<li>update API metadata when you own the API or have API administrator access</li>
+<li>continue related publish, MCP onboarding, or access-control tasks</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="api-admin"><a class="header" href="#api-admin">API Admin</a></h1>
 <p>Use API Admin to create, review, update, and retire APIs owned by your team or
