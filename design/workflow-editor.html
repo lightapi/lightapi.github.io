@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-6eb5bd18.js";
+            window.path_to_searchindex_js = "../searchindex-7dc70760.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-30d64436.js"></script>
@@ -507,6 +507,23 @@ transition edges.</li>
 reliable.</li>
 <li>Keep YAML as the source of truth even when visual editing is enabled.</li>
 </ul>
+<p>Phase D adds the graph as a projection of the parsed YAML model, not a separate
+persisted representation. The graph reads <code>steps</code>, <code>tasks</code>, <code>states</code>, or <code>do</code>
+containers and renders one custom React Flow node per detected step. Node
+styling reflects the Light-Fabric task type, and the graph can overlay runtime
+task status from the Phase C test-run read models when the workflow task id
+matches a graph step id.</p>
+<p>Explicit transition fields such as <code>next</code>, <code>then</code>, <code>to</code>, and <code>transition</code>
+become solid graph edges. Ordered fallback edges are shown as dashed edges so
+authors can distinguish model transitions from inferred sequence. Creating an
+edge in React Flow updates the source step’s transition in YAML, and deleting an
+explicit edge removes that transition target from YAML. Dragging nodes changes
+only the authoring layout in the browser session; it does not mutate the saved
+workflow definition.</p>
+<p>The graph must continue to tolerate partial or invalid authoring states. If the
+YAML cannot be parsed into a known workflow container, the editor keeps the
+source editor and validation panels usable and shows an empty graph state rather
+than blocking authoring.</p>
 <h2 id="recommendation"><a class="header" href="#recommendation">Recommendation</a></h2>
 <p>Build the generic Workflow Editor before the Skill Workspace embeds workflow
 authoring. The skill UI should provide context and constraints, while the
