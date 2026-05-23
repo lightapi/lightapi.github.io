@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-493cf884.js";
+            window.path_to_searchindex_js = "searchindex-cd315919.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-5aa440a2.js"></script>
+        <script src="toc-8444532b.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -3259,6 +3259,428 @@ endpoint-level groupings and should not automatically become curated catalog
 taxonomy.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="ai-agent-registration-in-task-center"><a class="header" href="#ai-agent-registration-in-task-center">AI Agent Registration In Task Center</a></h1>
+<h2 id="status"><a class="header" href="#status">Status</a></h2>
+<p>Initial Task Center implementation is available. The first version uses the
+existing API-version and agent-definition commands with backend validation
+guardrails. A dedicated composite registration command remains a later
+automation enhancement.</p>
+<h2 id="context-1"><a class="header" href="#context-1">Context</a></h2>
+<p>Light Portal treats an AI agent as an API. The API record provides the stable
+catalog identity, ownership, display name, marketplace metadata, and lifecycle.
+The API version record provides the deployable version identity. The agent
+definition record is an agent-specific profile extension for the same API
+version.</p>
+<p>The current data model already reflects this relationship:</p>
+<ul>
+<li><code>api_t</code> owns the logical API and display name.</li>
+<li><code>api_version_t</code> owns the API version identity.</li>
+<li><code>agent_definition_t.agent_def_id</code> stores the same UUID as
+<code>api_version_t.api_version_id</code>.</li>
+<li><code>agent_definition_t</code> stores model and runtime profile fields such as
+<code>model_provider</code>, <code>model_name</code>, <code>api_key_ref</code>, <code>temperature</code>, and
+<code>max_tokens</code>.</li>
+<li>Agent query paths join <code>agent_definition_t</code> to <code>api_version_t</code> and <code>api_t</code>
+to expose the effective agent metadata.</li>
+</ul>
+<p>The registration UX should make this model explicit. Operators should not have
+to understand the table split. They should see one task: register an AI agent.</p>
+<h2 id="goals-3"><a class="header" href="#goals-3">Goals</a></h2>
+<ul>
+<li>Add a focused Task Center flow named <code>Register AI Agent</code>.</li>
+<li>Register the agent first as an API and API version.</li>
+<li>Create the agent definition profile using the same ID as the API version.</li>
+<li>Keep event sourcing and replay clean by using domain events instead of direct
+table writes.</li>
+<li>Avoid duplicating mutable display name fields between <code>api_t</code> and
+<code>agent_definition_t</code>.</li>
+<li>Allow skills, tools, memory, access control, and deployment links to be added
+after the base agent is registered.</li>
+</ul>
+<h2 id="non-goals-6"><a class="header" href="#non-goals-6">Non-Goals</a></h2>
+<ul>
+<li>Do not create a second standalone agent registry independent from APIs.</li>
+<li>Do not make <code>AgentDefinitionCreatedEvent</code> create <code>api_version_t</code>.</li>
+<li>Do not make <code>ApiVersionCreatedEvent</code> directly write <code>agent_definition_t</code>
+unless the event schema is intentionally expanded later.</li>
+<li>Do not require all skill and tool assignments during the initial registration.</li>
+<li>Do not replace the existing <code>Manage GenAI Assets</code> task. That task remains the
+broader maintenance flow.</li>
+</ul>
+<h2 id="identity-model"><a class="header" href="#identity-model">Identity Model</a></h2>
+<p>The agent identity is the API version identity.</p>
+<pre><code class="language-text">api_t
+  host_id
+  api_id
+  api_name              # canonical agent display name
+
+api_version_t
+  host_id
+  api_version_id        # canonical agent definition id
+  api_id
+  api_version
+  api_type = "agt"      # or accepted legacy value "agent"
+
+agent_definition_t
+  host_id
+  agent_def_id          # same value as api_version_t.api_version_id
+  model_provider
+  model_name
+  api_key_ref
+  temperature
+  max_tokens
+</code></pre>
+<p><code>agent_definition_t</code> should remain a profile extension. It should not duplicate
+the agent name. Reads can continue to expose <code>agentName</code>, but the value should
+come from <code>api_t.api_name</code>.</p>
+<h3 id="api-type"><a class="header" href="#api-type">API Type</a></h3>
+<p>Use <code>agt</code> as the canonical API type for AI agents if the reference data uses the
+short code model. During migration, command handlers and queries can accept
+both <code>agt</code> and <code>agent</code> to avoid breaking existing test data or early records.</p>
+<p>The Portal UI should display this as <code>Agent</code> and submit the canonical value.
+Database columns use snake case such as <code>api_type</code>; event payloads and command
+requests use camel case such as <code>apiType</code>. The mapper must preserve this
+translation and normalize agent type values consistently.</p>
+<p>When registering an agent against an existing API, the backend must validate the
+existing API-version family. A logical API should not mix unrelated version
+types. If the selected <code>api_t</code> already has active versions, they must all be
+agent versions before an <code>agt</code> version can be added. The reverse should also be
+enforced: once an API has an active agent version, non-agent API versions should
+not be added under the same <code>api_id</code>.</p>
+<h2 id="event-model"><a class="header" href="#event-model">Event Model</a></h2>
+<p>The Task Center flow should produce two domain events for the required base
+registration:</p>
+<ol>
+<li><code>ApiVersionCreatedEvent</code></li>
+<li><code>AgentDefinitionCreatedEvent</code></li>
+</ol>
+<p>The two-event design is preferred because these are two separate domain facts:</p>
+<ul>
+<li>an API version exists and can participate in the API catalog;</li>
+<li>that API version has an agent runtime profile.</li>
+</ul>
+<p>This should not be modeled as two direct table writes from one handler. The
+event processor should continue to populate projection tables during normal
+processing and replay.</p>
+<h3 id="event-order"><a class="header" href="#event-order">Event Order</a></h3>
+<p><code>ApiVersionCreatedEvent</code> must be persisted and projected before
+<code>AgentDefinitionCreatedEvent</code>, because <code>agent_definition_t</code> has a foreign key
+to <code>api_version_t</code>.</p>
+<pre><code class="language-text">Register AI Agent
+  -&gt; ApiCreatedEvent, if the logical API does not already exist
+  -&gt; ApiVersionCreatedEvent
+  -&gt; AgentDefinitionCreatedEvent
+  -&gt; optional AgentSkillCreatedEvent events
+  -&gt; optional access-control events
+</code></pre>
+<p>The minimum required sequence for an existing API is:</p>
+<pre><code class="language-text">ApiVersionCreatedEvent
+AgentDefinitionCreatedEvent
+</code></pre>
+<h3 id="aggregate-ids"><a class="header" href="#aggregate-ids">Aggregate IDs</a></h3>
+<p><code>ApiVersionCreatedEvent</code> keeps the API version aggregate identity:</p>
+<pre><code class="language-json">{
+  "aggregateType": "ApiVersion",
+  "subject": "&lt;apiVersionId&gt;",
+  "data": {
+    "hostId": "&lt;hostId&gt;",
+    "apiId": "&lt;apiId&gt;",
+    "apiVersionId": "&lt;apiVersionId&gt;",
+    "apiVersion": "1.0.0",
+    "apiType": "agt"
+  }
+}
+</code></pre>
+<p><code>AgentDefinitionCreatedEvent</code> uses the same UUID for its aggregate identity:</p>
+<pre><code class="language-json">{
+  "aggregateType": "AgentDefinition",
+  "subject": "&lt;apiVersionId&gt;",
+  "data": {
+    "hostId": "&lt;hostId&gt;",
+    "agentDefId": "&lt;apiVersionId&gt;",
+    "apiVersionId": "&lt;apiVersionId&gt;",
+    "modelProvider": "openai",
+    "modelName": "gpt-4.1",
+    "apiKeyRef": "secret://openai/default",
+    "temperature": 0.7,
+    "maxTokens": 4096
+  }
+}
+</code></pre>
+<p>The event utility should continue to accept either <code>agentDefId</code> or
+<code>apiVersionId</code> for AgentDefinition aggregate ID calculation, but the canonical
+payload should include both during migration and treat them as equal.</p>
+<h2 id="task-center-flow"><a class="header" href="#task-center-flow">Task Center Flow</a></h2>
+<p>Add a Task Center definition:</p>
+<pre><code class="language-text">id: register-ai-agent
+title: Register AI Agent
+category: API Marketplace or Portal Administration
+roles: user, admin
+keywords: agent, ai, genai, model, skill, tool
+</code></pre>
+<p>The task should guide the operator through a narrow registration path. It is
+different from <code>Manage GenAI Assets</code>, which is a broad maintenance task for
+agents, skills, tools, memory, and session history.</p>
+<h3 id="steps"><a class="header" href="#steps">Steps</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Step</th><th>Required</th><th>Route</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td>Create or select API</td><td>Yes</td><td><code>/app/form/createApi</code> or API selector</td><td>Establish the logical API record and canonical agent name.</td></tr>
+<tr><td>Create agent API version</td><td>Yes</td><td><code>/app/form/createApiVersion?apiType=agt</code></td><td>Create <code>api_version_t</code> with agent API type and return <code>apiVersionId</code>.</td></tr>
+<tr><td>Configure agent profile</td><td>Yes</td><td><code>/app/form/createAgentDefinition</code> or <code>/app/genai/AgentDefinition</code></td><td>Create <code>agent_definition_t</code> with <code>agentDefId = apiVersionId</code>.</td></tr>
+<tr><td>Assign skills</td><td>No</td><td><code>/app/genai/AgentSkill</code></td><td>Attach curated skills to the agent.</td></tr>
+<tr><td>Review tools</td><td>No</td><td><code>/app/genai/Tool</code> or <code>/app/genai/SkillTool</code></td><td>Confirm agent-invokable tools through skill-tool assignments.</td></tr>
+<tr><td>Configure access</td><td>No</td><td><code>/app/access/rolePermission</code></td><td>Restrict who can invoke or manage the agent.</td></tr>
+<tr><td>Link runtime instance</td><td>No</td><td><code>/app/instance/InstanceApi</code></td><td>Attach the agent API version to a deployed runtime or gateway if needed.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="task-context"><a class="header" href="#task-context">Task Context</a></h3>
+<p>The task context should carry IDs from one step to the next:</p>
+<pre><code class="language-json">{
+  "hostId": "&lt;hostId&gt;",
+  "apiId": "&lt;apiId&gt;",
+  "apiVersionId": "&lt;apiVersionId&gt;",
+  "agentDefId": "&lt;apiVersionId&gt;",
+  "serviceId": "&lt;serviceId&gt;",
+  "providerId": "&lt;modelProvider&gt;",
+  "apiType": "agt"
+}
+</code></pre>
+<p>When the API version step completes, <code>apiVersionId</code> should be copied to
+<code>agentDefId</code> automatically before launching the agent definition step.</p>
+<h3 id="incomplete-registration-handling"><a class="header" href="#incomplete-registration-handling">Incomplete Registration Handling</a></h3>
+<p>If the UI calls <code>createApiVersion</code> and then fails before <code>createAgentDefinition</code>
+is processed, the system can contain an agent API version without an agent
+definition. This is an incomplete registration, not a valid runnable agent.</p>
+<p>The UI and query layer should treat these rows explicitly:</p>
+<ul>
+<li>Agent list views should be able to detect agent API versions missing matching
+<code>agent_definition_t</code> rows by left joining <code>api_version_t</code> to
+<code>agent_definition_t</code>.</li>
+<li>The row should be shown as <code>Incomplete</code> or <code>Profile missing</code>, not as a ready
+agent.</li>
+<li>The primary action should be <code>Complete profile</code>, prefilled with
+<code>agentDefId = apiVersionId</code>.</li>
+<li>A secondary action can delete or deactivate the orphaned API version if the
+operator abandons the registration.</li>
+<li>Runtime catalog reads should not expose incomplete agents as executable.</li>
+</ul>
+<p>This requirement makes the UI-orchestrated implementation safe enough for the
+first Task Center version. The long-term backend command should still create the
+version and profile in one ordered command to reduce orphan creation.</p>
+<h2 id="frontend-design"><a class="header" href="#frontend-design">Frontend Design</a></h2>
+<h3 id="phase-1-task-registry-only"><a class="header" href="#phase-1-task-registry-only">Phase 1: Task Registry Only</a></h3>
+<p>The first implementation can add a Task Center entry that reuses existing pages
+and forms:</p>
+<ul>
+<li><code>createApi</code></li>
+<li><code>createApiVersion</code></li>
+<li><code>createAgentDefinition</code></li>
+<li><code>AgentSkill</code></li>
+<li><code>SkillTool</code></li>
+<li><code>rolePermission</code></li>
+<li><code>InstanceApi</code></li>
+</ul>
+<p>This is low risk and aligns with the current task-oriented navigation model.</p>
+<p>The <code>createApiVersion</code> form should support prefilled <code>apiType=agt</code> from the
+task route. The form completion handler should save returned <code>apiVersionId</code> into
+the task context.</p>
+<p>The <code>createAgentDefinition</code> form should accept <code>apiVersionId</code> or <code>agentDefId</code>
+from task context and submit both values, with <code>agentDefId</code> equal to
+<code>apiVersionId</code>.</p>
+<h3 id="phase-2-dedicated-registration-wizard"><a class="header" href="#phase-2-dedicated-registration-wizard">Phase 2: Dedicated Registration Wizard</a></h3>
+<p>After the flow is validated, add a dedicated wizard route such as:</p>
+<pre><code class="language-text">/app/genai/register-agent
+</code></pre>
+<p>The wizard can reduce clicks by combining API version and agent profile fields
+on one page while still submitting separate commands or a composite command.</p>
+<p>Recommended sections:</p>
+<ul>
+<li>API identity: API name, API ID, status, owner.</li>
+<li>Version identity: version, service ID, environment tag, target host.</li>
+<li>Model profile: provider, model, API key reference, temperature, max tokens.</li>
+<li>Optional skills: selected skill IDs.</li>
+<li>Optional deployment: instance or gateway link.</li>
+</ul>
+<h3 id="secret-reference-selection"><a class="header" href="#secret-reference-selection">Secret Reference Selection</a></h3>
+<p><code>apiKeyRef</code> is a secret reference, not a secret value. The UI should not ask
+operators to paste raw provider keys into the agent definition form.</p>
+<p>The preferred control is a selector populated from the configured secret
+catalog, config-server reference data, or vault integration available to the
+current host. The selected value should be stored as a reference such as:</p>
+<pre><code class="language-text">secret://openai/default
+</code></pre>
+<p>If manual entry is temporarily supported, it should be an advanced path with
+validation. The command should reject values that look like raw API keys and
+should accept only approved reference schemes.</p>
+<h3 id="secure-default-access"><a class="header" href="#secure-default-access">Secure Default Access</a></h3>
+<p>The access-control step is optional for registration completeness, but runtime
+execution must be secure by default. A newly registered agent should not be
+publicly invokable just because the API version and profile exist.</p>
+<p>Default behavior:</p>
+<ul>
+<li>management is limited to the creator, owner, or admin roles according to the
+existing ownership model;</li>
+<li>runtime invocation is denied until an explicit role, scope, policy, or runtime
+assignment grants access;</li>
+<li>skill and tool assignment does not override access control;</li>
+<li>if no access policy exists, the gateway or agent runtime should treat the
+effective execution policy as deny-all.</li>
+</ul>
+<h2 id="backend-command-options"><a class="header" href="#backend-command-options">Backend Command Options</a></h2>
+<h3 id="option-1-ui-orchestrated-existing-commands"><a class="header" href="#option-1-ui-orchestrated-existing-commands">Option 1: UI-Orchestrated Existing Commands</a></h3>
+<p>The Task Center flow calls existing commands in sequence:</p>
+<ol>
+<li><code>createApi</code>, if a new API is needed.</li>
+<li><code>createApiVersion</code>.</li>
+<li><code>createAgentDefinition</code>.</li>
+<li>Optional <code>createAgentSkill</code> events.</li>
+</ol>
+<p>This is the recommended initial implementation. It avoids changing command
+handler infrastructure and uses existing event types.</p>
+<p>This option must include incomplete-registration handling. Without that, a
+browser failure or second-command validation error can leave an agent API
+version without an agent definition. That state is repairable, but the UI must
+surface it clearly and runtime catalog reads must ignore it.</p>
+<h3 id="option-2-composite-register-command"><a class="header" href="#option-2-composite-register-command">Option 2: Composite Register Command</a></h3>
+<p>Add a composite command such as:</p>
+<pre><code class="language-text">lightapi.net/genai/registerAiAgent/0.1.0
+</code></pre>
+<p>The command would validate the combined request and emit ordered events:</p>
+<ol>
+<li><code>ApiVersionCreatedEvent</code>.</li>
+<li><code>AgentDefinitionCreatedEvent</code>.</li>
+<li>Optional <code>AgentSkillCreatedEvent</code> events.</li>
+</ol>
+<p>This improves user experience for automation and API consumers, but it requires
+the command layer to support a multi-event result in one request. The command
+must not bypass event processing or write projection tables directly.</p>
+<p>The initial composite command should require an existing <code>apiId</code>. Keeping API
+creation as a separate command keeps the backend contract smaller and preserves
+the existing API ownership workflow. A later full registration command can add
+<code>ApiCreatedEvent</code> if automation needs to create the logical API and agent
+version in one request.</p>
+<h3 id="recommendation-3"><a class="header" href="#recommendation-3">Recommendation</a></h3>
+<p>Start with Option 1 only if incomplete registrations are visible and repairable.
+Prioritize Option 2 before exposing a one-click production registration wizard,
+because it gives the backend one validation boundary for the API version and
+agent profile.</p>
+<h2 id="validation-rules"><a class="header" href="#validation-rules">Validation Rules</a></h2>
+<p>Command handlers should enforce these rules server-side:</p>
+<ul>
+<li>Agent API versions must use <code>apiType = agt</code> or an accepted compatible value.</li>
+<li>New writes should use canonical <code>agt</code>. Legacy <code>agent</code> should be accepted only
+for migration, import, or replay compatibility.</li>
+<li>A logical API should not mix active agent and non-agent API versions.</li>
+<li><code>agentDefId</code> must equal <code>apiVersionId</code> when both are present.</li>
+<li>The referenced API version must exist before creating the agent definition.</li>
+<li>The referenced API version must belong to the same <code>hostId</code>.</li>
+<li>The referenced API version must have agent API type.</li>
+<li><code>modelProvider</code> and <code>modelName</code> are required for creation.</li>
+<li><code>apiKeyRef</code>, when present, must be a secret reference and not a raw provider
+key.</li>
+<li><code>temperature</code>, when provided, must be in the supported provider range.</li>
+<li><code>maxTokens</code>, when provided, must be positive.</li>
+<li>Optional skill IDs must reference active skills in the same host scope.</li>
+</ul>
+<p>The UI should guide the user, but the command and persistence layers should
+remain authoritative.</p>
+<h2 id="query-and-display"><a class="header" href="#query-and-display">Query And Display</a></h2>
+<p>Agent list and detail views should display a joined projection:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Source</th></tr>
+</thead>
+<tbody>
+<tr><td><code>agentDefId</code></td><td><code>agent_definition_t.agent_def_id</code></td></tr>
+<tr><td><code>apiVersionId</code></td><td>same value as <code>agentDefId</code></td></tr>
+<tr><td><code>agentName</code></td><td><code>api_t.api_name</code></td></tr>
+<tr><td><code>apiId</code></td><td><code>api_version_t.api_id</code></td></tr>
+<tr><td><code>apiVersion</code></td><td><code>api_version_t.api_version</code></td></tr>
+<tr><td><code>apiType</code></td><td><code>api_version_t.api_type</code></td></tr>
+<tr><td><code>serviceId</code></td><td><code>api_version_t.service_id</code></td></tr>
+<tr><td><code>envTag</code></td><td><code>api_version_t.env_tag</code></td></tr>
+<tr><td><code>targetHost</code></td><td><code>api_version_t.target_host</code></td></tr>
+<tr><td><code>modelProvider</code></td><td><code>agent_definition_t.model_provider</code></td></tr>
+<tr><td><code>modelName</code></td><td><code>agent_definition_t.model_name</code></td></tr>
+<tr><td><code>apiKeyRef</code></td><td><code>agent_definition_t.api_key_ref</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>The Agent Definition page should make the API identity read-only once selected.
+Mutable profile fields should remain editable through
+<code>AgentDefinitionUpdatedEvent</code>.</p>
+<h2 id="delete-and-update-semantics"><a class="header" href="#delete-and-update-semantics">Delete And Update Semantics</a></h2>
+<p>Updating the API name should update the visible agent name because the display
+name comes from <code>api_t.api_name</code>.</p>
+<p>Updating the API version should not implicitly update model settings. Model
+profile changes should use <code>AgentDefinitionUpdatedEvent</code>.</p>
+<p>Deleting or deactivating the API version should cascade or hide the agent
+definition through the existing API-version relationship. Explicit
+<code>AgentDefinitionDeletedEvent</code> remains useful when the operator wants to disable
+the agent profile while keeping the API version.</p>
+<h2 id="migration-notes"><a class="header" href="#migration-notes">Migration Notes</a></h2>
+<ul>
+<li>Existing rows that use <code>api_type = agent</code> can remain readable while the UI
+moves toward canonical <code>agt</code>.</li>
+<li>Projection builders can normalize legacy <code>agent</code> events to <code>agt</code> in
+<code>api_version_t</code> after the migration window. Event streams remain immutable,
+but new command writes should use only <code>agt</code>.</li>
+<li>Existing task contexts may carry either <code>apiVersionId</code> or <code>agentDefId</code>.
+Task utilities should normalize both values to the same ID.</li>
+<li>Documentation and form labels should say <code>Agent API version id</code> where the ID
+is exposed.</li>
+<li>Import/export and event replay should preserve event order for agent
+registration bundles.</li>
+</ul>
+<h2 id="implementation-plan-1"><a class="header" href="#implementation-plan-1">Implementation Plan</a></h2>
+<ol>
+<li>Add <code>Register AI Agent</code> to <code>portal-view/src/tasks/taskRegistry.ts</code>.</li>
+<li>Add help content under <code>src/help/portal-view/tasks/register-ai-agent.md</code>.</li>
+<li>Ensure <code>createApiVersion</code> can be launched with <code>apiType=agt</code>.</li>
+<li>Ensure form completion stores <code>apiVersionId</code> into task context.</li>
+<li>Ensure <code>createAgentDefinition</code> can prefill <code>agentDefId</code> from
+<code>apiVersionId</code>.</li>
+<li>Add server-side validation that <code>agentDefId == apiVersionId</code>.</li>
+<li>Add compatibility handling for <code>agt</code> and <code>agent</code> API type values.</li>
+<li>Add incomplete-registration detection and repair actions for agent API
+versions that do not have a matching agent definition.</li>
+<li>Add secure-by-default invocation checks for agents with no explicit access
+policy.</li>
+<li>Add integration tests for the two-event registration sequence.</li>
+<li>Add a composite <code>registerAiAgent</code> command for API-version plus profile
+creation.</li>
+</ol>
+<h2 id="resolved-recommendations"><a class="header" href="#resolved-recommendations">Resolved Recommendations</a></h2>
+<ul>
+<li>Persist <code>agt</code> as the canonical API type after migration. Keep <code>agent</code> readable
+for replay, import, and old data, but reject new command writes using
+<code>agent</code> after the migration window.</li>
+<li>Put <code>Register AI Agent</code> under <code>API Marketplace</code> initially because the agent is
+registered as an API and should be discoverable through the API catalog. If a
+dedicated <code>GenAI Assets</code> category is added later, the task can move there
+without changing the backend model.</li>
+<li>Keep skill assignment optional. An agent can be useful as an LLM-only worker,
+and required skill assignment would block simple conversational agents.</li>
+<li>The first composite command should require an existing API and emit
+<code>ApiVersionCreatedEvent</code> plus <code>AgentDefinitionCreatedEvent</code>. Keep
+<code>ApiCreatedEvent</code> separate until automation needs a full create-everything
+command.</li>
+</ul>
+<h2 id="decision-summary"><a class="header" href="#decision-summary">Decision Summary</a></h2>
+<p>Register AI agents through a Task Center flow that starts from API and API
+version registration. Create <code>api_version_t</code> first, then create
+<code>agent_definition_t</code> with <code>agentDefId</code> equal to <code>apiVersionId</code>. Use two domain
+events for the two required facts, keep projection writes behind event
+processing, reject mixed API-type families, treat incomplete version-only
+registrations as repairable but non-runnable, default runtime invocation to
+deny-all, and make the broader skill/tool/access setup optional follow-up steps.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="agent-skill-and-api-endpoint-discovery"><a class="header" href="#agent-skill-and-api-endpoint-discovery">Agent Skill And API Endpoint Discovery</a></h1>
 <h2 id="problem-3"><a class="header" href="#problem-3">Problem</a></h2>
 <p>The GenAI chat flow has two separate concepts that are easy to confuse:</p>
@@ -3285,7 +3707,7 @@ exist, which endpoint projections are invokable by agents, which skills they
 belong to, and which agents are allowed or expected to use those skills. Without
 that catalog, the agent can list executable gateway tools, but it has no domain
 guidance beyond each tool description.</p>
-<h2 id="goals-3"><a class="header" href="#goals-3">Goals</a></h2>
+<h2 id="goals-4"><a class="header" href="#goals-4">Goals</a></h2>
 <ul>
 <li>Keep the gateway as the runtime source of truth for MCP tool execution.</li>
 <li>Keep direct gateway <code>tools/list</code> and <code>tools/call</code> working even when no skills
@@ -3309,7 +3731,7 @@ to be wrapped before it can be called.</li>
 portal-query can perform macro-filtering, keyword search, vector ranking,
 context viability checks, and safety filtering.</li>
 </ul>
-<h2 id="non-goals-6"><a class="header" href="#non-goals-6">Non-Goals</a></h2>
+<h2 id="non-goals-7"><a class="header" href="#non-goals-7">Non-Goals</a></h2>
 <ul>
 <li>Do not move MCP request routing or downstream REST calls into the controller.</li>
 <li>Do not implement <code>skill/search</code> in controller-rs. Controller-rs can
@@ -4323,7 +4745,7 @@ persistence validation. Keep them as a diagnostics or governance item that
 compares cataloged/assigned tools with the selected gateway instance’s
 <code>tools/list</code> response before deployment or runtime enablement.</li>
 </ul>
-<h2 id="recommendation-3"><a class="header" href="#recommendation-3">Recommendation</a></h2>
+<h2 id="recommendation-4"><a class="header" href="#recommendation-4">Recommendation</a></h2>
 <p>Implement this as a progressive control-plane enhancement. The gateway remains
 the execution path, and portal-authored skills become the agent guidance layer
 served by portal-query. The agent should cache the effective catalog locally and
@@ -4366,7 +4788,7 @@ forms whose <code>definition</code> field is a YAML textarea.</li>
 </ul>
 <p>The first Workflow Editor can therefore be an incremental UI improvement over
 the existing definition CRUD and start workflow command.</p>
-<h2 id="goals-4"><a class="header" href="#goals-4">Goals</a></h2>
+<h2 id="goals-5"><a class="header" href="#goals-5">Goals</a></h2>
 <ul>
 <li>Keep workflow YAML as the canonical persisted artifact.</li>
 <li>Provide a readable step outline or graph next to the YAML editor.</li>
@@ -4379,7 +4801,7 @@ flows.</li>
 authoring component with skill-specific constraints.</li>
 <li>Preserve owner scoping and existing Portal command/query conventions.</li>
 </ul>
-<h2 id="non-goals-7"><a class="header" href="#non-goals-7">Non-Goals</a></h2>
+<h2 id="non-goals-8"><a class="header" href="#non-goals-8">Non-Goals</a></h2>
 <ul>
 <li>Do not execute workflow logic in Portal View.</li>
 <li>Do not make skills the workflow runtime.</li>
@@ -4682,7 +5104,7 @@ workflow definition.</p>
 YAML cannot be parsed into a known workflow container, the editor keeps the
 source editor and validation panels usable and shows an empty graph state rather
 than blocking authoring.</p>
-<h2 id="recommendation-4"><a class="header" href="#recommendation-4">Recommendation</a></h2>
+<h2 id="recommendation-5"><a class="header" href="#recommendation-5">Recommendation</a></h2>
 <p>Build the generic Workflow Editor before the Skill Workspace embeds workflow
 authoring. The skill UI should provide context and constraints, while the
 workflow editor provides YAML editing, step preview, validation, and test runs
@@ -4720,7 +5142,7 @@ should model catalog scope explicitly:</p>
 <li>a separate SPA may expose the same backend catalog, but it should not become
 the catalog authority.</li>
 </ul>
-<h2 id="goals-5"><a class="header" href="#goals-5">Goals</a></h2>
+<h2 id="goals-6"><a class="header" href="#goals-6">Goals</a></h2>
 <ul>
 <li>Avoid duplicating the full catalog for every tenant.</li>
 <li>Prevent catalog drift between tenants and between portal instances.</li>
@@ -4739,7 +5161,7 @@ agent-facing skills and tools.</li>
 <li>Support promotion or import/export between portal instances instead of
 relying on ad hoc row copies.</li>
 </ul>
-<h2 id="non-goals-8"><a class="header" href="#non-goals-8">Non-Goals</a></h2>
+<h2 id="non-goals-9"><a class="header" href="#non-goals-9">Non-Goals</a></h2>
 <ul>
 <li>Do not clone every global catalog row into every tenant by default.</li>
 <li>Do not make a separate SPA the source of truth for catalog data.</li>
@@ -5030,7 +5452,7 @@ entity-specific effective endpoints?</li>
 </li>
 <li><strong>Flow Determination</strong>: Instead of relying on client-supplied parameters like <code>requested_token_type</code>, the server retrieves the <code>token_ex_type</code> from the client context in the database to decide which handler to use. This ensures that only authorized exchange types are performed for each specific client.</li>
 </ol>
-<h2 id="recommendation-5"><a class="header" href="#recommendation-5">Recommendation</a></h2>
+<h2 id="recommendation-6"><a class="header" href="#recommendation-6">Recommendation</a></h2>
 <p>For the <code>light-portal</code> ecosystem:</p>
 <ul>
 <li><strong>Option 4: Client Context</strong> is the selected method. It provides the highest level of security by ensuring that token exchange flows are explicitly configured and restricted on a per-client basis in the database.</li>
@@ -5046,7 +5468,7 @@ entity-specific effective endpoints?</li>
 <h1 id="oauth-audit"><a class="header" href="#oauth-audit">OAuth Audit</a></h1>
 <p>The OAuth services keep authorization codes and refresh tokens as operational state. These rows are short lived and are now written directly to <code>auth_code_t</code> and <code>auth_refresh_token_t</code> instead of being created through the general event store. This avoids high-volume login and refresh-token churn in <code>event_store_t</code> and <code>outbox_message_t</code>.</p>
 <p>Audit and login history are recorded separately in append-oriented OAuth audit tables.</p>
-<h2 id="goals-6"><a class="header" href="#goals-6">Goals</a></h2>
+<h2 id="goals-7"><a class="header" href="#goals-7">Goals</a></h2>
 <ul>
 <li>Show administrators who is currently online.</li>
 <li>Show a user the last login time and session history.</li>
@@ -5355,7 +5777,7 @@ CREATE TABLE tenant_resource_t(
 <p>Azure CosmosDB for PostgreSQL (Managed Citus): Microsoft offers a fully managed cloud service called Azure CosmosDB for PostgreSQL, which is built on Citus. This service has usage-based pricing, and the cost depends on factors like the number of nodes, storage, and compute resources used. This managed option reduces the operational overhead of managing Citus yourself.</p>
 </li>
 </ul>
-<h4 id="recommendation-6"><a class="header" href="#recommendation-6">Recommendation:</a></h4>
+<h4 id="recommendation-7"><a class="header" href="#recommendation-7">Recommendation:</a></h4>
 <p>Don’t automatically add host_id to every table just because we are using Citus. Carefully analyze the data model, query patterns, and multi-tenancy requirements.</p>
 <ul>
 <li>
@@ -7227,7 +7649,7 @@ model conversations, read state, participant visibility, or per-user delete.</li
 messages page should load its own data from the query API.</li>
 <li>The existing private-message tests are disabled stubs.</li>
 </ul>
-<h2 id="goals-7"><a class="header" href="#goals-7">Goals</a></h2>
+<h2 id="goals-8"><a class="header" href="#goals-8">Goals</a></h2>
 <ul>
 <li>Let one logged-in user send a message to another portal user without knowing
 or seeing the recipient email.</li>
@@ -7242,7 +7664,7 @@ recipient email internally.</li>
 <li>Provide a path from the existing <code>message_t</code> skeleton to a conversation-based
 model without breaking existing UI routes immediately.</li>
 </ul>
-<h2 id="non-goals-9"><a class="header" href="#non-goals-9">Non-Goals</a></h2>
+<h2 id="non-goals-10"><a class="header" href="#non-goals-10">Non-Goals</a></h2>
 <ul>
 <li>Do not build group chat in the first phase.</li>
 <li>Do not expose email addresses in message APIs, events, UI state, or task
@@ -7338,7 +7760,7 @@ CREATE INDEX idx_private_message_state_unread
 bridge only. Add <code>from_user_id</code>, <code>to_user_id</code>, <code>message_id</code>, <code>read_ts</code>, and
 per-user delete columns, then migrate to the conversation tables once the API
 contract is stable.</p>
-<h2 id="event-model"><a class="header" href="#event-model">Event Model</a></h2>
+<h2 id="event-model-1"><a class="header" href="#event-model-1">Event Model</a></h2>
 <p>Keep the event-driven command/query pattern. A message send should create a
 CloudEvent and the query-side projection should update the private-message
 tables.</p>
@@ -12713,7 +13135,7 @@ function MyComponent() {
 <li>Add a timeout to stop polling after ~10-15 seconds to prevent infinite loops.</li>
 </ol>
 <p>As you can see, this is much more complicated than the optimistic update.</p>
-<h3 id="recommendation-7"><a class="header" href="#recommendation-7">Recommendation</a></h3>
+<h3 id="recommendation-8"><a class="header" href="#recommendation-8">Recommendation</a></h3>
 <p><strong>Adopt the Optimistic UI pattern (Option 1).</strong> It provides the best user experience, is resilient to timing issues caused by eventual consistency, and the implementation is clean and modern. The code provided for the optimistic <code>handleDelete</code> is a drop-in replacement that will solve your problem robustly.</p>
 <h3 id="should-you-poll-peroidically-to-sync-other-users-changes"><a class="header" href="#should-you-poll-peroidically-to-sync-other-users-changes">Should you poll peroidically to sync other users’ changes</a></h3>
 <p>The short answer is: <strong>No, you should still avoid client-side polling for this specific use case.</strong> It’s generally the wrong tool for this problem and creates more issues than it solves. The Optimistic UI approach is still preferable, but it needs to be combined with a robust backend and potentially other real-time technologies for a complete solution.</p>
@@ -15231,7 +15653,7 @@ The Importer processes the list in order:</p>
 <li><strong>Pros:</strong> 100% certainty that the data is valid according to the database schema.</li>
 <li><strong>Cons:</strong> Slightly heavier key locks, but acceptable for admin operations.</li>
 </ul>
-<h3 id="recommendation-8"><a class="header" href="#recommendation-8">Recommendation</a></h3>
+<h3 id="recommendation-9"><a class="header" href="#recommendation-9">Recommendation</a></h3>
 <p>Use <strong>Option 1 (App Simulation)</strong> for the UI preview to show the user “what will happen”.
 Use <strong>Option 2 (Transaction Rollback)</strong> immediately when the user clicks “Promote” (as a pre-flight check) or as an explicit “Verify” button to ensure deep integrity.</p>
 <h2 id="sibling-deletion-handling-orphaned-items"><a class="header" href="#sibling-deletion-handling-orphaned-items">Sibling Deletion: Handling Orphaned Items</a></h2>
@@ -16174,7 +16596,7 @@ artifacts?</li>
 long-running deployment progress events?</li>
 <li>Should rollback require the same environment-level approval policy as deploy?</li>
 </ul>
-<h2 id="recommendation-9"><a class="header" href="#recommendation-9">Recommendation</a></h2>
+<h2 id="recommendation-10"><a class="header" href="#recommendation-10">Recommendation</a></h2>
 <p>Use an in-cluster Rust deployer as the default production model. The deployer
 should connect outbound to Light Controller and execute deployment commands via
 MCP-style tools. Direct deployer URL mode is useful for MicroK8s and managed
@@ -16827,6 +17249,16 @@ instances may continue according to their already captured definition state.</p>
 and forms.</p>
 <p>Task help should explain the goal, prerequisites, required steps, optional
 steps, and common next actions.</p>
+<p>Available task guides:</p>
+<ul>
+<li><a href="#onboard-api-to-mcp-gateway">Onboard API to MCP Gateway</a></li>
+<li><a href="#register-standalone-mcp-server">Register Standalone MCP Server</a></li>
+<li><a href="#publish-api">Publish API</a></li>
+<li><a href="#register-ai-agent">Register AI Agent</a></li>
+<li><a href="#manage-instance">Manage Instance</a></li>
+<li><a href="#manage-client-app">Manage Client App</a></li>
+<li><a href="#manage-workflow">Manage Workflow</a></li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="onboard-api-to-mcp-gateway"><a class="header" href="#onboard-api-to-mcp-gateway">Onboard API to MCP Gateway</a></h1>
 <p>Use this task to expose an existing API through MCP Gateway.</p>
@@ -16859,6 +17291,21 @@ API version.</p>
 <li>create or select an API version</li>
 <li>review the marketplace listing</li>
 </ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="register-ai-agent"><a class="header" href="#register-ai-agent">Register AI Agent</a></h1>
+<p>Use this task to register an AI agent as an API marketplace asset.</p>
+<p>Typical steps:</p>
+<ul>
+<li>create or select the API</li>
+<li>create the API version with API type <code>agt</code></li>
+<li>create the agent definition for the same API version id</li>
+<li>assign skills when the agent needs reusable behavior</li>
+<li>review tools exposed through the assigned skills</li>
+<li>configure role permissions before exposing the agent</li>
+<li>link the agent API version to a runtime instance when deployment metadata is available</li>
+</ul>
+<p>The agent definition id is the API version id. This keeps the API catalog and
+GenAI agent profile as one logical asset instead of two separate identities.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="manage-instance"><a class="header" href="#manage-instance">Manage Instance</a></h1>
 <p>Use this task to create, review, and connect service instances.</p>
