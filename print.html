@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-ba76302e.js";
+            window.path_to_searchindex_js = "searchindex-dce73fa7.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-6367ab56.js"></script>
+        <script src="toc-bd41a77f.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -4754,6 +4754,378 @@ work immediately through <code>tools/list</code> and <code>tools/call</code>, wh
 portal operators a clean path to organize tools into skills, assign those
 skills to agents, and improve retrieval over time.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="tool-description-embedding-population"><a class="header" href="#tool-description-embedding-population">Tool Description Embedding Population</a></h1>
+<h2 id="problem-4"><a class="header" href="#problem-4">Problem</a></h2>
+<p>The GenAI Tool page lets users update <code>tool_t.description</code> through the
+<code>updateTool</code> form. Endpoint-backed tools are also projected into <code>tool_t</code> when
+<code>api_endpoint_t</code> is populated from OpenAPI, MCP <code>tools/list</code>, or LightAPI
+Description input.</p>
+<p>The schema already has <code>tool_t.description_embedding VECTOR(384)</code>, but the
+current write paths only populate the plain text description:</p>
+<ul>
+<li><code>ApiServicePersistenceImpl.syncEndpointToolProjections(...)</code> inserts or
+updates endpoint-backed <code>tool_t</code> rows from <code>api_endpoint_t</code>.</li>
+<li><code>GenAIPersistenceImpl.createTool(...)</code> inserts manually authored tools.</li>
+<li><code>GenAIPersistenceImpl.updateTool(...)</code> updates the Tool page edit form.</li>
+<li><code>genai-command</code> create/update tool contracts do not accept an embedding
+field, and the Portal UI should not expose raw vectors to users.</li>
+</ul>
+<p>As a result, new endpoint-backed tool rows start with a null
+<code>description_embedding</code>, and user edits can leave any future vector stale unless
+the write path marks it for regeneration.</p>
+<h2 id="goals-5"><a class="header" href="#goals-5">Goals</a></h2>
+<ul>
+<li>Populate <code>tool_t.description_embedding</code> for endpoint-backed and manually
+authored tools.</li>
+<li>Regenerate the embedding whenever the effective embedding source text changes.</li>
+<li>Keep Tool create/update latency independent from external embedding provider
+latency.</li>
+<li>Avoid trusting browser-submitted vectors.</li>
+<li>Preserve keyword search and normal CRUD behavior when embedding generation is
+disabled or temporarily failing.</li>
+<li>Keep the first implementation aligned with the existing <code>VECTOR(384)</code> schema.</li>
+</ul>
+<h2 id="non-goals-8"><a class="header" href="#non-goals-8">Non-Goals</a></h2>
+<ul>
+<li>Do not require every tool to have an embedding before it can be listed,
+edited, linked to a skill, or executed through the gateway.</li>
+<li>Do not move MCP execution into portal-query or the controller.</li>
+<li>Do not store API keys or provider secrets in tool metadata.</li>
+<li>Do not expose raw embedding vectors in the Tool page by default.</li>
+</ul>
+<h2 id="recommended-design-1"><a class="header" href="#recommended-design-1">Recommended Design</a></h2>
+<p>Use asynchronous server-side embedding generation. Tool writes should save the
+description immediately, mark the embedding stale or pending, and record the
+embedding task in the same database transaction as the <code>tool_t</code> update. A worker
+then picks up committed tasks, generates a 384-dimensional vector from a
+normalized source string, and updates <code>tool_t.description_embedding</code> only if the
+tool row still matches the source that was embedded.</p>
+<p>For phase 1, this should use a transactional work table or transactional outbox
+pattern. Do not call the external embedding provider inside the command
+transaction, but do insert or update the work item before that transaction
+commits. If a later implementation publishes tasks to Kafka or another queue,
+the database transaction should still write an outbox row first, and a
+dispatcher should publish after commit. This avoids a failure mode where the
+tool row commits successfully but the embedding task is never queued.</p>
+<p>This keeps command handling reliable and makes the embedding field a derived
+read-model value, not user-authored command input.</p>
+<pre><code class="language-text">API version import/update
+  -&gt; api_endpoint_t rows
+  -&gt; endpoint-backed tool_t projection
+  -&gt; upsert embedding_task_t in the same transaction
+
+Tool create/update form
+  -&gt; ToolCreatedEvent or ToolUpdatedEvent
+  -&gt; tool_t row update
+  -&gt; upsert embedding_task_t in the same transaction
+
+embedding worker
+  -&gt; poll committed pending tasks
+  -&gt; load current tool row
+  -&gt; build source text
+  -&gt; call configured embedding provider
+  -&gt; update tool_t.description_embedding with compare-and-set guard
+</code></pre>
+<h2 id="embedding-source-text"><a class="header" href="#embedding-source-text">Embedding Source Text</a></h2>
+<p>The vector should be generated from stable semantic fields, not audit fields or
+IDs. The default source can be:</p>
+<pre><code class="language-text">name: &lt;tool_t.name&gt;
+description: &lt;tool_t.description&gt;
+endpoint: &lt;tool_t.api_method&gt; &lt;tool_t.api_endpoint&gt;
+domain: &lt;tool_t.routing_domain&gt;
+namespace: &lt;tool_t.semantic_namespace&gt;
+protocol: &lt;tool_t.source_protocol&gt;
+personas: &lt;tool_t.target_personas&gt;
+</code></pre>
+<p>For endpoint-backed tools, the projection can enrich the source with
+<code>api_endpoint_t.endpoint_desc</code> and semantic keywords from
+<code>api_endpoint_t.tool_metadata.routing.semanticKeywords</code> when available. The
+LLM-facing description remains <code>tool_t.description</code>; enrichment only improves
+semantic retrieval.</p>
+<h2 id="staleness-tracking"><a class="header" href="#staleness-tracking">Staleness Tracking</a></h2>
+<p>The current table only has the vector. To make regeneration safe and auditable,
+add lightweight metadata beside it:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Column</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>description_embedding_model</code></td><td>Provider/model that produced the vector.</td></tr>
+<tr><td><code>description_embedding_dimension</code></td><td>Expected to be <code>384</code> for the current schema.</td></tr>
+<tr><td><code>description_embedding_source_hash</code></td><td>SHA-256 of the normalized source text.</td></tr>
+<tr><td><code>description_embedding_ts</code></td><td>Generation timestamp.</td></tr>
+<tr><td><code>description_embedding_status</code></td><td><code>pending</code>, <code>ready</code>, <code>failed</code>, <code>disabled</code>, or <code>blank</code>.</td></tr>
+<tr><td><code>description_embedding_error</code></td><td>Short last error for diagnostics.</td></tr>
+</tbody>
+</table>
+</div>
+<p>If the first implementation avoids schema expansion, it should at least set
+<code>description_embedding = NULL</code> whenever the description or semantic routing
+fields change. That prevents stale vector search, but it gives weaker
+operational visibility than explicit status and source-hash columns.</p>
+<p>The metadata can live in <code>tool_t</code> beside the vector for simple read-heavy
+queries. If row width becomes a concern, move the vector and metadata to a
+1:1 table such as <code>tool_embedding_t</code> or a generic <code>entity_embedding_t</code>; keep the
+same source-hash and status contract either way. The work table should not be
+the only durable location for ready-state metadata because completed work rows
+may be retried, compacted, or purged.</p>
+<h2 id="write-path-hooks"><a class="header" href="#write-path-hooks">Write Path Hooks</a></h2>
+<p>The persistence hooks should be narrow:</p>
+<ol>
+<li>When <code>syncEndpointToolProjections(...)</code> inserts or updates a tool row, compute
+the source hash from the projected values. If it differs from the stored hash,
+store the new <code>description_embedding_source_hash</code>, mark embedding status
+<code>pending</code>, and upsert an embedding task in the same transaction.</li>
+<li>When <code>createTool(...)</code> writes a new row, store the source hash, mark the
+embedding <code>pending</code>, and upsert an embedding task in the same transaction
+unless the normalized source text is blank. For blank source text, clear the
+vector and mark the status <code>blank</code> without creating a task.</li>
+<li>When <code>updateTool(...)</code> changes description, name, endpoint, routing domain,
+namespace, source protocol, target personas, endpoint description, or
+semantic keywords, store the new source hash, mark the embedding <code>pending</code>,
+and upsert an embedding task in the same transaction.</li>
+<li>When a tool is deactivated, no embedding work is needed. Existing vectors can
+remain stored, but vector queries must filter <code>active = TRUE</code>.</li>
+</ol>
+<p>The command contract should not add a <code>descriptionEmbedding</code> property. If a
+future admin API needs a manual vector load, it should be a separate privileged
+maintenance action, not part of the normal Tool form.</p>
+<p>Embedding writes are read-model maintenance, not user-authored tool changes. The
+preferred implementation should not emit a normal <code>ToolUpdatedEvent</code> and should
+not advance the business aggregate version used for user edits. If the local
+persistence framework requires a row-level version for every physical update,
+store it separately on the embedding row or task row so embedding maintenance
+does not interfere with Tool form optimistic concurrency.</p>
+<h2 id="endpoint-sync-and-manual-overrides"><a class="header" href="#endpoint-sync-and-manual-overrides">Endpoint Sync And Manual Overrides</a></h2>
+<p>Endpoint-backed tools need an explicit description ownership contract. Without
+one, a user can improve the Tool page description and later lose the edit when
+the API version is synced again from OpenAPI, MCP <code>tools/list</code>, or LightAPI
+Description input.</p>
+<p>Recommended behavior:</p>
+<ul>
+<li><code>api_endpoint_t</code> remains the source of imported endpoint metadata.</li>
+<li><code>tool_t.description</code> is the user-facing LLM description.</li>
+<li>When endpoint projection first creates a tool, copy the endpoint description
+into <code>tool_t.description</code>.</li>
+<li>When a user edits <code>tool_t.description</code> for an endpoint-backed tool, mark the
+tool description as a manual override.</li>
+<li>Later endpoint syncs should update generated endpoint fields and
+<code>api_endpoint_t.endpoint_desc</code>, but should not overwrite
+<code>tool_t.description</code> while the manual override is active.</li>
+<li>Provide a later admin action to reset the description to the imported source.</li>
+</ul>
+<p>Suggested columns:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Column</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>description_source</code></td><td><code>endpoint_sync</code>, <code>manual</code>, or another source label.</td></tr>
+<tr><td><code>description_manual_override</code></td><td>Boolean guard used by endpoint sync.</td></tr>
+<tr><td><code>description_override_ts</code></td><td>When the manual override was created.</td></tr>
+<tr><td><code>description_override_user</code></td><td>Who last changed the description manually.</td></tr>
+</tbody>
+</table>
+</div>
+<p>If a deployment wants endpoint sync to be the absolute source of truth, the Tool
+page must make that clear before allowing edits, because later syncs will
+overwrite user-authored descriptions. The default portal behavior should favor
+manual overrides to avoid surprising users.</p>
+<h2 id="work-queue-options"><a class="header" href="#work-queue-options">Work Queue Options</a></h2>
+<p>Three implementation options are viable:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Option</th><th>Pros</th><th>Cons</th></tr>
+</thead>
+<tbody>
+<tr><td>Polling backfill job</td><td>Smallest first step; scans active tools with null or stale embeddings.</td><td>Embeddings are eventually populated but not immediately after each edit.</td></tr>
+<tr><td>Database work table</td><td>Reliable retries, status, and batching without depending on Kafka.</td><td>Adds one table and worker lifecycle.</td></tr>
+<tr><td>Event-driven worker</td><td>Fits event-driven portal architecture and reacts immediately to tool events.</td><td>Requires one more event/consumer contract and careful replay behavior.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Recommended phase 1 is a database work table or polling worker. It is simpler
+than putting provider calls inside the command request and safer than calling an
+external model from inside a database transaction.</p>
+<p>Use a generic work table from the start so the same worker can later populate
+<code>skill_t.description_embedding</code> and other platform embeddings without adding one
+queue per entity type. The table can be named <code>embedding_task_t</code>.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Column</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>host_id</code></td><td>Tenant boundary.</td></tr>
+<tr><td><code>task_id</code></td><td>Task identity for retry and diagnostics.</td></tr>
+<tr><td><code>entity_type</code></td><td><code>tool</code>, <code>skill</code>, <code>agent</code>, or another supported embedding target.</td></tr>
+<tr><td><code>entity_id</code></td><td>Target row ID, such as <code>tool_id</code> or <code>skill_id</code>.</td></tr>
+<tr><td><code>source_table</code></td><td>Optional source table hint, such as <code>tool_t</code>.</td></tr>
+<tr><td><code>source_hash</code></td><td>Hash of the source text to embed.</td></tr>
+<tr><td><code>source_version</code></td><td>Optional row version observed when queued; useful for diagnostics but not required for the final CAS guard.</td></tr>
+<tr><td><code>status</code></td><td><code>pending</code>, <code>running</code>, <code>ready</code>, <code>failed</code>.</td></tr>
+<tr><td><code>attempt_count</code></td><td>Retry count.</td></tr>
+<tr><td><code>next_attempt_ts</code></td><td>Backoff control.</td></tr>
+<tr><td><code>last_error</code></td><td>Short diagnostic text.</td></tr>
+<tr><td><code>update_ts</code></td><td>Queue row update time.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Use a unique key such as <code>(host_id, entity_type, entity_id, source_hash)</code> so the
+transactional upsert is idempotent.</p>
+<p>The worker should claim tasks with row locking, for example
+<code>FOR UPDATE SKIP LOCKED</code>, so multiple workers can run safely. The final tool
+update should use the source hash as the primary compare-and-set guard:</p>
+<pre><code class="language-sql">UPDATE tool_t
+SET description_embedding = ?,
+    description_embedding_model = ?,
+    description_embedding_dimension = 384,
+    description_embedding_ts = CURRENT_TIMESTAMP,
+    description_embedding_status = 'ready',
+    description_embedding_error = NULL
+WHERE host_id = ?
+  AND tool_id = ?
+  AND active = TRUE
+  AND description_embedding_source_hash = ?;
+</code></pre>
+<p>If the row no longer matches, the worker should drop that result and let the
+newer pending job win. This prevents stale vectors from overwriting a newer
+description.</p>
+<p>Avoid using <code>aggregate_version</code> as a hard CAS requirement unless it is truly
+needed for local event-sourcing rules. The version may change because of fields
+that are not part of the embedding source, causing spurious worker failures even
+when the source hash is still valid. If <code>aggregate_version</code> must be checked, a
+CAS failure should reload the row; if the stored source hash is unchanged, retry
+the embedding update using the current version. If the source hash changed, drop
+the stale result.</p>
+<h2 id="embedding-provider"><a class="header" href="#embedding-provider">Embedding Provider</a></h2>
+<p>Add a small server-side provider abstraction:</p>
+<pre><code class="language-text">EmbeddingProvider.embed(model, dimension, inputText) -&gt; float[384]
+</code></pre>
+<p>Configuration should include:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Setting</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>embedding.provider</code></td><td><code>openai-compatible</code>, <code>local-http</code>, or <code>disabled</code>.</td></tr>
+<tr><td><code>embedding.model</code></td><td>Provider model name.</td></tr>
+<tr><td><code>embedding.dimension</code></td><td>Must match <code>384</code> until the schema is migrated.</td></tr>
+<tr><td><code>embedding.batchSize</code></td><td>Worker batch size.</td></tr>
+<tr><td><code>embedding.timeoutMs</code></td><td>Provider call timeout.</td></tr>
+<tr><td><code>embedding.maxRetries</code></td><td>Retry limit before <code>failed</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<p>For hosted providers, configure a model that can emit 384 dimensions, such as an
+OpenAI-compatible embedding endpoint with an explicit dimensions parameter. For
+restricted deployments, use a local embedding service that emits the same
+dimension.</p>
+<h2 id="search-and-indexing"><a class="header" href="#search-and-indexing">Search And Indexing</a></h2>
+<p>Vector search should only use ready embeddings:</p>
+<pre><code class="language-sql">WHERE host_id = ?
+  AND active = TRUE
+  AND description_embedding IS NOT NULL
+  AND description_embedding_status = 'ready'
+ORDER BY description_embedding &lt;=&gt; ?
+</code></pre>
+<p>Add a pgvector index when catalog size makes sequential vector scans too slow:</p>
+<pre><code class="language-sql">CREATE INDEX idx_tool_description_embedding
+    ON tool_t USING hnsw (description_embedding vector_cosine_ops)
+    WHERE active = TRUE AND description_embedding IS NOT NULL;
+</code></pre>
+<p><code>genai-query</code> can continue keyword search while embeddings are being populated.
+When vector ranking is enabled, combine vector distance with existing macro
+filters such as host, active flag, assigned skill, routing domain, semantic
+namespace, sensitivity tier, source protocol, and <code>semantic_weight</code>.</p>
+<p>Vector nearest-neighbor search should run in <code>genai-query</code> against PostgreSQL
+with pgvector, not inside the agent’s local catalog cache. Database-side search
+scales better because it can apply tenant, active-state, RBAC, assigned-skill,
+domain, and sensitivity filters before returning a small top-K result. The agent
+can still keep a lightweight local cache for fallback keyword matching and
+gateway intersection, but it should not need to download every catalog vector to
+rank tools.</p>
+<h2 id="backfill"><a class="header" href="#backfill">Backfill</a></h2>
+<p>Existing rows need a one-time backfill:</p>
+<ol>
+<li>Scan active tools with a non-blank description and null or stale embedding.</li>
+<li>Queue embedding work in batches per host.</li>
+<li>Generate and persist vectors with retry/backoff.</li>
+<li>Report counts: total tools, ready, pending, failed, disabled, blank source.</li>
+</ol>
+<p>Backfill should be restartable and idempotent. It should not block portal
+startup or the Tool page.</p>
+<h2 id="portal-ui-1"><a class="header" href="#portal-ui-1">Portal UI</a></h2>
+<p>The first UI change should be optional diagnostics, not vector editing:</p>
+<ul>
+<li>Do not show <code>description_embedding</code> in create/update forms.</li>
+<li>Optionally show read-only status columns on the Tool page:
+<code>Embedding Status</code>, <code>Embedding Model</code>, and <code>Embedding Updated</code>.</li>
+<li>After a user updates the description, show the saved description immediately.
+The embedding can move from <code>pending</code> to <code>ready</code> asynchronously.</li>
+<li>Add an admin action later for “Refresh Embedding” if operators need manual
+repair.</li>
+</ul>
+<h2 id="failure-behavior"><a class="header" href="#failure-behavior">Failure Behavior</a></h2>
+<ul>
+<li>If embedding is disabled, save descriptions normally and mark status
+<code>disabled</code>.</li>
+<li>If provider calls fail, keep the tool active and searchable by keyword.</li>
+<li>Failed rows should retry with backoff and surface diagnostics.</li>
+<li>A stale worker result must not overwrite a newer description’s embedding.</li>
+<li>If the source text is blank, clear the embedding and mark the status <code>disabled</code>
+or <code>blank</code>.</li>
+</ul>
+<h2 id="implementation-phases-2"><a class="header" href="#implementation-phases-2">Implementation Phases</a></h2>
+<h3 id="phase-1-safe-population"><a class="header" href="#phase-1-safe-population">Phase 1: Safe Population</a></h3>
+<ul>
+<li>Add embedding metadata columns to <code>tool_t</code>, or add a 1:1 embedding table, and
+add a generic <code>embedding_task_t</code> for queued work.</li>
+<li>Add description manual-override metadata for endpoint-backed tools.</li>
+<li>Add write-path hooks in endpoint projection and Tool create/update
+persistence. The hooks must upsert embedding work in the same database
+transaction as the tool row change.</li>
+<li>Add a polling or queue-backed embedding worker.</li>
+<li>Add a backfill command for existing active tools.</li>
+<li>Add focused tests that endpoint projection and <code>updateTool</code> mark embeddings
+pending when descriptions change.</li>
+</ul>
+<h3 id="phase-2-diagnostics"><a class="header" href="#phase-2-diagnostics">Phase 2: Diagnostics</a></h3>
+<ul>
+<li>Expose read-only embedding status through <code>getTool</code> and <code>getFreshTool</code>.</li>
+<li>Add Tool page status columns or a diagnostics view.</li>
+<li>Add retry and refresh operations for failed rows.</li>
+</ul>
+<h3 id="phase-3-retrieval"><a class="header" href="#phase-3-retrieval">Phase 3: Retrieval</a></h3>
+<ul>
+<li>Add the pgvector index.</li>
+<li>Add vector ranking to <code>genai-query</code> or the effective catalog path.</li>
+<li>Combine vector score with keyword score, macro filters, and
+<code>semantic_weight</code>.</li>
+<li>Keep gateway <code>tools/list</code> intersection as the runtime executability check.</li>
+</ul>
+<h2 id="design-decisions"><a class="header" href="#design-decisions">Design Decisions</a></h2>
+<ul>
+<li>Use a transactional work table or outbox for phase 1. The provider call is
+asynchronous, but task creation must be committed atomically with the tool row
+change.</li>
+<li>Use source hash as the primary stale-result guard. Treat <code>aggregate_version</code>
+as diagnostic or optional unless local persistence rules require it.</li>
+<li>Make the task table generic with <code>entity_type</code> and <code>entity_id</code>, so skills and
+future entities can share the same worker.</li>
+<li>Preserve manual Tool page description edits with a manual override flag for
+endpoint-backed tools.</li>
+<li>Reuse the same worker for <code>skill_t.description_embedding</code> when skill semantic
+search is enabled. The task shape should already support <code>entity_type = 'skill'</code>.</li>
+<li>Run vector ranking in <code>genai-query</code> with pgvector and return top-K results to
+the agent. Keep local agent ranking as a fallback or small-cache optimization,
+not the primary scalable path.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="workflow-editor"><a class="header" href="#workflow-editor">Workflow Editor</a></h1>
 <h2 id="purpose"><a class="header" href="#purpose">Purpose</a></h2>
 <p>The Workflow Editor is the generic Portal authoring surface for
@@ -4788,7 +5160,7 @@ forms whose <code>definition</code> field is a YAML textarea.</li>
 </ul>
 <p>The first Workflow Editor can therefore be an incremental UI improvement over
 the existing definition CRUD and start workflow command.</p>
-<h2 id="goals-5"><a class="header" href="#goals-5">Goals</a></h2>
+<h2 id="goals-6"><a class="header" href="#goals-6">Goals</a></h2>
 <ul>
 <li>Keep workflow YAML as the canonical persisted artifact.</li>
 <li>Provide a readable step outline or graph next to the YAML editor.</li>
@@ -4801,7 +5173,7 @@ flows.</li>
 authoring component with skill-specific constraints.</li>
 <li>Preserve owner scoping and existing Portal command/query conventions.</li>
 </ul>
-<h2 id="non-goals-8"><a class="header" href="#non-goals-8">Non-Goals</a></h2>
+<h2 id="non-goals-9"><a class="header" href="#non-goals-9">Non-Goals</a></h2>
 <ul>
 <li>Do not execute workflow logic in Portal View.</li>
 <li>Do not make skills the workflow runtime.</li>
@@ -5111,7 +5483,7 @@ workflow editor provides YAML editing, step preview, validation, and test runs
 for every workflow authoring use case in Portal.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="portal-catalog-scope"><a class="header" href="#portal-catalog-scope">Portal Catalog Scope</a></h1>
-<h2 id="problem-4"><a class="header" href="#problem-4">Problem</a></h2>
+<h2 id="problem-5"><a class="header" href="#problem-5">Problem</a></h2>
 <p>Light Portal supports multiple tenants through <code>host_id</code> and can also host
 multiple runtime environments in one portal instance. A common deployment shape
 is:</p>
@@ -5142,7 +5514,7 @@ should model catalog scope explicitly:</p>
 <li>a separate SPA may expose the same backend catalog, but it should not become
 the catalog authority.</li>
 </ul>
-<h2 id="goals-6"><a class="header" href="#goals-6">Goals</a></h2>
+<h2 id="goals-7"><a class="header" href="#goals-7">Goals</a></h2>
 <ul>
 <li>Avoid duplicating the full catalog for every tenant.</li>
 <li>Prevent catalog drift between tenants and between portal instances.</li>
@@ -5161,7 +5533,7 @@ agent-facing skills and tools.</li>
 <li>Support promotion or import/export between portal instances instead of
 relying on ad hoc row copies.</li>
 </ul>
-<h2 id="non-goals-9"><a class="header" href="#non-goals-9">Non-Goals</a></h2>
+<h2 id="non-goals-10"><a class="header" href="#non-goals-10">Non-Goals</a></h2>
 <ul>
 <li>Do not clone every global catalog row into every tenant by default.</li>
 <li>Do not make a separate SPA the source of truth for catalog data.</li>
@@ -5468,7 +5840,7 @@ entity-specific effective endpoints?</li>
 <h1 id="oauth-audit"><a class="header" href="#oauth-audit">OAuth Audit</a></h1>
 <p>The OAuth services keep authorization codes and refresh tokens as operational state. These rows are short lived and are now written directly to <code>auth_code_t</code> and <code>auth_refresh_token_t</code> instead of being created through the general event store. This avoids high-volume login and refresh-token churn in <code>event_store_t</code> and <code>outbox_message_t</code>.</p>
 <p>Audit and login history are recorded separately in append-oriented OAuth audit tables.</p>
-<h2 id="goals-7"><a class="header" href="#goals-7">Goals</a></h2>
+<h2 id="goals-8"><a class="header" href="#goals-8">Goals</a></h2>
 <ul>
 <li>Show administrators who is currently online.</li>
 <li>Show a user the last login time and session history.</li>
@@ -7614,7 +7986,7 @@ GROUP BY
 <p>This approach provides a seamless experience while maintaining compatibility with applications requiring roles for authorization or UI customization.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="private-messages"><a class="header" href="#private-messages">Private Messages</a></h1>
-<h2 id="problem-5"><a class="header" href="#problem-5">Problem</a></h2>
+<h2 id="problem-6"><a class="header" href="#problem-6">Problem</a></h2>
 <p>Portal users need a way to exchange private messages from the user profile
 without exposing email addresses to each other. The sender should only need a
 recipient user id or a display-safe user label. The backend can resolve email
@@ -7649,7 +8021,7 @@ model conversations, read state, participant visibility, or per-user delete.</li
 messages page should load its own data from the query API.</li>
 <li>The existing private-message tests are disabled stubs.</li>
 </ul>
-<h2 id="goals-8"><a class="header" href="#goals-8">Goals</a></h2>
+<h2 id="goals-9"><a class="header" href="#goals-9">Goals</a></h2>
 <ul>
 <li>Let one logged-in user send a message to another portal user without knowing
 or seeing the recipient email.</li>
@@ -7664,7 +8036,7 @@ recipient email internally.</li>
 <li>Provide a path from the existing <code>message_t</code> skeleton to a conversation-based
 model without breaking existing UI routes immediately.</li>
 </ul>
-<h2 id="non-goals-10"><a class="header" href="#non-goals-10">Non-Goals</a></h2>
+<h2 id="non-goals-11"><a class="header" href="#non-goals-11">Non-Goals</a></h2>
 <ul>
 <li>Do not build group chat in the first phase.</li>
 <li>Do not expose email addresses in message APIs, events, UI state, or task
@@ -9812,7 +10184,7 @@ public class ConfigRollbackService {
 <li>Non-standard instance files are copied into <code>snapshot_instance_file_t</code>.</li>
 </ul>
 <p>The <code>/config-server/files</code> endpoint must return both sets. It already filters standard files by <code>config_phase</code> through <code>config_snapshot_property_t.config_phase</code>, but <code>instance_file_t</code> and <code>snapshot_instance_file_t</code> do not currently carry <code>config_phase</code>. That makes it impossible to union the two sources while preserving runtime, deployment, and generator phase semantics.</p>
-<h2 id="problem-6"><a class="header" href="#problem-6">Problem</a></h2>
+<h2 id="problem-7"><a class="header" href="#problem-7">Problem</a></h2>
 <p>When a service starts through <code>DefaultConfigLoader</code>, it calls <code>/config-server/files</code> with <code>host</code>, <code>serviceId</code>, and <code>envTag</code>. The endpoint resolves the current snapshot and returns the files that should be written into <code>/config</code>.</p>
 <p>For the sidecar case, <code>openapi.yaml</code> exists in both <code>instance_file_t</code> and <code>snapshot_instance_file_t</code>, but it does not exist in <code>config_snapshot_property_t</code>. Since the current <code>/files</code> query reads only <code>config_snapshot_property_t</code>, the response does not include <code>openapi.yaml</code>, and the sidecar cannot write it to <code>/config</code>.</p>
 <p>The correct endpoint behavior is:</p>
@@ -15535,7 +15907,7 @@ Location: https://portal.lightapi.net/authorization?code=auth_code_abc&amp;state
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="auth-client-secret-regeneration"><a class="header" href="#auth-client-secret-regeneration">Auth Client Secret Regeneration</a></h1>
-<h2 id="problem-7"><a class="header" href="#problem-7">Problem</a></h2>
+<h2 id="problem-8"><a class="header" href="#problem-8">Problem</a></h2>
 <p>An OAuth auth client receives a <code>client_id</code> and <code>client_secret</code> when it is
 created. The clear text <code>client_secret</code> is intentionally a one-time value. The
 database projection stores only a verifier value in <code>auth_client_t.client_secret</code>
@@ -16197,7 +16569,7 @@ CREATE TABLE promotion_item_t (
 <p>A standard <code>MaterialReactTable</code> listing past promotions with columns: Source Host, Target Host, Entity Type, Status (color-coded chip), Created By, Timestamp, Promotion ID. Row action: View Details (navigates to diff view).</p>
 <h4 id="promotiondiffviewtsx-apppromotiondiff"><a class="header" href="#promotiondiffviewtsx-apppromotiondiff">PromotionDiffView.tsx (<code>/app/promotion/diff</code>)</a></h4>
 <p>Displays detailed promotion metadata (source/target hosts, status, timestamps) and a table of all promotion items with expandable field-level diffs showing source vs. target values and per-item execution status.</p>
-<h3 id="implementation-phases-2"><a class="header" href="#implementation-phases-2">Implementation Phases</a></h3>
+<h3 id="implementation-phases-3"><a class="header" href="#implementation-phases-3">Implementation Phases</a></h3>
 <ol>
 <li><strong>Phase 1 – UI Foundation:</strong> Create promotion pages, sidebar menu entry, route registration. <em>(Completed)</em></li>
 <li><strong>Phase 2 – Backend Services:</strong> Implement <code>exportSnapshot</code>, <code>importDryRun</code>, <code>importExecute</code> services, and <code>promotion_t</code>/<code>promotion_item_t</code> DDL.</li>
@@ -16360,7 +16732,7 @@ Kubernetes cluster from the Instance Admin page.</p>
 <p>The goal is to provide a production-like deployment path for small businesses
 and enterprise tenants without requiring Light Portal to have direct network
 access to every customer cluster.</p>
-<h2 id="problem-8"><a class="header" href="#problem-8">Problem</a></h2>
+<h2 id="problem-9"><a class="header" href="#problem-9">Problem</a></h2>
 <p>Each API or application repository can contain a <code>k8s/</code> folder with Kubernetes
 deployment templates. The templates contain variables in the following format:</p>
 <pre><code class="language-text">${key:defaultValue}
