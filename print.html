@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-81eaf5cc.js";
+            window.path_to_searchindex_js = "searchindex-ba76302e.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-b3d31f1e.js"></script>
+        <script src="toc-6367ab56.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -15534,6 +15534,300 @@ Location: https://portal.lightapi.net/authorization?code=auth_code_abc&amp;state
 <li><a href="https://datatracker.ietf.org/doc/html/rfc6749#section-10.12">RFC 6749 Section 10.12 (Cross-Site Request Forgery)</a></li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="auth-client-secret-regeneration"><a class="header" href="#auth-client-secret-regeneration">Auth Client Secret Regeneration</a></h1>
+<h2 id="problem-7"><a class="header" href="#problem-7">Problem</a></h2>
+<p>An OAuth auth client receives a <code>client_id</code> and <code>client_secret</code> when it is
+created. The clear text <code>client_secret</code> is intentionally a one-time value. The
+database projection stores only a verifier value in <code>auth_client_t.client_secret</code>
+so the clear secret cannot be recovered later.</p>
+<p>This is secure, but it creates an operational problem. Users can miss the
+one-time response, close the page, or forget to copy the secret into their
+deployment system. Once that happens, the portal needs a way to issue a new
+secret without weakening the storage model.</p>
+<h2 id="current-state-4"><a class="header" href="#current-state-4">Current State</a></h2>
+<p>The current create flow in <code>oauth-command</code> generates both values in
+<code>CreateClient</code>:</p>
+<ul>
+<li><code>clientId</code>: generated UUID.</li>
+<li><code>clientSecret</code>: generated random/base64 UUID value.</li>
+<li><code>clientSecretEncrypted</code>: generated with
+<code>HashUtil.generateStrongPasswordHash(clientSecret)</code>.</li>
+</ul>
+<p>The read model stores the verifier in <code>auth_client_t.client_secret</code>. The update
+flow does not update <code>client_secret</code>, which is correct because normal client
+metadata updates should not rotate credentials.</p>
+<p>The Auth Client page currently supports:</p>
+<ul>
+<li>creating a client through the create form,</li>
+<li>creating tokens for an existing client,</li>
+<li>updating client metadata,</li>
+<li>deleting a client.</li>
+</ul>
+<h2 id="options"><a class="header" href="#options">Options</a></h2>
+<h3 id="option-1-delete-and-recreate-the-client"><a class="header" href="#option-1-delete-and-recreate-the-client">Option 1: Delete And Recreate The Client</a></h3>
+<p>This works only as a workaround and should not be the product design.</p>
+<p>Problems:</p>
+<ul>
+<li>It changes <code>client_id</code>, so every downstream service, runtime config, token
+request, and automation script must be updated.</li>
+<li>It creates avoidable downtime because the old credential is removed before the
+new one can be distributed.</li>
+<li>It loses the continuity of the auth client record and makes audit history
+harder to read.</li>
+<li>It can leave related state confusing, especially provider-client mappings,
+client tokens, and owner relationships.</li>
+<li>It trains users to use a destructive operation for a credential-management
+problem.</li>
+</ul>
+<h3 id="option-2-add-a-regenerate-secret-action"><a class="header" href="#option-2-add-a-regenerate-secret-action">Option 2: Add A Regenerate Secret Action</a></h3>
+<p>This is the recommended option.</p>
+<p>The client record and <code>client_id</code> remain stable. Only the secret verifier is
+replaced. The clear text value is returned once in the command response and is
+never stored in a recoverable form.</p>
+<p>Benefits:</p>
+<ul>
+<li>Keeps existing client ownership, provider link, service references, and audit
+continuity.</li>
+<li>Avoids unnecessary delete/recreate events.</li>
+<li>Matches common OAuth client-management behavior.</li>
+<li>Enables a focused UI flow with explicit warning, confirmation, copy action,
+and audit trail.</li>
+</ul>
+<h2 id="decision-1"><a class="header" href="#decision-1">Decision</a></h2>
+<p>Add a dedicated “Regenerate Secret” action on the Auth Client page.</p>
+<p>Do not reuse delete/recreate as the normal path. Do not add a recoverable
+encrypted-secret store. The portal should continue treating client secrets as
+one-time credentials.</p>
+<h2 id="command-api"><a class="header" href="#command-api">Command API</a></h2>
+<p>Add a new command action:</p>
+<pre><code class="language-text">lightapi.net/oauth/regenerateClientSecret/0.1.0
+</code></pre>
+<p>Suggested request:</p>
+<pre><code class="language-json">{
+  "hostId": "01964b05-552a-7c4b-9184-6857e7f3dc5f",
+  "clientId": "019e6235-1966-7322-bbcd-1cb432b5bb88",
+  "aggregateVersion": 11,
+  "ownerPositionId": "optional-position-id",
+  "reason": "optional user supplied reason"
+}
+</code></pre>
+<p><code>aggregateVersion</code> is required. Secret regeneration modifies the existing Client
+aggregate, so the command must use the same optimistic concurrency pattern as
+other update commands. If the submitted version is stale, the command should fail
+with a refresh/retry response instead of silently rotating a secret against an
+older client view.</p>
+<p>Suggested response:</p>
+<pre><code class="language-json">{
+  "hostId": "01964b05-552a-7c4b-9184-6857e7f3dc5f",
+  "clientId": "019e6235-1966-7322-bbcd-1cb432b5bb88",
+  "clientSecret": "new-one-time-secret",
+  "aggregateVersion": 12,
+  "rotatedTs": "2026-05-28T14:22:00Z"
+}
+</code></pre>
+<p>The clear <code>clientSecret</code> is response-only. It must not be included in the event
+payload, logs, audit payloads, read-model query responses, or notification
+payloads.</p>
+<h2 id="event-design-1"><a class="header" href="#event-design-1">Event Design</a></h2>
+<p>Add a new event type:</p>
+<pre><code class="language-text">ClientSecretRegeneratedEvent
+</code></pre>
+<p>Use the existing Client aggregate. The aggregate id should be derived from
+<code>hostId</code> and <code>clientId</code>, the same way <code>ClientUpdatedEvent</code> is derived.</p>
+<p>Event data should contain only non-recoverable secret material:</p>
+<pre><code class="language-json">{
+  "hostId": "01964b05-552a-7c4b-9184-6857e7f3dc5f",
+  "clientId": "019e6235-1966-7322-bbcd-1cb432b5bb88",
+  "clientSecretEncrypted": "PBKDF2 verifier",
+  "reason": "optional user supplied reason"
+}
+</code></pre>
+<p>The command handler should keep two payloads:</p>
+<ul>
+<li>event payload: safe to persist and replay,</li>
+<li>response payload: includes the one-time clear secret.</li>
+</ul>
+<p>This separation is important. If the current create-client event still includes
+the clear <code>clientSecret</code>, harden <code>CreateClient</code> at the same time so the clear
+secret is returned to the UI but not stored in <code>event_store_t</code>.</p>
+<h2 id="projection-behavior"><a class="header" href="#projection-behavior">Projection Behavior</a></h2>
+<p>Add persistence handling for <code>ClientSecretRegeneratedEvent</code>.</p>
+<p>The projection should update only credential-related fields:</p>
+<pre><code class="language-sql">UPDATE auth_client_t
+SET client_secret = ?,
+    update_user = ?,
+    update_ts = ?,
+    aggregate_version = ?
+WHERE host_id = ?
+  AND client_id = ?
+  AND active = TRUE
+  AND aggregate_version &lt; ?;
+</code></pre>
+<p><code>update_user</code> and <code>update_ts</code> should come from standard CloudEvent metadata
+rather than from user-editable event data. The event payload can include an
+optional <code>reason</code>, but the actor performing the rotation must be taken from the
+authenticated command context and persisted through the event metadata used by
+the existing projection framework.</p>
+<p>No database schema change is required for the first implementation. The existing
+<code>auth_client_t.client_secret</code> column can continue storing the PBKDF2 verifier.
+The existing <code>update_user</code>, <code>update_ts</code>, and <code>aggregate_version</code> fields are
+enough to show that the client changed.</p>
+<p>Optional future projection fields:</p>
+<ul>
+<li><code>secret_update_user</code></li>
+<li><code>secret_update_ts</code></li>
+<li><code>secret_version</code></li>
+</ul>
+<p>Only add these if the UI needs to display secret rotation metadata separately
+from normal client metadata updates.</p>
+<h2 id="ui-design"><a class="header" href="#ui-design">UI Design</a></h2>
+<p>Add a row action on the Auth Client page:</p>
+<pre><code class="language-text">Regenerate Secret
+</code></pre>
+<p>Enable it only when the current user can modify the client. Use the same owner
+and <code>oauth-client-admin</code> rules as update/delete.</p>
+<p>Recommended flow:</p>
+<ol>
+<li>User clicks the row action.</li>
+<li>Portal shows a confirmation dialog explaining that the old secret will stop
+working for future client authentication.</li>
+<li>User confirms.</li>
+<li>Portal calls <code>regenerateClientSecret</code>.</li>
+<li>Portal shows a modal with:
+<ul>
+<li><code>clientId</code>,</li>
+<li>new <code>clientSecret</code>,</li>
+<li>copy buttons for each field,</li>
+<li>a “copied” acknowledgement before closing.</li>
+</ul>
+</li>
+<li>Portal refreshes the table row after the dialog closes.</li>
+</ol>
+<p>The modal must make it clear that the secret is shown once. After it closes, the
+secret cannot be recovered. If the user loses it again, they must regenerate
+again.</p>
+<h2 id="token-and-runtime-impact"><a class="header" href="#token-and-runtime-impact">Token And Runtime Impact</a></h2>
+<p>Regenerating the client secret changes future client authentication. Existing
+issued access tokens remain valid until their normal expiration unless token
+revocation is implemented separately.</p>
+<p>OAuth servers may cache client credential records to avoid database lookups on
+every token request. The implementation must make the cache behavior explicit:</p>
+<ul>
+<li>Prefer subscribing to <code>ClientSecretRegeneratedEvent</code> and evicting the affected
+<code>(hostId, clientId)</code> credential entry immediately.</li>
+<li>If event-driven eviction is not available, use a short and documented cache TTL
+so the new secret starts working and the old secret stops working within an
+acceptable window.</li>
+<li>Add an integration test or operational runbook check for the cache behavior,
+because the command can succeed while token requests still use a stale cached
+verifier.</li>
+</ul>
+<p>Current Java <code>oauth-kafka</code> behavior does not require client-secret cache
+invalidation. Its token handler validates client secrets through
+<code>PortalDbProvider.queryClientByClientId</code>, and its signing handler uses
+<code>ClientUtil.queryClientByClientId</code>, which delegates to the same provider method.
+The current <code>AuthPersistenceImpl.queryClientByClientId</code> implementation performs
+a direct SQL lookup from <code>auth_client_t</code>. The <code>CacheStartupHookProvider</code> entries
+in <code>oauth-kafka</code> config are commented out and there is no active client
+credential cache in that service path.</p>
+<p>If a future <code>oauth-kafka</code> deployment enables a client credential cache, it must
+evict the affected <code>(hostId, clientId)</code> entry on <code>ClientSecretRegeneratedEvent</code>.
+It should also evict on client delete and any future event that changes the
+stored verifier or active state.</p>
+<p>If the secret is being rotated because of compromise, the UI should guide the
+user to review existing client tokens and revoke long-lived tokens if needed.
+This should be a separate action, not an implicit side effect of secret
+regeneration.</p>
+<p>Secret regeneration should also emit an owner/admin notification. The event
+should not include the clear secret, but it should notify the client owner and,
+where appropriate, host or organization admins that a credential was rotated.
+This gives the owner a chance to detect unexpected rotations or client takeover
+attempts.</p>
+<h2 id="security-requirements-1"><a class="header" href="#security-requirements-1">Security Requirements</a></h2>
+<ul>
+<li>Generate the secret with the same or stronger entropy as create-client.</li>
+<li>Store only a verifier generated by <code>HashUtil.generateStrongPasswordHash</code>.</li>
+<li>Never persist the clear secret in <code>event_store_t</code>, <code>auth_client_t</code>, logs,
+notifications, or audit detail payloads.</li>
+<li>Return the clear secret only in the immediate command response.</li>
+<li>Require write scope and the same ownership checks as update/delete.</li>
+<li>Allow regeneration only for active clients.</li>
+<li>Treat repeated clicks as separate rotations. If the response is lost, the
+previous clear secret cannot be recovered; the user must regenerate again.</li>
+</ul>
+<h2 id="implementation-checklist"><a class="header" href="#implementation-checklist">Implementation Checklist</a></h2>
+<p><code>oauth-command</code>:</p>
+<ul>
+<li>Add <code>RegenerateClientSecret</code> command handler.</li>
+<li>Add <code>regenerateClientSecretRequest</code> and action metadata to <code>spec.yaml</code>.</li>
+<li>Require <code>aggregateVersion</code> and reject stale commands with a refresh/retry
+error.</li>
+<li>Generate <code>clientSecret</code> and <code>clientSecretEncrypted</code>.</li>
+<li>Build an event payload without the clear secret.</li>
+<li>Customize the response to include the clear secret once.</li>
+<li>Add handler tests that assert the event data excludes <code>clientSecret</code>.</li>
+</ul>
+<p><code>light-portal</code>:</p>
+<ul>
+<li>Add <code>CLIENT_SECRET_REGENERATED_EVENT</code> to <code>PortalConstants</code>.</li>
+<li>Update <code>EventTypeUtil</code> so the event maps to the Client aggregate id.</li>
+<li>Add <code>PortalDbProvider</code> dispatch for the new event type.</li>
+<li>Add <code>AuthPersistence.updateClientSecret</code>.</li>
+<li>Add persistence tests for monotonic replay and active-client checks.</li>
+<li>Add a side effect or notification processor entry so the client owner and
+relevant admins are notified when a secret is regenerated.</li>
+</ul>
+<p><code>light-oauth</code>:</p>
+<ul>
+<li>Verify whether client credential lookup is cached.</li>
+<li>If cached, evict <code>(hostId, clientId)</code> on <code>ClientSecretRegeneratedEvent</code> or
+document and test the maximum TTL for stale secret acceptance.</li>
+<li>Confirm old secret rejection and new secret acceptance after cache invalidation
+or TTL expiry.</li>
+</ul>
+<p><code>oauth-kafka</code>:</p>
+<ul>
+<li>Keep the current direct DB-backed client credential lookup, or add event-driven
+cache invalidation before enabling a client credential cache.</li>
+<li>If caching is introduced, evict <code>(hostId, clientId)</code> on
+<code>ClientSecretRegeneratedEvent</code> and client deletion.</li>
+<li>Add a regression test or operational check proving old secret rejection and new
+secret acceptance without waiting for process restart.</li>
+</ul>
+<p><code>oauth-query</code>:</p>
+<ul>
+<li>Prefer masking or omitting <code>clientSecret</code> from query responses. Query APIs
+should not return the stored verifier as if it were a usable secret.</li>
+</ul>
+<p><code>portal-view</code>:</p>
+<ul>
+<li>Add the row action and confirmation/result modal to <code>AuthClient.tsx</code>.</li>
+<li>Reuse ownership checks already used by update/delete.</li>
+<li>Add copy-to-clipboard handling and a copied acknowledgement.</li>
+<li>Refresh the table after a successful rotation.</li>
+</ul>
+<p><code>light-portal-doc</code>:</p>
+<ul>
+<li>Add user help for the Auth Client page explaining one-time secret display and
+regeneration.</li>
+</ul>
+<h2 id="test-plan"><a class="header" href="#test-plan">Test Plan</a></h2>
+<ul>
+<li>Create client still returns a one-time secret and stores only a verifier.</li>
+<li>Regenerate secret returns a new one-time secret and updates only the verifier.</li>
+<li>Regenerate secret with a stale <code>aggregateVersion</code> fails and asks the user to
+refresh.</li>
+<li>Old secret fails client authentication after regeneration.</li>
+<li>New secret succeeds client authentication after regeneration.</li>
+<li>OAuth server cache invalidation or TTL behavior is verified.</li>
+<li>Existing metadata, owner mapping, provider mapping, and <code>client_id</code> remain
+unchanged.</li>
+<li>Unauthorized users cannot regenerate secrets for clients they do not own.</li>
+<li>Client owner or admin notification is emitted without leaking the secret.</li>
+<li>Replaying an older regeneration event does not overwrite a newer verifier.</li>
+<li>The UI does not expose stored verifier values from query responses.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="event-promotion-design-state-based-reconciliation-with-composite-keys"><a class="header" href="#event-promotion-design-state-based-reconciliation-with-composite-keys">Event Promotion Design: State-Based Reconciliation with Composite Keys</a></h1>
 <h2 id="overview-4"><a class="header" href="#overview-4">Overview</a></h2>
 <p>Traditional event sourcing replication involves copying raw events from one environment to another. However, this fails when the target environment has diverged (e.g., hotfixes), causing <code>aggregateVersion</code> conflicts. Additionally, strict global UUID constraints can prevent reusing the same ID across environments (Tenants). Finally, partial promotions can fail if parent dependencies (referential integrity) are missing in the target.</p>
@@ -15692,7 +15986,7 @@ Use <strong>Option 2 (Transaction Rollback)</strong> immediately when the user c
 </ul>
 </li>
 </ol>
-<h3 id="implementation-checklist"><a class="header" href="#implementation-checklist">Implementation Checklist</a></h3>
+<h3 id="implementation-checklist-1"><a class="header" href="#implementation-checklist-1">Implementation Checklist</a></h3>
 <ul>
 <li><input disabled="" type="checkbox"> Exporter must include the full list of children IDs when exporting a parent container.</li>
 <li><input disabled="" type="checkbox"> Importer must realize that for “One-to-Many” relationships, it has to fetch the full target set to detect orphans.</li>
@@ -16066,7 +16360,7 @@ Kubernetes cluster from the Instance Admin page.</p>
 <p>The goal is to provide a production-like deployment path for small businesses
 and enterprise tenants without requiring Light Portal to have direct network
 access to every customer cluster.</p>
-<h2 id="problem-7"><a class="header" href="#problem-7">Problem</a></h2>
+<h2 id="problem-8"><a class="header" href="#problem-8">Problem</a></h2>
 <p>Each API or application repository can contain a <code>k8s/</code> folder with Kubernetes
 deployment templates. The templates contain variables in the following format:</p>
 <pre><code class="language-text">${key:defaultValue}
@@ -16907,9 +17201,21 @@ OAuth clients for the host.</p>
 <ul>
 <li>create an OAuth client</li>
 <li>update client metadata</li>
+<li>regenerate a client secret</li>
 <li>review scopes and token-exchange settings</li>
 <li>open client tokens</li>
 </ul>
+<h2 id="client-secrets"><a class="header" href="#client-secrets">Client Secrets</a></h2>
+<p>When a client is created, the page returns the generated <code>clientId</code> and
+<code>clientSecret</code>. Copy and store the secret immediately. The portal stores only a
+password verifier for future authentication; it cannot show the original clear
+secret again.</p>
+<p>If the secret is lost, use the Regenerate Client Secret row action. The action
+creates a new secret, replaces the stored verifier, and shows the new clear
+secret one time. Copy it before closing the dialog.</p>
+<p>Regenerating a secret affects future client authentication. Existing access
+tokens remain valid until they expire, but new token requests must use the new
+secret after the event is processed.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="oauth-client-token"><a class="header" href="#oauth-client-token">OAuth Client Token</a></h1>
 <p>Use OAuth Client Token to create and review long-lived client tokens.</p>
@@ -17267,6 +17573,23 @@ depending on the selected ownership context.</p>
 <li><code>providerId</code>: OAuth provider</li>
 <li><code>ownerPositionId</code>: optional position owner for team access</li>
 </ul>
+<h2 id="save-the-generated-secret"><a class="header" href="#save-the-generated-secret">Save The Generated Secret</a></h2>
+<p>After the client is created, the portal returns the generated <code>clientId</code> and
+<code>clientSecret</code>. Copy both values and store them in your secret manager before
+leaving the result page.</p>
+<p>The portal does not persist the clear <code>clientSecret</code>. It stores only a verifier
+for future authentication, so the original secret cannot be shown again. If the
+secret is lost, regenerate it from the OAuth Client page and update any systems
+that use the old secret.</p>
+<h2 id="save-the-generated-credentials"><a class="header" href="#save-the-generated-credentials">Save The Generated Credentials</a></h2>
+<p>After the client is created, the response includes the generated <code>clientId</code> and
+<code>clientSecret</code>. Copy both values and store them in the target application’s
+secret manager or deployment configuration immediately.</p>
+<p>The clear <code>clientSecret</code> is shown only once. The portal stores only a verifier
+for later authentication, so it cannot show the original secret again after you
+leave the result page.</p>
+<p>If the secret is lost, use the OAuth Client page to regenerate it. Regeneration
+creates a new secret and invalidates the old secret for future token requests.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="update-client"><a class="header" href="#update-client">Update Client</a></h1>
 <p>Use this form to update OAuth client metadata.</p>
