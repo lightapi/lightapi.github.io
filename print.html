@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-85e0beef.js";
+            window.path_to_searchindex_js = "searchindex-947eceda.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-743eaed2.js"></script>
+        <script src="toc-3cf740c8.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -4754,8 +4754,372 @@ work immediately through <code>tools/list</code> and <code>tools/call</code>, wh
 portal operators a clean path to organize tools into skills, assign those
 skills to agents, and improve retrieval over time.</p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="tool-description-embedding-population"><a class="header" href="#tool-description-embedding-population">Tool Description Embedding Population</a></h1>
+<h1 id="agent-memory-event-refactor"><a class="header" href="#agent-memory-event-refactor">Agent Memory Event Refactor</a></h1>
 <h2 id="problem-4"><a class="header" href="#problem-4">Problem</a></h2>
+<p><code>GlobalSnapshotPersistenceImpl</code> currently skips these Hindsight memory tables
+for both snapshot export and snapshot-to-event conversion:</p>
+<pre><code class="language-text">agent_memory_bank_t
+agent_memory_doc_t
+agent_memory_unit_t
+agent_memory_entity_t
+agent_memory_unit_entity_t
+agent_memory_entity_cooccur_t
+agent_memory_link_t
+agent_memory_directive_t
+agent_memory_reflection_t
+agent_session_history_t
+</code></pre>
+<p>The skip is intentional for the current implementation. These tables are not
+currently populated from portal events as the source of truth. They are runtime
+state written directly by <code>light-agent</code> or memory client code, so exporting them
+as portable portal domain state or converting them into generic created events
+would be unsafe.</p>
+<p>The current implementation also has a schema drift risk:</p>
+<ul>
+<li><code>light-agent</code> writes directly to the current Hindsight tables:
+<code>agent_memory_bank_t</code>, <code>agent_session_history_t</code>, and
+<code>agent_memory_unit_t</code>.</li>
+<li><code>light-fabric/crates/hindsight-client</code> writes directly to
+<code>agent_memory_unit_t</code>.</li>
+<li><code>light-portal</code> Java db-provider has event replay methods for
+<code>AgentSessionHistory</code> and <code>AgentMemory</code>, but those methods do not cover the
+current Hindsight table family. <code>AgentMemory</code> writes <code>agent_memory_t</code>, and
+<code>AgentSessionHistory</code> expects the older <code>session_history_id</code>, <code>process_id</code>,
+<code>role</code>, and <code>content</code> shape rather than the current
+<code>(host_id, bank_id, session_id, messages)</code> schema.</li>
+<li>The Rust importer also skips the same <code>agent_memory_*</code> and
+<code>agent_session_history_t</code> tables, so the Java and Rust conversion paths are
+aligned around the current non-event-backed behavior.</li>
+</ul>
+<h2 id="goal"><a class="header" href="#goal">Goal</a></h2>
+<p>Refactor the agent memory persistence path so that memory state has a clear
+owner:</p>
+<pre><code class="language-text">command/event path -&gt; event_store_t -&gt; db-provider replay -&gt; Hindsight tables
+</code></pre>
+<p>Once that contract is in place, snapshot export and conversion can safely
+include the event-backed memory state where appropriate.</p>
+<h2 id="non-goals-8"><a class="header" href="#non-goals-8">Non-Goals</a></h2>
+<ul>
+<li>Do not promote existing direct-write memory rows into snapshots before a
+backfill/migration event strategy exists.</li>
+<li>Do not convert derived caches into authoritative state unless a product
+decision requires exact cache promotion.</li>
+<li>Do not require every chat token or partial model response to become an event.</li>
+<li>Do not remove the current direct PostgreSQL path until <code>light-agent</code> has a
+stable command-backed memory store and operational validation.</li>
+</ul>
+<h2 id="current-state-2"><a class="header" href="#current-state-2">Current State</a></h2>
+<h3 id="snapshot-export-and-conversion"><a class="header" href="#snapshot-export-and-conversion">Snapshot Export And Conversion</a></h3>
+<p><code>GlobalSnapshotPersistenceImpl</code> excludes the memory tables from export and
+conversion. This prevents two bad outcomes:</p>
+<ul>
+<li>exporting user/session memory into another environment without an explicit
+promotion contract</li>
+<li>converting rows into events that no replay handler can faithfully apply</li>
+</ul>
+<p>The Rust importer has the same conversion skip list. Any future change must
+update both Java and Rust paths.</p>
+<h3 id="light-agent"><a class="header" href="#light-agent">light-agent</a></h3>
+<p><code>light-agent</code> currently owns some memory writes directly:</p>
+<pre><code class="language-text">ensure_session_memory_bank
+  INSERT INTO agent_memory_bank_t
+
+session history persistence
+  INSERT INTO agent_session_history_t ... ON CONFLICT DO UPDATE
+
+hindsight retain
+  INSERT INTO agent_memory_unit_t
+</code></pre>
+<p>This is operationally simple and gives the agent read-your-writes behavior, but
+it bypasses portal command validation, event persistence, replay, and snapshot
+conversion.</p>
+<h3 id="java-db-provider"><a class="header" href="#java-db-provider">Java db-provider</a></h3>
+<p>The Java db-provider already has event handler plumbing for many GenAI tables.
+For memory, however, the existing methods are not aligned with the Hindsight
+schema:</p>
+<pre><code class="language-text">AgentMemoryCreatedEvent -&gt; agent_memory_t
+AgentSessionHistoryCreatedEvent -&gt; old session-history row shape
+</code></pre>
+<p>There are no current event handlers for:</p>
+<pre><code class="language-text">agent_memory_bank_t
+agent_memory_doc_t
+agent_memory_unit_t
+agent_memory_entity_t
+agent_memory_unit_entity_t
+agent_memory_entity_cooccur_t
+agent_memory_link_t
+agent_memory_directive_t
+agent_memory_reflection_t
+</code></pre>
+<h2 id="recommended-design-1"><a class="header" href="#recommended-design-1">Recommended Design</a></h2>
+<p>Use events for durable memory state, and treat pure caches as rebuildable
+projection state.</p>
+<p>Recommended ownership:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Table</th><th>Ownership</th></tr>
+</thead>
+<tbody>
+<tr><td><code>agent_memory_bank_t</code></td><td>Event-backed aggregate</td></tr>
+<tr><td><code>agent_memory_doc_t</code></td><td>Event-backed aggregate</td></tr>
+<tr><td><code>agent_memory_unit_t</code></td><td>Event-backed aggregate</td></tr>
+<tr><td><code>agent_memory_entity_t</code></td><td>Event-backed aggregate</td></tr>
+<tr><td><code>agent_memory_unit_entity_t</code></td><td>Event-backed association</td></tr>
+<tr><td><code>agent_memory_link_t</code></td><td>Event-backed association</td></tr>
+<tr><td><code>agent_memory_directive_t</code></td><td>Event-backed aggregate</td></tr>
+<tr><td><code>agent_memory_reflection_t</code></td><td>Event-backed aggregate</td></tr>
+<tr><td><code>agent_session_history_t</code></td><td>Event-backed aggregate or explicit operational table</td></tr>
+<tr><td><code>agent_memory_entity_cooccur_t</code></td><td>Derived projection cache by default</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>agent_memory_entity_cooccur_t</code> should stay projection-owned unless exact
+co-occurrence counts are considered business state. It can be rebuilt from
+memory units and unit-entity links during replay.</p>
+<p><code>agent_session_history_t</code> needs an explicit decision. It contains conversation
+content and may be high volume. The recommended first phase is to make it
+event-backed for correctness, but keep snapshot export opt-in because it can
+contain sensitive user text.</p>
+<h2 id="event-model-1"><a class="header" href="#event-model-1">Event Model</a></h2>
+<p>Add explicit event constants and aggregate constants for the Hindsight schema.
+Use aggregate ids that include enough context to avoid cross-bank collisions.</p>
+<p>Suggested aggregate ids:</p>
+<pre><code class="language-text">AgentMemoryBank:        hostId|bankId
+AgentMemoryDoc:         hostId|bankId|docId
+AgentMemoryUnit:        hostId|bankId|unitId
+AgentMemoryEntity:      hostId|bankId|entityId
+AgentMemoryUnitEntity:  hostId|bankId|unitId|entityId
+AgentMemoryLink:        hostId|bankId|fromUnitId|toUnitId|linkType
+AgentMemoryDirective:   hostId|bankId|directiveId
+AgentMemoryReflection:  hostId|bankId|reflectionId
+AgentSessionHistory:    hostId|bankId|sessionId
+</code></pre>
+<p>Suggested events:</p>
+<pre><code class="language-text">AgentMemoryBankCreatedEvent
+AgentMemoryBankUpdatedEvent
+AgentMemoryBankDeletedEvent
+
+AgentMemoryDocCreatedEvent
+AgentMemoryDocUpdatedEvent
+AgentMemoryDocDeletedEvent
+
+AgentMemoryUnitRetainedEvent
+AgentMemoryUnitUpdatedEvent
+AgentMemoryUnitDeletedEvent
+
+AgentMemoryEntityCreatedEvent
+AgentMemoryEntityUpdatedEvent
+AgentMemoryEntityDeletedEvent
+
+AgentMemoryUnitEntityLinkedEvent
+AgentMemoryUnitEntityUnlinkedEvent
+
+AgentMemoryLinkCreatedEvent
+AgentMemoryLinkUpdatedEvent
+AgentMemoryLinkDeletedEvent
+
+AgentMemoryDirectiveCreatedEvent
+AgentMemoryDirectiveUpdatedEvent
+AgentMemoryDirectiveDeletedEvent
+
+AgentMemoryReflectionCreatedEvent
+AgentMemoryReflectionUpdatedEvent
+AgentMemoryReflectionDeletedEvent
+
+AgentSessionHistoryCreatedEvent
+AgentSessionHistoryAppendedEvent
+AgentSessionHistoryCompactedEvent
+AgentSessionHistoryDeletedEvent
+</code></pre>
+<p>Do not reuse the current <code>AgentMemoryCreatedEvent</code> name for
+<code>agent_memory_unit_t</code>. That name already maps to legacy <code>agent_memory_t</code> and
+would create ambiguity. Either deprecate the legacy event family or keep it
+separate with a clear <code>LegacyAgentMemory</code> name in documentation and tests.</p>
+<p>For session history, avoid <code>Upserted</code> as the long-term event name. The
+underlying table may use <code>INSERT ... ON CONFLICT DO UPDATE</code>, but the event log
+should express intent. Use <code>AgentSessionHistoryCreatedEvent</code> to start a
+session, <code>AgentSessionHistoryAppendedEvent</code> to add one or more messages, and
+<code>AgentSessionHistoryCompactedEvent</code> only when the retained JSON history is
+summarized or truncated.</p>
+<h2 id="db-provider-refactor"><a class="header" href="#db-provider-refactor">db-provider Refactor</a></h2>
+<p>Add a dedicated Hindsight persistence component, for example:</p>
+<pre><code class="language-text">HindsightMemoryPersistence
+HindsightMemoryPersistenceImpl
+</code></pre>
+<p>Responsibilities:</p>
+<ul>
+<li>replay Hindsight memory events into the current tables</li>
+<li>preserve <code>aggregate_version</code> ordering on every mutable table</li>
+<li>handle <code>JSONB</code>, <code>vector(384)</code>, and <code>UUID[]</code> fields explicitly</li>
+<li>maintain foreign-key order during replay</li>
+<li>rebuild or incrementally update derived <code>agent_memory_entity_cooccur_t</code></li>
+</ul>
+<p>Update:</p>
+<pre><code class="language-text">PortalConstants
+EventTypeUtil
+PortalDbProvider.handleEvent
+PortalDbProviderImpl
+GlobalSnapshotPersistenceImpl table-to-event overrides
+GlobalSnapshotPersistenceImpl skip lists
+importer/src/snapshot/table_rules.rs
+</code></pre>
+<p>The replay order must satisfy foreign keys:</p>
+<pre><code class="language-text">agent_memory_bank_t
+agent_memory_doc_t
+agent_memory_unit_t
+agent_memory_entity_t
+agent_memory_unit_entity_t
+agent_memory_link_t
+agent_memory_directive_t
+agent_memory_reflection_t
+agent_session_history_t
+</code></pre>
+<p>If <code>agent_memory_entity_cooccur_t</code> remains derived, rebuild it after replay or
+update it from <code>AgentMemoryUnitEntityLinkedEvent</code>.</p>
+<h2 id="light-agent-refactor"><a class="header" href="#light-agent-refactor">light-agent Refactor</a></h2>
+<p>Introduce a memory persistence abstraction:</p>
+<pre><code class="language-text">MemoryStore
+  DirectPgMemoryStore
+  PortalCommandMemoryStore
+</code></pre>
+<p><code>DirectPgMemoryStore</code> preserves the current local behavior during migration. It
+should be marked as a local/runtime compatibility mode and should not be
+considered portable event state.</p>
+<p><code>PortalCommandMemoryStore</code> should be the enterprise/default target once the
+command path is stable. It sends memory commands through the portal command API
+using the agent’s service token. This gives memory writes the same validation,
+event persistence, replay, and audit behavior as the rest of the portal.</p>
+<p>Configuration:</p>
+<pre><code class="language-yaml">memory:
+  writeMode: portal-command # portal-command | direct-pg
+  retainSessionHistory: true
+  exportableMemory: false
+</code></pre>
+<p>Initial implementation uses environment variables in <code>light-agent</code>:</p>
+<pre><code class="language-text">LIGHT_AGENT_MEMORY_WRITE_MODE=portal-command # portal-command | direct-pg
+LIGHT_AGENT_PORTAL_COMMAND_URL=https://...   # optional; defaults from portal config
+</code></pre>
+<p><code>exportableMemory</code> should default to <code>false</code> until privacy and environment
+promotion rules are finalized.</p>
+<p><code>DirectPgMemoryStore</code> should be phased out after <code>PortalCommandMemoryStore</code> is
+stable. Keeping two permanent write paths would reintroduce schema drift and
+make local development behave differently from production.</p>
+<h3 id="read-your-writes"><a class="header" href="#read-your-writes">Read-Your-Writes</a></h3>
+<p>The agent currently reads directly from PostgreSQL after direct writes. Moving
+writes behind command/event processing creates a read-your-writes requirement.
+For Phase 1, the command endpoint should apply the projection synchronously
+before returning. This keeps <code>light-agent</code> simple and avoids session-local
+buffer race conditions.</p>
+<p>Other options can be evaluated later if latency requires them:</p>
+<ul>
+<li>agent keeps a small session-local memory buffer until replay catches up</li>
+<li>agent reads through a query endpoint that can merge persisted memory with the
+session-local buffer</li>
+</ul>
+<h2 id="snapshot-policy"><a class="header" href="#snapshot-policy">Snapshot Policy</a></h2>
+<p>After the event-backed path is implemented:</p>
+<ol>
+<li>Remove event-backed Hindsight tables from <code>CONVERSION_SKIP_TABLES</code>.</li>
+<li>Keep export opt-in for memory tables because they may contain private user
+content.</li>
+<li>Keep <code>agent_memory_entity_cooccur_t</code> skipped if it remains derived.</li>
+<li>Add explicit table-to-event overrides for each event-backed Hindsight table.</li>
+<li>Keep Java <code>GlobalSnapshotPersistenceImpl</code> and Rust importer skip lists in
+sync.</li>
+</ol>
+<p>Suggested export behavior:</p>
+<pre><code class="language-text">default snapshot export: skip memory content
+entityTypes=agent_memory: include event-backed memory tables
+entityTypes=agent_session_history: include session history only when explicitly requested
+</code></pre>
+<p>Production session history export should be blocked by default even when the
+entity type is requested. Allow production export only with an explicit
+administrative override and a masking/scrubbing step. Lower environments may
+allow opt-in export for debugging, but the export response should record that
+memory/session content was included.</p>
+<h2 id="migration-plan"><a class="header" href="#migration-plan">Migration Plan</a></h2>
+<h3 id="phase-1-align-db-provider-with-current-schema"><a class="header" href="#phase-1-align-db-provider-with-current-schema">Phase 1: Align db-provider With Current Schema</a></h3>
+<ul>
+<li>Add <code>HindsightMemoryPersistenceImpl</code>.</li>
+<li>Add constants and event dispatch for the current Hindsight schema.</li>
+<li>Deprecate or rename legacy <code>AgentMemory</code> and old <code>AgentSessionHistory</code>
+methods that do not match the current tables.</li>
+<li>Add db-provider tests for replaying bank, unit, session history, and one
+association table.</li>
+</ul>
+<h3 id="phase-2-add-command-apis"><a class="header" href="#phase-2-add-command-apis">Phase 2: Add Command APIs</a></h3>
+<ul>
+<li>Add command schemas for Hindsight memory operations.</li>
+<li>Validate <code>hostId</code>, <code>bankId</code>, and optional <code>agentDefId</code> ownership.</li>
+<li>Generate events through the normal command path.</li>
+<li>Add authorization checks so an agent can only write memory for its host and
+allowed bank.</li>
+</ul>
+<h3 id="phase-3-refactor-light-agent"><a class="header" href="#phase-3-refactor-light-agent">Phase 3: Refactor light-agent</a></h3>
+<ul>
+<li>Introduce <code>MemoryStore</code>.</li>
+<li>Move direct SQL writes behind <code>DirectPgMemoryStore</code>.</li>
+<li>Add <code>PortalCommandMemoryStore</code>.</li>
+<li>Default local development to direct mode if needed, but document it as
+non-portable.</li>
+<li>Deprecate direct mode after the command path is stable and make
+<code>PortalCommandMemoryStore</code> the only supported production write path.</li>
+<li>Validate service-token <code>host</code>, <code>sid</code>, and <code>env</code> before writing through
+command APIs.</li>
+</ul>
+<h3 id="phase-4-snapshot-and-import"><a class="header" href="#phase-4-snapshot-and-import">Phase 4: Snapshot And Import</a></h3>
+<ul>
+<li>Add table-to-event overrides and conversion tests.</li>
+<li>Remove event-backed tables from conversion skip lists.</li>
+<li>Keep export of memory content opt-in.</li>
+<li>Update Rust importer table rules and dependency graph.</li>
+<li>Add replay-order tests for the FK chain.</li>
+</ul>
+<h3 id="phase-5-backfill-existing-rows"><a class="header" href="#phase-5-backfill-existing-rows">Phase 5: Backfill Existing Rows</a></h3>
+<ul>
+<li>Build a one-time backfill tool that reads existing direct-write rows and
+emits synthetic Hindsight events in dependency order.</li>
+<li>Preserve <code>aggregate_version</code> where possible.</li>
+<li>Mark backfilled events with metadata such as:</li>
+</ul>
+<pre><code class="language-json">{
+  "source": "agent-memory-backfill",
+  "backfilled": true
+}
+</code></pre>
+<p>Do not remove skip rules for production exports until backfill has been run or
+the deployment has no legacy direct-write rows.</p>
+<h2 id="testing"><a class="header" href="#testing">Testing</a></h2>
+<p>Add focused tests:</p>
+<ul>
+<li><code>GlobalSnapshotPersistenceImplTest</code>: memory tables remain skipped before
+event support; event-backed tables are included after the event-backed path
+is enabled.</li>
+<li>db-provider replay tests for each Hindsight event family.</li>
+<li><code>EventTypeUtil</code> aggregate-id tests.</li>
+<li>Rust importer table-rule parity tests.</li>
+<li>light-agent <code>MemoryStore</code> tests using a mock command client.</li>
+<li>end-to-end test: <code>light-agent</code> retain memory -&gt; command event -&gt; replay -&gt;
+recall reads the memory.</li>
+</ul>
+<h2 id="resolved-decisions"><a class="header" href="#resolved-decisions">Resolved Decisions</a></h2>
+<ul>
+<li><code>agent_session_history_t</code> is exportable only as an explicit opt-in. Production
+export is blocked unless an administrative override and data masking/scrubbing
+step are provided.</li>
+<li><code>agent_memory_entity_cooccur_t</code> remains derived. Store the underlying facts
+as events and rebuild or update co-occurrence counts as projection state.</li>
+<li>Direct PostgreSQL writes are a migration bridge only. They should be removed
+after the command-backed memory path is stable.</li>
+<li>Memory vectors should not be stored in events. Events store source text,
+metadata, and embedding model metadata when needed. Projection rebuilds should
+generate vectors, preferably through the embedding task pipeline, so the
+platform can re-embed after model upgrades.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="tool-description-embedding-population"><a class="header" href="#tool-description-embedding-population">Tool Description Embedding Population</a></h1>
+<h2 id="problem-5"><a class="header" href="#problem-5">Problem</a></h2>
 <p>The GenAI Tool page lets users update <code>tool_t.description</code> through the
 <code>updateTool</code> form. Endpoint-backed tools are also projected into <code>tool_t</code> when
 <code>api_endpoint_t</code> is populated from OpenAPI, MCP <code>tools/list</code>, or LightAPI
@@ -4785,7 +5149,7 @@ latency.</li>
 disabled or temporarily failing.</li>
 <li>Keep the first implementation aligned with the existing <code>VECTOR(384)</code> schema.</li>
 </ul>
-<h2 id="non-goals-8"><a class="header" href="#non-goals-8">Non-Goals</a></h2>
+<h2 id="non-goals-9"><a class="header" href="#non-goals-9">Non-Goals</a></h2>
 <ul>
 <li>Do not require every tool to have an embedding before it can be listed,
 edited, linked to a skill, or executed through the gateway.</li>
@@ -4793,7 +5157,7 @@ edited, linked to a skill, or executed through the gateway.</li>
 <li>Do not store API keys or provider secrets in tool metadata.</li>
 <li>Do not expose raw embedding vectors in the Tool page by default.</li>
 </ul>
-<h2 id="recommended-design-1"><a class="header" href="#recommended-design-1">Recommended Design</a></h2>
+<h2 id="recommended-design-2"><a class="header" href="#recommended-design-2">Recommended Design</a></h2>
 <p>Use asynchronous server-side embedding generation. Tool writes should save the
 description immediately, mark the embedding stale or pending, and record the
 embedding task in the same database transaction as the <code>tool_t</code> update. A worker
@@ -5149,7 +5513,7 @@ and other endpoint details belong in LightAPI descriptions, OpenAPI/OpenRPC
 documents, protobuf metadata, or the portal endpoint catalog. Workflow tasks
 reference those descriptions and provide step-level wiring, guards, exports,
 and error handling.</p>
-<h2 id="current-state-2"><a class="header" href="#current-state-2">Current State</a></h2>
+<h2 id="current-state-3"><a class="header" href="#current-state-3">Current State</a></h2>
 <p>The current Portal implementation already has the persistence and generic CRUD
 surface needed for a first editor:</p>
 <ul>
@@ -5175,7 +5539,7 @@ flows.</li>
 authoring component with skill-specific constraints.</li>
 <li>Preserve owner scoping and existing Portal command/query conventions.</li>
 </ul>
-<h2 id="non-goals-9"><a class="header" href="#non-goals-9">Non-Goals</a></h2>
+<h2 id="non-goals-10"><a class="header" href="#non-goals-10">Non-Goals</a></h2>
 <ul>
 <li>Do not execute workflow logic in Portal View.</li>
 <li>Do not make skills the workflow runtime.</li>
@@ -5485,7 +5849,7 @@ workflow editor provides YAML editing, step preview, validation, and test runs
 for every workflow authoring use case in Portal.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="portal-catalog-scope"><a class="header" href="#portal-catalog-scope">Portal Catalog Scope</a></h1>
-<h2 id="problem-5"><a class="header" href="#problem-5">Problem</a></h2>
+<h2 id="problem-6"><a class="header" href="#problem-6">Problem</a></h2>
 <p>Light Portal supports multiple tenants through <code>host_id</code> and can also host
 multiple runtime environments in one portal instance. A common deployment shape
 is:</p>
@@ -5535,7 +5899,7 @@ agent-facing skills and tools.</li>
 <li>Support promotion or import/export between portal instances instead of
 relying on ad hoc row copies.</li>
 </ul>
-<h2 id="non-goals-10"><a class="header" href="#non-goals-10">Non-Goals</a></h2>
+<h2 id="non-goals-11"><a class="header" href="#non-goals-11">Non-Goals</a></h2>
 <ul>
 <li>Do not clone every global catalog row into every tenant by default.</li>
 <li>Do not make a separate SPA the source of truth for catalog data.</li>
@@ -7988,13 +8352,13 @@ GROUP BY
 <p>This approach provides a seamless experience while maintaining compatibility with applications requiring roles for authorization or UI customization.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="private-messages"><a class="header" href="#private-messages">Private Messages</a></h1>
-<h2 id="problem-6"><a class="header" href="#problem-6">Problem</a></h2>
+<h2 id="problem-7"><a class="header" href="#problem-7">Problem</a></h2>
 <p>Portal users need a way to exchange private messages from the user profile
 without exposing email addresses to each other. The sender should only need a
 recipient user id or a display-safe user label. The backend can resolve email
 internally when it needs to send an external notification, but email must not be
 part of the user-facing message contract.</p>
-<h2 id="current-state-3"><a class="header" href="#current-state-3">Current State</a></h2>
+<h2 id="current-state-4"><a class="header" href="#current-state-4">Current State</a></h2>
 <p>The current codebase already has a partial private-message skeleton:</p>
 <ul>
 <li><code>user-command</code> exposes <code>lightapi.net/user/sendMessage/0.1.0</code>.</li>
@@ -8038,7 +8402,7 @@ recipient email internally.</li>
 <li>Provide a path from the existing <code>message_t</code> skeleton to a conversation-based
 model without breaking existing UI routes immediately.</li>
 </ul>
-<h2 id="non-goals-11"><a class="header" href="#non-goals-11">Non-Goals</a></h2>
+<h2 id="non-goals-12"><a class="header" href="#non-goals-12">Non-Goals</a></h2>
 <ul>
 <li>Do not build group chat in the first phase.</li>
 <li>Do not expose email addresses in message APIs, events, UI state, or task
@@ -8134,7 +8498,7 @@ CREATE INDEX idx_private_message_state_unread
 bridge only. Add <code>from_user_id</code>, <code>to_user_id</code>, <code>message_id</code>, <code>read_ts</code>, and
 per-user delete columns, then migrate to the conversation tables once the API
 contract is stable.</p>
-<h2 id="event-model-1"><a class="header" href="#event-model-1">Event Model</a></h2>
+<h2 id="event-model-2"><a class="header" href="#event-model-2">Event Model</a></h2>
 <p>Keep the event-driven command/query pattern. A message send should create a
 CloudEvent and the query-side projection should update the private-message
 tables.</p>
@@ -8290,7 +8654,7 @@ confusing recipient identity with the current user.</li>
 </ul>
 <p>The first UI can be an inbox plus conversation thread. Real-time typing,
 presence, attachments, and rich-text editing are later enhancements.</p>
-<h2 id="migration-plan"><a class="header" href="#migration-plan">Migration Plan</a></h2>
+<h2 id="migration-plan-1"><a class="header" href="#migration-plan-1">Migration Plan</a></h2>
 <h3 id="phase-0-stop-the-broken-behavior"><a class="header" href="#phase-0-stop-the-broken-behavior">Phase 0: Stop the Broken Behavior</a></h3>
 <ul>
 <li>Make <code>GetPrivateMessage</code> return valid JSON even before the new model is
@@ -8324,7 +8688,7 @@ and hide/delete APIs.</li>
 purges only messages deleted by all participants after the retention window.</li>
 <li>Add optional push delivery later if polling becomes insufficient.</li>
 </ul>
-<h2 id="testing"><a class="header" href="#testing">Testing</a></h2>
+<h2 id="testing-1"><a class="header" href="#testing-1">Testing</a></h2>
 <p>Backend tests should cover:</p>
 <ul>
 <li>Sender is derived from token and cannot be spoofed.</li>
@@ -10178,7 +10542,7 @@ public class ConfigRollbackService {
 <p>This approach provides a clean and relatively robust way to restore the specific override state from your snapshots using the DELETE/INSERT strategy. Remember to test thoroughly!</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="sid-and-host-verification"><a class="header" href="#sid-and-host-verification">SID and Host Verification</a></h1>
-<h2 id="problem-7"><a class="header" href="#problem-7">Problem</a></h2>
+<h2 id="problem-8"><a class="header" href="#problem-8">Problem</a></h2>
 <p>GitHub issue https://github.com/lightapi/portal-service/issues/39 reports that
 <code>config-server</code> accepted a valid JWT whose service identity did not match the
 requested service configuration.</p>
@@ -10341,7 +10705,7 @@ helper.</p>
 <p>The focused implementation tests cover missing and mismatched <code>host</code>, missing
 and mismatched <code>sid</code>, missing and mismatched <code>env</code> when <code>envTag</code> is requested,
 blank values, whitespace trimming, and case-sensitive identifier comparison.</p>
-<h2 id="non-goals-12"><a class="header" href="#non-goals-12">Non-Goals</a></h2>
+<h2 id="non-goals-13"><a class="header" href="#non-goals-13">Non-Goals</a></h2>
 <ul>
 <li>Do not replace JWT verification middleware.</li>
 <li>Do not redesign OAuth token issuance.</li>
@@ -10393,7 +10757,7 @@ the host binding rule still applies:</p>
 the environment binding rule also applies:</p>
 <pre><code class="language-text">token.env == request.envTag
 </code></pre>
-<h2 id="recommended-design-2"><a class="header" href="#recommended-design-2">Recommended Design</a></h2>
+<h2 id="recommended-design-3"><a class="header" href="#recommended-design-3">Recommended Design</a></h2>
 <p>Add a small config-server authorization helper in both implementations, and
 tighten the controller registry validators to use the same <code>sid</code> binding rule.</p>
 <p>The helper should accept the decoded JWT claims and the parsed query object, and
@@ -10744,7 +11108,7 @@ mvn -q -Dtest=ServiceIdAuthorizationUtilTest test
 <li>Non-standard instance files are copied into <code>snapshot_instance_file_t</code>.</li>
 </ul>
 <p>The <code>/config-server/files</code> endpoint must return both sets. It already filters standard files by <code>config_phase</code> through <code>config_snapshot_property_t.config_phase</code>, but <code>instance_file_t</code> and <code>snapshot_instance_file_t</code> do not currently carry <code>config_phase</code>. That makes it impossible to union the two sources while preserving runtime, deployment, and generator phase semantics.</p>
-<h2 id="problem-8"><a class="header" href="#problem-8">Problem</a></h2>
+<h2 id="problem-9"><a class="header" href="#problem-9">Problem</a></h2>
 <p>When a service starts through <code>DefaultConfigLoader</code>, it calls <code>/config-server/files</code> with <code>host</code>, <code>serviceId</code>, and <code>envTag</code>. The endpoint resolves the current snapshot and returns the files that should be written into <code>/config</code>.</p>
 <p>For the sidecar case, <code>openapi.yaml</code> exists in both <code>instance_file_t</code> and <code>snapshot_instance_file_t</code>, but it does not exist in <code>config_snapshot_property_t</code>. Since the current <code>/files</code> query reads only <code>config_snapshot_property_t</code>, the response does not include <code>openapi.yaml</code>, and the sidecar cannot write it to <code>/config</code>.</p>
 <p>The correct endpoint behavior is:</p>
@@ -16467,7 +16831,7 @@ Location: https://portal.lightapi.net/authorization?code=auth_code_abc&amp;state
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="auth-client-secret-regeneration"><a class="header" href="#auth-client-secret-regeneration">Auth Client Secret Regeneration</a></h1>
-<h2 id="problem-9"><a class="header" href="#problem-9">Problem</a></h2>
+<h2 id="problem-10"><a class="header" href="#problem-10">Problem</a></h2>
 <p>An OAuth auth client receives a <code>client_id</code> and <code>client_secret</code> when it is
 created. The clear text <code>client_secret</code> is intentionally a one-time value. The
 database projection stores only a verifier value in <code>auth_client_t.client_secret</code>
@@ -16476,7 +16840,7 @@ so the clear secret cannot be recovered later.</p>
 one-time response, close the page, or forget to copy the secret into their
 deployment system. Once that happens, the portal needs a way to issue a new
 secret without weakening the storage model.</p>
-<h2 id="current-state-4"><a class="header" href="#current-state-4">Current State</a></h2>
+<h2 id="current-state-5"><a class="header" href="#current-state-5">Current State</a></h2>
 <p>The current create flow in <code>oauth-command</code> generates both values in
 <code>CreateClient</code>:</p>
 <ul>
@@ -17292,7 +17656,7 @@ Kubernetes cluster from the Instance Admin page.</p>
 <p>The goal is to provide a production-like deployment path for small businesses
 and enterprise tenants without requiring Light Portal to have direct network
 access to every customer cluster.</p>
-<h2 id="problem-10"><a class="header" href="#problem-10">Problem</a></h2>
+<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
 <p>Each API or application repository can contain a <code>k8s/</code> folder with Kubernetes
 deployment templates. The templates contain variables in the following format:</p>
 <pre><code class="language-text">${key:defaultValue}
@@ -17834,7 +18198,7 @@ deployment intent and history, while the deployer owns safe cluster-local
 execution.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-oauth-and-oauth-kafka-agentcore-oidc-discovery"><a class="header" href="#light-oauth-and-oauth-kafka-agentcore-oidc-discovery">Light OAuth and OAuth Kafka AgentCore OIDC Discovery</a></h1>
-<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
+<h2 id="problem-12"><a class="header" href="#problem-12">Problem</a></h2>
 <p>Issue https://github.com/lightapi/portal-service/issues/44 asks whether
 <code>portal-service/apps/light-oauth</code> can support AWS AgentCore JWT inbound
 authorization.</p>
@@ -17976,7 +18340,7 @@ claims working.</li>
 <li>Keep issuer, audience, and discovery URLs deterministic across environments.</li>
 <li>Add tests that prove discovery, JWKS, and signed token claims line up.</li>
 </ul>
-<h2 id="non-goals-13"><a class="header" href="#non-goals-13">Non-Goals</a></h2>
+<h2 id="non-goals-14"><a class="header" href="#non-goals-14">Non-Goals</a></h2>
 <ul>
 <li>Do not implement full OIDC identity-provider behavior in the first phase.</li>
 <li>Do not add dynamic client registration.</li>
@@ -17985,7 +18349,7 @@ services.</li>
 <li>Do not remove Light-specific token claims.</li>
 <li>Do not solve AgentCore outbound OAuth credential providers in this change.</li>
 </ul>
-<h2 id="recommended-design-3"><a class="header" href="#recommended-design-3">Recommended Design</a></h2>
+<h2 id="recommended-design-4"><a class="header" href="#recommended-design-4">Recommended Design</a></h2>
 <p>Add provider-scoped OIDC discovery to Rust <code>light-oauth</code> and Java
 <code>oauth-kafka</code>, and make token output compatible with both Light and AWS
 AgentCore.</p>
