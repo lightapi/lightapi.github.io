@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-a04a7c8f.js";
+            window.path_to_searchindex_js = "searchindex-862f096f.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-7c3be7a2.js"></script>
+        <script src="toc-9c112244.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -4754,8 +4754,433 @@ work immediately through <code>tools/list</code> and <code>tools/call</code>, wh
 portal operators a clean path to organize tools into skills, assign those
 skills to agents, and improve retrieval over time.</p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="agent-memory-event-refactor"><a class="header" href="#agent-memory-event-refactor">Agent Memory Event Refactor</a></h1>
+<h1 id="agent-api-compose-and-multi-agent-workflow"><a class="header" href="#agent-api-compose-and-multi-agent-workflow">Agent API Compose And Multi-Agent Workflow</a></h1>
 <h2 id="problem-4"><a class="header" href="#problem-4">Problem</a></h2>
+<p><code>portal-config-loc</code> and <code>portal-config-dev</code> are being updated so local Docker
+Compose stacks can run <code>light-agent</code> beside the portal services, demo APIs, and
+gateway. The first implementation adds one <code>light-agent</code> directly to the main
+compose file and points the gateway direct registry at <code>http://light-agent:8083</code>.</p>
+<p>That works for a single account agent, but it does not scale cleanly for the
+next phase:</p>
+<ul>
+<li>the base portal stack should remain usable without demo APIs or agents,</li>
+<li>demo APIs and agents should be startable as an optional local package,</li>
+<li>all services must still share the same Docker network,</li>
+<li>multiple <code>light-agent</code> instances need unique runtime identities,</li>
+<li>each agent needs a different effective skill/tool/workflow catalog,</li>
+<li>workflows need to orchestrate API access across multiple specialized agents.</li>
+</ul>
+<p>The design goal is to split deployment concerns without splitting the runtime
+network or the control-plane model.</p>
+<h2 id="goals-5"><a class="header" href="#goals-5">Goals</a></h2>
+<ul>
+<li>Move the two demo APIs and local <code>light-agent</code> services into a separate
+Docker Compose overlay file.</li>
+<li>Keep the overlay on the same Docker network as the portal stack, gateway,
+controller, config-server, Postgres, and hybrid services.</li>
+<li>Support multiple <code>light-agent</code> containers from the same image with different
+service ids, advertised addresses, ports, model settings, agent definitions,
+skills, tools, and workflows.</li>
+<li>Keep <code>light-gateway</code> as the MCP runtime path for <code>tools/list</code> and
+<code>tools/call</code>.</li>
+<li>Keep portal-query as the source for the effective agent catalog.</li>
+<li>Use <code>skill_workflow_t</code> and <code>wf_definition_t</code> to connect skills to executable
+workflows.</li>
+<li>Use <code>light-workflow</code> for deterministic orchestration, retries, human tasks,
+assertions, audit, and multi-agent coordination.</li>
+</ul>
+<h2 id="non-goals-8"><a class="header" href="#non-goals-8">Non-Goals</a></h2>
+<ul>
+<li>Do not move the demo APIs or agent services into a different Compose project
+by default.</li>
+<li>Do not create a second Docker network for the demo APIs and agents.</li>
+<li>Do not make one agent container host multiple unrelated agent definitions.</li>
+<li>Do not move MCP tool execution into controller-rs or portal-query.</li>
+<li>Do not require every gateway tool to be wrapped by a skill before baseline
+gateway tool execution works.</li>
+<li>Do not store workflow definitions inside <code>skill_t</code>.</li>
+</ul>
+<h2 id="compose-file-split"><a class="header" href="#compose-file-split">Compose File Split</a></h2>
+<p>Use the main compose files for platform services and a separate overlay for demo
+APIs plus agents.</p>
+<p>Recommended files:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Repo</th><th>Base files</th><th>Agent/API overlay</th></tr>
+</thead>
+<tbody>
+<tr><td><code>portal-config-dev</code></td><td><code>docker-compose.yml</code></td><td><code>docker-compose.agent-api.yml</code></td></tr>
+<tr><td><code>portal-config-loc/all-in-pg</code></td><td><code>docker-compose.yml</code>, <code>docker-compose-rust.yml</code></td><td><code>docker-compose.agent-api.yml</code></td></tr>
+<tr><td><code>portal-config-loc/all-in-lt</code></td><td><code>docker-compose.yml</code>, <code>docker-compose-rust.yml</code></td><td><code>docker-compose.agent-api.yml</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>The base stack should own shared infrastructure:</p>
+<ul>
+<li>Postgres,</li>
+<li>config-server,</li>
+<li>controller,</li>
+<li>hybrid-query,</li>
+<li>hybrid-command,</li>
+<li>light-gateway,</li>
+<li>light-workflow,</li>
+<li>OAuth and other platform services.</li>
+</ul>
+<p>The overlay should own optional local workloads:</p>
+<ul>
+<li><code>demo-customer-profile-api</code>,</li>
+<li><code>demo-offer-decision-api</code>,</li>
+<li><code>light-agent-account</code>,</li>
+<li><code>light-agent-offer</code>,</li>
+<li>future specialized agents.</li>
+</ul>
+<p>The overlay is intended to be started with the base files in the same Compose
+command. In that mode Docker Compose creates or reuses one project default
+network, and every service can resolve every other service by service name.</p>
+<p>Example for <code>portal-config-dev</code>:</p>
+<pre><code class="language-sh">docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.agent-api.yml \
+  up -d
+</code></pre>
+<p>Example for <code>portal-config-loc/all-in-pg</code>:</p>
+<pre><code class="language-sh">docker compose \
+  -f docker-compose.yml \
+  -f docker-compose-rust.yml \
+  -f docker-compose.agent-api.yml \
+  up -d
+</code></pre>
+<p>If the overlay must be started separately, it must still use the same Compose
+project name as the base stack. Otherwise Docker will create a second default
+network and the gateway will not resolve the agent and demo API service names.</p>
+<h2 id="network-contract"><a class="header" href="#network-contract">Network Contract</a></h2>
+<p>The preferred local contract is the Compose default network for the active
+project. Do not declare a separate network in the overlay when the overlay is
+run with the base stack.</p>
+<p>Service-to-service URLs should use Compose service DNS names:</p>
+<pre><code class="language-text">http://light-agent-account:8083
+http://light-agent-offer:8083
+http://demo-customer-profile-api:8080
+http://demo-offer-decision-api:8080
+</code></pre>
+<p>Host port mappings are only for browser or curl access from the developer
+machine. They should not be used by gateway, agents, workflows, or demo APIs to
+call each other.</p>
+<p>For agent containers, use a stable service name and advertised address:</p>
+<pre><code class="language-yaml">server.advertisedAddress: ${LIGHT_AGENT_ADVERTISED_ADDRESS:light-agent-account}
+server.httpPort: ${LIGHT_AGENT_HTTP_PORT:8083}
+</code></pre>
+<p>The internal port can stay <code>8083</code> for every agent because each agent is a
+different container. Only host-published ports must be unique.</p>
+<h2 id="agent-service-identity"><a class="header" href="#agent-service-identity">Agent Service Identity</a></h2>
+<p>Each agent instance needs a unique runtime identity. The identity is not just
+the Docker service name.</p>
+<p>Recommended identity fields:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Purpose</th><th>Example</th></tr>
+</thead>
+<tbody>
+<tr><td>Compose service</td><td>Docker DNS name and local lifecycle unit.</td><td><code>light-agent-account</code></td></tr>
+<tr><td><code>server.serviceId</code></td><td>Runtime service id registered with controller and gateway.</td><td><code>com.networknt.agent.account-1.0.0</code></td></tr>
+<tr><td><code>server.environment</code></td><td>Runtime environment tag.</td><td><code>dev</code></td></tr>
+<tr><td><code>server.advertisedAddress</code></td><td>Address other services use for this agent.</td><td><code>light-agent-account</code></td></tr>
+<tr><td><code>LIGHT_AGENT_HOST_ID</code></td><td>Host or tenant boundary for portal catalog and memory.</td><td><code>01964b05-552a-7c4b-9184-6857e7f3dc5f</code></td></tr>
+<tr><td><code>LIGHT_AGENT_AGENT_DEF_ID</code></td><td>Agent definition id, currently aligned with API version id.</td><td>account agent API version id</td></tr>
+<tr><td>Model provider config</td><td>Runtime model settings for the agent instance.</td><td><code>codex</code>, <code>gpt-5.5</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>The same image can run multiple agents. Compose injects different environment
+variables and config-server startup values into each service.</p>
+<p>Example overlay shape:</p>
+<pre><code class="language-yaml">services:
+  light-agent-account:
+    image: ${LIGHT_AGENT_IMAGE:-networknt/light-agent:latest}
+    ports:
+      - ${ACCOUNT_AGENT_PORT:-8083}:8083
+    volumes:
+      - ./light-agent-rust/config:/config:ro
+      - ./light-controller-rust/ca.pem:/keystore/ca.pem:ro
+    environment:
+      LIGHT_RS_CONFIG_DIR: /config
+      DATABASE_URL: postgres://postgres:secret@postgres:5432/configserver
+      LIGHT_PORTAL_AUTHORIZATION: "${LIGHT_AGENT_LIGHT_PORTAL_AUTHORIZATION:-}"
+      LIGHT_AGENT_HOST_ID: "${LIGHT_AGENT_HOST_ID:-01964b05-552a-7c4b-9184-6857e7f3dc5f}"
+      LIGHT_AGENT_AGENT_DEF_ID: "${ACCOUNT_AGENT_DEF_ID:-}"
+      LIGHT_AGENT_SERVICE_ID: com.networknt.agent.account-1.0.0
+      LIGHT_AGENT_ADVERTISED_ADDRESS: light-agent-account
+      LIGHT_AGENT_MODEL: "${ACCOUNT_AGENT_MODEL:-gpt-5.5}"
+      CODEX_API_KEY: "${ACCOUNT_AGENT_CODEX_API_KEY:-}"
+      CODEX_ACCOUNT_ID: "${ACCOUNT_AGENT_CODEX_ACCOUNT_ID:-}"
+      CODEX_REASONING_EFFORT: "${ACCOUNT_AGENT_CODEX_REASONING_EFFORT:-low}"
+      RUST_LOG: "${ACCOUNT_AGENT_RUST_LOG:-info}"
+      AGENT_LOG_ANSI: "false"
+
+  light-agent-offer:
+    image: ${LIGHT_AGENT_IMAGE:-networknt/light-agent:latest}
+    ports:
+      - ${OFFER_AGENT_PORT:-8084}:8083
+    volumes:
+      - ./light-agent-rust/config:/config:ro
+      - ./light-controller-rust/ca.pem:/keystore/ca.pem:ro
+    environment:
+      LIGHT_RS_CONFIG_DIR: /config
+      DATABASE_URL: postgres://postgres:secret@postgres:5432/configserver
+      LIGHT_PORTAL_AUTHORIZATION: "${LIGHT_AGENT_LIGHT_PORTAL_AUTHORIZATION:-}"
+      LIGHT_AGENT_HOST_ID: "${LIGHT_AGENT_HOST_ID:-01964b05-552a-7c4b-9184-6857e7f3dc5f}"
+      LIGHT_AGENT_AGENT_DEF_ID: "${OFFER_AGENT_DEF_ID:-}"
+      LIGHT_AGENT_SERVICE_ID: com.networknt.agent.offer-1.0.0
+      LIGHT_AGENT_ADVERTISED_ADDRESS: light-agent-offer
+      LIGHT_AGENT_MODEL: "${OFFER_AGENT_MODEL:-gpt-5.5}"
+      CODEX_API_KEY: "${OFFER_AGENT_CODEX_API_KEY:-}"
+      CODEX_ACCOUNT_ID: "${OFFER_AGENT_CODEX_ACCOUNT_ID:-}"
+      CODEX_REASONING_EFFORT: "${OFFER_AGENT_CODEX_REASONING_EFFORT:-low}"
+      RUST_LOG: "${OFFER_AGENT_RUST_LOG:-info}"
+      AGENT_LOG_ANSI: "false"
+</code></pre>
+<p>The example deliberately avoids <code>container_name</code>. Compose service names already
+provide stable DNS on the project network, and omitting <code>container_name</code> avoids
+cross-project name collisions.</p>
+<h2 id="gateway-registry"><a class="header" href="#gateway-registry">Gateway Registry</a></h2>
+<p>The gateway should route to agent services through Docker DNS names, not host
+addresses. For the local direct registry:</p>
+<pre><code class="language-yaml">direct-registry.directUrls:
+  com.networknt.agent.account-1.0.0: http://light-agent-account:8083
+  com.networknt.agent.offer-1.0.0: http://light-agent-offer:8083
+</code></pre>
+<p>The same rule applies to demo APIs. Gateway route targets should be service
+names on the shared Compose network.</p>
+<p>When an agent is registered through controller, its runtime identity should
+match the config-server tuple used by the container:</p>
+<pre><code class="language-text">host + serviceId + envTag
+</code></pre>
+<p>The agent should keep <code>server.enableRegistry: true</code> so controller can discover
+it and send catalog cache invalidation notifications.</p>
+<h2 id="effective-agent-catalog"><a class="header" href="#effective-agent-catalog">Effective Agent Catalog</a></h2>
+<p>Each agent loads its effective catalog from portal-query with:</p>
+<pre><code class="language-text">hostId + agentDefId + serviceId + envTag
+</code></pre>
+<p>The effective catalog includes:</p>
+<ul>
+<li>the agent definition,</li>
+<li>assigned skills from <code>agent_skill_t</code>,</li>
+<li>tool projections from <code>skill_tool_t</code> and <code>tool_t</code>,</li>
+<li>tool parameters from <code>tool_param_t</code>,</li>
+<li>workflow mappings from <code>skill_workflow_t</code>,</li>
+<li>workflow definitions from <code>wf_definition_t</code>,</li>
+<li>policy diagnostics for tools that should not be exposed.</li>
+</ul>
+<p>The agent caches the effective catalog locally. Controller cache-management
+messages should clear that cache when skills, tools, workflows, or assignments
+change. On the next chat turn, the agent refreshes the catalog from
+portal-query.</p>
+<p>Gateway execution stays separate from catalog reads:</p>
+<pre><code class="language-text">portal-query
+  -&gt; effective catalog, skills, tools, workflows, policies
+
+light-gateway
+  -&gt; tools/list
+  -&gt; tools/call
+</code></pre>
+<p>If portal-query is temporarily unavailable, the direct gateway tool list can
+remain usable for baseline tool execution. If a tool is in the catalog but is
+not returned by gateway <code>tools/list</code>, the agent must not execute it.</p>
+<h2 id="capability-model"><a class="header" href="#capability-model">Capability Model</a></h2>
+<p>Agents should be specialized by catalog assignment rather than by image build.</p>
+<p>Recommended specialization:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Agent</th><th>Service id</th><th>Skills</th><th>Typical tools</th><th>Workflows</th></tr>
+</thead>
+<tbody>
+<tr><td>Account agent</td><td><code>com.networknt.agent.account-1.0.0</code></td><td>Account lookup, profile enrichment</td><td>customer profile API tools</td><td>profile lookup, profile validation</td></tr>
+<tr><td>Offer agent</td><td><code>com.networknt.agent.offer-1.0.0</code></td><td>Offer eligibility, decision explanation</td><td>offer decision API tools</td><td>offer decision, approval check</td></tr>
+<tr><td>Advisor agent</td><td><code>com.networknt.agent.advisor-1.0.0</code></td><td>Cross-domain recommendation</td><td>account and offer read tools</td><td>customer advisory orchestration</td></tr>
+<tr><td>Coordinator agent</td><td><code>com.networknt.agent.coordinator-1.0.0</code></td><td>Routing and task planning</td><td>agent invocation tools, workflow tools</td><td>multi-agent workflow start</td></tr>
+</tbody>
+</table>
+</div>
+<p>The capability boundary is the effective catalog:</p>
+<ul>
+<li><code>agent_skill_t</code> assigns skills to the agent,</li>
+<li><code>skill_tool_t</code> controls which tools a skill can expose,</li>
+<li><code>skill_workflow_t</code> controls which workflows a skill can start or reference,</li>
+<li>workflow and gateway policy still enforce runtime access.</li>
+</ul>
+<p>This keeps the runtime image generic while making each agent instance
+purpose-built.</p>
+<h2 id="workflow-orchestration"><a class="header" href="#workflow-orchestration">Workflow Orchestration</a></h2>
+<p><code>light-workflow</code> should orchestrate multi-step API and agent flows. Agents
+provide reasoning and tool selection inside their assigned domain, while
+workflow provides deterministic control flow.</p>
+<p>Recommended orchestration responsibilities:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Component</th><th>Responsibility</th></tr>
+</thead>
+<tbody>
+<tr><td>Portal</td><td>Author skills, tools, workflow mappings, and agent assignments.</td></tr>
+<tr><td>portal-query</td><td>Serve the effective catalog to each agent.</td></tr>
+<tr><td>controller</td><td>Register agents and invalidate agent catalog caches.</td></tr>
+<tr><td>light-gateway</td><td>Execute MCP tools and route API calls.</td></tr>
+<tr><td>light-agent</td><td>Reason over assigned skills and call allowed gateway tools.</td></tr>
+<tr><td>light-workflow</td><td>Run multi-agent plans, API sequences, assertions, retries, and human tasks.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Example advisory flow:</p>
+<ol>
+<li>A user starts an advisory request.</li>
+<li>The coordinator agent or portal UI starts a workflow in <code>light-workflow</code>.</li>
+<li>The workflow calls the account agent with the <code>customer-profile</code> skill.</li>
+<li>The account agent reads its effective catalog and calls customer profile
+tools through <code>light-gateway</code>.</li>
+<li>The workflow validates the profile response with an <code>assert</code> task.</li>
+<li>The workflow calls the offer agent with the <code>offer-decision</code> skill.</li>
+<li>The offer agent calls offer decision tools through <code>light-gateway</code>.</li>
+<li>The workflow applies policy checks, optional human approval, and final
+response shaping.</li>
+</ol>
+<p>The workflow is the durable orchestration record. Agent chat history and memory
+can support reasoning, but they should not be the only source of orchestration
+state.</p>
+<h2 id="skill-to-workflow-mapping"><a class="header" href="#skill-to-workflow-mapping">Skill To Workflow Mapping</a></h2>
+<p>Use <code>skill_workflow_t</code> to link a skill to one or more workflow definitions:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Column</th><th>Use</th></tr>
+</thead>
+<tbody>
+<tr><td><code>host_id</code></td><td>Tenant boundary.</td></tr>
+<tr><td><code>skill_id</code></td><td>Skill that can use the workflow.</td></tr>
+<tr><td><code>wf_def_id</code></td><td>Workflow definition in <code>wf_definition_t</code>.</td></tr>
+<tr><td><code>workflow_role</code></td><td><code>primary</code>, <code>validation</code>, <code>remediation</code>, <code>approval</code>, or <code>test</code>.</td></tr>
+<tr><td><code>start_mode</code></td><td><code>manual</code>, <code>agent</code>, <code>portal</code>, or <code>scheduled</code>.</td></tr>
+<tr><td><code>config</code></td><td>Skill-specific workflow input defaults and safety hints.</td></tr>
+<tr><td><code>active</code></td><td>Publication flag.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The effective catalog should include these mappings so the agent can decide
+whether a user request should be answered directly, routed to a tool, or handed
+to a workflow.</p>
+<p>For destructive or externally visible operations, the skill should prefer a
+workflow mapping over direct tool execution. The workflow can add approval,
+assertions, idempotency keys, retries, and audit events.</p>
+<h2 id="api-access-pattern"><a class="header" href="#api-access-pattern">API Access Pattern</a></h2>
+<p>Agents should not call downstream business APIs directly. They should use the
+gateway data plane:</p>
+<pre><code class="language-text">light-agent
+  -&gt; light-gateway /mcp tools/list
+  -&gt; light-gateway /mcp tools/call
+  -&gt; downstream MCP server or REST/OpenAPI-backed tool
+</code></pre>
+<p>Workflows should also use gateway-backed calls when invoking API operations:</p>
+<pre><code class="language-yaml">do:
+  - get-profile:
+      call: mcp
+      with:
+        session: gateway
+        tool: customer_profile_get
+        arguments:
+          customerId: "${ .customerId }"
+</code></pre>
+<p>When workflow needs reasoning, it should call an agent task:</p>
+<pre><code class="language-yaml">do:
+  - review-offer:
+      call: agent
+      with:
+        agent: com.networknt.agent.offer-1.0.0
+        skill: offer-decision
+        input:
+          customerId: "${ .customerId }"
+          profile: "${ .profile }"
+</code></pre>
+<p>The exact agent invocation transport can evolve, but the logical contract is
+stable: workflow names the agent and skill, and the called agent uses its
+effective catalog to constrain tools and workflow options.</p>
+<h2 id="local-configuration-layout"><a class="header" href="#local-configuration-layout">Local Configuration Layout</a></h2>
+<p>Use one shared config template when agents differ only by environment
+variables:</p>
+<pre><code class="language-text">light-agent-rust/
+  config/
+    startup.yml
+    client.yml
+    values.yml
+</code></pre>
+<p>Use per-agent config folders only when the bootstrap or runtime config needs to
+diverge beyond service id, advertised address, model, or agent definition:</p>
+<pre><code class="language-text">light-agent-rust/
+  account/config/
+  offer/config/
+  advisor/config/
+</code></pre>
+<p>The recommended first phase is the shared template plus per-service Compose
+environment overrides. This avoids copying the same config files for every
+agent.</p>
+<p>Keep secrets outside git:</p>
+<ul>
+<li>portal bearer token,</li>
+<li>provider API keys,</li>
+<li>provider account ids,</li>
+<li>customer CA material,</li>
+<li>database credentials outside local defaults.</li>
+</ul>
+<h2 id="rollout-plan-3"><a class="header" href="#rollout-plan-3">Rollout Plan</a></h2>
+<h3 id="phase-1-compose-overlay"><a class="header" href="#phase-1-compose-overlay">Phase 1: Compose Overlay</a></h3>
+<ul>
+<li>Add <code>docker-compose.agent-api.yml</code> beside the current base compose files.</li>
+<li>Move demo APIs and local <code>light-agent</code> services into the overlay.</li>
+<li>Rename the first agent service to <code>light-agent-account</code>.</li>
+<li>Remove <code>container_name</code> from agent services.</li>
+<li>Update gateway direct registry entries to service DNS names.</li>
+<li>Verify the rendered compose model with the base and overlay files together.</li>
+</ul>
+<h3 id="phase-2-multiple-agent-instances"><a class="header" href="#phase-2-multiple-agent-instances">Phase 2: Multiple Agent Instances</a></h3>
+<ul>
+<li>Add one overlay service per specialized agent.</li>
+<li>Assign unique service ids and host ports.</li>
+<li>Add portal agent definitions for each service id and env tag.</li>
+<li>Assign skills through <code>agent_skill_t</code>.</li>
+<li>Assign tools through <code>skill_tool_t</code>.</li>
+<li>Assign workflows through <code>skill_workflow_t</code>.</li>
+<li>Verify each agent can load a distinct effective catalog.</li>
+</ul>
+<h3 id="phase-3-workflow-orchestration"><a class="header" href="#phase-3-workflow-orchestration">Phase 3: Workflow Orchestration</a></h3>
+<ul>
+<li>Create workflow definitions for cross-agent API access.</li>
+<li>Add workflow mappings to skills.</li>
+<li>Let coordinator or portal UI start workflows for multi-step tasks.</li>
+<li>Use gateway MCP calls for API operations.</li>
+<li>Use agent tasks only where domain reasoning is required.</li>
+<li>Add policy checks for destructive tools and approval-required workflows.</li>
+</ul>
+<h3 id="phase-4-operational-hardening"><a class="header" href="#phase-4-operational-hardening">Phase 4: Operational Hardening</a></h3>
+<ul>
+<li>Add health checks for every agent and demo API.</li>
+<li>Add startup validation that each agent has a non-empty effective catalog when
+<code>LIGHT_AGENT_AGENT_DEF_ID</code> is configured.</li>
+<li>Add gateway drift diagnostics comparing catalog tools with gateway
+<code>tools/list</code>.</li>
+<li>Add cache invalidation verification after skill, tool, or workflow changes.</li>
+<li>Add docs for common local run commands and expected service URLs.</li>
+</ul>
+<h2 id="design-decisions"><a class="header" href="#design-decisions">Design Decisions</a></h2>
+<ul>
+<li><strong>Overlay Scope</strong>: The first overlay will include both the account and offer agents, together with the two demo APIs.</li>
+<li><strong>Port Publishing</strong>: Every agent will publish its own UI port and register with the control plane independently. Chat clients will discover agents via controller registration, and <code>light-gateway</code> will discover them via explicit <code>direct-registry</code> entries.</li>
+<li><strong>Workflow Triggers</strong>: Workflow start requests will go through a dedicated workflow command API for the first implementation.</li>
+<li><strong>Agent Orchestration</strong>: Agent-to-agent calls will not be exposed as direct gateway tools. Multi-agent flows are orchestrated exclusively via <code>light-workflow</code>. Currently, <code>call: agent</code> tasks are native, catalog-backed model calls executed directly by the workflow engine (bypassing the containerized <code>light-agent</code> tool loops). The containerized agents are primarily used by chat clients. Future implementations may choose to invoke the containerized agent services from workflow.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="agent-memory-event-refactor"><a class="header" href="#agent-memory-event-refactor">Agent Memory Event Refactor</a></h1>
+<h2 id="problem-5"><a class="header" href="#problem-5">Problem</a></h2>
 <p><code>GlobalSnapshotPersistenceImpl</code> currently skips these Hindsight memory tables
 for both snapshot export and snapshot-to-event conversion:</p>
 <pre><code class="language-text">agent_memory_bank_t
@@ -4798,7 +5223,7 @@ owner:</p>
 </code></pre>
 <p>Once that contract is in place, snapshot export and conversion can safely
 include the event-backed memory state where appropriate.</p>
-<h2 id="non-goals-8"><a class="header" href="#non-goals-8">Non-Goals</a></h2>
+<h2 id="non-goals-9"><a class="header" href="#non-goals-9">Non-Goals</a></h2>
 <ul>
 <li>Do not promote existing direct-write memory rows into snapshots before a
 backfill/migration event strategy exists.</li>
@@ -5119,7 +5544,7 @@ platform can re-embed after model upgrades.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="tool-description-embedding-population"><a class="header" href="#tool-description-embedding-population">Tool Description Embedding Population</a></h1>
-<h2 id="problem-5"><a class="header" href="#problem-5">Problem</a></h2>
+<h2 id="problem-6"><a class="header" href="#problem-6">Problem</a></h2>
 <p>The GenAI Tool page lets users update <code>tool_t.description</code> through the
 <code>updateTool</code> form. Endpoint-backed tools are also projected into <code>tool_t</code> when
 <code>api_endpoint_t</code> is populated from OpenAPI, MCP <code>tools/list</code>, or LightAPI
@@ -5137,7 +5562,7 @@ field, and the Portal UI should not expose raw vectors to users.</li>
 <p>As a result, new endpoint-backed tool rows start with a null
 <code>description_embedding</code>, and user edits can leave any future vector stale unless
 the write path marks it for regeneration.</p>
-<h2 id="goals-5"><a class="header" href="#goals-5">Goals</a></h2>
+<h2 id="goals-6"><a class="header" href="#goals-6">Goals</a></h2>
 <ul>
 <li>Populate <code>tool_t.description_embedding</code> for endpoint-backed and manually
 authored tools.</li>
@@ -5149,7 +5574,7 @@ latency.</li>
 disabled or temporarily failing.</li>
 <li>Keep the first implementation aligned with the existing <code>VECTOR(384)</code> schema.</li>
 </ul>
-<h2 id="non-goals-9"><a class="header" href="#non-goals-9">Non-Goals</a></h2>
+<h2 id="non-goals-10"><a class="header" href="#non-goals-10">Non-Goals</a></h2>
 <ul>
 <li>Do not require every tool to have an embedding before it can be listed,
 edited, linked to a skill, or executed through the gateway.</li>
@@ -5474,7 +5899,7 @@ pending when descriptions change.</li>
 <code>semantic_weight</code>.</li>
 <li>Keep gateway <code>tools/list</code> intersection as the runtime executability check.</li>
 </ul>
-<h2 id="design-decisions"><a class="header" href="#design-decisions">Design Decisions</a></h2>
+<h2 id="design-decisions-1"><a class="header" href="#design-decisions-1">Design Decisions</a></h2>
 <ul>
 <li>Use a transactional work table or outbox for phase 1. The provider call is
 asynchronous, but task creation must be committed atomically with the tool row
@@ -5526,7 +5951,7 @@ forms whose <code>definition</code> field is a YAML textarea.</li>
 </ul>
 <p>The first Workflow Editor can therefore be an incremental UI improvement over
 the existing definition CRUD and start workflow command.</p>
-<h2 id="goals-6"><a class="header" href="#goals-6">Goals</a></h2>
+<h2 id="goals-7"><a class="header" href="#goals-7">Goals</a></h2>
 <ul>
 <li>Keep workflow YAML as the canonical persisted artifact.</li>
 <li>Provide a readable step outline or graph next to the YAML editor.</li>
@@ -5539,7 +5964,7 @@ flows.</li>
 authoring component with skill-specific constraints.</li>
 <li>Preserve owner scoping and existing Portal command/query conventions.</li>
 </ul>
-<h2 id="non-goals-10"><a class="header" href="#non-goals-10">Non-Goals</a></h2>
+<h2 id="non-goals-11"><a class="header" href="#non-goals-11">Non-Goals</a></h2>
 <ul>
 <li>Do not execute workflow logic in Portal View.</li>
 <li>Do not make skills the workflow runtime.</li>
@@ -5849,7 +6274,7 @@ workflow editor provides YAML editing, step preview, validation, and test runs
 for every workflow authoring use case in Portal.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="portal-catalog-scope"><a class="header" href="#portal-catalog-scope">Portal Catalog Scope</a></h1>
-<h2 id="problem-6"><a class="header" href="#problem-6">Problem</a></h2>
+<h2 id="problem-7"><a class="header" href="#problem-7">Problem</a></h2>
 <p>Light Portal supports multiple tenants through <code>host_id</code> and can also host
 multiple runtime environments in one portal instance. A common deployment shape
 is:</p>
@@ -5880,7 +6305,7 @@ should model catalog scope explicitly:</p>
 <li>a separate SPA may expose the same backend catalog, but it should not become
 the catalog authority.</li>
 </ul>
-<h2 id="goals-7"><a class="header" href="#goals-7">Goals</a></h2>
+<h2 id="goals-8"><a class="header" href="#goals-8">Goals</a></h2>
 <ul>
 <li>Avoid duplicating the full catalog for every tenant.</li>
 <li>Prevent catalog drift between tenants and between portal instances.</li>
@@ -5899,7 +6324,7 @@ agent-facing skills and tools.</li>
 <li>Support promotion or import/export between portal instances instead of
 relying on ad hoc row copies.</li>
 </ul>
-<h2 id="non-goals-11"><a class="header" href="#non-goals-11">Non-Goals</a></h2>
+<h2 id="non-goals-12"><a class="header" href="#non-goals-12">Non-Goals</a></h2>
 <ul>
 <li>Do not clone every global catalog row into every tenant by default.</li>
 <li>Do not make a separate SPA the source of truth for catalog data.</li>
@@ -6206,7 +6631,7 @@ entity-specific effective endpoints?</li>
 <h1 id="oauth-audit"><a class="header" href="#oauth-audit">OAuth Audit</a></h1>
 <p>The OAuth services keep authorization codes and refresh tokens as operational state. These rows are short lived and are now written directly to <code>auth_code_t</code> and <code>auth_refresh_token_t</code> instead of being created through the general event store. This avoids high-volume login and refresh-token churn in <code>event_store_t</code> and <code>outbox_message_t</code>.</p>
 <p>Audit and login history are recorded separately in append-oriented OAuth audit tables.</p>
-<h2 id="goals-8"><a class="header" href="#goals-8">Goals</a></h2>
+<h2 id="goals-9"><a class="header" href="#goals-9">Goals</a></h2>
 <ul>
 <li>Show administrators who is currently online.</li>
 <li>Show a user the last login time and session history.</li>
@@ -8352,7 +8777,7 @@ GROUP BY
 <p>This approach provides a seamless experience while maintaining compatibility with applications requiring roles for authorization or UI customization.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="private-messages"><a class="header" href="#private-messages">Private Messages</a></h1>
-<h2 id="problem-7"><a class="header" href="#problem-7">Problem</a></h2>
+<h2 id="problem-8"><a class="header" href="#problem-8">Problem</a></h2>
 <p>Portal users need a way to exchange private messages from the user profile
 without exposing email addresses to each other. The sender should only need a
 recipient user id or a display-safe user label. The backend can resolve email
@@ -8387,7 +8812,7 @@ model conversations, read state, participant visibility, or per-user delete.</li
 messages page should load its own data from the query API.</li>
 <li>The existing private-message tests are disabled stubs.</li>
 </ul>
-<h2 id="goals-9"><a class="header" href="#goals-9">Goals</a></h2>
+<h2 id="goals-10"><a class="header" href="#goals-10">Goals</a></h2>
 <ul>
 <li>Let one logged-in user send a message to another portal user without knowing
 or seeing the recipient email.</li>
@@ -8402,7 +8827,7 @@ recipient email internally.</li>
 <li>Provide a path from the existing <code>message_t</code> skeleton to a conversation-based
 model without breaking existing UI routes immediately.</li>
 </ul>
-<h2 id="non-goals-12"><a class="header" href="#non-goals-12">Non-Goals</a></h2>
+<h2 id="non-goals-13"><a class="header" href="#non-goals-13">Non-Goals</a></h2>
 <ul>
 <li>Do not build group chat in the first phase.</li>
 <li>Do not expose email addresses in message APIs, events, UI state, or task
@@ -10542,7 +10967,7 @@ public class ConfigRollbackService {
 <p>This approach provides a clean and relatively robust way to restore the specific override state from your snapshots using the DELETE/INSERT strategy. Remember to test thoroughly!</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="sid-and-host-verification"><a class="header" href="#sid-and-host-verification">SID and Host Verification</a></h1>
-<h2 id="problem-8"><a class="header" href="#problem-8">Problem</a></h2>
+<h2 id="problem-9"><a class="header" href="#problem-9">Problem</a></h2>
 <p>GitHub issue https://github.com/lightapi/portal-service/issues/39 reports that
 <code>config-server</code> accepted a valid JWT whose service identity did not match the
 requested service configuration.</p>
@@ -10659,7 +11084,7 @@ should not be forced to match <code>sid</code> until the product-level authoriza
 is explicitly designed.</p>
 <p>The same exception does not apply to controller registry registration because
 <code>service/register</code> always carries a requested <code>serviceId</code>.</p>
-<h2 id="goals-10"><a class="header" href="#goals-10">Goals</a></h2>
+<h2 id="goals-11"><a class="header" href="#goals-11">Goals</a></h2>
 <ul>
 <li>Prevent one service token from downloading another service’s config, certs,
 or files.</li>
@@ -10705,7 +11130,7 @@ helper.</p>
 <p>The focused implementation tests cover missing and mismatched <code>host</code>, missing
 and mismatched <code>sid</code>, missing and mismatched <code>env</code> when <code>envTag</code> is requested,
 blank values, whitespace trimming, and case-sensitive identifier comparison.</p>
-<h2 id="non-goals-13"><a class="header" href="#non-goals-13">Non-Goals</a></h2>
+<h2 id="non-goals-14"><a class="header" href="#non-goals-14">Non-Goals</a></h2>
 <ul>
 <li>Do not replace JWT verification middleware.</li>
 <li>Do not redesign OAuth token issuance.</li>
@@ -11108,7 +11533,7 @@ mvn -q -Dtest=ServiceIdAuthorizationUtilTest test
 <li>Non-standard instance files are copied into <code>snapshot_instance_file_t</code>.</li>
 </ul>
 <p>The <code>/config-server/files</code> endpoint must return both sets. It already filters standard files by <code>config_phase</code> through <code>config_snapshot_property_t.config_phase</code>, but <code>instance_file_t</code> and <code>snapshot_instance_file_t</code> do not currently carry <code>config_phase</code>. That makes it impossible to union the two sources while preserving runtime, deployment, and generator phase semantics.</p>
-<h2 id="problem-9"><a class="header" href="#problem-9">Problem</a></h2>
+<h2 id="problem-10"><a class="header" href="#problem-10">Problem</a></h2>
 <p>When a service starts through <code>DefaultConfigLoader</code>, it calls <code>/config-server/files</code> with <code>host</code>, <code>serviceId</code>, and <code>envTag</code>. The endpoint resolves the current snapshot and returns the files that should be written into <code>/config</code>.</p>
 <p>For the sidecar case, <code>openapi.yaml</code> exists in both <code>instance_file_t</code> and <code>snapshot_instance_file_t</code>, but it does not exist in <code>config_snapshot_property_t</code>. Since the current <code>/files</code> query reads only <code>config_snapshot_property_t</code>, the response does not include <code>openapi.yaml</code>, and the sidecar cannot write it to <code>/config</code>.</p>
 <p>The correct endpoint behavior is:</p>
@@ -16831,7 +17256,7 @@ Location: https://portal.lightapi.net/authorization?code=auth_code_abc&amp;state
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="auth-client-secret-regeneration"><a class="header" href="#auth-client-secret-regeneration">Auth Client Secret Regeneration</a></h1>
-<h2 id="problem-10"><a class="header" href="#problem-10">Problem</a></h2>
+<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
 <p>An OAuth auth client receives a <code>client_id</code> and <code>client_secret</code> when it is
 created. The clear text <code>client_secret</code> is intentionally a one-time value. The
 database projection stores only a verifier value in <code>auth_client_t.client_secret</code>
@@ -17656,7 +18081,7 @@ Kubernetes cluster from the Instance Admin page.</p>
 <p>The goal is to provide a production-like deployment path for small businesses
 and enterprise tenants without requiring Light Portal to have direct network
 access to every customer cluster.</p>
-<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
+<h2 id="problem-12"><a class="header" href="#problem-12">Problem</a></h2>
 <p>Each API or application repository can contain a <code>k8s/</code> folder with Kubernetes
 deployment templates. The templates contain variables in the following format:</p>
 <pre><code class="language-text">${key:defaultValue}
@@ -18198,7 +18623,7 @@ deployment intent and history, while the deployer owns safe cluster-local
 execution.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-oauth-and-oauth-kafka-agentcore-oidc-discovery"><a class="header" href="#light-oauth-and-oauth-kafka-agentcore-oidc-discovery">Light OAuth and OAuth Kafka AgentCore OIDC Discovery</a></h1>
-<h2 id="problem-12"><a class="header" href="#problem-12">Problem</a></h2>
+<h2 id="problem-13"><a class="header" href="#problem-13">Problem</a></h2>
 <p>Issue https://github.com/lightapi/portal-service/issues/44 asks whether
 <code>portal-service/apps/light-oauth</code> can support AWS AgentCore JWT inbound
 authorization.</p>
@@ -18328,7 +18753,7 @@ the provider <code>jwk</code> from <code>auth_provider_t</code>. The implementat
 that the JWT header <code>kid</code> is present in the returned JWKS for the same provider.
 That guarantee matters more once external AWS services cache the discovery and
 JWKS responses.</p>
-<h2 id="goals-11"><a class="header" href="#goals-11">Goals</a></h2>
+<h2 id="goals-12"><a class="header" href="#goals-12">Goals</a></h2>
 <ul>
 <li>Let AWS AgentCore use Rust <code>light-oauth</code> or Java <code>oauth-kafka</code> as a JWT
 bearer token issuer.</li>
@@ -18340,7 +18765,7 @@ claims working.</li>
 <li>Keep issuer, audience, and discovery URLs deterministic across environments.</li>
 <li>Add tests that prove discovery, JWKS, and signed token claims line up.</li>
 </ul>
-<h2 id="non-goals-14"><a class="header" href="#non-goals-14">Non-Goals</a></h2>
+<h2 id="non-goals-15"><a class="header" href="#non-goals-15">Non-Goals</a></h2>
 <ul>
 <li>Do not implement full OIDC identity-provider behavior in the first phase.</li>
 <li>Do not add dynamic client registration.</li>
