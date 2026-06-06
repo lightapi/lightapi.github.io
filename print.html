@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-862f096f.js";
+            window.path_to_searchindex_js = "searchindex-88d408f4.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-9c112244.js"></script>
+        <script src="toc-8e555e55.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -969,6 +969,528 @@ wizards in the same style. The long-term solution should be:</p>
 <p>This gives new users guided paths while still letting experienced users jump
 directly to the page or form they already know.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="config-update-page"><a class="header" href="#config-update-page">Config Update Page</a></h1>
+<p>The current <code>portal-view</code> configuration admin area is complete but split across
+many table pages and generated forms. A customer Settings page shows a denser
+workflow: list applicable config properties in a tree, edit scalar values
+inline, and open a modal for list/map values. This document proposes a similar
+page for <code>portal-view</code> that can update config property overrides at the
+environment, product, product version, instance, API, app, and app-api levels.
+In this document, API, app, and app-api mean the instance-linked config
+override scopes represented by <code>instanceApiId</code>, <code>instanceAppId</code>, and
+<code>instanceApiId + instanceAppId</code>.</p>
+<h2 id="current-implementation"><a class="header" href="#current-implementation">Current Implementation</a></h2>
+<p>The customer Settings implementation is centered on these files:</p>
+<ul>
+<li><code>Settings.jsx</code></li>
+<li><code>SettingsListView.jsx</code></li>
+<li><code>SettingsListMapModal.jsx</code></li>
+<li><code>InputForm.jsx</code></li>
+<li><code>JsonSchemaForm.jsx</code></li>
+</ul>
+<p>The useful behavior is:</p>
+<ul>
+<li>one page loads applicable config properties and the current custom values</li>
+<li>properties are displayed as a tree under <code>configName</code></li>
+<li>scalar values are edited inline</li>
+<li>list and map values open a modal with form, raw JSON, and raw YAML tabs</li>
+<li>save chooses create or update based on whether the override exists</li>
+<li>delete removes the override and lets the inherited value show again</li>
+</ul>
+<p>The customer implementation currently handles instance, instance API, instance
+app, and instance app API targets. It chooses the query/write action from
+<code>instanceId</code>, <code>instanceApiId</code>, and <code>instanceAppId</code>.</p>
+<p><code>portal-view</code> already has separate config override pages:</p>
+<ul>
+<li><code>src/pages/config/ConfigEnvironment.tsx</code></li>
+<li><code>src/pages/config/ConfigProduct.tsx</code></li>
+<li><code>src/pages/config/ConfigProductVersion.tsx</code></li>
+<li><code>src/pages/config/ConfigInstance.tsx</code></li>
+<li><code>src/pages/config/ConfigInstanceApi.tsx</code></li>
+<li><code>src/pages/config/ConfigInstanceApp.tsx</code></li>
+<li><code>src/pages/config/ConfigInstanceAppApi.tsx</code></li>
+</ul>
+<p>Those pages use Material React Table, fetch one override aggregate at a time,
+and navigate to generated <code>react-schema-form</code> routes for create/update. The form
+definitions live in <code>src/data/Forms.json</code>, and the generic form runner is
+<code>src/components/Form/Form.tsx</code>.</p>
+<p>The existing form approach works for CRUD, but it is inefficient for config
+editing because the user must pick a config, pick a property, leave the list
+page, edit one value, and return.</p>
+<h2 id="goals"><a class="header" href="#goals">Goals</a></h2>
+<ul>
+<li>Provide a single task-oriented config editor for the seven override scopes.</li>
+<li>Show the property catalog and current override values together.</li>
+<li>Preserve the existing config-command write APIs.</li>
+<li>Preserve optimistic concurrency by carrying <code>aggregateVersion</code> for existing
+override rows.</li>
+<li>Avoid client-side joins across independently paginated result sets.</li>
+<li>Keep existing table pages and generated forms available as admin fallback
+routes.</li>
+<li>Support scalar editing inline and structured list/map editing in a modal.</li>
+<li>Show inherited/default value and custom override value separately.</li>
+<li>Make delete/reset mean “remove this override”, not “delete the base property”.</li>
+<li>Support read-only and hidden states when the user lacks write permission for
+a scope or target.</li>
+</ul>
+<h2 id="non-goals-1"><a class="header" href="#non-goals-1">Non-Goals</a></h2>
+<ul>
+<li>Do not replace <code>react-schema-form</code> globally.</li>
+<li>Do not replace the existing config list pages during the first release.</li>
+<li>Do not edit <code>File</code> or <code>Cert</code> property values inline in the first release.
+Those can continue to use existing generated forms.</li>
+<li>Do not require every config property to have a typed form schema before the
+page is useful.</li>
+<li>Do not add a bulk transaction command in the first release. The UI can stage
+multiple changes and then orchestrate the existing single-row commands.</li>
+</ul>
+<h2 id="recommended-ux"><a class="header" href="#recommended-ux">Recommended UX</a></h2>
+<p>Add a <code>Config Update</code> page under the configuration task area. The first row is
+a scope and target selector:</p>
+<ul>
+<li>Scope: Environment, Product, Product Version, Instance, API, App, App API</li>
+<li>Target: the selected scope’s identity, such as <code>environment</code>, <code>productId</code>,
+<code>productVersionId</code>, <code>instanceId</code>, <code>instanceApiId</code>, <code>instanceAppId</code>, or both
+app/API ids for app-api</li>
+<li>Optional filters: config phase, config type, property type, resource type,
+and “show overridden only”</li>
+<li>Save mode: staged changes by default, with optional single-row Apply for
+quick edits</li>
+</ul>
+<p>Below the selectors, render a tree/table:</p>
+<ul>
+<li>group rows by <code>configName</code></li>
+<li>property leaf rows show <code>propertyName</code></li>
+<li>columns: value type, inherited value, override value, effective source,
+required, resource type, config phase, description, status</li>
+<li>row status: inherited, overridden, dirty, saving, conflict, error</li>
+<li>toolbar actions: expand all, collapse all, refresh, reset override,
+review changes, apply changes</li>
+<li>row action menu: view history, open fallback form, copy identifiers</li>
+</ul>
+<p>Editing behavior:</p>
+<ul>
+<li><code>string</code>: inline text editor or larger popover editor for long values</li>
+<li><code>boolean</code>: select true/false</li>
+<li><code>integer</code> and <code>float</code>: numeric editor with validation before save</li>
+<li><code>list</code> and <code>map</code>: open a structured modal</li>
+<li>unsupported <code>valueType</code>: view-only with a link to the existing form route</li>
+<li><code>propertyType</code> <code>File</code> or <code>Cert</code>: open the existing create/update form in a
+drawer or modal overlay</li>
+</ul>
+<p>The page should keep the inherited/default value visible while editing an
+override. If the override is deleted, the row remains visible and falls back to
+the inherited value.</p>
+<p>The staged-change panel should list every pending create, update, and reset
+before applying. This matters for coordinated changes such as enabling a flag
+and setting a related URL. The backend commands can still run one by one, but
+the user gets a review step and can see partial failures without losing the
+full set of intended changes.</p>
+<p>The row action menu should include View History. It should link to the audit
+log or history page pre-filtered by <code>configId</code>, <code>propertyId</code>, and the selected
+scope target. The row already shows <code>updateUser</code> and <code>updateTs</code>; history gives
+operators the deeper trail they need when debugging production configuration
+changes.</p>
+<h2 id="structured-value-modal"><a class="header" href="#structured-value-modal">Structured Value Modal</a></h2>
+<p>The modal should start with raw JSON and raw YAML tabs. If a schema is available
+for the property, add a Form tab.</p>
+<p>The customer code loads schema assets with:</p>
+<pre><code class="language-text">schemas/&lt;propertyName&gt;/&lt;propertyName&gt;.json
+schemas/&lt;propertyName&gt;/config.js
+</code></pre>
+<p><code>portal-view</code> does not currently have this property-schema convention, so the
+first implementation should not depend on local schema assets. Use raw
+JSON/YAML with syntax and JSON validation first. Typed form support should come
+from the light-portal schema registry through <code>schema-query</code>, <code>schema-command</code>,
+and <code>schema_t</code>.</p>
+<p>If a row has a <code>schemaId</code> and <code>schemaVersion</code>, the dialog should lazily fetch
+the published schema body from <code>schema-query</code> when the user opens the structured
+editor. The main <code>getConfigUpdateProperties</code> response should include schema
+metadata but not <code>schemaBody</code>, so the paginated table does not move large schema
+documents unnecessarily.</p>
+<p>The schema association should key by <code>configId + propertyId</code>. Human-friendly
+keys such as <code>configName + propertyName</code> can be shown in the UI, but should not
+be used as the durable validation key.</p>
+<p>List/map values should be saved as compact JSON strings because the command
+APIs store <code>propertyValue</code> as a string.</p>
+<h2 id="schema-registry-validation"><a class="header" href="#schema-registry-validation">Schema Registry Validation</a></h2>
+<p>The schema registry should be used for structured <code>map</code> and <code>list</code> values once
+the registry is hardened enough for production validation. The config update
+page should treat the registry as optional per property: rows with no schema
+still use <code>valueType</code> validation and raw JSON/YAML editing.</p>
+<p><code>getConfigUpdateProperties</code> should return lightweight schema metadata:</p>
+<pre><code class="language-json">{
+  "schemaId": "security-jwt-claim-mapping",
+  "schemaVersion": "1.0.0",
+  "schemaType": "json",
+  "schemaStatus": "P",
+  "hasSchema": true
+}
+</code></pre>
+<p>The UI should enable the Form tab only when the schema exists, is published, and
+is compatible with the property value type. Schema documents should be cached by
+<code>hostId + schemaId + schemaVersion</code>, with host-specific lookup falling back to a
+global schema.</p>
+<p>Validation must run in both places:</p>
+<ul>
+<li>frontend validation gives immediate editor feedback and highlights the JSON
+path that failed</li>
+<li>backend validation remains authoritative in the config command handlers before
+a create or update override is accepted</li>
+</ul>
+<p>Backend validation should parse <code>propertyValue</code> according to <code>valueType</code> before
+running JSON Schema validation. The UI should normalize YAML input to compact
+JSON before sending the command payload, so the command APIs continue to receive
+string values.</p>
+<p>The schema registry needs a config-property binding before this can be enabled.
+The preferred minimal binding is <code>schemaId + schemaVersion</code> on the base config
+property definition. If tenant-specific schemas are needed later, schema lookup
+can resolve the same schema id/version against the selected <code>hostId</code> first and
+then fall back to the global row.</p>
+<h2 id="api-matrix"><a class="header" href="#api-matrix">API Matrix</a></h2>
+<p>The write side can reuse the current command APIs.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Scope</th><th>Create</th><th>Update</th><th>Delete</th></tr>
+</thead>
+<tbody>
+<tr><td>Environment</td><td><code>createConfigEnvironment</code></td><td><code>updateConfigEnvironment</code></td><td><code>deleteConfigEnvironment</code></td></tr>
+<tr><td>Product</td><td><code>createConfigProduct</code></td><td><code>updateConfigProduct</code></td><td><code>deleteConfigProduct</code></td></tr>
+<tr><td>Product Version</td><td><code>createConfigProductVersion</code></td><td><code>updateConfigProductVersion</code></td><td><code>deleteConfigProductVersion</code></td></tr>
+<tr><td>Instance</td><td><code>createConfigInstance</code></td><td><code>updateConfigInstance</code></td><td><code>deleteConfigInstance</code></td></tr>
+<tr><td>API</td><td><code>createConfigInstanceApi</code></td><td><code>updateConfigInstanceApi</code></td><td><code>deleteConfigInstanceApi</code></td></tr>
+<tr><td>App</td><td><code>createConfigInstanceApp</code></td><td><code>updateConfigInstanceApp</code></td><td><code>deleteConfigInstanceApp</code></td></tr>
+<tr><td>App API</td><td><code>createConfigInstanceAppApi</code></td><td><code>updateConfigInstanceAppApi</code></td><td><code>deleteConfigInstanceAppApi</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>For existing override rows, the update/delete payload must include the current
+<code>aggregateVersion</code> so the event persistence layer can enforce the monotonic
+version check. For new override rows, the page sends the scope identity,
+<code>configId</code>, <code>propertyId</code>, and <code>propertyValue</code>.</p>
+<h2 id="security-and-rbac"><a class="header" href="#security-and-rbac">Security And RBAC</a></h2>
+<p>The page must not assume that a user who can view configuration can write every
+override scope. The selected scope and target should be checked against the
+same permission model used by the existing config admin routes and command
+handlers.</p>
+<p>Recommended behavior:</p>
+<ul>
+<li>hide scopes the user cannot see</li>
+<li>show read-only rows for scopes the user can read but cannot update</li>
+<li>disable apply/reset controls when the selected target is not writable</li>
+<li>show a lock icon or tooltip for read-only rows</li>
+<li>keep backend command authorization authoritative, even when the UI already
+filtered the control</li>
+</ul>
+<p>Unauthorized command responses should be mapped back to the row that triggered
+the command. The page should not fail the entire table because one row is not
+writable.</p>
+<h2 id="read-model"><a class="header" href="#read-model">Read Model</a></h2>
+<p>The instance-facing scopes already have applicable-property queries:</p>
+<ul>
+<li><code>getApplicableConfigPropertiesForInstance</code></li>
+<li><code>getApplicableConfigPropertiesForInstanceApi</code></li>
+<li><code>getApplicableConfigPropertiesForInstanceApp</code></li>
+<li><code>getApplicableConfigPropertiesForInstanceAppApi</code></li>
+</ul>
+<p>These queries return property metadata and inherited/effective values, including:</p>
+<ul>
+<li><code>configId</code></li>
+<li><code>configName</code></li>
+<li><code>configPhase</code></li>
+<li><code>configType</code></li>
+<li><code>propertyId</code></li>
+<li><code>propertyName</code></li>
+<li><code>propertyType</code></li>
+<li><code>propertyValue</code></li>
+<li><code>propertySource</code></li>
+<li><code>propertySourceType</code></li>
+<li><code>valueType</code></li>
+<li><code>resourceType</code></li>
+<li><code>required</code></li>
+<li><code>displayOrder</code></li>
+</ul>
+<p>The same page needs current override metadata from:</p>
+<ul>
+<li><code>getConfigInstance</code></li>
+<li><code>getConfigInstanceApi</code></li>
+<li><code>getConfigInstanceApp</code></li>
+<li><code>getConfigInstanceAppApi</code></li>
+</ul>
+<p>The page should not join applicable rows and override rows across separately
+paginated API calls. That produces brittle pagination, filtering, sorting, and
+row-count behavior. Instead, Phase 1 should add a merged backend read model that
+returns one row per configurable property with inherited value, override value,
+effective value, override metadata, and permission hints.</p>
+<p>Environment, product, and product version currently have list/getFresh queries
+for existing overrides, but they do not have equivalent applicable-property
+queries:</p>
+<ul>
+<li><code>getConfigEnvironment</code></li>
+<li><code>getConfigProduct</code></li>
+<li><code>getConfigProductVersion</code></li>
+</ul>
+<p>The new merged query should cover these scopes before they are exposed in the
+new page. A temporary client merge is acceptable only for a local prototype with
+unpaginated data; it should not be shipped as the production page behavior.</p>
+<h2 id="proposed-generic-query"><a class="header" href="#proposed-generic-query">Proposed Generic Query</a></h2>
+<p>Add a Phase 1 query such as <code>getConfigUpdateProperties</code> in <code>config-query</code>.</p>
+<p>Request:</p>
+<pre><code class="language-json">{
+  "hostId": "host uuid",
+  "scope": "instance",
+  "target": {
+    "instanceId": "instance uuid"
+  },
+  "filters": {
+    "configPhases": ["R"],
+    "propertyTypes": ["Config"],
+    "resourceTypes": ["all"]
+  },
+  "offset": 0,
+  "limit": 1000,
+  "active": true
+}
+</code></pre>
+<p>Response:</p>
+<pre><code class="language-json">{
+  "total": 1,
+  "properties": [
+    {
+      "scope": "instance",
+      "hostId": "host uuid",
+      "configId": "config uuid",
+      "configName": "security.yml",
+      "configPhase": "R",
+      "propertyId": "property uuid",
+      "propertyName": "jwt.clockSkew",
+      "propertyType": "Config",
+      "valueType": "integer",
+      "resourceType": "all",
+      "required": false,
+      "schemaId": "security-jwt-clock-skew",
+      "schemaVersion": "1.0.0",
+      "schemaType": "json",
+      "schemaStatus": "P",
+      "defaultValue": "60",
+      "defaultSourceType": "config_property",
+      "overrideValue": "120",
+      "overrideAggregateVersion": 3,
+      "effectiveValue": "120",
+      "effectiveSourceType": "config_instance",
+      "canUpdate": true,
+      "canDeleteOverride": true
+    }
+  ]
+}
+</code></pre>
+<p>This query should be read-only. It does not need new write commands.</p>
+<p>The query owns inheritance and candidate selection. The frontend owns
+presentation, editing state, and calls to the existing command APIs.</p>
+<h2 id="frontend-structure"><a class="header" href="#frontend-structure">Frontend Structure</a></h2>
+<p>Recommended files:</p>
+<pre><code class="language-text">src/pages/config/update/ConfigUpdatePage.tsx
+src/pages/config/update/ConfigUpdateTable.tsx
+src/pages/config/update/ConfigValueEditor.tsx
+src/pages/config/update/ConfigStructuredValueDialog.tsx
+src/pages/config/update/configUpdateScopes.ts
+src/pages/config/update/configUpdateApi.ts
+src/pages/config/update/configValue.ts
+src/pages/config/update/configUpdateDraft.ts
+</code></pre>
+<p><code>configUpdateScopes.ts</code> should be the single source of truth for scope metadata:</p>
+<pre><code class="language-ts">type ConfigUpdateScope = {
+  id: 'environment' | 'product' | 'productVersion' | 'instance' | 'api' | 'app' | 'appApi';
+  label: string;
+  targetKeys: string[];
+  applicableQuery?: string;
+  overrideQuery: string;
+  overrideResponseKey: string;
+  createAction: string;
+  updateAction: string;
+  deleteAction: string;
+  getFreshAction?: string;
+  defaultResourceTypes?: string[];
+  defaultConfigPhases?: string[];
+};
+</code></pre>
+<p>The page should avoid hard-coding create/update/delete branching inside cell
+handlers. The handler asks the selected scope metadata which action and keys to
+use.</p>
+<h2 id="draft-and-apply-flow"><a class="header" href="#draft-and-apply-flow">Draft And Apply Flow</a></h2>
+<p>The default edit mode should stage changes locally. A dirty row is not saved
+until the user chooses Apply for that row or Review &amp; Apply from the toolbar.</p>
+<p>The draft model should track:</p>
+<ul>
+<li>operation: create, update, reset</li>
+<li>previous effective value</li>
+<li>next override value</li>
+<li>scope target keys</li>
+<li><code>configId</code></li>
+<li><code>propertyId</code></li>
+<li>current <code>aggregateVersion</code></li>
+<li>validation state</li>
+</ul>
+<p>The review dialog should group changes by operation and show enough context for
+operators to catch mistakes before applying. If multiple commands are applied
+and one fails, the dialog should show which rows succeeded and which rows need
+attention. The page should refetch or refresh successful rows and leave failed
+rows dirty with their error state intact.</p>
+<h2 id="save-flow"><a class="header" href="#save-flow">Save Flow</a></h2>
+<ol>
+<li>User edits a row.</li>
+<li>UI validates the value against <code>valueType</code> and the schema registry when a
+published schema is attached to the property.</li>
+<li>UI marks the row dirty and stores a draft operation.</li>
+<li>User applies a row or opens Review &amp; Apply.</li>
+<li>UI builds payload from selected scope, row <code>configId</code>, row <code>propertyId</code>, and
+normalized <code>propertyValue</code>.</li>
+<li>If an active override row exists, call the update action and include
+<code>aggregateVersion</code>.</li>
+<li>If no active override row exists, call the create action.</li>
+<li>On success, update the row with returned aggregate version or refetch that
+row.</li>
+<li>On conflict or error, keep the draft value, restore the displayed committed
+value, and show the row error.</li>
+</ol>
+<p>The local override map should store the full override row, not just the string
+value. At minimum it needs:</p>
+<ul>
+<li><code>propertyValue</code></li>
+<li><code>aggregateVersion</code></li>
+<li><code>active</code></li>
+<li>scope identity fields</li>
+<li><code>updateUser</code></li>
+<li><code>updateTs</code></li>
+</ul>
+<p>Before update or delete, the UI should support the same <code>getFresh*</code> pattern
+used by the existing admin pages. If the row has been open for a while, the
+Apply action can fetch the latest row to get the freshest <code>aggregateVersion</code>.
+At minimum, a version conflict must offer a “Refresh Row &amp; Try Again” action
+that reloads that row, compares the current backend value with the user’s draft,
+and lets the user reapply intentionally.</p>
+<p>Validation errors should stay close to the edited cell. For example, an invalid
+integer should keep the cell in edit/error state with a short message. Backend
+validation, authorization, and conflict errors should be attached to the row
+that caused them, not only shown as a global toast.</p>
+<h2 id="reset-flow"><a class="header" href="#reset-flow">Reset Flow</a></h2>
+<p>Reset means delete the override for the selected target and property.</p>
+<ol>
+<li>User selects an overridden row.</li>
+<li>UI calls the scope’s delete action with target keys, <code>propertyId</code>, and
+<code>aggregateVersion</code>.</li>
+<li>On success, clear <code>overrideValue</code> and <code>overrideAggregateVersion</code>.</li>
+<li>The displayed effective value reverts to the inherited/default value.</li>
+</ol>
+<p>Rows with no override should not allow reset.</p>
+<p>Like update, reset should support <code>getFresh*</code> before delete or expose the same
+“Refresh Row &amp; Try Again” conflict path.</p>
+<h2 id="routing"><a class="header" href="#routing">Routing</a></h2>
+<p>Add a route such as:</p>
+<pre><code class="language-text">/app/config/update
+</code></pre>
+<p>The route should accept task context and target context through query params:</p>
+<pre><code class="language-text">/app/config/update?scope=api&amp;instanceApiId=...&amp;task=mcp-onboard-api
+</code></pre>
+<p>Existing config table pages can link to it when they already have target
+context. Existing generated forms should remain available from row overflow
+actions for advanced edits and File/Cert values.</p>
+<p>The View History row action should preserve context by opening the audit trail
+in a drawer, modal, or task-aware route with filters already applied. The filter
+payload should include the selected scope, target keys, <code>configId</code>, and
+<code>propertyId</code>.</p>
+<p>For fallback forms, prefer opening the existing <code>react-schema-form</code> experience
+inside a drawer or modal over navigating away from the table. That keeps the
+user’s current scope, filters, expansion state, selected row, and staged changes
+intact. Full-page navigation can remain as a secondary fallback for complex
+forms that cannot safely render in an overlay.</p>
+<h2 id="implementation-plan-1"><a class="header" href="#implementation-plan-1">Implementation Plan</a></h2>
+<p>Phase 0: schema registry foundation for config validation</p>
+<ul>
+<li>Harden <code>schema-query</code>, <code>schema-command</code>, and <code>schema_t</code> enough for production
+JSON Schema lookup.</li>
+<li>Add a durable config-property-to-schema association with <code>schemaId</code> and
+<code>schemaVersion</code>.</li>
+<li>Make schema lookup tenant-aware: host-specific schema first, global schema
+second.</li>
+<li>Validate schema bodies on schema create/update.</li>
+<li>Add backend config value validation for create/update override commands.</li>
+<li>Add tests for schema CRUD, tenant/global lookup, version pinning, and invalid
+config property values.</li>
+</ul>
+<p>Phase 1: merged read model and instance-facing MVP</p>
+<ul>
+<li>Add <code>getConfigUpdateProperties</code> or an equivalent merged query in
+<code>config-query</code>.</li>
+<li>Return candidate properties, inherited values, current override values,
+override metadata, schema metadata, and permission hints in one
+paginated/sortable result.</li>
+<li>Build the page for Instance, API, App, and App API.</li>
+<li>Use existing command APIs for create/update/delete.</li>
+<li>Support scalar inline edits.</li>
+<li>Support list/map raw JSON/YAML modal.</li>
+<li>Support staged changes and Review &amp; Apply.</li>
+<li>Support row-level validation/error/conflict states.</li>
+<li>Enable the typed Form tab only for properties with a published schema.</li>
+</ul>
+<p>Phase 2: higher-level scopes</p>
+<ul>
+<li>Add Environment, Product, and Product Version selectors.</li>
+<li>Expose each scope only through the merged read model, not a client-side
+paginated join.</li>
+<li>Ensure product version respects product-version config/property mappings
+where available.</li>
+</ul>
+<p>Phase 3: typed structured forms</p>
+<ul>
+<li>Use the schema registry for list/map config properties.</li>
+<li>Support custom validators by property key.</li>
+<li>Add tests for string array, object array, map, and malformed JSON/YAML values.</li>
+</ul>
+<p>Phase 4: task integration</p>
+<ul>
+<li>Link from configuration task panels to <code>/app/config/update</code>.</li>
+<li>Add contextual next actions from instance, API, app, and app-api pages.</li>
+<li>Keep generated create/update forms as drawer/modal fallback actions.</li>
+</ul>
+<h2 id="risks-and-open-questions"><a class="header" href="#risks-and-open-questions">Risks And Open Questions</a></h2>
+<ul>
+<li>Environment inheritance needs a precise target rule. Existing applicable
+instance queries include <code>environment_property</code> as an inherited source, but
+the target environment is not selected by the current instance-facing query
+contract.</li>
+<li>Product and product-version candidate lists can be too broad if they are
+loaded from all config properties. Product version should eventually use the
+product version config mappings.</li>
+<li>The customer Settings code stores custom values in a map keyed by
+<code>propertyId</code>; for <code>portal-view</code>, the key should include scope target plus
+<code>propertyId</code> to avoid collisions when multiple targets are loaded.</li>
+<li><code>propertyId</code> is the stable merge key only after the candidate list has been
+constrained to the selected target. If multiple configs can contain the same
+property id in unusual imports, use <code>configId + propertyId</code>.</li>
+<li>The page should avoid silently editing <code>File</code> or <code>Cert</code> values as plain text.</li>
+<li>Staged apply is not atomic until a bulk command exists. The UI must show
+partial success and partial failure clearly.</li>
+<li>Overlaying generated forms in a drawer depends on the form runner handling
+router state, success/failure navigation, and task context without forcing a
+full-page transition.</li>
+<li>The schema registry is not fully implemented and tested yet. Schema-backed
+validation should not be enabled until tenant-aware lookup, version pinning,
+and backend command validation are in place.</li>
+</ul>
+<h2 id="recommendation-1"><a class="header" href="#recommendation-1">Recommendation</a></h2>
+<p>Build the page as a new task-oriented editor, not as a rewrite of the existing
+config admin tables. Make the merged <code>getConfigUpdateProperties</code> read model a
+Phase 1 backend requirement so the frontend does not perform brittle
+pagination-sensitive joins. Start frontend exposure with the four
+instance-facing scopes, then add environment, product, and product version once
+the same merged query handles their inheritance and candidate-selection rules.</p>
+<p>Implement the minimal schema registry foundation before enabling schema-backed
+validation in the config update page. The raw JSON/YAML editor and scalar
+<code>valueType</code> validation can be built in parallel, but the Form tab and backend
+schema enforcement should wait for the registry work.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="human-task-ui"><a class="header" href="#human-task-ui">Human Task UI</a></h1>
 <p><code>ask</code> is the workflow task type that pauses execution for human input. The
 runtime can now create <code>task_asst_t</code> and <code>worklist_t</code> rows when an <code>ask</code> task
@@ -989,7 +1511,7 @@ per active user in the role.</li>
 </ul>
 <p>The Worklist page can show assigned tasks, but it does not yet provide a
 generic input screen for the user to approve or enter data.</p>
-<h2 id="goals"><a class="header" href="#goals">Goals</a></h2>
+<h2 id="goals-1"><a class="header" href="#goals-1">Goals</a></h2>
 <ul>
 <li>Provide one generic page for all human-input workflow tasks.</li>
 <li>Render the input controls from the ask task definition, not from a
@@ -1002,7 +1524,7 @@ side.</li>
 <li>Keep the UI useful for approval tasks first while leaving room for richer
 object-input tasks.</li>
 </ul>
-<h2 id="non-goals-1"><a class="header" href="#non-goals-1">Non-Goals</a></h2>
+<h2 id="non-goals-2"><a class="header" href="#non-goals-2">Non-Goals</a></h2>
 <ul>
 <li>Do not create a custom approval page for each workflow.</li>
 <li>Do not make every workflow task human-actionable; only <code>ask</code> tasks use this
@@ -1480,7 +2002,7 @@ backend.</p>
 <li>Preserve host scoping and existing role-based page visibility.</li>
 <li>Avoid presenting UI-side filtering as a security boundary.</li>
 </ul>
-<h2 id="non-goals-2"><a class="header" href="#non-goals-2">Non-Goals</a></h2>
+<h2 id="non-goals-3"><a class="header" href="#non-goals-3">Non-Goals</a></h2>
 <ul>
 <li>Do not claim UI filtering is sufficient authorization.</li>
 <li>Do not replace service-layer rule-engine enforcement.</li>
@@ -1962,7 +2484,7 @@ replace them.</p>
 </tbody>
 </table>
 </div>
-<h2 id="recommendation-1"><a class="header" href="#recommendation-1">Recommendation</a></h2>
+<h2 id="recommendation-2"><a class="header" href="#recommendation-2">Recommendation</a></h2>
 <p>Use owner-scoped filtering as the first UI step, but centralize it immediately.
 Do not copy the <code>Schedule.tsx</code> logic into every page by hand.</p>
 <p>The recommended path is:</p>
@@ -2006,7 +2528,7 @@ of them.</p>
 <li>Support future documentation search, related topics, and task-specific help.</li>
 <li>Preserve the ability to run the app locally with a configurable docs base URL.</li>
 </ul>
-<h2 id="non-goals-3"><a class="header" href="#non-goals-3">Non-Goals</a></h2>
+<h2 id="non-goals-4"><a class="header" href="#non-goals-4">Non-Goals</a></h2>
 <ul>
 <li>Do not build a full documentation authoring system inside <code>portal-view</code>.</li>
 <li>Do not duplicate long user guides in component source files.</li>
@@ -2365,7 +2887,7 @@ PORTAL_DOC_BASE_URL=https://doc.lightapi.net/v2.0
 <p>This gives cloud deployments a simple latest-docs experience and gives
 enterprise deployments a path to version-matched help without changing
 <code>portal-view</code> metadata.</p>
-<h2 id="recommendation-2"><a class="header" href="#recommendation-2">Recommendation</a></h2>
+<h2 id="recommendation-3"><a class="header" href="#recommendation-3">Recommendation</a></h2>
 <p>Store user-facing help content in <code>light-portal-doc</code> and add declarative
 <code>helpPath</code> metadata in <code>portal-view</code>. This keeps documentation maintainable and
 publishable while allowing every page, form, and task to provide context-aware
@@ -2417,7 +2939,7 @@ processing boundary.</p>
 whose handler currently returns an empty response. That explains the browser
 error <code>Unexpected end of JSON input</code>, but it is separate from the notification
 status design.</p>
-<h2 id="goals-1"><a class="header" href="#goals-1">Goals</a></h2>
+<h2 id="goals-2"><a class="header" href="#goals-2">Goals</a></h2>
 <ul>
 <li>Show the current user the latest event processing results in the profile
 notification page.</li>
@@ -2430,7 +2952,7 @@ projection method.</li>
 <li>Keep enough diagnostic data to debug failed projections.</li>
 <li>Keep notification writes idempotent so event replay is safe.</li>
 </ul>
-<h2 id="non-goals-4"><a class="header" href="#non-goals-4">Non-Goals</a></h2>
+<h2 id="non-goals-5"><a class="header" href="#non-goals-5">Non-Goals</a></h2>
 <ul>
 <li>Do not replace <code>event_store_t</code>, <code>outbox_message_t</code>, or <code>dead_letter_queue</code>.</li>
 <li>Do not use notifications as the source of truth for projection state.</li>
@@ -2964,7 +3486,7 @@ protocol, lifecycle status, and governance metadata.</p>
 <p>The service query layer also returns <code>categoryIds</code>, <code>categories</code>, <code>tagIds</code>, and
 <code>tags</code> for API rows. The catalog should use those fields for display and
 filtering instead of reintroducing the legacy <code>apiTags</code> string field.</p>
-<h2 id="goals-2"><a class="header" href="#goals-2">Goals</a></h2>
+<h2 id="goals-3"><a class="header" href="#goals-3">Goals</a></h2>
 <ul>
 <li>Add a Marketplace menu entry for an API catalog.</li>
 <li>Use database-backed categories and tags, not hard-coded UI lists.</li>
@@ -2975,7 +3497,7 @@ filtering instead of reintroducing the legacy <code>apiTags</code> string field.
 runtime bindings, and owner actions.</li>
 <li>Preserve host scope and ownership rules already used by API administration.</li>
 </ul>
-<h2 id="non-goals-5"><a class="header" href="#non-goals-5">Non-Goals</a></h2>
+<h2 id="non-goals-6"><a class="header" href="#non-goals-6">Non-Goals</a></h2>
 <ul>
 <li>Do not replace API administration pages with the catalog.</li>
 <li>Do not store display names in API rows when they can be resolved from
@@ -3013,7 +3535,7 @@ move from API-type-only links to intent-based entries:</p>
 <ul>
 <li>API Catalog</li>
 <li>API Clients</li>
-<li>JSON Schema</li>
+<li>Schema Catalog</li>
 <li>YAML Rule</li>
 <li>Schema Form</li>
 </ul>
@@ -3285,7 +3807,7 @@ to expose the effective agent metadata.</li>
 </ul>
 <p>The registration UX should make this model explicit. Operators should not have
 to understand the table split. They should see one task: register an AI agent.</p>
-<h2 id="goals-3"><a class="header" href="#goals-3">Goals</a></h2>
+<h2 id="goals-4"><a class="header" href="#goals-4">Goals</a></h2>
 <ul>
 <li>Add a focused Task Center flow named <code>Register AI Agent</code>.</li>
 <li>Register the agent first as an API and API version.</li>
@@ -3297,7 +3819,7 @@ table writes.</li>
 <li>Allow skills, tools, memory, access control, and deployment links to be added
 after the base agent is registered.</li>
 </ul>
-<h2 id="non-goals-6"><a class="header" href="#non-goals-6">Non-Goals</a></h2>
+<h2 id="non-goals-7"><a class="header" href="#non-goals-7">Non-Goals</a></h2>
 <ul>
 <li>Do not create a second standalone agent registry independent from APIs.</li>
 <li>Do not make <code>AgentDefinitionCreatedEvent</code> create <code>api_version_t</code>.</li>
@@ -3564,7 +4086,7 @@ creation as a separate command keeps the backend contract smaller and preserves
 the existing API ownership workflow. A later full registration command can add
 <code>ApiCreatedEvent</code> if automation needs to create the logical API and agent
 version in one request.</p>
-<h3 id="recommendation-3"><a class="header" href="#recommendation-3">Recommendation</a></h3>
+<h3 id="recommendation-4"><a class="header" href="#recommendation-4">Recommendation</a></h3>
 <p>Start with Option 1 only if incomplete registrations are visible and repairable.
 Prioritize Option 2 before exposing a one-click production registration wizard,
 because it gives the backend one validation boundary for the API version and
@@ -3638,7 +4160,7 @@ is exposed.</li>
 <li>Import/export and event replay should preserve event order for agent
 registration bundles.</li>
 </ul>
-<h2 id="implementation-plan-1"><a class="header" href="#implementation-plan-1">Implementation Plan</a></h2>
+<h2 id="implementation-plan-2"><a class="header" href="#implementation-plan-2">Implementation Plan</a></h2>
 <ol>
 <li>Add <code>Register AI Agent</code> to <code>portal-view/src/tasks/taskRegistry.ts</code>.</li>
 <li>Add help content under <code>src/help/portal-view/tasks/register-ai-agent.md</code>.</li>
@@ -3707,7 +4229,7 @@ exist, which endpoint projections are invokable by agents, which skills they
 belong to, and which agents are allowed or expected to use those skills. Without
 that catalog, the agent can list executable gateway tools, but it has no domain
 guidance beyond each tool description.</p>
-<h2 id="goals-4"><a class="header" href="#goals-4">Goals</a></h2>
+<h2 id="goals-5"><a class="header" href="#goals-5">Goals</a></h2>
 <ul>
 <li>Keep the gateway as the runtime source of truth for MCP tool execution.</li>
 <li>Keep direct gateway <code>tools/list</code> and <code>tools/call</code> working even when no skills
@@ -3731,7 +4253,7 @@ to be wrapped before it can be called.</li>
 portal-query can perform macro-filtering, keyword search, vector ranking,
 context viability checks, and safety filtering.</li>
 </ul>
-<h2 id="non-goals-7"><a class="header" href="#non-goals-7">Non-Goals</a></h2>
+<h2 id="non-goals-8"><a class="header" href="#non-goals-8">Non-Goals</a></h2>
 <ul>
 <li>Do not move MCP request routing or downstream REST calls into the controller.</li>
 <li>Do not implement <code>skill/search</code> in controller-rs. Controller-rs can
@@ -4745,7 +5267,7 @@ persistence validation. Keep them as a diagnostics or governance item that
 compares cataloged/assigned tools with the selected gateway instance’s
 <code>tools/list</code> response before deployment or runtime enablement.</li>
 </ul>
-<h2 id="recommendation-4"><a class="header" href="#recommendation-4">Recommendation</a></h2>
+<h2 id="recommendation-5"><a class="header" href="#recommendation-5">Recommendation</a></h2>
 <p>Implement this as a progressive control-plane enhancement. The gateway remains
 the execution path, and portal-authored skills become the agent guidance layer
 served by portal-query. The agent should cache the effective catalog locally and
@@ -4772,7 +5294,7 @@ next phase:</p>
 </ul>
 <p>The design goal is to split deployment concerns without splitting the runtime
 network or the control-plane model.</p>
-<h2 id="goals-5"><a class="header" href="#goals-5">Goals</a></h2>
+<h2 id="goals-6"><a class="header" href="#goals-6">Goals</a></h2>
 <ul>
 <li>Move the two demo APIs and local <code>light-agent</code> services into a separate
 Docker Compose overlay file.</li>
@@ -4789,7 +5311,7 @@ workflows.</li>
 <li>Use <code>light-workflow</code> for deterministic orchestration, retries, human tasks,
 assertions, audit, and multi-agent coordination.</li>
 </ul>
-<h2 id="non-goals-8"><a class="header" href="#non-goals-8">Non-Goals</a></h2>
+<h2 id="non-goals-9"><a class="header" href="#non-goals-9">Non-Goals</a></h2>
 <ul>
 <li>Do not move the demo APIs or agent services into a different Compose project
 by default.</li>
@@ -5223,7 +5745,7 @@ owner:</p>
 </code></pre>
 <p>Once that contract is in place, snapshot export and conversion can safely
 include the event-backed memory state where appropriate.</p>
-<h2 id="non-goals-9"><a class="header" href="#non-goals-9">Non-Goals</a></h2>
+<h2 id="non-goals-10"><a class="header" href="#non-goals-10">Non-Goals</a></h2>
 <ul>
 <li>Do not promote existing direct-write memory rows into snapshots before a
 backfill/migration event strategy exists.</li>
@@ -5562,7 +6084,7 @@ field, and the Portal UI should not expose raw vectors to users.</li>
 <p>As a result, new endpoint-backed tool rows start with a null
 <code>description_embedding</code>, and user edits can leave any future vector stale unless
 the write path marks it for regeneration.</p>
-<h2 id="goals-6"><a class="header" href="#goals-6">Goals</a></h2>
+<h2 id="goals-7"><a class="header" href="#goals-7">Goals</a></h2>
 <ul>
 <li>Populate <code>tool_t.description_embedding</code> for endpoint-backed and manually
 authored tools.</li>
@@ -5574,7 +6096,7 @@ latency.</li>
 disabled or temporarily failing.</li>
 <li>Keep the first implementation aligned with the existing <code>VECTOR(384)</code> schema.</li>
 </ul>
-<h2 id="non-goals-10"><a class="header" href="#non-goals-10">Non-Goals</a></h2>
+<h2 id="non-goals-11"><a class="header" href="#non-goals-11">Non-Goals</a></h2>
 <ul>
 <li>Do not require every tool to have an embedding before it can be listed,
 edited, linked to a skill, or executed through the gateway.</li>
@@ -5951,7 +6473,7 @@ forms whose <code>definition</code> field is a YAML textarea.</li>
 </ul>
 <p>The first Workflow Editor can therefore be an incremental UI improvement over
 the existing definition CRUD and start workflow command.</p>
-<h2 id="goals-7"><a class="header" href="#goals-7">Goals</a></h2>
+<h2 id="goals-8"><a class="header" href="#goals-8">Goals</a></h2>
 <ul>
 <li>Keep workflow YAML as the canonical persisted artifact.</li>
 <li>Provide a readable step outline or graph next to the YAML editor.</li>
@@ -5964,7 +6486,7 @@ flows.</li>
 authoring component with skill-specific constraints.</li>
 <li>Preserve owner scoping and existing Portal command/query conventions.</li>
 </ul>
-<h2 id="non-goals-11"><a class="header" href="#non-goals-11">Non-Goals</a></h2>
+<h2 id="non-goals-12"><a class="header" href="#non-goals-12">Non-Goals</a></h2>
 <ul>
 <li>Do not execute workflow logic in Portal View.</li>
 <li>Do not make skills the workflow runtime.</li>
@@ -6267,7 +6789,7 @@ workflow definition.</p>
 YAML cannot be parsed into a known workflow container, the editor keeps the
 source editor and validation panels usable and shows an empty graph state rather
 than blocking authoring.</p>
-<h2 id="recommendation-5"><a class="header" href="#recommendation-5">Recommendation</a></h2>
+<h2 id="recommendation-6"><a class="header" href="#recommendation-6">Recommendation</a></h2>
 <p>Build the generic Workflow Editor before the Skill Workspace embeds workflow
 authoring. The skill UI should provide context and constraints, while the
 workflow editor provides YAML editing, step preview, validation, and test runs
@@ -6305,7 +6827,7 @@ should model catalog scope explicitly:</p>
 <li>a separate SPA may expose the same backend catalog, but it should not become
 the catalog authority.</li>
 </ul>
-<h2 id="goals-8"><a class="header" href="#goals-8">Goals</a></h2>
+<h2 id="goals-9"><a class="header" href="#goals-9">Goals</a></h2>
 <ul>
 <li>Avoid duplicating the full catalog for every tenant.</li>
 <li>Prevent catalog drift between tenants and between portal instances.</li>
@@ -6324,7 +6846,7 @@ agent-facing skills and tools.</li>
 <li>Support promotion or import/export between portal instances instead of
 relying on ad hoc row copies.</li>
 </ul>
-<h2 id="non-goals-12"><a class="header" href="#non-goals-12">Non-Goals</a></h2>
+<h2 id="non-goals-13"><a class="header" href="#non-goals-13">Non-Goals</a></h2>
 <ul>
 <li>Do not clone every global catalog row into every tenant by default.</li>
 <li>Do not make a separate SPA the source of truth for catalog data.</li>
@@ -6615,7 +7137,7 @@ entity-specific effective endpoints?</li>
 </li>
 <li><strong>Flow Determination</strong>: Instead of relying on client-supplied parameters like <code>requested_token_type</code>, the server retrieves the <code>token_ex_type</code> from the client context in the database to decide which handler to use. This ensures that only authorized exchange types are performed for each specific client.</li>
 </ol>
-<h2 id="recommendation-6"><a class="header" href="#recommendation-6">Recommendation</a></h2>
+<h2 id="recommendation-7"><a class="header" href="#recommendation-7">Recommendation</a></h2>
 <p>For the <code>light-portal</code> ecosystem:</p>
 <ul>
 <li><strong>Option 4: Client Context</strong> is the selected method. It provides the highest level of security by ensuring that token exchange flows are explicitly configured and restricted on a per-client basis in the database.</li>
@@ -6631,7 +7153,7 @@ entity-specific effective endpoints?</li>
 <h1 id="oauth-audit"><a class="header" href="#oauth-audit">OAuth Audit</a></h1>
 <p>The OAuth services keep authorization codes and refresh tokens as operational state. These rows are short lived and are now written directly to <code>auth_code_t</code> and <code>auth_refresh_token_t</code> instead of being created through the general event store. This avoids high-volume login and refresh-token churn in <code>event_store_t</code> and <code>outbox_message_t</code>.</p>
 <p>Audit and login history are recorded separately in append-oriented OAuth audit tables.</p>
-<h2 id="goals-9"><a class="header" href="#goals-9">Goals</a></h2>
+<h2 id="goals-10"><a class="header" href="#goals-10">Goals</a></h2>
 <ul>
 <li>Show administrators who is currently online.</li>
 <li>Show a user the last login time and session history.</li>
@@ -6940,7 +7462,7 @@ CREATE TABLE tenant_resource_t(
 <p>Azure CosmosDB for PostgreSQL (Managed Citus): Microsoft offers a fully managed cloud service called Azure CosmosDB for PostgreSQL, which is built on Citus. This service has usage-based pricing, and the cost depends on factors like the number of nodes, storage, and compute resources used. This managed option reduces the operational overhead of managing Citus yourself.</p>
 </li>
 </ul>
-<h4 id="recommendation-7"><a class="header" href="#recommendation-7">Recommendation:</a></h4>
+<h4 id="recommendation-8"><a class="header" href="#recommendation-8">Recommendation:</a></h4>
 <p>Don’t automatically add host_id to every table just because we are using Citus. Carefully analyze the data model, query patterns, and multi-tenancy requirements.</p>
 <ul>
 <li>
@@ -7647,39 +8169,536 @@ CREATE TABLE relation_t (
 <p>or</p>
 <p>![“status”]</p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="json-schema-registry"><a class="header" href="#json-schema-registry">JSON Schema Registry</a></h1>
-<p>JSON Schema is a declarative language that provides a standardized way to describe and validate JSON data.</p>
-<h3 id="what-it-does"><a class="header" href="#what-it-does">What it does</a></h3>
-<p>JSON Schema defines the structure, content, data types, and constraints of JSON documents. It’s an IETF standard that helps ensure the consistency and integrity of JSON data across applications.</p>
-<h3 id="how-it-works"><a class="header" href="#how-it-works">How it works</a></h3>
-<p>JSON Schema uses keywords to define data properties. A JSON Schema validator checks if JSON documents conform to the schema.</p>
-<h3 id="what-its-useful-for"><a class="header" href="#what-its-useful-for">What it’s useful for</a></h3>
+<h1 id="schema-registry"><a class="header" href="#schema-registry">Schema Registry</a></h1>
+<p>The schema registry is the portal-owned catalog for reusable schema contracts.
+The first release should focus on JSON Schema documents for UI form generation,
+backend validation, external schema discovery, and operational auditability. The
+model should remain extensible enough to add Protobuf later if
+gRPC-over-WebSocket contract discovery becomes a real requirement, but Protobuf
+support is not required for the initial hardening pass. This design focuses on
+hardening the current <code>schema-query</code>, <code>schema-command</code>, and <code>schema_t</code>
+implementation so it can safely validate configuration property values and
+support future schema reuse across portal features.</p>
+<h2 id="current-state-4"><a class="header" href="#current-state-4">Current State</a></h2>
+<p>The portal already has the core pieces of a schema registry:</p>
 <ul>
-<li>Describing existing data formats</li>
-<li>Validating data as part of automated testing</li>
-<li>Submitting client data</li>
-<li>Defining how a record should be organized</li>
+<li><code>schema_t</code> stores schema metadata and the schema body.</li>
+<li><code>schema-query</code> exposes read actions such as <code>getSchema</code>, <code>getSchemaLabel</code>,
+<code>getSchemaById</code>, and <code>getFreshSchema</code>.</li>
+<li><code>schema-command</code> exposes create, update, and delete actions.</li>
+<li><code>schema_t.host_id</code> supports tenant-specific rows, with <code>NULL</code> representing a
+global schema.</li>
+<li><code>schema_t.schema_status</code> tracks draft, published, and retired states.</li>
+<li><code>schema_t.spec_version</code> records the schema language version, such as a JSON
+Schema draft.</li>
 </ul>
-<h3 id="what-is-a-json-schema-registry"><a class="header" href="#what-is-a-json-schema-registry">What is a JSON Schema Registry</a></h3>
-<p>The JSON Schema Registry provides a centralized service for your JSON schemas with RESTful endpoints for storing and retrieving JSON schemas.</p>
-<p>When using data in a distributed application with many RESTful APIs, it is important to ensure that it is well-formed and structured. If data is sent without prior validation, errors may occur on the services. A schema registry provides a way to ensure that the data is validated before it is sent and validated after it is received.</p>
-<p>A schema registry is a service used to define and confirm the structure of data that is sent between consumers and providers. In a schema registry, developers can define what the data should look like and how it should be validated. The schemas can be utilized in the OpenAPI specifications to ensure that schemas can be externalized.</p>
-<p>Schema records can also help ensure forward and backward compatibility when changes are made to the data structure. When a schema record is used, the data transfered with more schema information that can be used to ensure that applications reading the data can interpret it.</p>
-<p>Given the API consumers and providers can belong to different groups or organizations, it is necessary to have a centralized service to manage the schemas so that they can be shared between them. This is why we have implemented this service as part of the light-portal.</p>
-<h3 id="schema-specification-version"><a class="header" href="#schema-specification-version">Schema Specification Version</a></h3>
-<p>The registry is heterogeneous registry as it can store schemas of different schema draft versions. By default the registry is configured to store schemas of Draft 2020-12. When a schema is added, the version which is currently is set, is what the schema is saved as.</p>
-<p>The following list contains all supported specification versions.</p>
+<p>The implementation is not ready to be treated as an authoritative validation
+service yet. The main gaps are:</p>
 <ul>
-<li>Draft 4</li>
-<li>Draft 6</li>
-<li>Draft 7</li>
-<li>2019-09</li>
-<li>2020-12</li>
+<li>schema lookup is not consistently tenant-aware</li>
+<li>version lookup semantics are not explicit enough for config validation</li>
+<li>schema bodies are not clearly validated before being stored</li>
+<li>published schema immutability is not defined</li>
+<li>schema type and body validation rules are not explicit</li>
+<li>schema rows do not have a stable URL-friendly public alias</li>
+<li>config properties do not currently reference schemas</li>
+<li>backend config command handlers do not validate values against schemas</li>
+<li>tests for schema CRUD, tenant/global lookup, versioning, and config
+validation are incomplete</li>
 </ul>
-<h3 id="schema-version"><a class="header" href="#schema-version">Schema Version</a></h3>
-<p>Once a schema is registed into the registry, it will be assigned as version 1. Each time it is updated, the version number will increase 1. When the schema is retrieve, the version number can be part of the URL to indicate that exact version will be retrieved. If version number is not in the URL, the latest version will be retrieved.</p>
-<h3 id="access-endpoint"><a class="header" href="#access-endpoint">Access Endpoint</a></h3>
-<h3 id="table-structure"><a class="header" href="#table-structure">Table Structure</a></h3>
+<h2 id="goals-11"><a class="header" href="#goals-11">Goals</a></h2>
+<ul>
+<li>Store JSON Schema documents with clear tenant/global ownership.</li>
+<li>Support immutable published schema versions.</li>
+<li>Let config properties reference an exact schema id and version.</li>
+<li>Validate structured config property values on both frontend and backend.</li>
+<li>Preserve existing schema registry CRUD pages and generated forms.</li>
+<li>Add a Marketplace Schema Catalog entry for browse-first schema discovery.</li>
+<li>Add URL-friendly schema aliases so external applications can retrieve
+published schemas through <code>portal-service</code>.</li>
+<li>Keep schema lookup cheap for list pages by returning schema metadata first
+and loading schema bodies lazily.</li>
+<li>Support schema status transitions: draft, published, retired.</li>
+<li>Make validation errors specific enough for editors to highlight the failing
+JSON path.</li>
+<li>Categorize and tag schemas for easier discovery and filtering.</li>
+</ul>
+<h2 id="non-goals-14"><a class="header" href="#non-goals-14">Non-Goals</a></h2>
+<ul>
+<li>Do not build a full schema compatibility engine in the first release.</li>
+<li>Do not require every config property to have a schema.</li>
+<li>Do not replace OpenAPI schemas or the existing API spec registry.</li>
+<li>Do not implement Protobuf parsing, compatibility, config form generation, or
+runtime validation in the first release.</li>
+<li>Do not make the config update page depend on schema registry completion for
+basic scalar and raw JSON/YAML editing.</li>
+<li>Do not allow unpublished schemas to validate production config overrides.</li>
+</ul>
+<h2 id="data-model"><a class="header" href="#data-model">Data Model</a></h2>
+<p>The existing <code>schema_t</code> table is a reasonable starting point. It already has:</p>
+<ul>
+<li><code>schema_id</code></li>
+<li><code>host_id</code></li>
+<li><code>schema_version</code></li>
+<li><code>schema_type</code></li>
+<li><code>spec_version</code></li>
+<li><code>schema_body</code></li>
+<li><code>schema_status</code></li>
+<li>ownership, active, audit, and aggregate-version fields</li>
+</ul>
+<p>Before production validation depends on this table, the versioning model should
+be made explicit. The recommended model is:</p>
+<ul>
+<li><code>schema_id</code> is the stable, lower-case, URL-friendly logical schema id.</li>
+<li><code>schema_version</code> identifies an immutable schema version.</li>
+<li><code>host_id IS NULL</code> means a global schema.</li>
+<li><code>host_id IS NOT NULL</code> means a tenant-specific schema.</li>
+<li>a published schema body is immutable</li>
+<li>changing a published schema creates a new version</li>
+<li>retiring a schema version marks it unavailable for new bindings but keeps it
+readable for historical audit and existing references</li>
+</ul>
+<p>The current table uses <code>schema_id</code> as the primary key while also defining
+unique indexes on <code>(schema_id, schema_version)</code> and
+<code>(host_id, schema_id, schema_version)</code>. That conflicts with a true immutable
+version-row model. The preferred correction is to introduce a surrogate row key
+such as <code>schema_uid UUID</code> and keep uniqueness on the logical reference:</p>
+<pre><code class="language-text">schema_uid       UUID primary key
+schema_lineage_id UUID not null
+host_id          UUID nullable
+schema_id        VARCHAR(126)
+schema_alias     VARCHAR(126) nullable
+schema_version   VARCHAR(12)
+schema_type      VARCHAR(16)
+spec_version     VARCHAR(12)
+schema_body      TEXT
+schema_status    CHAR(1)
+external_visible BOOLEAN
+aggregate_version BIGINT
+...
+</code></pre>
+<p>The registry should keep unique constraints for:</p>
+<ul>
+<li>global schema versions: <code>schema_id + schema_version</code> where <code>host_id IS NULL</code></li>
+<li>tenant schema versions: <code>host_id + schema_id + schema_version</code> where
+<code>host_id IS NOT NULL</code></li>
+<li>version rows within one logical lineage: <code>schema_lineage_id + schema_version</code></li>
+</ul>
+<p><code>schema_lineage_id</code> is the stable identity for a logical schema within a scope.
+All immutable versions of the same global schema share one lineage id. All
+immutable versions of the same tenant schema share a different lineage id. This
+prevents category and tag assignments from colliding when a global schema and a
+tenant schema use the same <code>schema_id</code>.</p>
+<p><code>schema_alias</code> is an optional URL-friendly external identifier for a schema
+lineage. It should use the same lower-case, URL-friendly character policy as
+<code>schema_id</code>, and it should be stable across immutable versions of the same
+lineage. <code>schema_alias</code> is allowed to differ from <code>schema_id</code> so operators can
+rename an external contract URL without changing internal schema ids.</p>
+<p>Because alias and taxonomy are lineage-level metadata, the clean target is a
+small lineage table:</p>
+<pre><code class="language-text">schema_lineage_t
+  schema_lineage_id UUID primary key
+  host_id UUID nullable
+  schema_id VARCHAR(126)
+  schema_alias VARCHAR(126) nullable
+  external_visible BOOLEAN not null default false
+  ...
+
+schema_t
+  schema_uid UUID primary key
+  schema_lineage_id UUID references schema_lineage_t(schema_lineage_id)
+  schema_version VARCHAR(12)
+  schema_body TEXT
+  ...
+</code></pre>
+<p>If a separate lineage table is too large for the first pass, <code>schema_alias</code> and
+<code>external_visible</code> can be stored on <code>schema_t</code> with command-side enforcement that
+all versions in one lineage share the same alias and visibility. The migration
+should still move them to <code>schema_lineage_t</code> when the immutable version-row model
+is introduced.</p>
+<p>Alias uniqueness should be scoped the same way as schemas:</p>
+<ul>
+<li>global aliases: unique <code>schema_alias</code> where <code>host_id IS NULL</code></li>
+<li>tenant aliases: unique <code>host_id + schema_alias</code> where <code>host_id IS NOT NULL</code></li>
+</ul>
+<p>If a surrogate key migration is too disruptive for the first hardening pass, the
+minimum acceptable interim model is to keep the current row shape but document
+that <code>schema_id</code> represents the current mutable aggregate. That is weaker for
+config validation because a schema body can drift under an existing config
+property reference. The immutable version-row model should be the target.</p>
+<h2 id="schema-types"><a class="header" href="#schema-types">Schema Types</a></h2>
+<p><code>schema_type</code> should be treated as a controlled value. The first supported value
+is:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th><code>schema_type</code></th><th><code>schema_body</code> meaning</th><th><code>spec_version</code> examples</th><th>First-release use</th></tr>
+</thead>
+<tbody>
+<tr><td><code>json</code></td><td>JSON Schema document</td><td><code>draft-07</code>, <code>2019-09</code>, <code>2020-12</code></td><td>Config form generation, frontend validation, backend config command validation, catalog discovery</td></tr>
+</tbody>
+</table>
+</div>
+<p>For <code>json</code> schemas, <code>schema-command</code> must parse <code>schema_body</code> as JSON and
+validate it as a JSON Schema document before the schema can be published.</p>
+<p><code>protobuf</code> should remain a reserved future <code>schema_type</code>, not an MVP
+requirement. If future gRPC-over-WebSocket support needs Protobuf contracts, add
+Protobuf parsing and either a schema artifact table or a schema bundle table for
+multi-file imports and compiled descriptors. Do not overload the JSON Schema
+validation path to make Protobuf fit.</p>
+<h2 id="classification-and-discovery"><a class="header" href="#classification-and-discovery">Classification and Discovery</a></h2>
+<p>Schemas must support categorization and tagging using the portal’s common
+<code>category_t</code>, <code>tag_t</code>, <code>entity_category_t</code>, and <code>entity_tag_t</code> infrastructure,
+similar to APIs, workflows, agents, and skills.</p>
+<ul>
+<li><code>entity_type</code> will be <code>'schema'</code>.</li>
+<li><code>entity_id</code> should be <code>schema_lineage_id::text</code>, not raw <code>schema_id</code>. This
+lets tags and categories apply to the logical schema lineage rather than a
+specific immutable version, while still separating global and tenant schemas
+that use the same <code>schema_id</code>.</li>
+<li><code>entity_category_t</code> connects schemas to categories.</li>
+<li><code>entity_tag_t</code> connects schemas to tags.</li>
+<li><code>schema-command</code> create/update payloads should use <code>categoryIds</code> and <code>tagIds</code>
+to match the existing taxonomy contract used by API, workflow, and skill
+forms.</li>
+<li>When <code>categoryIds</code> or <code>tagIds</code> are present on update, the command should
+replace that assignment set. An empty array clears assignments. An omitted
+field leaves the current assignment set unchanged.</li>
+</ul>
+<p>These mappings enable discovery across the portal using category and tag
+filters. Query paths must join through <code>category_t</code> and <code>tag_t</code>, enforce
+<code>active = TRUE</code> on mapping rows and taxonomy rows, and resolve global plus
+host-specific taxonomy labels for the selected host.</p>
+<h2 id="marketplace-schema-catalog"><a class="header" href="#marketplace-schema-catalog">Marketplace Schema Catalog</a></h2>
+<p>Add a Schema Catalog entry under Marketplace alongside API Catalog and Workflow
+Catalog. If the navigation uses short labels, the menu label can be <code>Schema</code>,
+but the page title should be <code>Schema Catalog</code>.</p>
+<p>Recommended route:</p>
+<pre><code class="language-text">/app/marketplace/schema
+</code></pre>
+<p>Visible records should include:</p>
+<ul>
+<li>published global schemas visible to the caller</li>
+<li>published tenant schemas for the selected host</li>
+<li>draft or retired schemas only when the caller owns or administers the schema</li>
+<li><code>json</code> schemas in the first release</li>
+</ul>
+<p>Common filters:</p>
+<ul>
+<li>search text for schema id, name, description, source, and owner metadata</li>
+<li>schema type, starting with <code>json</code></li>
+<li>schema status, such as draft, published, and retired</li>
+<li>categories from <code>getCategoryLabelByType(entityType = "schema")</code></li>
+<li>grouped tags from <code>getTagLabelByType(entityType = "schema")</code></li>
+<li>active or inactive state</li>
+<li>sort and card/list view options</li>
+</ul>
+<p>Catalog cards should show a compact contract summary:</p>
+<ul>
+<li>schema id, name, latest published version, and type</li>
+<li>spec version, source, status, and scope provenance</li>
+<li>schema alias and external URL when external access is enabled</li>
+<li>categories and grouped tags</li>
+<li>whether a schema body is available for preview</li>
+<li>whether a JSON Schema can be used for config-backed form generation</li>
+</ul>
+<p>Common actions:</p>
+<ul>
+<li>open a read-only schema details drawer</li>
+<li>preview JSON Schema source</li>
+<li>copy a schema reference, including <code>schemaId</code>, <code>schemaVersion</code>, and
+<code>schemaType</code></li>
+<li>copy an external schema URL when <code>schema_alias</code> and <code>external_visible</code> are set</li>
+<li>create a new version when the user has schema write permission</li>
+<li>edit draft metadata and taxonomy assignments when permitted</li>
+<li>open the schema administration page for table-based management</li>
+</ul>
+<h2 id="external-schema-access"><a class="header" href="#external-schema-access">External Schema Access</a></h2>
+<p>External applications should be able to retrieve published schemas through
+<code>portal-service/apps/portal-service</code>, similar to the existing <code>/r/data</code>
+reference-data endpoint. The recommended route is:</p>
+<pre><code class="language-text">GET /r/schema/{schemaAlias}
+</code></pre>
+<p>Query parameters:</p>
+<ul>
+<li><code>host</code> is optional. When present, the service first resolves a tenant schema
+for <code>host + schemaAlias</code>, then falls back to a global schema with the same
+alias. When omitted, only global schemas are considered.</li>
+<li><code>version</code> is optional. When omitted, the service returns the latest published
+active version for the resolved alias. When present, the service returns that
+exact published or retired active version if it is still externally visible.</li>
+<li><code>envelope</code> is optional. The default should return the schema body directly for
+external validators. <code>envelope=true</code> should return metadata plus
+<code>schemaBody</code>.</li>
+</ul>
+<p>Default response for <code>schema_type = "json"</code> should be the JSON Schema document
+itself with <code>Content-Type: application/schema+json</code> where possible. The response
+should include headers such as:</p>
+<pre><code class="language-text">X-Schema-Id: security-jwt-claim-mapping
+X-Schema-Alias: jwt-claim-mapping
+X-Schema-Version: 1.0.0
+X-Schema-Type: json
+X-Schema-Source: global|tenant
+</code></pre>
+<p>Envelope response:</p>
+<pre><code class="language-json">{
+  "schemaAlias": "jwt-claim-mapping",
+  "schemaId": "security-jwt-claim-mapping",
+  "schemaVersion": "1.0.0",
+  "schemaType": "json",
+  "specVersion": "2020-12",
+  "schemaStatus": "P",
+  "source": "global",
+  "schemaBody": { }
+}
+</code></pre>
+<p>The external route must only serve schemas that are:</p>
+<ul>
+<li>active</li>
+<li>published, or retired when an exact <code>version</code> is requested</li>
+<li><code>external_visible = TRUE</code></li>
+<li>visible in the requested host scope</li>
+</ul>
+<p>Draft schemas must never be returned by <code>/r/schema/{schemaAlias}</code>. A missing,
+inactive, private, or unauthorized alias should return <code>404</code> instead of leaking
+that the schema exists.</p>
+<p><code>portal-service</code> should add a lightweight schema lookup service and cache,
+separate from the <code>/r/data</code> reference cache. Suggested cache key:</p>
+<pre><code class="language-text">host + schemaAlias + version + envelope
+</code></pre>
+<p>The cache should be invalidated when a schema is published, retired, deleted, or
+when alias/external visibility changes.</p>
+<h2 id="config-property-binding"><a class="header" href="#config-property-binding">Config Property Binding</a></h2>
+<p>Config property validation needs an explicit link from a config property to a
+schema. The simplest useful binding is to add these nullable fields to the base
+config property definition:</p>
+<pre><code class="language-text">config_property_t.schema_id
+config_property_t.schema_version
+</code></pre>
+<p>This works because a config property has at most one schema for its value shape.
+The selected <code>hostId</code> is still used during lookup so tenants can override the
+global schema with the same <code>schemaId + schemaVersion</code> when needed.</p>
+<p>The binding should be optional:</p>
+<ul>
+<li>scalar properties can continue to use <code>valueType</code> validation only</li>
+<li><code>map</code> and <code>list</code> properties can attach JSON Schema for structured validation</li>
+<li><code>File</code> and <code>Cert</code> properties should keep using their existing generated forms
+until file-specific schema handling is designed</li>
+</ul>
+<p>The registry lookup for config validation should resolve in this order:</p>
+<ol>
+<li>tenant-specific schema for <code>hostId + schemaId + schemaVersion</code></li>
+<li>global schema for <code>schemaId + schemaVersion</code></li>
+<li>no schema found, which disables schema-backed validation for that row</li>
+</ol>
+<p>Only published schemas should be used to validate active config override
+commands.</p>
+<h2 id="api-changes"><a class="header" href="#api-changes">API Changes</a></h2>
+<p>The existing <code>schema-query</code> actions can remain, but config validation needs a
+tenant-aware versioned lookup. Add or evolve an action such as
+<code>getSchemaByRef</code>:</p>
+<pre><code class="language-json">{
+  "hostId": "host uuid",
+  "schemaId": "security-jwt-claim-mapping",
+  "schemaVersion": "1.0.0",
+  "active": true
+}
+</code></pre>
+<p>Response:</p>
+<pre><code class="language-json">{
+  "schemaId": "security-jwt-claim-mapping",
+  "schemaAlias": "jwt-claim-mapping",
+  "schemaVersion": "1.0.0",
+  "schemaType": "json",
+  "specVersion": "v2020-12",
+  "schemaStatus": "P",
+  "schemaBody": "{...}",
+  "source": "tenant"
+}
+</code></pre>
+<p><code>getSchema</code> should remain a metadata list query. It should not return
+<code>schemaBody</code> by default because schema bodies can be large and are usually not
+needed for table rendering.</p>
+<p><code>querySchemaCatalog</code> or an evolved <code>getSchema</code> should support server-side
+catalog filtering:</p>
+<pre><code class="language-json">{
+  "hostId": "host uuid",
+  "offset": 0,
+  "limit": 20,
+  "active": true,
+  "schemaTypes": ["json"],
+  "schemaStatus": "P",
+  "categoryIds": ["..."],
+  "tagIds": ["..."],
+  "tagMatch": "all",
+  "globalFilter": "jwt"
+}
+</code></pre>
+<p>Category filters should use OR semantics. Tag filters should support
+<code>tagMatch = "all"</code> and <code>tagMatch = "any"</code>. The response should return
+<code>categoryIds</code>, <code>categories</code>, <code>tagIds</code>, and <code>tags</code>, but omit <code>schemaBody</code> unless a
+details action explicitly asks for it. It should also return <code>schemaAlias</code>,
+<code>externalVisible</code>, and the derived external URL when alias-based access is
+enabled.</p>
+<p><code>schema-command</code> should validate <code>schemaBody</code> before create or update. It
+should reject invalid JSON Schema documents for <code>schema_type = "json"</code>. It
+should also enforce the status rules:</p>
+<ul>
+<li>draft schemas can be edited</li>
+<li>publishing validates the schema body and makes that version available</li>
+<li>published schema bodies are immutable</li>
+<li>retired schemas remain readable but cannot be newly bound to config
+properties</li>
+</ul>
+<p><code>schema-command</code> should also support <code>schemaAlias</code> and <code>externalVisible</code>.
+<code>schemaAlias</code> must be lower-case and URL-friendly, unique in the selected
+global/host scope, and stable across versions of the same lineage.
+<code>externalVisible</code> controls whether the alias can be served by
+<code>portal-service /r/schema/{schemaAlias}</code>. A draft schema may carry an alias, but
+the external route must not serve it until a published version exists.</p>
+<p>Schema delete should remain a soft delete or retire operation for schemas that
+may be referenced by config properties or historical overrides.</p>
+<p><code>schema-command</code> should support linking <code>categoryIds</code> and <code>tagIds</code> during schema
+creation and update. <code>schema-query</code> already has <code>getSchemaByCategoryId</code> and
+<code>getSchemaByTagId</code>; those actions should be hardened rather than reintroduced.
+They must honor <code>hostId</code>, <code>offset</code>, <code>limit</code>, <code>active</code>, active taxonomy mapping
+rows, active taxonomy labels, and active schema rows. They should return schema
+metadata for catalog browsing and filtering, not full schema bodies by default.</p>
+<h2 id="config-update-page-integration"><a class="header" href="#config-update-page-integration">Config Update Page Integration</a></h2>
+<p><code>getConfigUpdateProperties</code> should include schema metadata but not schema body:</p>
+<pre><code class="language-json">{
+  "configId": "config uuid",
+  "propertyId": "property uuid",
+  "propertyName": "jwt.claimMapping",
+  "valueType": "map",
+  "schemaId": "security-jwt-claim-mapping",
+  "schemaVersion": "1.0.0",
+  "schemaType": "json",
+  "schemaStatus": "P",
+  "hasSchema": true
+}
+</code></pre>
+<p>When the user opens a <code>map</code> or <code>list</code> editor, the frontend calls the
+tenant-aware schema lookup and caches the result by:</p>
+<pre><code class="language-text">hostId + schemaId + schemaVersion
+</code></pre>
+<p>The structured editor should always provide raw JSON and YAML tabs. The Form tab
+is enabled only when a published compatible schema is available. YAML input is
+normalized to compact JSON before it is sent to the existing config command API,
+because config property values are stored as strings.</p>
+<h2 id="validation-flow"><a class="header" href="#validation-flow">Validation Flow</a></h2>
+<p>Validation runs in two layers.</p>
+<p>Frontend validation:</p>
+<ul>
+<li>parse scalar values according to <code>valueType</code></li>
+<li>parse <code>list</code> values as JSON arrays</li>
+<li>parse <code>map</code> values as JSON objects</li>
+<li>run JSON Schema validation when a schema is available</li>
+<li>show validation errors next to the row or field that failed</li>
+<li>keep the draft dirty until the value is valid</li>
+</ul>
+<p>Backend validation:</p>
+<ul>
+<li>load the config property metadata by <code>configId + propertyId</code></li>
+<li>parse <code>propertyValue</code> according to <code>valueType</code></li>
+<li>resolve the published schema for <code>hostId + schemaId + schemaVersion</code></li>
+<li>validate the parsed value against the schema</li>
+<li>reject the command before event persistence when validation fails</li>
+</ul>
+<p>Backend validation is authoritative. Frontend validation improves usability but
+cannot replace command-side enforcement.</p>
+<p>Validation errors should include enough detail for row-level UI feedback:</p>
+<pre><code class="language-json">{
+  "code": "CONFIG_PROPERTY_SCHEMA_VALIDATION_FAILED",
+  "configId": "config uuid",
+  "propertyId": "property uuid",
+  "schemaId": "security-jwt-claim-mapping",
+  "schemaVersion": "1.0.0",
+  "errors": [
+    {
+      "path": "$.issuer",
+      "keyword": "required",
+      "message": "issuer is required"
+    }
+  ]
+}
+</code></pre>
+<h2 id="security-and-rbac-1"><a class="header" href="#security-and-rbac-1">Security And RBAC</a></h2>
+<p>Schema registry access should follow the same tenant ownership model used by
+other portal resources:</p>
+<ul>
+<li>global schemas are readable by authorized portal users</li>
+<li>tenant schemas are readable only within the selected host context</li>
+<li>schema create/update/delete requires write permission</li>
+<li>config command validation may read a schema internally even when the end user
+only has config update permission</li>
+<li>command authorization remains separate from schema validation</li>
+</ul>
+<p>The frontend should not expose tenant-specific schema bodies from another host.
+The backend lookup must enforce this even if the UI sends a forged <code>hostId</code>.</p>
+<p>External schema access has a stricter rule: <code>/r/schema/{schemaAlias}</code> should
+only return active schemas that are explicitly marked <code>external_visible = TRUE</code>.
+It should return <code>404</code> for missing, private, draft, inactive, or unauthorized
+aliases so external callers cannot enumerate private schema names.</p>
+<h2 id="testing-1"><a class="header" href="#testing-1">Testing</a></h2>
+<p>The first hardening pass should include tests for:</p>
+<ul>
+<li>create draft schema</li>
+<li>reject invalid <code>schemaBody</code></li>
+<li>publish schema</li>
+<li>reject edits to published schema body</li>
+<li>retire schema</li>
+<li>tenant-specific lookup</li>
+<li>global fallback lookup</li>
+<li>schema metadata list excluding body</li>
+<li>schema body lookup by <code>hostId + schemaId + schemaVersion</code></li>
+<li>schema alias validation and global/tenant uniqueness</li>
+<li>external visibility enforcement</li>
+<li><code>/r/schema/{schemaAlias}</code> latest published lookup</li>
+<li><code>/r/schema/{schemaAlias}?version=...</code> exact version lookup</li>
+<li><code>/r/schema/{schemaAlias}</code> host-specific lookup with global fallback</li>
+<li><code>/r/schema/{schemaAlias}</code> direct body and envelope response shapes</li>
+<li>create/update schema with <code>categoryIds</code> and <code>tagIds</code></li>
+<li>replace and clear schema taxonomy assignments on update</li>
+<li>schema category and tag catalog filters, including active mapping rows</li>
+<li>tenant/global taxonomy collision prevention through <code>schema_lineage_id</code></li>
+<li>JSON Schema <code>schema_type</code> validation</li>
+<li>Schema Catalog visibility, filters, and body-lazy result shape</li>
+<li>config property binding</li>
+<li>valid map/list config property override</li>
+<li>invalid map/list config property override</li>
+<li>scalar validation still works when no schema is attached</li>
+<li>version mismatch and <code>getFreshSchema</code></li>
+</ul>
+<h2 id="implementation-order"><a class="header" href="#implementation-order">Implementation Order</a></h2>
+<p>Implement the schema registry foundation before enabling schema-backed
+validation in the config update page. The registry work does not need to block
+the entire config update page, but it must block the Form tab and backend schema
+enforcement.</p>
+<p>Recommended order:</p>
+<ol>
+<li>Harden schema registry data model, lookup, and command validation.</li>
+<li>Add schema alias and external visibility support.</li>
+<li>Add taxonomy linkage through <code>categoryIds</code>, <code>tagIds</code>, and
+<code>schema_lineage_id</code>.</li>
+<li>Add the Marketplace Schema Catalog entry and body-lazy catalog query.</li>
+<li>Add <code>/r/schema/{schemaAlias}</code> in <code>portal-service/apps/portal-service</code>.</li>
+<li>Add config-property-to-schema binding.</li>
+<li>Add backend config property value validation in config command handlers.</li>
+<li>Extend <code>getConfigUpdateProperties</code> to return schema metadata.</li>
+<li>Add lazy schema lookup and typed Form tab in <code>portal-view</code>.</li>
+<li>Add end-to-end tests for schema-backed config updates and catalog discovery.</li>
+</ol>
+<p>The config update page can still ship a useful MVP with scalar validation and
+raw JSON/YAML editors while the registry is being hardened. Once the registry
+foundation is complete, the same page can enable schema-backed forms and command
+validation without changing the operator workflow.</p>
+<h2 id="recommendation-9"><a class="header" href="#recommendation-9">Recommendation</a></h2>
+<p>Use the schema registry as the authoritative source for structured config
+property schemas. Do not implement a separate local schema convention in
+<code>portal-view</code>. Stabilize the registry enough for versioned, tenant-aware,
+published-schema lookup, then use it to validate <code>map</code> and <code>list</code> config
+property values in both the frontend editor and the backend command path.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-controller"><a class="header" href="#light-controller">Light Controller</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
@@ -8783,7 +9802,7 @@ without exposing email addresses to each other. The sender should only need a
 recipient user id or a display-safe user label. The backend can resolve email
 internally when it needs to send an external notification, but email must not be
 part of the user-facing message contract.</p>
-<h2 id="current-state-4"><a class="header" href="#current-state-4">Current State</a></h2>
+<h2 id="current-state-5"><a class="header" href="#current-state-5">Current State</a></h2>
 <p>The current codebase already has a partial private-message skeleton:</p>
 <ul>
 <li><code>user-command</code> exposes <code>lightapi.net/user/sendMessage/0.1.0</code>.</li>
@@ -8812,7 +9831,7 @@ model conversations, read state, participant visibility, or per-user delete.</li
 messages page should load its own data from the query API.</li>
 <li>The existing private-message tests are disabled stubs.</li>
 </ul>
-<h2 id="goals-10"><a class="header" href="#goals-10">Goals</a></h2>
+<h2 id="goals-12"><a class="header" href="#goals-12">Goals</a></h2>
 <ul>
 <li>Let one logged-in user send a message to another portal user without knowing
 or seeing the recipient email.</li>
@@ -8827,7 +9846,7 @@ recipient email internally.</li>
 <li>Provide a path from the existing <code>message_t</code> skeleton to a conversation-based
 model without breaking existing UI routes immediately.</li>
 </ul>
-<h2 id="non-goals-13"><a class="header" href="#non-goals-13">Non-Goals</a></h2>
+<h2 id="non-goals-15"><a class="header" href="#non-goals-15">Non-Goals</a></h2>
 <ul>
 <li>Do not build group chat in the first phase.</li>
 <li>Do not expose email addresses in message APIs, events, UI state, or task
@@ -9113,7 +10132,7 @@ and hide/delete APIs.</li>
 purges only messages deleted by all participants after the retention window.</li>
 <li>Add optional push delivery later if polling becomes insufficient.</li>
 </ul>
-<h2 id="testing-1"><a class="header" href="#testing-1">Testing</a></h2>
+<h2 id="testing-2"><a class="header" href="#testing-2">Testing</a></h2>
 <p>Backend tests should cover:</p>
 <ul>
 <li>Sender is derived from token and cannot be spoofed.</li>
@@ -11084,7 +12103,7 @@ should not be forced to match <code>sid</code> until the product-level authoriza
 is explicitly designed.</p>
 <p>The same exception does not apply to controller registry registration because
 <code>service/register</code> always carries a requested <code>serviceId</code>.</p>
-<h2 id="goals-11"><a class="header" href="#goals-11">Goals</a></h2>
+<h2 id="goals-13"><a class="header" href="#goals-13">Goals</a></h2>
 <ul>
 <li>Prevent one service token from downloading another service’s config, certs,
 or files.</li>
@@ -11130,7 +12149,7 @@ helper.</p>
 <p>The focused implementation tests cover missing and mismatched <code>host</code>, missing
 and mismatched <code>sid</code>, missing and mismatched <code>env</code> when <code>envTag</code> is requested,
 blank values, whitespace trimming, and case-sensitive identifier comparison.</p>
-<h2 id="non-goals-14"><a class="header" href="#non-goals-14">Non-Goals</a></h2>
+<h2 id="non-goals-16"><a class="header" href="#non-goals-16">Non-Goals</a></h2>
 <ul>
 <li>Do not replace JWT verification middleware.</li>
 <li>Do not redesign OAuth token issuance.</li>
@@ -12888,7 +13907,7 @@ private void markOffsetsAsProcessed(List&lt;ConsumerRecord&lt;String, Event&gt;&
 <hr>
 <h3 id="option-1-populating-the-event-store-db-table-before-publishing-to-kafka-transactional-outbox-pattern"><a class="header" href="#option-1-populating-the-event-store-db-table-before-publishing-to-kafka-transactional-outbox-pattern">Option 1: Populating the Event Store (DB Table) <strong>Before</strong> Publishing to Kafka (Transactional Outbox Pattern)</a></h3>
 <p>This is generally the <strong>most robust and recommended approach</strong> for ensuring <strong>at-least-once (often effectively once) persistence</strong> of your events. It guarantees that an event is durably stored in your Event Store <em>before</em> it is ever considered for publishing to Kafka.</p>
-<h4 id="how-it-works-1"><a class="header" href="#how-it-works-1">How it works:</a></h4>
+<h4 id="how-it-works"><a class="header" href="#how-it-works">How it works:</a></h4>
 <ol>
 <li>
 <p><strong>Command Processing:</strong></p>
@@ -12922,7 +13941,7 @@ private void markOffsetsAsProcessed(List&lt;ConsumerRecord&lt;String, Event&gt;&
 <hr>
 <h3 id="option-2-populating-the-event-store-db-table-after-consuming-from-kafka"><a class="header" href="#option-2-populating-the-event-store-db-table-after-consuming-from-kafka">Option 2: Populating the Event Store (DB Table) <strong>After</strong> Consuming from Kafka</a></h3>
 <p>This approach involves two stages of atomicity: first, the producer guarantees delivery to Kafka, and then the consumer guarantees persistence from Kafka to your Event Store.</p>
-<h4 id="how-it-works-1-1"><a class="header" href="#how-it-works-1-1">How it works:</a></h4>
+<h4 id="how-it-works-1"><a class="header" href="#how-it-works-1">How it works:</a></h4>
 <ol>
 <li>
 <p><strong>Command Processing &amp; Kafka Publishing:</strong></p>
@@ -14856,7 +15875,7 @@ function MyComponent() {
 <li>Add a timeout to stop polling after ~10-15 seconds to prevent infinite loops.</li>
 </ol>
 <p>As you can see, this is much more complicated than the optimistic update.</p>
-<h3 id="recommendation-8"><a class="header" href="#recommendation-8">Recommendation</a></h3>
+<h3 id="recommendation-10"><a class="header" href="#recommendation-10">Recommendation</a></h3>
 <p><strong>Adopt the Optimistic UI pattern (Option 1).</strong> It provides the best user experience, is resilient to timing issues caused by eventual consistency, and the implementation is clean and modern. The code provided for the optimistic <code>handleDelete</code> is a drop-in replacement that will solve your problem robustly.</p>
 <h3 id="should-you-poll-peroidically-to-sync-other-users-changes"><a class="header" href="#should-you-poll-peroidically-to-sync-other-users-changes">Should you poll peroidically to sync other users’ changes</a></h3>
 <p>The short answer is: <strong>No, you should still avoid client-side polling for this specific use case.</strong> It’s generally the wrong tool for this problem and creates more issues than it solves. The Optimistic UI approach is still preferable, but it needs to be combined with a robust backend and potentially other real-time technologies for a complete solution.</p>
@@ -15795,6 +16814,417 @@ public class Cli {
 <ul>
 <li>May take some time to create and maintain the event file for every release.</li>
 </ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="product-version-config-mapping-automation"><a class="header" href="#product-version-config-mapping-automation">Product Version Config Mapping Automation</a></h1>
+<p>The <code>portal-view</code> config update page depends on product-version applicability
+metadata before it can show configurable properties for instance, API, app, and
+app-api scopes. The metadata is stored in two product release mapping tables:</p>
+<ul>
+<li><code>product_version_config_t</code></li>
+<li><code>product_version_config_property_t</code></li>
+</ul>
+<p>The current Rust bootstrap data is generated into import files:</p>
+<ul>
+<li><code>event-importer/events/local/09-rust-product-version-configs.json</code></li>
+<li><code>event-importer/events/local/08-rust-product-version-config-properties.json</code></li>
+</ul>
+<p>The same import-file approach can be used for Java products, but it does not
+scale well if every Java or Rust release requires a hand-maintained set of
+mapping events across all portal instances. This design proposes a release
+mapping automation model that keeps the existing event-sourced write path and
+removes the need to manually recreate mapping files for every product release.</p>
+<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
+<p>Product versions are released often. Each new release can introduce a new
+<code>productVersionId</code>, and the config update page only knows which configs and
+properties are applicable when mappings exist for that exact product version.</p>
+<p>Without automation:</p>
+<ul>
+<li>new releases have empty config update views until mappings are imported</li>
+<li>each portal instance must be updated separately</li>
+<li>Java and Rust products need parallel manual processes</li>
+<li>copying JSON import files by hand can drift from the actual product config
+schema</li>
+<li>support teams cannot safely tell whether an empty page means “no configs” or
+“missing mappings”</li>
+</ul>
+<p>The automation must support two release modes:</p>
+<ul>
+<li>release all Java products</li>
+<li>release all Rust products</li>
+</ul>
+<p>It must also support applying the mappings to every active portal host or
+tenant that owns product versions.</p>
+<h2 id="current-model-1"><a class="header" href="#current-model-1">Current Model</a></h2>
+<p><code>product_version_config_t</code> maps a product version to a config:</p>
+<pre><code class="language-text">host_id + product_version_id + config_id
+</code></pre>
+<p><code>product_version_config_property_t</code> maps a product version to a config
+property:</p>
+<pre><code class="language-text">host_id + product_version_id + property_id
+</code></pre>
+<p>The event types already exist:</p>
+<ul>
+<li><code>ProductVersionConfigCreatedEvent</code></li>
+<li><code>ProductVersionConfigDeletedEvent</code></li>
+<li><code>ProductVersionConfigPropertyCreatedEvent</code></li>
+<li><code>ProductVersionConfigPropertyDeletedEvent</code></li>
+</ul>
+<p>The command APIs already exist:</p>
+<ul>
+<li><code>product/createProductVersionConfig/0.1.0</code></li>
+<li><code>product/deleteProductVersionConfig/0.1.0</code></li>
+<li><code>product/createProductVersionConfigProperty/0.1.0</code></li>
+<li><code>product/deleteProductVersionConfigProperty/0.1.0</code></li>
+</ul>
+<p>The projection handlers insert into the mapping tables through the event
+processor. The preferred automation path is therefore event-based, not direct
+SQL.</p>
+<h2 id="goals-14"><a class="header" href="#goals-14">Goals</a></h2>
+<ul>
+<li>Auto-populate config mappings for every new Java or Rust product release.</li>
+<li>Preserve event replay, auditability, and projection rebuild behavior.</li>
+<li>Support all portal hosts with one release operation.</li>
+<li>Avoid hard-coded <code>productVersionId</code> values in reusable release manifests.</li>
+<li>Support dry-run reporting before events are emitted.</li>
+<li>Keep manual override and cleanup possible through existing mapping commands.</li>
+<li>Make generated events idempotent enough for safe retry.</li>
+<li>Detect missing config and property definitions before a release appears
+complete.</li>
+</ul>
+<h2 id="non-goals-17"><a class="header" href="#non-goals-17">Non-Goals</a></h2>
+<ul>
+<li>Do not change the config override hierarchy.</li>
+<li>Do not write directly to <code>product_version_config_t</code> or
+<code>product_version_config_property_t</code>.</li>
+<li>Do not make the config update page infer product applicability by scanning
+all config properties at runtime.</li>
+<li>Do not require schema-registry completion before mappings can be automated.</li>
+<li>Do not force all organizations to use the same product mappings if they need
+host-specific customization.</li>
+</ul>
+<h2 id="recommended-approach"><a class="header" href="#recommended-approach">Recommended Approach</a></h2>
+<p>Use a release mapping manifest as the source of truth, then generate normal
+product mapping events from that manifest.</p>
+<p>The manifest is portable. It uses logical product, config, and property names,
+not database-only IDs. The generator resolves IDs against each target portal
+host before creating events.</p>
+<pre><code class="language-json">{
+  "runtimeFamily": "rust",
+  "releaseSet": "rust-2026-06",
+  "products": [
+    {
+      "productId": "gtw",
+      "productVersion": "1.0.1",
+      "light4jVersion": "2.3.4",
+      "inheritFrom": {
+        "productVersion": "1.0.0"
+      },
+      "configs": [
+        {
+          "configName": "client",
+          "properties": [
+            "tls",
+            "timeout",
+            "proxyHost"
+          ]
+        }
+      ]
+    }
+  ]
+}
+</code></pre>
+<p>For Java products, the same structure is used with
+<code>"runtimeFamily": "java"</code>. If a release set upgrades every Java product, the
+manifest contains every product and version in that release set.</p>
+<h2 id="generator-responsibilities"><a class="header" href="#generator-responsibilities">Generator Responsibilities</a></h2>
+<p>The generator takes:</p>
+<ul>
+<li><code>hostId</code> or <code>allHosts=true</code></li>
+<li>runtime family: <code>java</code>, <code>rust</code>, or both</li>
+<li>release set or manifest path</li>
+<li>dry-run flag</li>
+</ul>
+<p>For each host and product entry, it resolves:</p>
+<ul>
+<li><code>productVersionId</code> from <code>hostId + productId + productVersion</code></li>
+<li><code>configId</code> from <code>configName</code></li>
+<li><code>propertyId</code> from <code>configName + propertyName</code></li>
+</ul>
+<p>Then it emits:</p>
+<ul>
+<li>one <code>ProductVersionConfigCreatedEvent</code> for each config</li>
+<li>one <code>ProductVersionConfigPropertyCreatedEvent</code> for each property</li>
+</ul>
+<p>If <code>dryRun=true</code>, no events are emitted. The response returns a report:</p>
+<pre><code class="language-json">{
+  "hostId": "01964b05-552a-7c4b-9184-6857e7f3dc5f",
+  "releaseSet": "rust-2026-06",
+  "products": [
+    {
+      "productId": "gtw",
+      "productVersion": "1.0.1",
+      "productVersionId": "019f...",
+      "configsToCreate": 15,
+      "propertiesToCreate": 183,
+      "alreadyMappedConfigs": 0,
+      "alreadyMappedProperties": 0,
+      "missingConfigs": [],
+      "missingProperties": []
+    }
+  ]
+}
+</code></pre>
+<p>Dry run must fail the release when any required product version, config, or
+property cannot be resolved.</p>
+<h2 id="inheritance-from-previous-version"><a class="header" href="#inheritance-from-previous-version">Inheritance From Previous Version</a></h2>
+<p><code>inheritFrom</code> is useful for frequent releases, but it should not be the only
+source of truth.</p>
+<p>Recommended rules:</p>
+<ul>
+<li>If a manifest lists explicit configs and properties, use the manifest.</li>
+<li>If <code>inheritFrom</code> is set and the manifest omits <code>configs</code>, copy mappings from
+the source product version.</li>
+<li>If both are set, start from the inherited mappings and apply explicit
+additions/removals from the manifest.</li>
+<li>If the new product version has <code>breakConfig=true</code>, require an explicit
+manifest. Do not silently inherit.</li>
+<li>If <code>breakConfig=false</code>, inheritance is allowed, but dry run should still
+compare the inherited mappings against any known generated config metadata.</li>
+</ul>
+<p>Example:</p>
+<pre><code class="language-json">{
+  "productId": "api",
+  "productVersion": "1.0.2",
+  "inheritFrom": {
+    "productVersion": "1.0.1"
+  },
+  "remove": [
+    {
+      "configName": "old-config"
+    }
+  ],
+  "add": [
+    {
+      "configName": "new-config",
+      "properties": ["enabled", "endpoint"]
+    }
+  ]
+}
+</code></pre>
+<p>This gives release automation a low-maintenance path for patch releases while
+still allowing breaking releases to declare exact applicability.</p>
+<h2 id="event-idempotency"><a class="header" href="#event-idempotency">Event Idempotency</a></h2>
+<p>The generator should produce deterministic event IDs so the same release
+operation can be retried safely.</p>
+<p>Use a stable namespace string such as:</p>
+<pre><code class="language-text">hostId|releaseSet|productVersionId|configId
+hostId|releaseSet|productVersionId|propertyId
+</code></pre>
+<p>The aggregate subject should match the mapping aggregate identity used by the
+event model. The projection table keys include <code>hostId</code>, <code>productVersionId</code>,
+and either <code>configId</code> or <code>propertyId</code>, so event generation must include those
+values in <code>data</code> even when an enricher can resolve them.</p>
+<p>Direct IDs are preferred in generated events:</p>
+<pre><code class="language-json">{
+  "type": "ProductVersionConfigCreatedEvent",
+  "aggregatetype": "ProductVersionConfig",
+  "data": {
+    "hostId": "01964b05-552a-7c4b-9184-6857e7f3dc5f",
+    "productId": "gtw",
+    "productVersion": "1.0.1",
+    "productVersionId": "019f...",
+    "configName": "client",
+    "configId": "0196...",
+    "aggregateVersion": 0,
+    "newAggregateVersion": 1
+  }
+}
+</code></pre>
+<p>The human-readable names are still useful for audit and diagnostics, but the
+projection should not depend on name resolution after the generator has already
+resolved the IDs.</p>
+<h2 id="command-api-option"><a class="header" href="#command-api-option">Command API Option</a></h2>
+<p>Add a new product command:</p>
+<pre><code class="language-text">product/syncProductVersionConfigMappings/0.1.0
+</code></pre>
+<p>Request:</p>
+<pre><code class="language-json">{
+  "hostId": "01964b05-552a-7c4b-9184-6857e7f3dc5f",
+  "runtimeFamily": "rust",
+  "releaseSet": "rust-2026-06",
+  "manifest": {},
+  "allHosts": false,
+  "dryRun": true,
+  "mode": "manifest"
+}
+</code></pre>
+<p>Modes:</p>
+<ul>
+<li><code>manifest</code>: resolve mappings from a supplied or registered manifest</li>
+<li><code>inherit</code>: copy mappings from a source product version</li>
+<li><code>backfill</code>: create missing mappings for existing product versions</li>
+<li><code>verify</code>: report missing mappings without creating events</li>
+</ul>
+<p>The command handler should not directly update projection tables. It should
+emit the same child events that the existing create mapping commands emit.</p>
+<p>For large all-host release sets, the command can either:</p>
+<ul>
+<li>emit all mapping events in one transaction per host, or</li>
+<li>enqueue one mapping job per host and product</li>
+</ul>
+<p>The second option is safer for large releases because a single missing property
+does not block unrelated hosts and products.</p>
+<h2 id="importer-option"><a class="header" href="#importer-option">Importer Option</a></h2>
+<p>The event importer should support a generator mode:</p>
+<pre><code class="language-bash">event-importer generate-pv-config-mappings \
+  --manifest events/releases/rust-2026-06.json \
+  --host 01964b05-552a-7c4b-9184-6857e7f3dc5f \
+  --dry-run
+</code></pre>
+<p>For deployment bundles, the generator can write normal JSON import files:</p>
+<pre><code class="language-text">events/generated/08-product-version-config-properties-rust-2026-06.json
+events/generated/09-product-version-configs-rust-2026-06.json
+</code></pre>
+<p>This is the fastest migration path because it extends the current Rust import
+process. It also lets teams review the generated events before importing them.</p>
+<p>The importer path is best for bootstrap and local environments. The command API
+path is better for live portal operations where the release needs to update all
+hosts without copying files into each deployment.</p>
+<h2 id="release-flow"><a class="header" href="#release-flow">Release Flow</a></h2>
+<p>Recommended release pipeline:</p>
+<ol>
+<li>Generate or update config/property definitions for Java or Rust products.</li>
+<li>Create the new <code>ProductVersionCreatedEvent</code> rows for every product in the
+release set.</li>
+<li>Run mapping dry-run for all target hosts.</li>
+<li>Fail the release if dry-run reports unresolved configs or properties.</li>
+<li>Emit mapping events.</li>
+<li>Verify <code>product_version_config_t</code> and
+<code>product_version_config_property_t</code> counts for each product version.</li>
+<li>Smoke-test <code>getConfigUpdateProperties</code> for at least one instance, API, app,
+and app-api target for the release.</li>
+</ol>
+<p>For patch releases where config does not change, the pipeline can use
+<code>inheritFrom</code> and verify that the new version receives the same mapping counts
+as the previous version.</p>
+<p>For breaking config releases, the pipeline should require an explicit manifest
+and should report added and removed configs/properties in the release note.</p>
+<h2 id="backfill-existing-product-versions"><a class="header" href="#backfill-existing-product-versions">Backfill Existing Product Versions</a></h2>
+<p>Backfill is needed for product versions that already exist but have missing
+mappings.</p>
+<p>Backfill should support:</p>
+<ul>
+<li>one product version</li>
+<li>all versions of one product</li>
+<li>all products in one runtime family</li>
+<li>all active product versions for all hosts</li>
+</ul>
+<p>Backfill must be conservative:</p>
+<ul>
+<li>create only missing active mappings</li>
+<li>never delete existing mappings unless the request explicitly uses a removal
+manifest</li>
+<li>report conflicting or inactive config/property definitions</li>
+<li>keep generated events deterministic</li>
+</ul>
+<p>Backfill output should include counts by host, product, and product version so
+operators can confirm why a config update page was empty before the fix.</p>
+<h2 id="host-and-tenant-handling"><a class="header" href="#host-and-tenant-handling">Host and Tenant Handling</a></h2>
+<p>The manifest is host-neutral. The generator resolves IDs per host.</p>
+<p>For <code>allHosts=true</code>, the generator should query active hosts that have matching
+product versions and generate mappings per host. If a host does not have the
+target product version, it should be reported as skipped, not failed, unless
+the release request marks that product version as required for every host.</p>
+<p>Host-specific overrides are allowed through optional manifest sections:</p>
+<pre><code class="language-json">{
+  "hostOverrides": {
+    "01964b05-552a-7c4b-9184-6857e7f3dc5f": {
+      "products": [
+        {
+          "productId": "gtw",
+          "remove": [
+            { "configName": "experimental" }
+          ]
+        }
+      ]
+    }
+  }
+}
+</code></pre>
+<p>The default path should be shared manifests. Host overrides should be rare and
+visible in dry-run output.</p>
+<h2 id="observability-1"><a class="header" href="#observability-1">Observability</a></h2>
+<p>The generator or command should publish a structured summary:</p>
+<ul>
+<li>release set</li>
+<li>runtime family</li>
+<li>host count</li>
+<li>product count</li>
+<li>generated config mapping events</li>
+<li>generated property mapping events</li>
+<li>skipped existing mappings</li>
+<li>missing product versions</li>
+<li>missing configs</li>
+<li>missing properties</li>
+<li>failed hosts</li>
+</ul>
+<p>The config update page empty-state message should reference this operational
+check: if an instance has no applicable config properties, verify the product
+version has config and config property mappings.</p>
+<h2 id="phased-implementation-2"><a class="header" href="#phased-implementation-2">Phased Implementation</a></h2>
+<h3 id="phase-1-manifest-generator-for-importer"><a class="header" href="#phase-1-manifest-generator-for-importer">Phase 1: Manifest Generator for Importer</a></h3>
+<ul>
+<li>Add Java and Rust mapping manifests.</li>
+<li>Generate JSON import files from host-neutral manifests.</li>
+<li>Use direct IDs in generated events.</li>
+<li>Add dry-run validation and count reports.</li>
+<li>Use this path to backfill current local/dev deployments.</li>
+</ul>
+<h3 id="phase-2-sync-command"><a class="header" href="#phase-2-sync-command">Phase 2: Sync Command</a></h3>
+<ul>
+<li>Add <code>syncProductVersionConfigMappings</code>.</li>
+<li>Support <code>dryRun</code>, <code>manifest</code>, <code>inherit</code>, and <code>verify</code>.</li>
+<li>Emit normal mapping events instead of direct SQL.</li>
+<li>Add RBAC so only product/release admins can run it.</li>
+</ul>
+<h3 id="phase-3-release-pipeline-integration"><a class="header" href="#phase-3-release-pipeline-integration">Phase 3: Release Pipeline Integration</a></h3>
+<ul>
+<li>Call dry-run during Java and Rust release workflows.</li>
+<li>Fail release on unresolved mappings.</li>
+<li>Emit mapping events after product versions are created.</li>
+<li>Record mapping summary in release artifacts.</li>
+</ul>
+<h3 id="phase-4-runtime-drift-detection"><a class="header" href="#phase-4-runtime-drift-detection">Phase 4: Runtime Drift Detection</a></h3>
+<ul>
+<li>Add scheduled or on-demand verification.</li>
+<li>Report active product versions with zero config mappings.</li>
+<li>Report config properties referenced by manifests but missing from
+<code>config_property_t</code>.</li>
+<li>Add a portal-view diagnostics link from the config update page.</li>
+</ul>
+<h2 id="open-questions-4"><a class="header" href="#open-questions-4">Open Questions</a></h2>
+<ul>
+<li>Should release manifests live in <code>event-importer</code>, each product repository,
+or a dedicated release metadata repository?</li>
+<li>Should <code>ProductVersionCreatedEvent</code> optionally carry a <code>configMappingPolicy</code>
+field, or should mapping remain a separate release step?</li>
+<li>Do we need an organization-level policy to prevent inheritance for selected
+regulated products?</li>
+<li>Should removal manifests emit delete events immediately, or only warn until a
+release admin confirms?</li>
+</ul>
+<h2 id="recommendation-11"><a class="header" href="#recommendation-11">Recommendation</a></h2>
+<p>Implement Phase 1 first for immediate Java and Rust parity, then add the sync
+command for live all-host operations.</p>
+<p>The long-term target is release-time automation:</p>
+<ul>
+<li>product release creates product versions</li>
+<li>mapping dry-run validates every host</li>
+<li>mapping events are emitted or imported</li>
+<li>config update page works for the new release without manual follow-up</li>
+</ul>
+<p>This keeps the config update page simple and keeps product applicability in the
+event-sourced product release model where it belongs.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="optimistic-concurrency-control-occ"><a class="header" href="#optimistic-concurrency-control-occ">Optimistic Concurrency Control (OCC)</a></h1>
 <p>In the previous documento <a href="#optimistic-vs-pessimistic-ui">optimistic-pessimistic-ui</a>, we have decided to leverage the OCC to prevent multiple users update the same aggregate at the same time from different browser sessions.</p>
@@ -17057,7 +18487,7 @@ waitPeriod: 1000  # ms to wait between polls when no records
 <li><strong>Deployment Trigger:</strong> Automatically created when a deployment occurs (to capture the state being deployed).</li>
 <li><strong>User Trigger:</strong> Manually created by a user via the UI (e.g., to save a milestone).</li>
 </ol>
-<h2 id="data-model"><a class="header" href="#data-model">Data Model</a></h2>
+<h2 id="data-model-1"><a class="header" href="#data-model-1">Data Model</a></h2>
 <h3 id="snapshot-header-config_snapshot_t"><a class="header" href="#snapshot-header-config_snapshot_t">Snapshot Header (<code>config_snapshot_t</code>)</a></h3>
 <p>Captures metadata about the snapshot.</p>
 <ul>
@@ -17256,7 +18686,7 @@ Location: https://portal.lightapi.net/authorization?code=auth_code_abc&amp;state
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="auth-client-secret-regeneration"><a class="header" href="#auth-client-secret-regeneration">Auth Client Secret Regeneration</a></h1>
-<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
+<h2 id="problem-12"><a class="header" href="#problem-12">Problem</a></h2>
 <p>An OAuth auth client receives a <code>client_id</code> and <code>client_secret</code> when it is
 created. The clear text <code>client_secret</code> is intentionally a one-time value. The
 database projection stores only a verifier value in <code>auth_client_t.client_secret</code>
@@ -17265,7 +18695,7 @@ so the clear secret cannot be recovered later.</p>
 one-time response, close the page, or forget to copy the secret into their
 deployment system. Once that happens, the portal needs a way to issue a new
 secret without weakening the storage model.</p>
-<h2 id="current-state-5"><a class="header" href="#current-state-5">Current State</a></h2>
+<h2 id="current-state-6"><a class="header" href="#current-state-6">Current State</a></h2>
 <p>The current create flow in <code>oauth-command</code> generates both values in
 <code>CreateClient</code>:</p>
 <ul>
@@ -17668,7 +19098,7 @@ The Importer processes the list in order:</p>
 <li><strong>Pros:</strong> 100% certainty that the data is valid according to the database schema.</li>
 <li><strong>Cons:</strong> Slightly heavier key locks, but acceptable for admin operations.</li>
 </ul>
-<h3 id="recommendation-9"><a class="header" href="#recommendation-9">Recommendation</a></h3>
+<h3 id="recommendation-12"><a class="header" href="#recommendation-12">Recommendation</a></h3>
 <p>Use <strong>Option 1 (App Simulation)</strong> for the UI preview to show the user “what will happen”.
 Use <strong>Option 2 (Transaction Rollback)</strong> immediately when the user clicks “Promote” (as a pre-flight check) or as an explicit “Verify” button to ensure deep integrity.</p>
 <h2 id="sibling-deletion-handling-orphaned-items"><a class="header" href="#sibling-deletion-handling-orphaned-items">Sibling Deletion: Handling Orphaned Items</a></h2>
@@ -18081,7 +19511,7 @@ Kubernetes cluster from the Instance Admin page.</p>
 <p>The goal is to provide a production-like deployment path for small businesses
 and enterprise tenants without requiring Light Portal to have direct network
 access to every customer cluster.</p>
-<h2 id="problem-12"><a class="header" href="#problem-12">Problem</a></h2>
+<h2 id="problem-13"><a class="header" href="#problem-13">Problem</a></h2>
 <p>Each API or application repository can contain a <code>k8s/</code> folder with Kubernetes
 deployment templates. The templates contain variables in the following format:</p>
 <pre><code class="language-text">${key:defaultValue}
@@ -18602,7 +20032,7 @@ later.</li>
 <li>Rollback is a redeploy of a previous Light Portal deployment snapshot, not a
 native Kubernetes rollout undo.</li>
 </ul>
-<h2 id="open-questions-4"><a class="header" href="#open-questions-4">Open Questions</a></h2>
+<h2 id="open-questions-5"><a class="header" href="#open-questions-5">Open Questions</a></h2>
 <ul>
 <li>Which object storage providers should enterprise artifact mode support first?</li>
 <li>What retention policies should be available for encrypted rendered manifest
@@ -18611,7 +20041,7 @@ artifacts?</li>
 long-running deployment progress events?</li>
 <li>Should rollback require the same environment-level approval policy as deploy?</li>
 </ul>
-<h2 id="recommendation-10"><a class="header" href="#recommendation-10">Recommendation</a></h2>
+<h2 id="recommendation-13"><a class="header" href="#recommendation-13">Recommendation</a></h2>
 <p>Use an in-cluster Rust deployer as the default production model. The deployer
 should connect outbound to Light Controller and execute deployment commands via
 MCP-style tools. Direct deployer URL mode is useful for MicroK8s and managed
@@ -18623,7 +20053,7 @@ deployment intent and history, while the deployer owns safe cluster-local
 execution.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-oauth-and-oauth-kafka-agentcore-oidc-discovery"><a class="header" href="#light-oauth-and-oauth-kafka-agentcore-oidc-discovery">Light OAuth and OAuth Kafka AgentCore OIDC Discovery</a></h1>
-<h2 id="problem-13"><a class="header" href="#problem-13">Problem</a></h2>
+<h2 id="problem-14"><a class="header" href="#problem-14">Problem</a></h2>
 <p>Issue https://github.com/lightapi/portal-service/issues/44 asks whether
 <code>portal-service/apps/light-oauth</code> can support AWS AgentCore JWT inbound
 authorization.</p>
@@ -18753,7 +20183,7 @@ the provider <code>jwk</code> from <code>auth_provider_t</code>. The implementat
 that the JWT header <code>kid</code> is present in the returned JWKS for the same provider.
 That guarantee matters more once external AWS services cache the discovery and
 JWKS responses.</p>
-<h2 id="goals-12"><a class="header" href="#goals-12">Goals</a></h2>
+<h2 id="goals-15"><a class="header" href="#goals-15">Goals</a></h2>
 <ul>
 <li>Let AWS AgentCore use Rust <code>light-oauth</code> or Java <code>oauth-kafka</code> as a JWT
 bearer token issuer.</li>
@@ -18765,7 +20195,7 @@ claims working.</li>
 <li>Keep issuer, audience, and discovery URLs deterministic across environments.</li>
 <li>Add tests that prove discovery, JWKS, and signed token claims line up.</li>
 </ul>
-<h2 id="non-goals-15"><a class="header" href="#non-goals-15">Non-Goals</a></h2>
+<h2 id="non-goals-18"><a class="header" href="#non-goals-18">Non-Goals</a></h2>
 <ul>
 <li>Do not implement full OIDC identity-provider behavior in the first phase.</li>
 <li>Do not add dynamic client registration.</li>
@@ -18947,7 +20377,7 @@ URL:</p>
 <p>If the customer wants <code>allowedAudience</code> to be the AgentCore runtime or an API
 identifier instead of <code>urn:com.networknt</code>, make <code>jwtAudience</code> environment
 specific and align it with the AgentCore authorizer configuration.</p>
-<h2 id="implementation-plan-2"><a class="header" href="#implementation-plan-2">Implementation Plan</a></h2>
+<h2 id="implementation-plan-3"><a class="header" href="#implementation-plan-3">Implementation Plan</a></h2>
 <h3 id="phase-1-discovery-metadata"><a class="header" href="#phase-1-discovery-metadata">Phase 1: Discovery Metadata</a></h3>
 <ul>
 <li>Rust: add <code>publicIssuerBaseUrl</code>, <code>oidcDiscoveryEnabled</code>, and
@@ -19154,6 +20584,7 @@ records are visible, and which common actions are available.</p>
 <li><a href="#user-session">User Session</a></li>
 <li><a href="#api-catalog">API Catalog</a></li>
 <li><a href="#workflow-catalog">Workflow Catalog</a></li>
+<li><a href="#schema-catalog">Schema Catalog</a></li>
 <li><a href="#skill-workspace">Skill Workspace</a></li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
@@ -19282,6 +20713,42 @@ owner metadata, taxonomy, and read-only YAML preview without leaving the catalog
 <code>catalogVisible</code> setting. Publishing makes the workflow discoverable in
 Marketplace, but editing and deleting remain restricted to owners, owner
 positions, workflow administrators, and administrators.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="schema-catalog"><a class="header" href="#schema-catalog">Schema Catalog</a></h1>
+<p>Use Schema Catalog to browse reusable schema contracts from Marketplace.</p>
+<p>The catalog is backed by schema registry records, categories, and tags. It is
+intended for discovery and inspection, not bulk schema administration.</p>
+<p>Visible records include published global schemas, published schemas for the
+current host, and draft or retired schemas that you own or can administer.</p>
+<p>Common filters:</p>
+<ul>
+<li>search text for schema id, name, description, source, and owner metadata</li>
+<li>schema type, starting with JSON Schema</li>
+<li>schema status, such as draft, published, and retired</li>
+<li>schema categories</li>
+<li>grouped schema tags</li>
+<li>active or inactive status</li>
+<li>sort and card/list view options</li>
+</ul>
+<p>Catalog cards show a compact contract summary:</p>
+<ul>
+<li>schema id, name, latest published version, and type</li>
+<li>spec version, source, status, and scope</li>
+<li>schema alias and external URL when external access is enabled</li>
+<li>categories and tags</li>
+<li>whether the schema body is available for preview</li>
+<li>whether the schema can drive config-backed form generation</li>
+</ul>
+<p>Common actions:</p>
+<ul>
+<li>open the schema details drawer</li>
+<li>preview JSON Schema source</li>
+<li>copy a schema reference</li>
+<li>copy an external schema URL when available</li>
+<li>create a new schema version when you have permission</li>
+<li>edit draft metadata and taxonomy when you own or administer the schema</li>
+<li>open Schema Admin for table-based management</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="skill-workspace"><a class="header" href="#skill-workspace">Skill Workspace</a></h1>
 <p>Use Skill Workspace to review and assemble one GenAI skill after the skill
