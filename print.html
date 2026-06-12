@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-8e8bd163.js";
+            window.path_to_searchindex_js = "searchindex-f53fb6e4.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-20681368.js"></script>
+        <script src="toc-7d273796.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -8169,6 +8169,541 @@ CREATE TABLE relation_t (
 <p>or</p>
 <p>![“status”]</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="claim-org-role-bootstrap"><a class="header" href="#claim-org-role-bootstrap">Claim Org Role Bootstrap</a></h1>
+<h2 id="problem-8"><a class="header" href="#problem-8">Problem</a></h2>
+<p>The Claim Org action lets a signed-in user create an organization and its default host from the profile menu. The <code>createOrg</code> form captures the organization owner, default subdomain, host description, and host owner. The backend create-org flow then creates the organization, the default host, and user-host membership rows in one transaction.</p>
+<p>That transaction is not sufficient for a usable tenant. A new host membership without role assignments can leave the owner unable to authorize after switching to the newly claimed host. The user profile/login query joins roles through <code>role_user_t</code> by the current <code>user_host_t.host_id</code>; if the current host has no active role rows for that user, role-dependent reads can return no user context.</p>
+<p>The Claim Org bootstrap must create the minimum administration roles and assignments for the default host at the same time as the organization and host.</p>
+<h2 id="current-flow"><a class="header" href="#current-flow">Current Flow</a></h2>
+<p>The current UI entry point is the Claim Org menu in <code>portal-view/src/components/Header/ProfileMenu.tsx</code>, which routes to <code>/app/form/createOrg</code> through <code>portal-view/src/contexts/UserContext.tsx</code>.</p>
+<p>The <code>createOrg</code> form is defined in <code>portal-view/src/data/Forms.json</code>. It posts the <code>host/createOrg</code> action and includes:</p>
+<ul>
+<li><code>domain</code></li>
+<li><code>orgName</code></li>
+<li><code>orgDesc</code></li>
+<li><code>orgOwner</code></li>
+<li><code>subDomain</code></li>
+<li><code>hostDesc</code></li>
+<li><code>hostOwner</code></li>
+</ul>
+<p>The form help text already says that creating the default host assigns the host owner the <code>host-admin</code> role. Existing UI comments also assume that the organization owner can update and delete the organization because the user has the <code>org-admin</code> role.</p>
+<p>On the projection side, <code>HostOrgPersistenceImpl</code> has separate handlers for:</p>
+<ul>
+<li><code>createOrg</code>, which writes <code>org_t</code></li>
+<li><code>createHost</code>, which writes <code>host_t</code></li>
+<li><code>createUserHost</code>, which writes <code>user_host_t</code></li>
+</ul>
+<p>Access control data is projected by <code>AccessControlPersistenceImpl</code> into:</p>
+<ul>
+<li><code>role_t</code></li>
+<li><code>role_user_t</code></li>
+<li><code>role_permission_t</code></li>
+</ul>
+<p>The <code>role_user_t</code> table has a foreign key to <code>(host_id, role_id)</code> in <code>role_t</code>, so role rows must exist before the user-role assignments are inserted.</p>
+<h2 id="goals-11"><a class="header" href="#goals-11">Goals</a></h2>
+<ol>
+<li>A claimed organization must be immediately usable by the selected organization owner and host owner.</li>
+<li>The default host must receive deterministic administrative roles.</li>
+<li>The role assignments must be created in the same command transaction as the organization, host, and user-host membership.</li>
+<li>The event stream and projections must remain replayable and idempotent.</li>
+<li>The implementation must use the canonical role IDs already used by the portal data: <code>org-admin</code> and <code>host-admin</code>.</li>
+</ol>
+<h2 id="non-goals-14"><a class="header" href="#non-goals-14">Non-Goals</a></h2>
+<p>This design does not introduce a new global organization-role table. Existing roles are host-scoped through <code>role_t.host_id</code>, so the organization administrator role for a claimed organization is represented as a role on the default host.</p>
+<p>This design also does not merge organization and host administration into one broad role. Organization ownership and host ownership are separate responsibilities, and the system should grant both roles only when the same user is selected for both owner fields.</p>
+<h2 id="role-model-1"><a class="header" href="#role-model-1">Role Model</a></h2>
+<p>For the default host created during Claim Org:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Role ID</th><th>Assigned To</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>org-admin</code></td><td><code>orgOwner</code></td><td>Manage organization metadata, billing, and owner transfer for the claimed domain.</td></tr>
+<tr><td><code>host-admin</code></td><td><code>hostOwner</code></td><td>Manage the default host, membership, infrastructure, and host-level API deployment setup.</td></tr>
+</tbody>
+</table>
+</div>
+<p>If <code>orgOwner</code> and <code>hostOwner</code> are the same user, that user receives both roles.</p>
+<p>The two roles should stay separate. <code>org-admin</code> should not implicitly include all host administration permissions. If an organization owner also needs to administer the default host, the command should grant that user both <code>org-admin</code> and <code>host-admin</code> explicitly.</p>
+<p>The implementation should not use the current Java constant value <code>HOST_ADMIN_ROLE = "hostAdmin"</code> for this bootstrap. The canonical role ID in portal role data and UI task IDs is <code>host-admin</code>. The constant should be corrected or a new canonical constant should be introduced before it is used by bootstrap code.</p>
+<h2 id="command-transaction"><a class="header" href="#command-transaction">Command Transaction</a></h2>
+<p>The Claim Org command should validate and persist these facts atomically:</p>
+<ol>
+<li>Create <code>org_t</code> for <code>domain</code>.</li>
+<li>Create the default <code>host_t</code> for <code>(domain, subDomain)</code>.</li>
+<li>Create <code>user_host_t</code> rows for the selected owners on the default host.</li>
+<li>Switch the selected <code>hostOwner</code> to the new host by emitting <code>UserHostSwitchedEvent</code>.</li>
+<li>Create or reactivate <code>role_t</code> rows for <code>org-admin</code> and <code>host-admin</code> on the default host.</li>
+<li>Assign <code>org-admin</code> to <code>orgOwner</code> in <code>role_user_t</code>.</li>
+<li>Assign <code>host-admin</code> to <code>hostOwner</code> in <code>role_user_t</code>.</li>
+<li>Seed the required <code>role_permission_t</code> rows for these roles when endpoint-based authorization is enforced for the target admin APIs.</li>
+</ol>
+<p>All rows should share the command’s audit fields where possible: <code>update_user</code>, <code>update_ts</code>, and the event aggregate version metadata. Inserts should use the same idempotent create/reactivate pattern already used by role and role-user projections.</p>
+<h2 id="event-shape"><a class="header" href="#event-shape">Event Shape</a></h2>
+<p>The preferred event-sourcing shape is a single command producing multiple atomic events in one transaction:</p>
+<ol>
+<li><code>OrgCreatedEvent</code></li>
+<li><code>HostCreatedEvent</code></li>
+<li><code>UserHostCreatedEvent</code> for <code>orgOwner</code>, if needed</li>
+<li><code>UserHostCreatedEvent</code> for <code>hostOwner</code>, if different</li>
+<li><code>UserHostSwitchedEvent</code> for <code>hostOwner</code></li>
+<li><code>RoleCreatedEvent</code> for <code>org-admin</code></li>
+<li><code>RoleCreatedEvent</code> for <code>host-admin</code></li>
+<li><code>RoleUserCreatedEvent</code> for <code>orgOwner</code> and <code>org-admin</code></li>
+<li><code>RoleUserCreatedEvent</code> for <code>hostOwner</code> and <code>host-admin</code></li>
+<li><code>RolePermissionCreatedEvent</code> events for the required endpoint permissions, if endpoint permission seeding is part of the command</li>
+</ol>
+<p>The events must be written atomically by the command side. Each emitted event must reserve and carry its own user nonce because <code>event_store_t</code> enforces uniqueness on <code>(user_id, nonce)</code>. Projection replay can then use the existing individual projection handlers. This matches the existing atomic-event design direction while keeping the Claim Org user gesture transactional.</p>
+<p>Claim Org emits <code>UserHostSwitchedEvent</code> for the host owner after creating the selected host owner’s <code>user_host_t</code> membership. The master OAuth host tenant login boundary allows this safely: light-oauth validates the portal client under the configured OAuth host, then stores <code>auth_session_t</code>, <code>auth_code_t</code>, and <code>auth_refresh_token_t</code> rows with tenant <code>host_id</code> plus master <code>auth_host_id</code>.</p>
+<p>The target login/session design is documented in <a href="#master-oauth-host-tenant-login">Master OAuth Host Tenant Login</a>. It keeps OAuth provider/client rows on the master host while storing tenant-host claims and sessions for the user’s current host.</p>
+<p>If the current command service still emits one composite <code>createOrg</code> event, the projection may temporarily perform the role bootstrap as part of that composite handler. That should be treated as a compatibility step, not the long-term event model.</p>
+<h2 id="permission-bootstrap"><a class="header" href="#permission-bootstrap">Permission Bootstrap</a></h2>
+<p>Creating <code>role_t</code> and <code>role_user_t</code> rows gives the user role identity on the new host. It does not automatically grant endpoint access if the request path is protected by <code>role_permission_t</code>.</p>
+<p>The authoritative role-permission catalog should live with the command service as static, versioned metadata, for example <code>default-role-permissions.yml</code>. The Claim Org command reads that catalog and emits the required <code>RolePermissionCreatedEvent</code> events. This keeps the authorization bootstrap in the event stream, so projection replay produces the same state without depending on seed SQL.</p>
+<p>The chosen source must be deterministic and replayable. It must also account for the fact that <code>role_permission_t</code> references <code>api_endpoint_t</code> through <code>(host_id, endpoint_id)</code>. Permission rows can only be inserted after the target host has the corresponding endpoint rows.</p>
+<p>Event importer assets such as <code>events.json</code> can mirror the same catalog for environment bootstrap and repair, but they should not be the only source of truth for permissions created by an interactive Claim Org command.</p>
+<p>Initial SQL seed files should not own the final role-permission state. Seed SQL is useful for bootstrapping a local database, but event-sourced permission state must be represented by events so replay and promotion remain deterministic.</p>
+<p>If endpoint rows are not available during Claim Org, the command should still create the roles and role-user assignments, then schedule or trigger a follow-up permission bootstrap once the endpoint catalog exists. That follow-up must emit the same <code>RolePermissionCreatedEvent</code> facts that would have been emitted synchronously.</p>
+<h2 id="ui-contract"><a class="header" href="#ui-contract">UI Contract</a></h2>
+<p>The <code>createOrg</code> form should require both owners:</p>
+<ul>
+<li><code>orgOwner</code></li>
+<li><code>hostOwner</code></li>
+</ul>
+<p>The current form requires <code>hostOwner</code> but not <code>orgOwner</code>. Since the backend persistence expects <code>orgOwner</code>, the form schema and command service request schema should mark both owner fields required and reject blank values through static schema validation.</p>
+<p>The Claim Org command creates the selected host owner’s membership for the new default host and switches that owner’s current host in the same transaction. The portal must not bootstrap duplicate OAuth provider/client rows on every tenant host.</p>
+<p>When automatic switching is enabled, the UI success path should tell the host owner to log out and log in again so the browser session receives the new tenant-host and role claims.</p>
+<h2 id="owner-transfer"><a class="header" href="#owner-transfer">Owner Transfer</a></h2>
+<p>Owner transfer role behavior is intentionally deferred. Claim Org bootstrap grants the initial <code>org-admin</code> and <code>host-admin</code> assignments, but later changes to <code>org_t.org_owner</code> or <code>host_t.host_owner</code> should not automatically remove or transfer those roles until the access policy is defined.</p>
+<p>There are valid cases where more than one user should keep the same administrative role. For example, a new organization owner may need <code>org-admin</code> while the previous owner remains an administrator during handoff, support, or shared ownership. Automatically deleting the old owner’s <code>RoleUser</code> assignment can remove access that was granted intentionally through another path.</p>
+<p>When this policy is revisited, the implementation should decide separately:</p>
+<ol>
+<li>Whether changing <code>orgOwner</code> should grant <code>org-admin</code> to the new owner.</li>
+<li>Whether changing <code>hostOwner</code> should grant <code>host-admin</code> to the new owner.</li>
+<li>Whether the old owner should retain the role, lose it, or require an explicit UI choice.</li>
+<li>How to distinguish a bootstrap-created role assignment from an independently granted role assignment.</li>
+</ol>
+<p>Until then, <code>UpdateOrg</code> and <code>UpdateHost</code> should remain metadata updates only. Any role changes after Claim Org should use the existing role-user administration flow.</p>
+<h2 id="backfill-1"><a class="header" href="#backfill-1">Backfill</a></h2>
+<p>Existing claimed organizations may already have a default host and <code>user_host_t</code> rows without the corresponding admin role bootstrap.</p>
+<p>A one-time repair should:</p>
+<ol>
+<li>Find active hosts whose organization and host owner users exist.</li>
+<li>Ensure <code>org-admin</code> and <code>host-admin</code> exist in <code>role_t</code> for each host.</li>
+<li>Ensure the organization owner has <code>org-admin</code>.</li>
+<li>Ensure the host owner has <code>host-admin</code>.</li>
+<li>Seed required role permissions if the endpoint catalog is present.</li>
+</ol>
+<p>The repair must be idempotent and should only activate missing or soft-deleted bootstrap rows. It should not remove custom roles or overwrite existing role assignments.</p>
+<h2 id="validation-2"><a class="header" href="#validation-2">Validation</a></h2>
+<p>A focused validation set should cover:</p>
+<ul>
+<li>Claim Org creates <code>org_t</code>, <code>host_t</code>, and <code>user_host_t</code> rows.</li>
+<li>Claim Org creates <code>org-admin</code> and <code>host-admin</code> rows in <code>role_t</code> for the default host.</li>
+<li>Claim Org assigns <code>org-admin</code> to <code>orgOwner</code>.</li>
+<li>Claim Org assigns <code>host-admin</code> to <code>hostOwner</code>.</li>
+<li>The same user can receive both roles when <code>orgOwner == hostOwner</code>.</li>
+<li>After Claim Org switches the host owner to the claimed host, the current-host user query returns the claimed user with active roles on the next login.</li>
+<li>Replaying the events does not duplicate rows or downgrade active rows.</li>
+<li>Permission bootstrap either creates the expected <code>role_permission_t</code> rows or records a deterministic follow-up when endpoint rows are not present.</li>
+<li>Claim Org switches the selected host owner’s current host during creation after the master OAuth host login boundary is implemented.</li>
+<li>The UI tells the host owner to log out and log in again after Claim Org switches the current host.</li>
+</ul>
+<h2 id="resolved-decisions-1"><a class="header" href="#resolved-decisions-1">Resolved Decisions</a></h2>
+<ol>
+<li>Claim Org creates the selected host owner’s user-host membership and switches that owner to the new host during the same command transaction.</li>
+<li><code>org-admin</code> and <code>host-admin</code> should remain separate roles. A user who needs both capabilities should receive both roles explicitly.</li>
+<li>The authoritative role-permission catalog should live as command-side static metadata, with importer assets kept in sync for bootstrap and repair.</li>
+</ol>
+<h2 id="remaining-follow-up"><a class="header" href="#remaining-follow-up">Remaining Follow-up</a></h2>
+<p>The implementation still needs to define the exact <code>org-admin</code> and <code>host-admin</code> endpoint permission sets. That catalog should be reviewed with the host and organization command/query API surface before implementation starts.</p>
+<p>The owner-transfer role policy also remains open. The system should decide whether owner changes imply role grants, role revokes, both, or neither before adding role side effects to <code>UpdateOrg</code> or <code>UpdateHost</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="master-oauth-host-tenant-login"><a class="header" href="#master-oauth-host-tenant-login">Master OAuth Host Tenant Login</a></h1>
+<h2 id="problem-9"><a class="header" href="#problem-9">Problem</a></h2>
+<p>In a deployed portal instance, <code>dev.lightapi.net</code> is the master host for the instance. Its host ID is:</p>
+<pre><code class="language-text">01964b05-552a-7c4b-9184-6857e7f3dc5f
+</code></pre>
+<p>The master host owns the OAuth provider and portal client configuration:</p>
+<ul>
+<li><code>auth_provider_t</code></li>
+<li><code>auth_client_t</code></li>
+<li><code>auth_provider_client_t</code></li>
+</ul>
+<p>Tenant hosts own user membership, roles, groups, positions, attributes, and host-scoped portal data. A user can belong to many hosts, and <code>user_host_t.current = TRUE</code> identifies which tenant host should be used for the user’s login roles and JWT <code>host</code> claim.</p>
+<p>The current light-oauth authorization code flow mixes these two meanings of host:</p>
+<ol>
+<li>It validates the portal client against the configured master host.</li>
+<li>It loads the user by the current tenant host.</li>
+<li>It writes <code>auth_session_t</code> and <code>auth_code_t</code> using the user’s current tenant host.</li>
+</ol>
+<p>That fails after Claim Org switches the user to the newly created tenant host, because <code>auth_session_t</code>, <code>auth_code_t</code>, and <code>auth_refresh_token_t</code> currently enforce this foreign key:</p>
+<pre><code class="language-sql">FOREIGN KEY (host_id, client_id, provider_id)
+REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
+</code></pre>
+<p>The new tenant host does not and should not have duplicate OAuth provider/client rows. The FK therefore rejects login with:</p>
+<pre><code class="language-text">auth_session_t_host_id_client_id_provider_id_fkey
+</code></pre>
+<h2 id="goals-12"><a class="header" href="#goals-12">Goals</a></h2>
+<ol>
+<li>Keep <code>dev.lightapi.net</code> as the single master OAuth host for the instance.</li>
+<li>Allow users whose current host is a tenant host to log in through the master host’s provider/client.</li>
+<li>Preserve tenant-scoped JWT claims, especially the <code>host</code> claim and role claims.</li>
+<li>Avoid duplicating <code>auth_provider_t</code>, <code>auth_client_t</code>, or <code>auth_provider_client_t</code> rows per tenant host.</li>
+<li>Allow Claim Org to switch the host owner to the new host and require logout/login for fresh claims.</li>
+<li>Keep session, auth-code, refresh-token, and audit lifecycle behavior deterministic and queryable.</li>
+</ol>
+<h2 id="non-goals-15"><a class="header" href="#non-goals-15">Non-Goals</a></h2>
+<p>This design does not introduce tenant-specific OAuth provider IDs, client IDs, redirect URIs, or BFF configuration.</p>
+<p>This design does not change the portal UI or BFF to select a different OAuth provider per tenant host.</p>
+<p>This design does not remove database referential integrity. The provider-client relationship should remain enforced, but it should be enforced against the master OAuth host instead of the tenant host.</p>
+<h2 id="terminology"><a class="header" href="#terminology">Terminology</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Term</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td>Master OAuth host</td><td>The host that owns OAuth provider/client configuration for the portal instance. In local/dev this is <code>01964b05-552a-7c4b-9184-6857e7f3dc5f</code>.</td></tr>
+<tr><td>Tenant host</td><td>The user’s current business host from <code>user_host_t.current</code>; this drives roles and tenant data access.</td></tr>
+<tr><td><code>auth_host_id</code></td><td>The host ID used to validate OAuth provider/client configuration.</td></tr>
+<tr><td><code>host_id</code></td><td>The tenant host ID used for session ownership, user roles, and JWT <code>host</code> claim.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="decision"><a class="header" href="#decision">Decision</a></h2>
+<p>Separate OAuth configuration host from tenant host in the OAuth runtime tables.</p>
+<p>Keep <code>host_id</code> in <code>auth_session_t</code>, <code>auth_code_t</code>, and <code>auth_refresh_token_t</code> as the tenant/current host. Add <code>auth_host_id</code> to those tables to point to the master OAuth host that owns the provider-client mapping.</p>
+<p>The provider-client foreign key should move from <code>host_id</code> to <code>auth_host_id</code>:</p>
+<pre><code class="language-sql">FOREIGN KEY (auth_host_id, client_id, provider_id)
+REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
+</code></pre>
+<p>Session and token lifecycle keys should remain tenant-host scoped:</p>
+<pre><code class="language-sql">auth_session_t.host_id
+auth_code_t.host_id
+auth_refresh_token_t.host_id
+</code></pre>
+<p>This preserves the current meaning of <code>host_id</code> for tenant access while allowing all OAuth configuration to live on the master host.</p>
+<h2 id="data-model"><a class="header" href="#data-model">Data Model</a></h2>
+<h3 id="auth_session_t"><a class="header" href="#auth_session_t"><code>auth_session_t</code></a></h3>
+<p>Add:</p>
+<pre><code class="language-sql">auth_host_id UUID NOT NULL
+</code></pre>
+<p>Keep:</p>
+<pre><code class="language-sql">PRIMARY KEY (host_id, session_id)
+FOREIGN KEY (host_id) REFERENCES host_t(host_id)
+</code></pre>
+<p>Replace:</p>
+<pre><code class="language-sql">FOREIGN KEY (host_id, client_id, provider_id)
+REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
+</code></pre>
+<p>With:</p>
+<pre><code class="language-sql">FOREIGN KEY (auth_host_id, client_id, provider_id)
+REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
+</code></pre>
+<h3 id="auth_code_t"><a class="header" href="#auth_code_t"><code>auth_code_t</code></a></h3>
+<p>Add:</p>
+<pre><code class="language-sql">auth_host_id UUID NOT NULL
+</code></pre>
+<p>Keep:</p>
+<pre><code class="language-sql">PRIMARY KEY (host_id, auth_code)
+FOREIGN KEY (host_id, session_id)
+REFERENCES auth_session_t(host_id, session_id)
+</code></pre>
+<p>Replace the provider-client FK with:</p>
+<pre><code class="language-sql">FOREIGN KEY (auth_host_id, client_id, provider_id)
+REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
+</code></pre>
+<h3 id="auth_refresh_token_t"><a class="header" href="#auth_refresh_token_t"><code>auth_refresh_token_t</code></a></h3>
+<p>Add:</p>
+<pre><code class="language-sql">auth_host_id UUID NOT NULL
+</code></pre>
+<p>Keep:</p>
+<pre><code class="language-sql">PRIMARY KEY (host_id, refresh_token)
+FOREIGN KEY (host_id, session_id)
+REFERENCES auth_session_t(host_id, session_id)
+</code></pre>
+<p>Replace the provider-client FK with:</p>
+<pre><code class="language-sql">FOREIGN KEY (auth_host_id, client_id, provider_id)
+REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
+</code></pre>
+<h3 id="auth_session_audit_t"><a class="header" href="#auth_session_audit_t"><code>auth_session_audit_t</code></a></h3>
+<p><code>auth_session_audit_t.host_id</code> should remain the tenant host for session and user queries.</p>
+<p>Add:</p>
+<pre><code class="language-sql">auth_host_id UUID NOT NULL
+</code></pre>
+<p>Audit rows must distinguish the authorization server host from the tenant host from the first migration. This is required for security and compliance trails because a single database can contain multiple master hosts, and operators need to answer both questions:</p>
+<ul>
+<li>Which OAuth host authenticated the user?</li>
+<li>Which tenant host did the user access?</li>
+</ul>
+<p><code>auth_host_id</code> should be populated from the same value used by the session, auth code, or refresh token involved in the audit event.</p>
+<h3 id="token-endpoint-lookup-indexes"><a class="header" href="#token-endpoint-lookup-indexes">Token Endpoint Lookup Indexes</a></h3>
+<p>The token endpoint receives an authorization code or refresh token string. It does not receive tenant <code>host_id</code> in the standard OAuth request, so it cannot use the <code>(host_id, auth_code)</code> or <code>(host_id, refresh_token)</code> primary keys as the first lookup.</p>
+<p>Add unique secondary indexes:</p>
+<pre><code class="language-sql">CREATE UNIQUE INDEX idx_auth_code_t_auth_code
+    ON auth_code_t(auth_code);
+
+CREATE UNIQUE INDEX idx_auth_refresh_token_t_refresh_token
+    ON auth_refresh_token_t(refresh_token);
+</code></pre>
+<p>The token endpoint should load the row by the code or refresh token string, then validate the tenant and OAuth boundaries with the row values. This keeps the external OAuth token format unchanged and avoids embedding tenant host IDs into authorization code or refresh token strings.</p>
+<h2 id="migration"><a class="header" href="#migration">Migration</a></h2>
+<p>The migration should be backward compatible for existing rows.</p>
+<ol>
+<li>Add nullable <code>auth_host_id</code> columns.</li>
+</ol>
+<pre><code class="language-sql">ALTER TABLE auth_session_t ADD COLUMN auth_host_id UUID;
+ALTER TABLE auth_code_t ADD COLUMN auth_host_id UUID;
+ALTER TABLE auth_refresh_token_t ADD COLUMN auth_host_id UUID;
+ALTER TABLE auth_session_audit_t ADD COLUMN auth_host_id UUID;
+</code></pre>
+<ol start="2">
+<li>Backfill existing rows. Existing valid rows used <code>host_id</code> for both meanings, so the safe default is:</li>
+</ol>
+<pre><code class="language-sql">UPDATE auth_session_t SET auth_host_id = host_id WHERE auth_host_id IS NULL;
+UPDATE auth_code_t SET auth_host_id = host_id WHERE auth_host_id IS NULL;
+UPDATE auth_refresh_token_t SET auth_host_id = host_id WHERE auth_host_id IS NULL;
+UPDATE auth_session_audit_t SET auth_host_id = host_id WHERE auth_host_id IS NULL;
+</code></pre>
+<ol start="3">
+<li>Set the new columns to not null.</li>
+</ol>
+<pre><code class="language-sql">ALTER TABLE auth_session_t ALTER COLUMN auth_host_id SET NOT NULL;
+ALTER TABLE auth_code_t ALTER COLUMN auth_host_id SET NOT NULL;
+ALTER TABLE auth_refresh_token_t ALTER COLUMN auth_host_id SET NOT NULL;
+ALTER TABLE auth_session_audit_t ALTER COLUMN auth_host_id SET NOT NULL;
+</code></pre>
+<ol start="4">
+<li>Drop the current provider-client FKs.</li>
+</ol>
+<p>The exact constraint names vary by schema version. The migration should drop the existing provider-client constraints on:</p>
+<ul>
+<li><code>auth_session_t</code></li>
+<li><code>auth_code_t</code></li>
+<li><code>auth_refresh_token_t</code></li>
+</ul>
+<ol start="5">
+<li>Add new provider-client FKs through <code>auth_host_id</code>.</li>
+</ol>
+<pre><code class="language-sql">ALTER TABLE auth_session_t
+    ADD CONSTRAINT auth_session_t_auth_provider_client_fk
+    FOREIGN KEY (auth_host_id, client_id, provider_id)
+    REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
+    ON DELETE CASCADE;
+
+ALTER TABLE auth_code_t
+    ADD CONSTRAINT auth_code_t_auth_provider_client_fk
+    FOREIGN KEY (auth_host_id, client_id, provider_id)
+    REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
+    ON DELETE CASCADE;
+
+ALTER TABLE auth_refresh_token_t
+    ADD CONSTRAINT auth_refresh_token_t_auth_provider_client_fk
+    FOREIGN KEY (auth_host_id, client_id, provider_id)
+    REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
+    ON DELETE CASCADE;
+</code></pre>
+<ol start="6">
+<li>Add supporting indexes.</li>
+</ol>
+<pre><code class="language-sql">CREATE INDEX idx_auth_session_t_auth_host_client_provider
+    ON auth_session_t(auth_host_id, client_id, provider_id);
+
+CREATE INDEX idx_auth_code_t_auth_host_client_provider
+    ON auth_code_t(auth_host_id, client_id, provider_id);
+
+CREATE INDEX idx_auth_refresh_token_t_auth_host_client_provider
+    ON auth_refresh_token_t(auth_host_id, client_id, provider_id);
+
+CREATE UNIQUE INDEX idx_auth_code_t_auth_code
+    ON auth_code_t(auth_code);
+
+CREATE UNIQUE INDEX idx_auth_refresh_token_t_refresh_token
+    ON auth_refresh_token_t(refresh_token);
+
+CREATE INDEX idx_auth_session_audit_t_auth_refresh_rotation
+    ON auth_session_audit_t(auth_host_id, old_refresh_token_id, client_id, provider_id, event_type, event_ts DESC);
+</code></pre>
+<h2 id="light-oauth-changes"><a class="header" href="#light-oauth-changes">light-oauth Changes</a></h2>
+<h3 id="authorization-code-login"><a class="header" href="#authorization-code-login">Authorization Code Login</a></h3>
+<p>In <code>post_code</code>, keep using <code>state.host_id</code> to validate the configured portal client:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let client = get_client_by_provider_client_id(state.host_id, provider_id, client_id);
+<span class="boring">}</span></code></pre>
+<p>After password verification, use two host IDs:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let auth_host_id = client.host_id; // master OAuth host
+let tenant_host_id = user.host_id; // current user host
+<span class="boring">}</span></code></pre>
+<p>Persist:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>AuthCode {
+    host_id: tenant_host_id,
+    auth_host_id,
+    ...
+}
+
+AuthSession {
+    host_id: tenant_host_id,
+    auth_host_id,
+    ...
+}
+<span class="boring">}</span></code></pre>
+<h3 id="authorization-code-token-exchange"><a class="header" href="#authorization-code-token-exchange">Authorization Code Token Exchange</a></h3>
+<p>When exchanging the code:</p>
+<ol>
+<li>Load the auth code by the unique <code>auth_code</code> value.</li>
+<li>Authenticate the client against the master OAuth host.</li>
+<li>Verify:</li>
+</ol>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>code.provider_id == provider_id
+code.client_id == client.client_id
+code.auth_host_id == client.host_id
+<span class="boring">}</span></code></pre>
+<p>The lookup can remain by authorization code only because <code>auth_code_t(auth_code)</code> is unique. The endpoint must still validate the row after retrieval so a code issued to one client or master host cannot be exchanged by another client.</p>
+<p>Generate access token claims from tenant data:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>("host", Some(code.host_id.to_string()))
+<span class="boring">}</span></code></pre>
+<p>Create refresh tokens with:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>AuthRefreshToken {
+    host_id: code.host_id,
+    auth_host_id: code.auth_host_id,
+    ...
+}
+<span class="boring">}</span></code></pre>
+<h3 id="refresh-token-flow"><a class="header" href="#refresh-token-flow">Refresh Token Flow</a></h3>
+<p>The token endpoint should load refresh tokens by the unique <code>refresh_token</code> value. After the row is loaded, all mutation and session lifecycle operations should use the tenant <code>host_id</code> from the row.</p>
+<p>The refresh flow must also verify that the authenticated client belongs to the same master OAuth host stored on the refresh token:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>token.auth_host_id == client.host_id
+token.client_id == client.client_id
+token.provider_id == provider_id
+<span class="boring">}</span></code></pre>
+<p>Rotated refresh tokens must carry forward <code>auth_host_id</code>.</p>
+<p>The JWT <code>host</code> claim must continue to come from <code>token.host_id</code>, not <code>token.auth_host_id</code>.</p>
+<p>Refresh-token deletion and rotation should use:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>host_id = token.host_id
+refresh_token = token.refresh_token
+<span class="boring">}</span></code></pre>
+<p>This preserves tenant-host session ownership while allowing the token endpoint to find the row without the caller providing tenant <code>host_id</code>.</p>
+<h3 id="logout-and-revocation"><a class="header" href="#logout-and-revocation">Logout And Revocation</a></h3>
+<p>Logout and administrative revocation should use the tenant host from the provided token or loaded refresh-token row.</p>
+<p>For refresh-token based logout:</p>
+<ol>
+<li>Load the refresh token by the unique <code>refresh_token</code> value.</li>
+<li>Validate <code>token.auth_host_id == client.host_id</code> when client context is present.</li>
+<li>Revoke the session with <code>token.host_id</code> and <code>token.session_id</code>.</li>
+<li>Delete refresh tokens and outstanding auth codes with the same tenant <code>host_id</code> and <code>session_id</code>.</li>
+<li>Write audit rows with both tenant <code>host_id</code> and master <code>auth_host_id</code>.</li>
+</ol>
+<p>For access-token based logout, the host claim represents the tenant host. The logout handler should use that tenant host to locate the session or refresh token state, and should not treat the master OAuth host as the tenant context.</p>
+<h3 id="password-grant"><a class="header" href="#password-grant">Password Grant</a></h3>
+<p>The password grant has the same host split:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let auth_host_id = client.host_id;
+let tenant_host_id = user.host_id;
+<span class="boring">}</span></code></pre>
+<p>Sessions and refresh tokens should store both values.</p>
+<h3 id="client-authenticated-user-grant"><a class="header" href="#client-authenticated-user-grant">Client Authenticated User Grant</a></h3>
+<p>This grant already accepts an optional tenant host in the request. That host should remain the tenant <code>host_id</code>.</p>
+<p>The authenticated client’s host should become <code>auth_host_id</code>.</p>
+<h3 id="client-authentication"><a class="header" href="#client-authentication">Client Authentication</a></h3>
+<p><code>authenticate_client</code> should become host-aware. The token endpoint should not load a client only by <code>client_id</code>, because <code>auth_client_t</code> is keyed by <code>(host_id, client_id)</code>.</p>
+<p>Preferred behavior:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>get_client_by_provider_client_id(state.host_id, provider_id, client_id)
+<span class="boring">}</span></code></pre>
+<p>This keeps token endpoint client authentication aligned with the authorization endpoint.</p>
+<h3 id="provider-and-key-lookup"><a class="header" href="#provider-and-key-lookup">Provider And Key Lookup</a></h3>
+<p>Provider and signing-key lookup should also be scoped by the configured master OAuth host.</p>
+<p>Current provider IDs are short and not globally guaranteed across every possible master host in a shared database. Therefore the light-oauth lookup shape should be:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>query_provider_by_id(state.host_id, provider_id)
+query_current_provider_key(state.host_id, provider_id)
+query_long_live_provider_key(state.host_id, provider_id)
+<span class="boring">}</span></code></pre>
+<p>The SQL should include <code>host_id = $1</code> as well as <code>provider_id = $2</code>. This prevents accidental cross-master-host key or provider resolution if another portal instance later stores the same provider ID in the same database cluster.</p>
+<h2 id="jwt-claims"><a class="header" href="#jwt-claims">JWT Claims</a></h2>
+<p>The access token must continue to identify the tenant host:</p>
+<pre><code class="language-json">{
+  "host": "&lt;tenant-host-id&gt;",
+  "role": "host-admin org-admin"
+}
+</code></pre>
+<p>The master OAuth host should not replace the JWT <code>host</code> claim. It is an implementation detail for OAuth provider/client validation.</p>
+<p>If operational diagnostics need visibility into the authorization host, a separate claim could be introduced later, but this is not required for the current flow and should not be added unless there is a clear consumer.</p>
+<h2 id="claim-org-behavior"><a class="header" href="#claim-org-behavior">Claim Org Behavior</a></h2>
+<p>With this design implemented, Claim Org can safely emit <code>UserHostSwitchedEvent</code> for the selected host owner during the same command transaction that creates:</p>
+<ol>
+<li><code>OrgCreatedEvent</code></li>
+<li><code>HostCreatedEvent</code></li>
+<li><code>UserHostCreatedEvent</code></li>
+<li><code>UserHostSwitchedEvent</code></li>
+<li><code>RoleCreatedEvent</code> for <code>org-admin</code></li>
+<li><code>RoleCreatedEvent</code> for <code>host-admin</code></li>
+<li><code>RoleUserCreatedEvent</code> for <code>orgOwner</code> and <code>org-admin</code></li>
+<li><code>RoleUserCreatedEvent</code> for <code>hostOwner</code> and <code>host-admin</code></li>
+</ol>
+<p>The user’s current browser session still has the old host claim. The UI should tell the host owner to log out and log in again after Claim Org. The next login will:</p>
+<ol>
+<li>Authenticate through the master OAuth host.</li>
+<li>Load roles from the new current tenant host.</li>
+<li>Store session/code/refresh rows with tenant <code>host_id</code> and master <code>auth_host_id</code>.</li>
+<li>Issue a token whose <code>host</code> claim is the new tenant host.</li>
+</ol>
+<h2 id="backfill-and-repair"><a class="header" href="#backfill-and-repair">Backfill And Repair</a></h2>
+<p>For existing databases, the schema migration backfills <code>auth_host_id = host_id</code> for existing valid OAuth rows.</p>
+<p>For users already switched to a tenant host by an earlier Claim Org deployment, no OAuth provider/client rows should be created on the tenant host. After this design is deployed, those users should be able to log in because new session rows will reference:</p>
+<pre><code class="language-text">host_id      = tenant host
+auth_host_id = master OAuth host
+</code></pre>
+<p>If an earlier failed login left partial session artifacts, they should be removed through existing session cleanup paths or targeted SQL cleanup before retesting.</p>
+<h2 id="validation-3"><a class="header" href="#validation-3">Validation</a></h2>
+<p>A focused validation set should cover:</p>
+<ul>
+<li>Existing master-host login still succeeds after migration.</li>
+<li>Claim Org switches the selected host owner to the new tenant host.</li>
+<li>The host owner can log out and log in again after Claim Org.</li>
+<li>New <code>auth_session_t</code> rows use tenant <code>host_id</code> and master <code>auth_host_id</code>.</li>
+<li>New <code>auth_code_t</code> rows use tenant <code>host_id</code> and master <code>auth_host_id</code>.</li>
+<li>New <code>auth_refresh_token_t</code> rows use tenant <code>host_id</code> and master <code>auth_host_id</code>.</li>
+<li>The JWT <code>host</code> claim is the tenant host, not the master OAuth host.</li>
+<li>Role claims come from the tenant host after <code>user_host_t.current</code> is switched.</li>
+<li>No <code>auth_provider_t</code>, <code>auth_client_t</code>, or <code>auth_provider_client_t</code> rows are created for the tenant host.</li>
+<li>Refresh token rotation preserves <code>auth_host_id</code>.</li>
+<li>Revoking a session or refresh token still works with tenant-host keys.</li>
+<li>Logout uses the tenant host from the token/session row and writes audit rows with <code>auth_host_id</code>.</li>
+<li>Existing rows migrated with <code>auth_host_id = host_id</code> still support token refresh and audit queries.</li>
+<li>Auth code lookup uses <code>auth_code_t(auth_code)</code> and still rejects mismatched client/provider/auth host.</li>
+<li>Refresh token lookup uses <code>auth_refresh_token_t(refresh_token)</code> and still rejects mismatched client/provider/auth host.</li>
+<li>Provider and provider-key lookup is scoped by the configured master OAuth host.</li>
+</ul>
+<h2 id="resolved-decisions-2"><a class="header" href="#resolved-decisions-2">Resolved Decisions</a></h2>
+<ol>
+<li><code>auth_session_audit_t</code> must add <code>auth_host_id</code> in the first migration.</li>
+<li>Provider and provider-key lookup must require the configured master OAuth host ID.</li>
+<li><code>auth_code_t</code> lookup remains by unique <code>auth_code</code>, followed by strict client, provider, and <code>auth_host_id</code> validation.</li>
+<li><code>auth_refresh_token_t</code> lookup remains by unique <code>refresh_token</code>, followed by strict client, provider, and <code>auth_host_id</code> validation.</li>
+<li>Authorization code and refresh token string formats should not embed tenant host IDs in this design.</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="schema-registry"><a class="header" href="#schema-registry">Schema Registry</a></h1>
 <p>The schema registry is the portal-owned catalog for reusable schema contracts.
 The first release should focus on JSON Schema documents for UI form generation,
@@ -8206,7 +8741,7 @@ service yet. The main gaps are:</p>
 <li>tests for schema CRUD, tenant/global lookup, versioning, and config
 validation are incomplete</li>
 </ul>
-<h2 id="goals-11"><a class="header" href="#goals-11">Goals</a></h2>
+<h2 id="goals-13"><a class="header" href="#goals-13">Goals</a></h2>
 <ul>
 <li>Store JSON Schema documents with clear tenant/global ownership.</li>
 <li>Support immutable published schema versions.</li>
@@ -8223,7 +8758,7 @@ and loading schema bodies lazily.</li>
 JSON path.</li>
 <li>Categorize and tag schemas for easier discovery and filtering.</li>
 </ul>
-<h2 id="non-goals-14"><a class="header" href="#non-goals-14">Non-Goals</a></h2>
+<h2 id="non-goals-16"><a class="header" href="#non-goals-16">Non-Goals</a></h2>
 <ul>
 <li>Do not build a full schema compatibility engine in the first release.</li>
 <li>Do not require every config property to have a schema.</li>
@@ -8234,7 +8769,7 @@ runtime validation in the first release.</li>
 basic scalar and raw JSON/YAML editing.</li>
 <li>Do not allow unpublished schemas to validate production config overrides.</li>
 </ul>
-<h2 id="data-model"><a class="header" href="#data-model">Data Model</a></h2>
+<h2 id="data-model-1"><a class="header" href="#data-model-1">Data Model</a></h2>
 <p>The existing <code>schema_t</code> table is a reasonable starting point. It already has:</p>
 <ul>
 <li><code>schema_id</code></li>
@@ -9796,7 +10331,7 @@ GROUP BY
 <p>This approach provides a seamless experience while maintaining compatibility with applications requiring roles for authorization or UI customization.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="private-messages"><a class="header" href="#private-messages">Private Messages</a></h1>
-<h2 id="problem-8"><a class="header" href="#problem-8">Problem</a></h2>
+<h2 id="problem-10"><a class="header" href="#problem-10">Problem</a></h2>
 <p>Portal users need a way to exchange private messages from the user profile
 without exposing email addresses to each other. The sender should only need a
 recipient user id or a display-safe user label. The backend can resolve email
@@ -9831,7 +10366,7 @@ model conversations, read state, participant visibility, or per-user delete.</li
 messages page should load its own data from the query API.</li>
 <li>The existing private-message tests are disabled stubs.</li>
 </ul>
-<h2 id="goals-12"><a class="header" href="#goals-12">Goals</a></h2>
+<h2 id="goals-14"><a class="header" href="#goals-14">Goals</a></h2>
 <ul>
 <li>Let one logged-in user send a message to another portal user without knowing
 or seeing the recipient email.</li>
@@ -9846,7 +10381,7 @@ recipient email internally.</li>
 <li>Provide a path from the existing <code>message_t</code> skeleton to a conversation-based
 model without breaking existing UI routes immediately.</li>
 </ul>
-<h2 id="non-goals-15"><a class="header" href="#non-goals-15">Non-Goals</a></h2>
+<h2 id="non-goals-17"><a class="header" href="#non-goals-17">Non-Goals</a></h2>
 <ul>
 <li>Do not build group chat in the first phase.</li>
 <li>Do not expose email addresses in message APIs, events, UI state, or task
@@ -11986,7 +12521,7 @@ public class ConfigRollbackService {
 <p>This approach provides a clean and relatively robust way to restore the specific override state from your snapshots using the DELETE/INSERT strategy. Remember to test thoroughly!</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="sid-and-host-verification"><a class="header" href="#sid-and-host-verification">SID and Host Verification</a></h1>
-<h2 id="problem-9"><a class="header" href="#problem-9">Problem</a></h2>
+<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
 <p>GitHub issue https://github.com/lightapi/portal-service/issues/39 reports that
 <code>config-server</code> accepted a valid JWT whose service identity did not match the
 requested service configuration.</p>
@@ -12103,7 +12638,7 @@ should not be forced to match <code>sid</code> until the product-level authoriza
 is explicitly designed.</p>
 <p>The same exception does not apply to controller registry registration because
 <code>service/register</code> always carries a requested <code>serviceId</code>.</p>
-<h2 id="goals-13"><a class="header" href="#goals-13">Goals</a></h2>
+<h2 id="goals-15"><a class="header" href="#goals-15">Goals</a></h2>
 <ul>
 <li>Prevent one service token from downloading another service’s config, certs,
 or files.</li>
@@ -12149,7 +12684,7 @@ helper.</p>
 <p>The focused implementation tests cover missing and mismatched <code>host</code>, missing
 and mismatched <code>sid</code>, missing and mismatched <code>env</code> when <code>envTag</code> is requested,
 blank values, whitespace trimming, and case-sensitive identifier comparison.</p>
-<h2 id="non-goals-16"><a class="header" href="#non-goals-16">Non-Goals</a></h2>
+<h2 id="non-goals-18"><a class="header" href="#non-goals-18">Non-Goals</a></h2>
 <ul>
 <li>Do not replace JWT verification middleware.</li>
 <li>Do not redesign OAuth token issuance.</li>
@@ -12552,7 +13087,7 @@ mvn -q -Dtest=ServiceIdAuthorizationUtilTest test
 <li>Non-standard instance files are copied into <code>snapshot_instance_file_t</code>.</li>
 </ul>
 <p>The <code>/config-server/files</code> endpoint must return both sets. It already filters standard files by <code>config_phase</code> through <code>config_snapshot_property_t.config_phase</code>, but <code>instance_file_t</code> and <code>snapshot_instance_file_t</code> do not currently carry <code>config_phase</code>. That makes it impossible to union the two sources while preserving runtime, deployment, and generator phase semantics.</p>
-<h2 id="problem-10"><a class="header" href="#problem-10">Problem</a></h2>
+<h2 id="problem-12"><a class="header" href="#problem-12">Problem</a></h2>
 <p>When a service starts through <code>DefaultConfigLoader</code>, it calls <code>/config-server/files</code> with <code>host</code>, <code>serviceId</code>, and <code>envTag</code>. The endpoint resolves the current snapshot and returns the files that should be written into <code>/config</code>.</p>
 <p>For the sidecar case, <code>openapi.yaml</code> exists in both <code>instance_file_t</code> and <code>snapshot_instance_file_t</code>, but it does not exist in <code>config_snapshot_property_t</code>. Since the current <code>/files</code> query reads only <code>config_snapshot_property_t</code>, the response does not include <code>openapi.yaml</code>, and the sidecar cannot write it to <code>/config</code>.</p>
 <p>The correct endpoint behavior is:</p>
@@ -12562,7 +13097,7 @@ mvn -q -Dtest=ServiceIdAuthorizationUtilTest test
 <li>Filter both sources by the requested config phase.</li>
 <li>Return one filename-to-base64-content map.</li>
 </ol>
-<h2 id="decision"><a class="header" href="#decision">Decision</a></h2>
+<h2 id="decision-1"><a class="header" href="#decision-1">Decision</a></h2>
 <p>Add <code>config_phase</code> to both runtime and snapshot instance file tables:</p>
 <ul>
 <li><code>instance_file_t.config_phase</code></li>
@@ -12602,7 +13137,7 @@ CREATE INDEX idx_snap_inst_file_phase
   ON snapshot_instance_file_t (snapshot_id, config_phase, file_type, active);
 </code></pre>
 <p>The primary key can remain <code>(snapshot_id, host_id, instance_file_id)</code> because <code>instance_file_id</code> identifies the copied runtime row. The phase-aware index supports config-server lookups.</p>
-<h2 id="migration"><a class="header" href="#migration">Migration</a></h2>
+<h2 id="migration-1"><a class="header" href="#migration-1">Migration</a></h2>
 <p>Existing rows should be backfilled to runtime:</p>
 <pre><code class="language-sql">UPDATE instance_file_t
 SET config_phase = 'R'
@@ -12715,7 +13250,7 @@ WHERE h.sub_domain || '.' || h.domain = ?
 <li><code>portal-service/apps/config-server</code> response assembly if duplicate precedence is handled outside SQL</li>
 <li><code>portal-view</code> schemas/forms/pages for instance files</li>
 </ul>
-<h2 id="validation-2"><a class="header" href="#validation-2">Validation</a></h2>
+<h2 id="validation-4"><a class="header" href="#validation-4">Validation</a></h2>
 <p>Minimum checks:</p>
 <ol>
 <li>Create or migrate an instance file named <code>openapi.yaml</code> with <code>config_phase = 'R'</code>.</li>
@@ -16833,7 +17368,7 @@ scale well if every Java or Rust release requires a hand-maintained set of
 mapping events across all portal instances. This design proposes a release
 mapping automation model that keeps the existing event-sourced write path and
 removes the need to manually recreate mapping files for every product release.</p>
-<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
+<h2 id="problem-13"><a class="header" href="#problem-13">Problem</a></h2>
 <p>Product versions are released often. Each new release can introduce a new
 <code>productVersionId</code>, and the config update page only knows which configs and
 properties are applicable when mappings exist for that exact product version.</p>
@@ -16934,7 +17469,7 @@ unchanged products and to the new <code>productVersionId</code> for rebuilt prod
 </tbody>
 </table>
 </div>
-<h2 id="goals-14"><a class="header" href="#goals-14">Goals</a></h2>
+<h2 id="goals-16"><a class="header" href="#goals-16">Goals</a></h2>
 <ul>
 <li>Auto-populate config mappings for every new Java or Rust product release.</li>
 <li>Preserve event replay, auditability, and projection rebuild behavior.</li>
@@ -16947,7 +17482,7 @@ event amplification.</li>
 <li>Detect missing config and property definitions before a release appears
 complete.</li>
 </ul>
-<h2 id="non-goals-17"><a class="header" href="#non-goals-17">Non-Goals</a></h2>
+<h2 id="non-goals-19"><a class="header" href="#non-goals-19">Non-Goals</a></h2>
 <ul>
 <li>Do not change the config override hierarchy.</li>
 <li>Do not write directly to config mapping projection tables.</li>
@@ -17593,7 +18128,7 @@ artifact publishing, AI-assisted failure diagnosis, and human approval.</p>
 portal service process. Command execution belongs in a sandboxed release
 runner, with <code>light-workflow</code> owning state, task routing, retries, approvals,
 and audit history.</p>
-<h2 id="problem-12"><a class="header" href="#problem-12">Problem</a></h2>
+<h2 id="problem-14"><a class="header" href="#problem-14">Problem</a></h2>
 <p>Java releases currently depend on <code>light-bot</code>, while Rust releases are handled
 through separate command-line and repository-specific steps. This works, but it
 keeps release knowledge outside the same workflow model used by Light Portal
@@ -17612,7 +18147,7 @@ and who approved publication.</li>
 <p>The release workflow should be flexible enough to call existing command-line
 tools, but controlled enough that it does not become an unrestricted shell
 inside Light Portal.</p>
-<h2 id="goals-15"><a class="header" href="#goals-15">Goals</a></h2>
+<h2 id="goals-17"><a class="header" href="#goals-17">Goals</a></h2>
 <ul>
 <li>Replace the current Java <code>light-bot</code> release path with <code>light-workflow</code> once
 parity is proven.</li>
@@ -17630,7 +18165,7 @@ reporting into the release gate.</li>
 behind explicit approval.</li>
 <li>Preserve release auditability and reproducibility.</li>
 </ul>
-<h2 id="non-goals-18"><a class="header" href="#non-goals-18">Non-Goals</a></h2>
+<h2 id="non-goals-20"><a class="header" href="#non-goals-20">Non-Goals</a></h2>
 <ul>
 <li>Do not run arbitrary release commands in the Light Portal service process.</li>
 <li>Do not replace Maven, Cargo, Docker, GitHub CLI, or existing release scripts
@@ -19347,7 +19882,7 @@ waitPeriod: 1000  # ms to wait between polls when no records
 <li><strong>Deployment Trigger:</strong> Automatically created when a deployment occurs (to capture the state being deployed).</li>
 <li><strong>User Trigger:</strong> Manually created by a user via the UI (e.g., to save a milestone).</li>
 </ol>
-<h2 id="data-model-1"><a class="header" href="#data-model-1">Data Model</a></h2>
+<h2 id="data-model-2"><a class="header" href="#data-model-2">Data Model</a></h2>
 <h3 id="snapshot-header-config_snapshot_t"><a class="header" href="#snapshot-header-config_snapshot_t">Snapshot Header (<code>config_snapshot_t</code>)</a></h3>
 <p>Captures metadata about the snapshot.</p>
 <ul>
@@ -19546,7 +20081,7 @@ Location: https://portal.lightapi.net/authorization?code=auth_code_abc&amp;state
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="auth-client-secret-regeneration"><a class="header" href="#auth-client-secret-regeneration">Auth Client Secret Regeneration</a></h1>
-<h2 id="problem-13"><a class="header" href="#problem-13">Problem</a></h2>
+<h2 id="problem-15"><a class="header" href="#problem-15">Problem</a></h2>
 <p>An OAuth auth client receives a <code>client_id</code> and <code>client_secret</code> when it is
 created. The clear text <code>client_secret</code> is intentionally a one-time value. The
 database projection stores only a verifier value in <code>auth_client_t.client_secret</code>
@@ -19604,7 +20139,7 @@ continuity.</li>
 <li>Enables a focused UI flow with explicit warning, confirmation, copy action,
 and audit trail.</li>
 </ul>
-<h2 id="decision-1"><a class="header" href="#decision-1">Decision</a></h2>
+<h2 id="decision-2"><a class="header" href="#decision-2">Decision</a></h2>
 <p>Add a dedicated “Regenerate Secret” action on the Auth Client page.</p>
 <p>Do not reuse delete/recreate as the normal path. Do not add a recoverable
 encrypted-secret store. The portal should continue treating client secrets as
@@ -20371,7 +20906,7 @@ Kubernetes cluster from the Instance Admin page.</p>
 <p>The goal is to provide a production-like deployment path for small businesses
 and enterprise tenants without requiring Light Portal to have direct network
 access to every customer cluster.</p>
-<h2 id="problem-14"><a class="header" href="#problem-14">Problem</a></h2>
+<h2 id="problem-16"><a class="header" href="#problem-16">Problem</a></h2>
 <p>Each API or application repository can contain a <code>k8s/</code> folder with Kubernetes
 deployment templates. The templates contain variables in the following format:</p>
 <pre><code class="language-text">${key:defaultValue}
@@ -20913,7 +21448,7 @@ deployment intent and history, while the deployer owns safe cluster-local
 execution.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-oauth-and-oauth-kafka-agentcore-oidc-discovery"><a class="header" href="#light-oauth-and-oauth-kafka-agentcore-oidc-discovery">Light OAuth and OAuth Kafka AgentCore OIDC Discovery</a></h1>
-<h2 id="problem-15"><a class="header" href="#problem-15">Problem</a></h2>
+<h2 id="problem-17"><a class="header" href="#problem-17">Problem</a></h2>
 <p>Issue https://github.com/lightapi/portal-service/issues/44 asks whether
 <code>portal-service/apps/light-oauth</code> can support AWS AgentCore JWT inbound
 authorization.</p>
@@ -21043,7 +21578,7 @@ the provider <code>jwk</code> from <code>auth_provider_t</code>. The implementat
 that the JWT header <code>kid</code> is present in the returned JWKS for the same provider.
 That guarantee matters more once external AWS services cache the discovery and
 JWKS responses.</p>
-<h2 id="goals-16"><a class="header" href="#goals-16">Goals</a></h2>
+<h2 id="goals-18"><a class="header" href="#goals-18">Goals</a></h2>
 <ul>
 <li>Let AWS AgentCore use Rust <code>light-oauth</code> or Java <code>oauth-kafka</code> as a JWT
 bearer token issuer.</li>
@@ -21055,7 +21590,7 @@ claims working.</li>
 <li>Keep issuer, audience, and discovery URLs deterministic across environments.</li>
 <li>Add tests that prove discovery, JWKS, and signed token claims line up.</li>
 </ul>
-<h2 id="non-goals-19"><a class="header" href="#non-goals-19">Non-Goals</a></h2>
+<h2 id="non-goals-21"><a class="header" href="#non-goals-21">Non-Goals</a></h2>
 <ul>
 <li>Do not implement full OIDC identity-provider behavior in the first phase.</li>
 <li>Do not add dynamic client registration.</li>
@@ -22466,6 +23001,237 @@ should manage only clients they own or can access through their position.
 Administrators can manage all clients for the host when their role allows it.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="implementation"><a class="header" href="#implementation">Implementation</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="local-portal-setup"><a class="header" href="#local-portal-setup">Local Portal Setup</a></h1>
+<p>This guide starts the local Light Portal runtime from two sibling repositories:</p>
+<pre><code class="language-text">~/lightapi/portal-config-loc
+~/lightapi/service-asset
+</code></pre>
+<p><code>portal-config-loc</code> contains the local Compose stacks and startup script.
+<code>service-asset</code> contains the checked-in service jars, UI assets, released image
+tags, and the event snapshot used to initialize a new local database.</p>
+<h2 id="quick-start"><a class="header" href="#quick-start">Quick Start</a></h2>
+<p>Clone or update both repositories under <code>~/lightapi</code>:</p>
+<pre><code class="language-bash">cd ~
+mkdir -p lightapi
+cd lightapi
+git clone git@github.com:lightapi/portal-config-loc.git
+git clone git@github.com:lightapi/service-asset.git
+</code></pre>
+<p>If they are already cloned:</p>
+<pre><code class="language-bash">cd ~/lightapi/portal-config-loc
+git pull --rebase
+cd ~/lightapi/service-asset
+git pull --rebase
+</code></pre>
+<h2 id="optional-use-your-own-events"><a class="header" href="#optional-use-your-own-events">Optional: Use Your Own Events</a></h2>
+<p>The importer always reads this exact file:</p>
+<pre><code class="language-text">~/lightapi/service-asset/events.json
+</code></pre>
+<p>To initialize a new local database with your own snapshot, replace
+<code>~/lightapi/service-asset/events.json</code> before running <code>deploy-local.sh</code> for the
+first time:</p>
+<pre><code class="language-bash">cp /path/to/your/events.json ~/lightapi/service-asset/events.json
+</code></pre>
+<p>Do not use a different filename. <code>deploy-local.sh</code> rejects <code>EVENT_IMPORT_FILE</code>
+so every import path uses only <code>service-asset/events.json</code>. After the script has
+started and imported events into Postgres, replacing the file will not change
+the existing database. To reinitialize from a different file, remove the
+Postgres named volume, replace <code>service-asset/events.json</code>, and then start the
+script again with <code>IMPORT_EVENTS=auto</code>.</p>
+<p>For Podman:</p>
+<pre><code class="language-bash">cd ~/lightapi/portal-config-loc/all-in-lt
+podman compose -f docker-compose.yml -f docker-compose-rust.yml down -v
+</code></pre>
+<p>For Docker:</p>
+<pre><code class="language-bash">cd ~/lightapi/portal-config-loc/all-in-lt
+docker compose -f docker-compose.yml -f docker-compose-rust.yml down -v
+</code></pre>
+<p>Start the Rust stack with Docker Compose:</p>
+<pre><code class="language-bash">cd ~/lightapi/portal-config-loc
+COMPOSE_CMD="docker compose" \
+CONTAINER_CMD=docker \
+IMPORT_EVENTS=auto \
+RUST_LOG=info \
+./scripts/deploy-local.sh lt rust
+</code></pre>
+<p>Start the Rust stack with Podman Compose:</p>
+<pre><code class="language-bash">cd ~/lightapi/portal-config-loc
+COMPOSE_CMD="podman compose" \
+CONTAINER_CMD=podman \
+IMPORT_EVENTS=auto \
+RUST_LOG=info \
+./scripts/deploy-local.sh lt rust
+</code></pre>
+<p>Open the portal at:</p>
+<pre><code class="language-text">https://localhost
+</code></pre>
+<p>If the selected configuration uses hostnames such as <code>dev.lightapi.net</code>, add
+them to the local hosts file and point them to <code>127.0.0.1</code>.</p>
+<h2 id="what-the-script-does"><a class="header" href="#what-the-script-does">What The Script Does</a></h2>
+<p><code>deploy-local.sh</code> copies assets from the sibling <code>service-asset</code> repository into
+the selected <code>portal-config-loc</code> stack only when the target directories are
+missing or empty. It does not overwrite populated asset directories during a
+normal run.</p>
+<p>For the <code>lt rust</code> stack, the script starts <code>all-in-lt</code> with the Rust compose
+override. It also passes <code>service-asset/docker-images.env</code> to Compose when that
+file is present, so the stack can use the released image tags generated by the
+asset release process.</p>
+<p>When <code>IMPORT_EVENTS=auto</code> is set, the script waits for Postgres, checks
+<code>event_store_t</code>, and imports <code>service-asset/events.json</code> only if the event
+store is empty. This is intended for a brand new environment or after removing
+the Postgres named volume. Leave <code>IMPORT_EVENTS</code> unset for normal restarts.</p>
+<p>Automatic event import uses the event-importer container image by default:</p>
+<pre><code class="language-bash">CONTAINER_CMD=podman
+EVENT_IMPORTER_IMAGE=networknt/event-importer:latest
+</code></pre>
+<p>Use <code>EVENT_IMPORT_RUNNER=local</code> only when you intentionally want to run the
+host-side importer scripts from <code>service-asset</code>.</p>
+<p>Postgres uses a Compose named volume called <code>postgres-data</code> instead of the
+host bind directory <code>postgres-db/data</code>. This avoids rootless Podman permission
+and SELinux label issues on Fedora Silverblue. To reset Postgres for a selected
+stack, run Compose directly from that stack directory with <code>down -v</code>.</p>
+<h2 id="ubuntu"><a class="header" href="#ubuntu">Ubuntu</a></h2>
+<p>Docker Compose is the simplest Ubuntu path. Install Docker Engine and the
+Compose plugin by following the official Docker Ubuntu guide, then run:</p>
+<pre><code class="language-bash">cd ~/lightapi/portal-config-loc
+COMPOSE_CMD="docker compose" \
+CONTAINER_CMD=docker \
+IMPORT_EVENTS=auto \
+RUST_LOG=info \
+./scripts/deploy-local.sh lt rust
+</code></pre>
+<p>Podman also works on Ubuntu after installing Podman and a Compose provider:</p>
+<pre><code class="language-bash">cd ~/lightapi/portal-config-loc
+COMPOSE_CMD="podman compose" \
+CONTAINER_CMD=podman \
+IMPORT_EVENTS=auto \
+RUST_LOG=info \
+./scripts/deploy-local.sh lt rust
+</code></pre>
+<p>References:</p>
+<ul>
+<li><a href="https://docs.docker.com/engine/install/ubuntu/">Docker Engine on Ubuntu</a></li>
+<li><a href="https://podman.io/docs/installation">Podman installation</a></li>
+<li><a href="https://docs.podman.io/en/latest/markdown/podman-compose.1.html">Podman Compose provider</a></li>
+</ul>
+<h2 id="fedora-silverblue"><a class="header" href="#fedora-silverblue">Fedora Silverblue</a></h2>
+<p>Fedora Silverblue already fits a Podman-first local workflow. Install the
+Compose provider once, then reboot into the new deployment:</p>
+<pre><code class="language-bash">sudo rpm-ostree install podman-compose
+systemctl reboot
+</code></pre>
+<p>Rootless Podman normally cannot bind host port <code>443</code>. The local configuration
+expects <code>https://localhost</code>, so allow unprivileged processes to bind from <code>443</code>
+upward before starting the stack:</p>
+<pre><code class="language-bash">printf 'net.ipv4.ip_unprivileged_port_start=443\n' | \
+  sudo tee /etc/sysctl.d/99-rootless-low-ports.conf
+sudo sysctl --system
+</code></pre>
+<p>Then start the stack:</p>
+<pre><code class="language-bash">cd ~/lightapi/portal-config-loc
+COMPOSE_CMD="podman compose" \
+CONTAINER_CMD=podman \
+IMPORT_EVENTS=auto \
+RUST_LOG=info \
+./scripts/deploy-local.sh lt rust
+</code></pre>
+<p>References:</p>
+<ul>
+<li><a href="https://podman.io/docs/installation">Podman installation</a></li>
+<li><a href="https://docs.podman.io/en/latest/markdown/podman-compose.1.html">Podman Compose provider</a></li>
+</ul>
+<h3 id="postgres-permission-recovery"><a class="header" href="#postgres-permission-recovery">Postgres Permission Recovery</a></h3>
+<p>Postgres data is stored in a Compose named volume, not in
+<code>postgres-db/data</code>. If you previously started the stack before this change and
+hit a permission error on the old bind-mounted data directory, pull the latest
+config and recreate the stack:</p>
+<pre><code class="language-bash">cd ~/lightapi/portal-config-loc
+git pull --rebase
+COMPOSE_CMD="podman compose" CONTAINER_CMD=podman ./scripts/deploy-local.sh lt rust stop
+COMPOSE_CMD="podman compose" CONTAINER_CMD=podman IMPORT_EVENTS=auto ./scripts/deploy-local.sh lt rust
+</code></pre>
+<p>If you need a completely fresh database after a failed first run, remove the
+Compose volume before starting again:</p>
+<pre><code class="language-bash">cd ~/lightapi/portal-config-loc/all-in-lt
+podman compose -f docker-compose.yml -f docker-compose-rust.yml down -v
+</code></pre>
+<h3 id="controller-certificate-recovery"><a class="header" href="#controller-certificate-recovery">Controller Certificate Recovery</a></h3>
+<p>If <code>controller-rs</code> fails with a message that
+<code>CONTROLLER_TLS_CERT_PATH</code> points to missing <code>/keystore/server.pem</code>, use the
+latest Compose files and recreate the Rust stack. The cert files are tracked in
+<code>all-in-lt/light-controller-rust</code>, but rootless Podman on Silverblue needs the
+keystore bind mount to be SELinux relabeled.</p>
+<pre><code class="language-bash">cd ~/lightapi/portal-config-loc
+git pull --rebase
+COMPOSE_CMD="podman compose" CONTAINER_CMD=podman ./scripts/deploy-local.sh lt rust restart
+</code></pre>
+<h2 id="macos"><a class="header" href="#macos">macOS</a></h2>
+<p>Docker Desktop is the simplest macOS path. Install Docker Desktop, start it,
+then run the same script from Terminal:</p>
+<pre><code class="language-bash">cd ~/lightapi/portal-config-loc
+COMPOSE_CMD="docker compose" \
+CONTAINER_CMD=docker \
+IMPORT_EVENTS=auto \
+RUST_LOG=info \
+./scripts/deploy-local.sh lt rust
+</code></pre>
+<p>Podman Desktop can also be used. Start the Podman machine first, then use the
+Podman command form:</p>
+<pre><code class="language-bash">cd ~/lightapi/portal-config-loc
+COMPOSE_CMD="podman compose" \
+CONTAINER_CMD=podman \
+IMPORT_EVENTS=auto \
+RUST_LOG=info \
+./scripts/deploy-local.sh lt rust
+</code></pre>
+<p>References:</p>
+<ul>
+<li><a href="https://docs.docker.com/desktop/setup/install/mac-install/">Docker Desktop for Mac</a></li>
+<li><a href="https://podman.io/docs/installation">Podman installation</a></li>
+</ul>
+<h2 id="windows"><a class="header" href="#windows">Windows</a></h2>
+<p>Use WSL2 Ubuntu for the local development shell. Clone the repositories under
+the WSL home directory, not under a Windows drive mount:</p>
+<pre><code class="language-text">~/lightapi/portal-config-loc
+~/lightapi/service-asset
+</code></pre>
+<p>With Docker Desktop, enable WSL integration for the Ubuntu distribution and run
+the script inside the WSL shell:</p>
+<pre><code class="language-bash">cd ~/lightapi/portal-config-loc
+COMPOSE_CMD="docker compose" \
+CONTAINER_CMD=docker \
+IMPORT_EVENTS=auto \
+RUST_LOG=info \
+./scripts/deploy-local.sh lt rust
+</code></pre>
+<p>Podman on Windows also works through a Podman machine, but WSL2 plus Docker
+Desktop is usually the shortest setup path for this local stack.</p>
+<p>References:</p>
+<ul>
+<li><a href="https://docs.docker.com/desktop/features/wsl/">Docker Desktop WSL2 integration</a></li>
+<li><a href="https://docs.docker.com/desktop/features/wsl/best-practices/">Docker WSL best practices</a></li>
+<li><a href="https://podman.io/docs/installation">Podman installation</a></li>
+</ul>
+<h2 id="common-commands"><a class="header" href="#common-commands">Common Commands</a></h2>
+<p>Show status:</p>
+<pre><code class="language-bash">COMPOSE_CMD="podman compose" ./scripts/deploy-local.sh lt rust status
+</code></pre>
+<p>Show logs:</p>
+<pre><code class="language-bash">COMPOSE_CMD="podman compose" ./scripts/deploy-local.sh lt rust logs
+</code></pre>
+<p>Restart:</p>
+<pre><code class="language-bash">COMPOSE_CMD="podman compose" ./scripts/deploy-local.sh lt rust restart
+</code></pre>
+<p>Stop:</p>
+<pre><code class="language-bash">COMPOSE_CMD="podman compose" ./scripts/deploy-local.sh lt rust stop
+</code></pre>
+<p>Force event import:</p>
+<pre><code class="language-bash">COMPOSE_CMD="podman compose" \
+CONTAINER_CMD=podman \
+IMPORT_EVENTS=true \
+./scripts/deploy-local.sh lt rust start
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="sign-in"><a class="header" href="#sign-in">Sign In</a></h1>
 <h2 id="portal-dashboard"><a class="header" href="#portal-dashboard">Portal Dashboard</a></h2>
