@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-f53fb6e4.js";
+            window.path_to_searchindex_js = "searchindex-f18ce909.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-7d273796.js"></script>
+        <script src="toc-b43063e9.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -22020,6 +22020,89 @@ from the category cards so the same task does not appear twice on the page.</p>
 actions for opening the next page or form. When a task opens another page, the
 portal carries task context through the URL so the destination can prefill or
 highlight the relevant record when supported.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="reference-table-admin"><a class="header" href="#reference-table-admin">Reference Table Admin</a></h1>
+<p>The Reference Table Admin page allows you to create and manage reference-data tables for your portal view.</p>
+<h2 id="global-vs-host-specific-tables"><a class="header" href="#global-vs-host-specific-tables">Global vs. Host-Specific Tables</a></h2>
+<p>Reference tables can be defined at two levels:</p>
+<ol>
+<li><strong>Global Reference Tables</strong>: These are built-in or system-wide tables that have no specific <code>hostId</code> assigned (the Host ID column will display as “Global”). They provide a baseline set of reference data accessible to all hosts.</li>
+<li><strong>Host-Specific Reference Tables</strong>: These are tables created by and assigned to a specific host (displaying the host’s ID in the Host ID column). They contain reference data that is isolated and only accessible to that particular host.</li>
+</ol>
+<blockquote class="blockquote-tag blockquote-tag-tip">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"></path></svg>Tip</p>
+<p><strong>Expanding Global Tables:</strong> You can define a host-specific reference table using the <strong>exact same table name</strong> as an existing global reference table. By doing this, you can expand or override the global reference table entries with your own host-specific values, tailoring the reference data to your host’s needs without affecting other hosts.</p>
+</blockquote>
+<h2 id="usage-in-formsjson"><a class="header" href="#usage-in-formsjson">Usage in <code>Forms.json</code></a></h2>
+<p>The primary consumer of reference tables in <code>portal-view</code> is the React Schema Form component, which dynamically renders dropdowns, radios, and multi-select fields based on <code>Forms.json</code>.</p>
+<p>In <code>portal-view/src/data/Forms.json</code>, fields that require dynamic reference data specify a URL pointing to the backend API.</p>
+<p>Example of a standard dropdown:</p>
+<pre><code class="language-json">{
+  "key": "user_type",
+  "type": "select",
+  "titleMap": {
+    "url": "/r/data?name=user_type"
+  }
+}
+</code></pre>
+<p>Example of a cascading (dependent) dropdown using the <code>host</code> context and a parent field value:</p>
+<pre><code class="language-json">{
+  "key": "province",
+  "type": "select",
+  "titleMap": {
+    "url": "/r/data?name=province&amp;host={0}&amp;rela=country-province&amp;from={1}"
+  }
+}
+</code></pre>
+<h2 id="the-rdata-api"><a class="header" href="#the-rdata-api">The <code>/r/data</code> API</a></h2>
+<p>The <code>/r/data</code> endpoint is exposed by the <code>portal-service</code> (specifically in <code>apps/portal-service</code>) to serve reference data securely and efficiently to the frontend.</p>
+<p>It accepts several important query parameters to shape the response:</p>
+<ul>
+<li><strong><code>name</code></strong>: The <code>tableName</code> of the reference table you want to fetch (e.g., <code>country</code>, <code>user_type</code>).</li>
+<li><strong><code>host</code></strong>: The <code>hostId</code> of the current user’s workspace. Passing this parameter ensures that any host-specific reference values (overrides/expansions) are merged seamlessly with the global values.</li>
+<li><strong><code>rela</code></strong>: The ID of a relationship mapping (Reference Relation). This is used for dependent datasets (e.g., <code>country-province</code>).</li>
+<li><strong><code>from</code></strong>: The actual selected value of the parent field in the relationship (e.g., if <code>country</code> was set to <code>US</code>, <code>from=US</code> would fetch only provinces belonging to the US).</li>
+</ul>
+<p>The <code>portal-service</code> securely resolves these requests, fetches the necessary values from the underlying <code>ref-query</code> service, evaluates relationships, and returns a key-value map compatible with <code>react-schema-form</code>’s <code>titleMap</code> or <code>dynaselect</code>.</p>
+<h2 id="example-global-vs-host-specific-expansion-createinstance-form"><a class="header" href="#example-global-vs-host-specific-expansion-createinstance-form">Example: Global vs. Host-Specific Expansion (<code>createInstance</code> form)</a></h2>
+<p>A perfect example of how global and host-specific tables interact is found in the <strong>Create Instance</strong> form, specifically between the <code>environment</code> and <code>envTag</code> fields.</p>
+<h3 id="1-the-global-field-environment"><a class="header" href="#1-the-global-field-environment">1. The Global Field (<code>environment</code>)</a></h3>
+<p>The <code>environment</code> field is designed to ONLY show the standard global environments. It does not pass the <code>host</code> parameter to the API.</p>
+<pre><code class="language-json">{
+  "key": "environment",
+  "type": "dynaselect",
+  "multiple": false,
+  "action": {
+    "url": "/r/data?name=environment"
+  }
+}
+</code></pre>
+<h3 id="2-the-expanded-field-envtag"><a class="header" href="#2-the-expanded-field-envtag">2. The Expanded Field (<code>envTag</code>)</a></h3>
+<p>The <code>envTag</code> field allows you to select a specific environment tag. This field passes the <code>hostId</code> to the API, meaning the resulting dropdown will <strong>combine</strong> the global environments WITH any host-specific environment tags you have defined.</p>
+<pre><code class="language-json">{
+  "key": "envTag",
+  "type": "dynaselect",
+  "multiple": false,
+  "action": {
+    "url": "/r/data?name=environment&amp;host={0}",
+    "params": [
+      "hostId"
+    ]
+  }
+}
+</code></pre>
+<h3 id="viewing-both-tables"><a class="header" href="#viewing-both-tables">Viewing Both Tables</a></h3>
+<p>To see both the global and your host-specific reference tables in action:</p>
+<ol>
+<li>Go to the <strong>Reference Table Admin</strong> page.</li>
+<li>In the column filters, type <code>environment</code> under the <strong>Table Name</strong> column.</li>
+<li>You will see two results:
+<ul>
+<li>One row with an empty (or “Global”) Host ID. This is the global table.</li>
+<li>One row with your specific Host ID. This is where you can add custom tags that will only appear in your <code>envTag</code> dropdown.</li>
+</ul>
+</li>
+</ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="user-session"><a class="header" href="#user-session">User Session</a></h1>
 <p>Use User Session to review and revoke OAuth sessions for your own account.</p>
