@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-9c4a31b0.js";
+            window.path_to_searchindex_js = "searchindex-59db2700.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-b43063e9.js"></script>
+        <script src="toc-d4216eaf.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -21954,6 +21954,310 @@ https://loige.co/debugging-api-gateway-http-oidc-jwt-authorizer/</li>
 <li>OIDC discovery field overview:
 https://www.authgear.com/post/well-known-openid-configuration/</li>
 </ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="openapi-endpoint-parameter-mapping-design"><a class="header" href="#openapi-endpoint-parameter-mapping-design">OpenAPI Endpoint Parameter Mapping Design</a></h1>
+<p>This document outlines the design for passing OpenAPI parameter mapping details (path parameters, query parameters, headers, cookies, and body) from <code>SpecUtil</code> to the <code>mcp-router</code> in <code>light-fabric</code>. This enables the MCP router to correctly invoke the backend REST APIs based on flat tool call arguments provided by AI agents.</p>
+<hr>
+<h2 id="context--motivation"><a class="header" href="#context--motivation">Context &amp; Motivation</a></h2>
+<p>When the OpenAPI specification is parsed by <code>SpecUtil.java</code>, endpoints are registered in the Light Portal database, and a flat <code>toolSchema</code> is generated to represent the input schema.</p>
+<p>For example, given a GET request with query parameters (like <code>/offers</code>) or path parameters (like <code>/customers/{customerId}</code>), the parameters are flattened into a single JSON schema structure:</p>
+<pre><code class="language-json">{
+  "type": "object",
+  "properties": {
+    "segment": { "type": "string", "description": "Customer segment filter." },
+    "state": { "type": "string", "description": "Region or province filter." }
+  }
+}
+</code></pre>
+<p>The AI agent invokes this tool by passing a flat map of arguments:</p>
+<pre><code class="language-json">{
+  "segment": "premium",
+  "state": "ON"
+}
+</code></pre>
+<p>Currently, the <code>mcp-router</code> in <code>light-fabric</code> does not know where each argument belongs (e.g., whether it should be placed in the URL path, query string, headers, or request body). For <code>GET</code> requests, it defaults to appending all arguments as query parameters. For <code>POST</code>/<code>PUT</code>/<code>PATCH</code> requests, it defaults to placing all arguments in the JSON body.</p>
+<p>This leads to several failures:</p>
+<ol>
+<li><strong>Path parameters</strong> (e.g. <code>{customerId}</code>) are not substituted in the URL path.</li>
+<li><strong>Header parameters</strong> and <strong>Cookies</strong> are completely lost or put in the wrong place.</li>
+<li>Mixed requests (e.g. a <code>POST</code> with a URL path parameter and a JSON body) cannot be assembled correctly.</li>
+</ol>
+<hr>
+<h2 id="design-requirements"><a class="header" href="#design-requirements">Design Requirements</a></h2>
+<ul>
+<li><strong>Accuracy</strong>: The router must place every argument in the exact location (path, query, header, cookie, or body) defined by the OpenAPI specification.</li>
+<li><strong>Efficiency / Cleanliness</strong>: The solution must not increase token usage for the LLM agents. Gateway-specific routing details should remain hidden from public tool schemas exposed to agents.</li>
+<li><strong>Backward Compatibility</strong>: If no mapping metadata is provided, the router should fall back to its existing default routing rules.</li>
+</ul>
+<hr>
+<h2 id="design-options-for-storing-parameter-locations"><a class="header" href="#design-options-for-storing-parameter-locations">Design Options for Storing Parameter Locations</a></h2>
+<p>We evaluated two options for conveying parameter mapping information from the Spec parser to the gateway router:</p>
+<h3 id="option-a-schema-level-annotations-toolschema"><a class="header" href="#option-a-schema-level-annotations-toolschema">Option A: Schema-Level Annotations (<code>toolSchema</code>)</a></h3>
+<p>Inject custom attributes (such as <code>"x-in": "query"</code>, <code>"x-in": "path"</code>) directly into the JSON Schema properties:</p>
+<pre><code class="language-json">{
+  "type": "object",
+  "properties": {
+    "customerId": {
+      "type": "string",
+      "x-in": "path"
+    }
+  }
+}
+</code></pre>
+<ul>
+<li><strong>Pros</strong>: Self-contained schema where each field is annotated with its location.</li>
+<li><strong>Cons</strong>: Increases the payload size of <code>inputSchema</code> sent to the LLM agent via <code>tools/list</code>, leading to wasted token count and exposing gateway-internal routing details to the agent.</li>
+</ul>
+<h3 id="option-b-metadata-level-mappings-toolmetadata---recommended"><a class="header" href="#option-b-metadata-level-mappings-toolmetadata---recommended">Option B: Metadata-Level Mappings (<code>toolMetadata</code>) - <em>RECOMMENDED</em></a></h3>
+<p>Store the parameter locations in the private <code>toolMetadata</code> payload, which is saved in the database and loaded by the gateway, but is filtered out and never sent to the LLM agent.</p>
+<pre><code class="language-json">{
+  "routing": {
+    "domain": "Offers",
+    "sourceProtocol": "openapi"
+  },
+  "parameters": {
+    "customerId": "path",
+    "segment": "query",
+    "X-Trace-Id": "header",
+    "body": "body"
+  }
+}
+</code></pre>
+<ul>
+<li><strong>Pros</strong>:
+<ul>
+<li>Keeps the public <code>toolSchema</code> clean and minimal.</li>
+<li>Saves LLM token costs.</li>
+<li>Consistently places all gateway-internal routing decisions inside the private <code>toolMetadata</code> structure.</li>
+</ul>
+</li>
+<li><strong>Cons</strong>: Slightly split parsing (schema for validation, metadata for execution), but since the gateway already deserializes both, this has negligible overhead.</li>
+</ul>
+<hr>
+<h2 id="detailed-solution"><a class="header" href="#detailed-solution">Detailed Solution</a></h2>
+<p>We will implement <strong>Option B</strong>. The design requires updates to two components: <code>SpecUtil.java</code> (spec parsing) and <code>mcp.rs</code> (routing execution in the Rust gateway).</p>
+<h3 id="1-spec-parser-changes-specutiljava"><a class="header" href="#1-spec-parser-changes-specutiljava">1. Spec Parser Changes (<code>SpecUtil.java</code>)</a></h3>
+<p>When parsing an OpenAPI spec in <code>SpecUtil.java</code>, we will build a <code>parameters</code> location map of type <code>Map&lt;String, String&gt;</code> mapping each parameter name to its location:</p>
+<ul>
+<li><code>path</code> -&gt; <code>"path"</code></li>
+<li><code>query</code> -&gt; <code>"query"</code></li>
+<li><code>header</code> -&gt; <code>"header"</code></li>
+<li><code>cookie</code> -&gt; <code>"cookie"</code></li>
+<li>Request Body -&gt; <code>"body"</code> (mapped from the unified schema body property for body-capable HTTP methods)</li>
+</ul>
+<p>This map will be attached to <code>routingExtras</code> during metadata enrichment under the <code>"parameters"</code> key, resulting in the following <code>toolMetadata</code> structure:</p>
+<pre><code class="language-json">{
+  "routing": {
+    "domain": "Offers",
+    "sourceProtocol": "openapi",
+    "parameters": {
+      "segment": "query",
+      "state": "query",
+      "customerId": "path"
+    }
+  },
+  "safety": {
+    "read_only": true,
+    "destructive": false
+  }
+}
+</code></pre>
+<h3 id="2-rust-gateway-router-changes-mcprs"><a class="header" href="#2-rust-gateway-router-changes-mcprs">2. Rust Gateway Router Changes (<code>mcp.rs</code>)</a></h3>
+<p>The <code>mcp.rs</code> module in <code>light-pingora</code> will be updated as follows:</p>
+<ol>
+<li><strong>Extract Parameter Locations</strong>: When caching or loading tools, the router will deserialize the <code>parameters</code> map from <code>tool_metadata.routing.parameters</code>.</li>
+<li><strong>Argument Placement</strong>: When executing an HTTP tool call, the router will partition the <code>arguments</code> map into:
+<ul>
+<li><strong>Path Map</strong>: Key-value pairs where location is <code>"path"</code>.</li>
+<li><strong>Query Map</strong>: Key-value pairs where location is <code>"query"</code>.</li>
+<li><strong>Header Map</strong>: Key-value pairs where location is <code>"header"</code>.</li>
+<li><strong>Cookie Map</strong>: Key-value pairs where location is <code>"cookie"</code>.</li>
+<li><strong>Body Val</strong>: The argument corresponding to the key mapped to <code>"body"</code>. If no explicit body mapping is defined but the HTTP method allows a body (POST/PUT/PATCH), any arguments not explicitly mapped to path/query/header/cookie will be packed into the JSON request body.</li>
+</ul>
+</li>
+<li><strong>Build Outbound Request</strong>:
+<ul>
+<li><strong>Path Substitution</strong>: Iterate through the path map and replace <code>{key}</code> placeholders in the tool URL path.</li>
+<li><strong>Query Serialization</strong>: Append the query map properties to the target URL’s query string using URL-encoding.</li>
+<li><strong>Header Injection</strong>: Append header map values as HTTP headers.</li>
+<li><strong>Cookie Injection</strong>: Format cookie map values into the <code>Cookie</code> header.</li>
+<li><strong>Body Serialization</strong>: Attach the JSON body payload to the outbound HTTP request.</li>
+</ul>
+</li>
+</ol>
+<hr>
+<h2 id="concrete-examples"><a class="header" href="#concrete-examples">Concrete Examples</a></h2>
+<h3 id="example-1-get-offers-query-filters"><a class="header" href="#example-1-get-offers-query-filters">Example 1: GET <code>/offers</code> (Query Filters)</a></h3>
+<h4 id="original-openapi-specification"><a class="header" href="#original-openapi-specification">Original OpenAPI Specification</a></h4>
+<pre><code class="language-yaml">  /offers:
+    get:
+      operationId: searchOffers
+      parameters:
+        - name: segment
+          in: query
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+</code></pre>
+<h4 id="generated-database-artifacts"><a class="header" href="#generated-database-artifacts">Generated Database Artifacts</a></h4>
+<ul>
+<li><strong><code>toolSchema</code></strong>:
+<pre><code class="language-json">{
+  "type": "object",
+  "properties": {
+    "segment": { "type": "string" },
+    "state": { "type": "string" }
+  }
+}
+</code></pre>
+</li>
+<li><strong><code>toolMetadata</code></strong>:
+<pre><code class="language-json">{
+  "routing": {
+    "domain": "Offers",
+    "sourceProtocol": "openapi",
+    "parameters": {
+      "segment": "query",
+      "state": "query"
+    }
+  }
+}
+</code></pre>
+</li>
+</ul>
+<h4 id="tool-call-arguments"><a class="header" href="#tool-call-arguments">Tool Call Arguments</a></h4>
+<pre><code class="language-json">{
+  "segment": "premium",
+  "state": "ON"
+}
+</code></pre>
+<h4 id="outgoing-rest-call"><a class="header" href="#outgoing-rest-call">Outgoing REST Call</a></h4>
+<pre><code class="language-http">GET /offers?segment=premium&amp;state=ON HTTP/1.1
+Host: backend-service
+</code></pre>
+<hr>
+<h3 id="example-2-get-customerscustomerid-path-parameter"><a class="header" href="#example-2-get-customerscustomerid-path-parameter">Example 2: GET <code>/customers/{customerId}</code> (Path Parameter)</a></h3>
+<h4 id="original-openapi-specification-1"><a class="header" href="#original-openapi-specification-1">Original OpenAPI Specification</a></h4>
+<pre><code class="language-yaml">  /customers/{customerId}:
+    get:
+      operationId: getCustomerProfile
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+</code></pre>
+<h4 id="generated-database-artifacts-1"><a class="header" href="#generated-database-artifacts-1">Generated Database Artifacts</a></h4>
+<ul>
+<li><strong><code>toolSchema</code></strong>:
+<pre><code class="language-json">{
+  "type": "object",
+  "properties": {
+    "customerId": { "type": "string" }
+  },
+  "required": ["customerId"]
+}
+</code></pre>
+</li>
+<li><strong><code>toolMetadata</code></strong>:
+<pre><code class="language-json">{
+  "routing": {
+    "domain": "Customers",
+    "sourceProtocol": "openapi",
+    "parameters": {
+      "customerId": "path"
+    }
+  }
+}
+</code></pre>
+</li>
+</ul>
+<h4 id="tool-call-arguments-1"><a class="header" href="#tool-call-arguments-1">Tool Call Arguments</a></h4>
+<pre><code class="language-json">{
+  "customerId": "CUST-1001"
+}
+</code></pre>
+<h4 id="outgoing-rest-call-1"><a class="header" href="#outgoing-rest-call-1">Outgoing REST Call</a></h4>
+<pre><code class="language-http">GET /customers/CUST-1001 HTTP/1.1
+Host: backend-service
+</code></pre>
+<hr>
+<h3 id="example-3-put-customerscustomeridpreferences-mixed-path--body"><a class="header" href="#example-3-put-customerscustomeridpreferences-mixed-path--body">Example 3: PUT <code>/customers/{customerId}/preferences</code> (Mixed Path &amp; Body)</a></h3>
+<h4 id="original-openapi-specification-2"><a class="header" href="#original-openapi-specification-2">Original OpenAPI Specification</a></h4>
+<pre><code class="language-yaml">  /customers/{customerId}/preferences:
+    put:
+      operationId: updateCustomerPreferences
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                channel:
+                  type: string
+                consent:
+                  type: boolean
+</code></pre>
+<h4 id="generated-database-artifacts-2"><a class="header" href="#generated-database-artifacts-2">Generated Database Artifacts</a></h4>
+<ul>
+<li><strong><code>toolSchema</code></strong>:
+<pre><code class="language-json">{
+  "type": "object",
+  "properties": {
+    "customerId": { "type": "string" },
+    "body": {
+      "type": "object",
+      "properties": {
+        "channel": { "type": "string" },
+        "consent": { "type": "boolean" }
+      }
+    }
+  },
+  "required": ["customerId", "body"]
+}
+</code></pre>
+</li>
+<li><strong><code>toolMetadata</code></strong>:
+<pre><code class="language-json">{
+  "routing": {
+    "domain": "Customers",
+    "sourceProtocol": "openapi",
+    "parameters": {
+      "customerId": "path",
+      "body": "body"
+    }
+  }
+}
+</code></pre>
+</li>
+</ul>
+<h4 id="tool-call-arguments-2"><a class="header" href="#tool-call-arguments-2">Tool Call Arguments</a></h4>
+<pre><code class="language-json">{
+  "customerId": "CUST-1001",
+  "body": {
+    "channel": "portal",
+    "consent": true
+  }
+}
+</code></pre>
+<h4 id="outgoing-rest-call-2"><a class="header" href="#outgoing-rest-call-2">Outgoing REST Call</a></h4>
+<pre><code class="language-http">PUT /customers/CUST-1001/preferences HTTP/1.1
+Host: backend-service
+Content-Type: application/json
+
+{"channel":"portal","consent":true}
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="portal-view-help"><a class="header" href="#portal-view-help">Portal View Help</a></h1>
 <p>This is the fallback help page for <code>portal-view</code>.</p>
