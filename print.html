@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-59db2700.js";
+            window.path_to_searchindex_js = "searchindex-acf712d6.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-d4216eaf.js"></script>
+        <script src="toc-243feb81.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -23367,6 +23367,151 @@ GenAI agent profile as one logical asset instead of two separate identities.</p>
 <li>start a workflow</li>
 <li>review process instances, tasks, assignments, worklists, and audit logs</li>
 </ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="configs"><a class="header" href="#configs">Configs</a></h1>
+<p>Use config help pages to understand runtime configuration properties managed through portal-view and the config server.</p>
+<p>Common config areas:</p>
+<ul>
+<li>logging filter</li>
+<li>handler chains and paths</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="logging-filter"><a class="header" href="#logging-filter">Logging Filter</a></h1>
+<p>Use <code>logging.filter</code> to control Rust runtime logging for <code>light-gateway</code> and other <code>light-fabric</code> services from config server <code>values.yml</code>.</p>
+<p>The value uses the Rust <code>tracing</code> filter syntax. Set a default level first, then add more specific module targets when you need detailed logs for one area.</p>
+<p>Example:</p>
+<pre><code class="language-yaml">logging.filter: info,light_pingora::security=debug
+</code></pre>
+<p>This keeps the service at <code>info</code> level overall and enables <code>debug</code> logs only for the <code>light_pingora::security</code> target. This is useful when debugging JWT verification failures without turning on debug logs for HTTP clients, TLS, and every gateway request.</p>
+<h2 id="log-levels"><a class="header" href="#log-levels">Log Levels</a></h2>
+<p>Supported levels, from least to most verbose:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Level</th><th>Use</th></tr>
+</thead>
+<tbody>
+<tr><td><code>error</code></td><td>Only failures that require attention.</td></tr>
+<tr><td><code>warn</code></td><td>Warnings and errors.</td></tr>
+<tr><td><code>info</code></td><td>Normal operational events. This is the recommended default.</td></tr>
+<tr><td><code>debug</code></td><td>Diagnostic details for troubleshooting.</td></tr>
+<tr><td><code>trace</code></td><td>Very detailed execution flow. Use for short troubleshooting windows only.</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>off</code> can be used for a specific noisy target when you want to suppress it.</p>
+<h2 id="filter-syntax"><a class="header" href="#filter-syntax">Filter Syntax</a></h2>
+<p>Common patterns:</p>
+<pre><code class="language-yaml"># Default info for all targets.
+logging.filter: info
+
+# Debug only JWT/security logic.
+logging.filter: info,light_pingora::security=debug
+
+# Trace unified-security routing while keeping the rest at info.
+logging.filter: info,light_pingora::unified_security=trace
+
+# Debug MCP request handling.
+logging.filter: info,light_pingora::mcp=debug
+
+# Debug config loading and runtime reloads.
+logging.filter: info,light_runtime=debug
+
+# Reduce noisy dependency logs while debugging gateway code.
+logging.filter: info,light_pingora::security=debug,reqwest=warn,hyper_util=warn,rustls=warn
+</code></pre>
+<p>Rules:</p>
+<ul>
+<li>Separate directives with commas.</li>
+<li>The first bare level, such as <code>info</code>, is the default for all targets.</li>
+<li>Use <code>target=level</code> for a specific crate or module.</li>
+<li>More specific targets override broader targets.</li>
+<li>Target names use Rust module paths, such as <code>light_pingora::security</code>.</li>
+</ul>
+<h2 id="common-gateway-targets"><a class="header" href="#common-gateway-targets">Common Gateway Targets</a></h2>
+<p>These targets are useful for <code>light-gateway</code> troubleshooting:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Target</th><th>What it covers</th></tr>
+</thead>
+<tbody>
+<tr><td><code>light_gateway</code></td><td>Gateway application code and proxy handling.</td></tr>
+<tr><td><code>light_pingora</code></td><td>Shared Pingora framework code.</td></tr>
+<tr><td><code>light_pingora::security</code></td><td>JWT verification, JWK loading, issuer and audience checks.</td></tr>
+<tr><td><code>light_pingora::unified_security</code></td><td>Unified security handler routing across JWT, SJWT, Basic Auth, and API key.</td></tr>
+<tr><td><code>light_pingora::mcp</code></td><td>MCP routing, backend MCP calls, and MCP response diagnostics.</td></tr>
+<tr><td><code>light_pingora::handler</code></td><td>Handler duration reporting when handler timing is enabled.</td></tr>
+<tr><td><code>light_pingora::pii_tokenization</code></td><td>PII tokenization and detokenization runtime warnings.</td></tr>
+<tr><td><code>light_runtime</code></td><td>Runtime bootstrap, config loading, module registry, config reload, and controller registration.</td></tr>
+<tr><td><code>light_client</code></td><td>HTTP client configuration and OAuth client support.</td></tr>
+<tr><td><code>portal_registry</code></td><td>Control-plane websocket registration and registry client behavior.</td></tr>
+<tr><td><code>reqwest</code></td><td>Outbound HTTP client internals.</td></tr>
+<tr><td><code>hyper_util</code></td><td>Lower-level HTTP client connection and pooling logs.</td></tr>
+<tr><td><code>rustls</code></td><td>TLS handshake and certificate details.</td></tr>
+<tr><td><code>pingora_core</code></td><td>Pingora server lifecycle, listeners, and protocol logs.</td></tr>
+<tr><td><code>pingora_proxy</code></td><td>Pingora proxy request handling.</td></tr>
+<tr><td><code>tungstenite</code></td><td>WebSocket handshake and frame-level support used by registry connections.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Use the narrowest target that contains the evidence you need. For example, prefer <code>info,light_pingora::security=debug</code> over plain <code>debug</code> when investigating JWT verification.</p>
+<h2 id="reload-behavior"><a class="header" href="#reload-behavior">Reload Behavior</a></h2>
+<p><code>logging.filter</code> is reloadable. If the control plane reloads all modules, the runtime logging module reloads the filter from the latest config server values. If <code>logging.filter</code> is not present in <code>values.yml</code>, an all-module reload can return the process to the default filter.</p>
+<p>To keep a debug filter across reloads, store it in config server <code>values.yml</code>:</p>
+<pre><code class="language-yaml">logging.filter: info,light_pingora::security=debug
+</code></pre>
+<p>Then reload the runtime configuration from the control plane. The new filter applies without restarting the gateway.</p>
+<h2 id="recommendations"><a class="header" href="#recommendations">Recommendations</a></h2>
+<ul>
+<li>Keep the default at <code>info</code> in shared environments.</li>
+<li>Add <code>debug</code> or <code>trace</code> only for the module under investigation.</li>
+<li>Remove short-term <code>debug</code> or <code>trace</code> overrides after the issue is resolved.</li>
+<li>Avoid logging full tokens, secrets, request bodies, or response bodies unless the target log point is known to mask sensitive data.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="handler-config"><a class="header" href="#handler-config">Handler Config</a></h1>
+<p>Use the handler config to define which handlers are available, how handler chains are composed, and which chain runs for each request path.</p>
+<p>Common properties:</p>
+<ul>
+<li><code>handlers</code>: handler aliases enabled for this gateway</li>
+<li><code>chains</code>: named handler chains</li>
+<li><code>paths</code>: request path and method mappings</li>
+<li><code>defaultHandlers</code>: fallback chain when no path entry matches</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="handler-path"><a class="header" href="#handler-path">Handler Path</a></h1>
+<p>Use handler paths to select the handler chain for an incoming gateway request.</p>
+<p>Each path entry matches a request by HTTP method and path. The <code>exec</code> list names the chain or handlers to run.</p>
+<p>Supported path patterns:</p>
+<ul>
+<li>exact path, such as <code>/customers</code></li>
+<li>path template, such as <code>/customers/{customerId}</code></li>
+<li>trailing wildcard, such as <code>/customers/*</code> or <code>/*</code></li>
+</ul>
+<p>Examples:</p>
+<pre><code class="language-yaml">paths:
+  - path: /customers/{customerId}
+    method: GET
+    exec:
+      - apiChain
+  - path: /customers/*
+    method: GET
+    exec:
+      - apiChain
+  - path: /*
+    method: POST
+    exec:
+      - apiChain
+</code></pre>
+<p>Important behavior:</p>
+<ul>
+<li><code>/customers</code> matches only <code>/customers</code></li>
+<li><code>/customers/{customerId}</code> matches one segment after <code>/customers</code></li>
+<li><code>/customers/*</code> matches <code>/customers</code> and any deeper path under <code>/customers</code></li>
+<li><code>/*</code> matches any path for the configured method</li>
+</ul>
+<p>For sidecar API proxy routes, point the matching API methods to the API proxy chain.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="portal-view-concepts"><a class="header" href="#portal-view-concepts">Portal View Concepts</a></h1>
 <p>This section contains reusable explanations for portal concepts referenced by
