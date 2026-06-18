@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-acf712d6.js";
+            window.path_to_searchindex_js = "searchindex-ace22544.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-243feb81.js"></script>
+        <script src="toc-a2571800.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -1491,6 +1491,557 @@ validation in the config update page. The raw JSON/YAML editor and scalar
 <code>valueType</code> validation can be built in parallel, but the Form tab and backend
 schema enforcement should wait for the registry work.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="rust-controller-logging"><a class="header" href="#rust-controller-logging">Rust Controller Logging</a></h1>
+<p>The controller service dashboard already has a logger page for Java runtimes.
+That page is built around Logback concepts: named loggers, per-logger levels,
+historical log content, and live streaming through controller-mediated MCP
+tools. Rust products need a similar operator workflow, but the underlying
+logging model is different. Rust services use <code>tracing</code> targets and one runtime
+<code>logging.filter</code> expression instead of mutable Logback logger objects.</p>
+<p>This document proposes a Rust-aware logger page for gateway, agent, API,
+deployer, and workflow runtimes:</p>
+<ul>
+<li><code>gtw</code>: <code>light-gateway</code></li>
+<li><code>agt</code>: <code>light-agent</code></li>
+<li><code>api</code>: Rust API services built on <code>light-axum</code> or <code>light-runtime</code></li>
+<li><code>dpl</code>: <code>light-deployer</code></li>
+<li><code>wf</code>: <code>light-workflow</code></li>
+</ul>
+<p>The goal is to keep the existing controller page entry point while switching
+the page behavior based on runtime capabilities.</p>
+<h2 id="current-state"><a class="header" href="#current-state">Current State</a></h2>
+<p><code>portal-view</code> has a unified controller logger page at
+<code>/app/controller/logger</code>. The page receives a runtime instance from the control
+pane dashboard and uses controller MCP tools:</p>
+<ul>
+<li><code>get_loggers</code></li>
+<li><code>set_loggers</code></li>
+<li><code>get_log_content</code></li>
+<li><code>start_logs</code></li>
+<li><code>stop_logs</code></li>
+</ul>
+<p>Those contracts work for Java services where the runtime can inspect and update
+Logback logger levels.</p>
+<p>Rust services already expose live logging filter control through the
+<code>light-runtime</code> MCP handler:</p>
+<ul>
+<li><code>get_logging_filter</code></li>
+<li><code>set_logging_filter</code></li>
+<li><code>reload_modules</code> with <code>modules: ["runtime/logging"]</code></li>
+</ul>
+<p>The tested config server baseline is:</p>
+<pre><code class="language-yaml">logging.filter: info,light_pingora::security=debug
+</code></pre>
+<p>This keeps the process at <code>info</code> by default and enables <code>debug</code> only for the
+gateway security target.</p>
+<h2 id="goals-1"><a class="header" href="#goals-1">Goals</a></h2>
+<ul>
+<li>Provide one operator page for Rust log filter control, time-based history,
+and live streaming.</li>
+<li>Reuse the controller-mediated MCP path instead of adding direct browser
+access to runtime instances.</li>
+<li>Preserve the existing Java logger page behavior.</li>
+<li>Use Rust <code>tracing</code> vocabulary in the UI: target, level, filter expression,
+and source.</li>
+<li>Let operators build common filters without memorizing module paths.</li>
+<li>Keep an advanced filter input for exact <code>EnvFilter</code> expressions.</li>
+<li>Support time-range log lookup from the running process.</li>
+<li>Support live log streaming through <code>notifications/log</code>.</li>
+<li>Make reset behavior explicit: live filter changes are temporary unless the
+instance configuration is updated separately.</li>
+</ul>
+<h2 id="non-goals-2"><a class="header" href="#non-goals-2">Non-Goals</a></h2>
+<ul>
+<li>Do not replace Java Logback logger management.</li>
+<li>Do not make the browser connect directly to pods, services, or container
+runtimes.</li>
+<li>Do not keep historical logs in portal-view or controller memory.</li>
+<li>Do not store full authorization headers, tokens, cookies, request bodies, or
+other secrets in log files, log responses, or live stream payloads.</li>
+</ul>
+<h2 id="runtime-detection"><a class="header" href="#runtime-detection">Runtime Detection</a></h2>
+<p>The logger page should select the Rust experience when either condition is
+true:</p>
+<ul>
+<li>the selected runtime instance advertises product type <code>gtw</code>, <code>agt</code>, <code>api</code>,
+<code>dpl</code>, or <code>wf</code></li>
+<li>the runtime MCP <code>tools/list</code> or controller tool discovery includes
+<code>get_logging_filter</code></li>
+</ul>
+<p>If detection is uncertain, portal-view can attempt <code>get_logging_filter</code> and
+fall back to the Java logger page if the response says logging control is not
+available.</p>
+<p>The page should show a capability banner when a selected runtime supports only
+some features:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Capability</th><th>Required runtime support</th></tr>
+</thead>
+<tbody>
+<tr><td>Filter control</td><td><code>get_logging_filter</code>, <code>set_logging_filter</code>, <code>reload_modules</code></td></tr>
+<tr><td>History</td><td><code>get_log_content</code> backed by a JSON log file or platform log provider</td></tr>
+<tr><td>Live stream</td><td><code>start_logs</code>, <code>stop_logs</code>, <code>notifications/log</code></td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="page-layout"><a class="header" href="#page-layout">Page Layout</a></h2>
+<p>Use the current logger page route and high-level structure, but render Rust
+content when the selected instance is Rust.</p>
+<p>Header:</p>
+<ul>
+<li>service label</li>
+<li>runtime instance ID</li>
+<li>service ID</li>
+<li>product type</li>
+<li>address and port</li>
+<li>connection status</li>
+<li>logging capability status</li>
+</ul>
+<p>Tabs:</p>
+<ul>
+<li><code>Filter</code></li>
+<li><code>History</code></li>
+<li><code>Live Stream</code></li>
+</ul>
+<p>The Java page can keep <code>Config</code>, <code>History</code>, and <code>Live Stream</code>; the Rust page
+uses <code>Filter</code> instead of <code>Config</code> because the operator edits one <code>tracing</code>
+filter expression, not a list of Logback logger objects.</p>
+<h2 id="filter-tab"><a class="header" href="#filter-tab">Filter Tab</a></h2>
+<p>The filter tab controls the active runtime <code>logging.filter</code>.</p>
+<p>Controls:</p>
+<ul>
+<li>current effective filter</li>
+<li>filter source, such as <code>values.yml:logging.filter</code>, <code>env:RUST_LOG</code>, or
+<code>mcp:set_logging_filter</code></li>
+<li>default level selector</li>
+<li>target rows for common Rust modules</li>
+<li>advanced filter text area</li>
+<li><code>Apply Live</code></li>
+<li><code>Reset From Config</code></li>
+</ul>
+<p>Levels:</p>
+<ul>
+<li><code>error</code></li>
+<li><code>warn</code></li>
+<li><code>info</code></li>
+<li><code>debug</code></li>
+<li><code>trace</code></li>
+<li><code>off</code></li>
+</ul>
+<p>Recommended default level is <code>info</code>.</p>
+<p>Example generated filter:</p>
+<pre><code class="language-text">info,light_pingora::security=debug
+</code></pre>
+<p>Apply flow:</p>
+<pre><code class="language-text">operator changes target rows
+  -&gt; portal-view builds EnvFilter expression
+  -&gt; controller calls runtime set_logging_filter
+  -&gt; runtime validates and applies the filter immediately
+  -&gt; portal-view refreshes get_logging_filter
+</code></pre>
+<p>Reset flow:</p>
+<pre><code class="language-text">operator clicks Reset From Config
+  -&gt; controller calls reload_modules with runtime/logging
+  -&gt; runtime reloads logging.filter from current resolved values
+  -&gt; portal-view refreshes get_logging_filter
+</code></pre>
+<p>Baseline changes are handled outside this page. If an operator wants the filter
+to survive restart or reset, they should update the selected instance
+configuration, for example:</p>
+<pre><code class="language-yaml">logging.filter: info,light_pingora::security=debug
+</code></pre>
+<h2 id="target-presets"><a class="header" href="#target-presets">Target Presets</a></h2>
+<p>The advanced filter must accept any valid Rust <code>tracing</code> target. The module
+picker should be backed by reference data so new targets can be added without a
+portal-view deployment.</p>
+<p>Portal-view should load the dropdown from:</p>
+<pre><code class="language-text">/r/data?name=logging_target
+</code></pre>
+<p>Recommended reference table mapping:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Reference field</th><th>Logging target use</th></tr>
+</thead>
+<tbody>
+<tr><td><code>ref_table_t.table_name</code></td><td><code>logging_target</code></td></tr>
+<tr><td><code>ref_value_t.value_code</code></td><td>exact Rust <code>tracing</code> target, such as <code>light_pingora::security</code></td></tr>
+<tr><td><code>value_locale_t.value_desc</code></td><td>dropdown label and short operator-facing description</td></tr>
+<tr><td><code>ref_value_t.display_order</code></td><td>stable dropdown order</td></tr>
+<tr><td><code>ref_value_t.active</code></td><td>retire a target without deleting the row</td></tr>
+</tbody>
+</table>
+</div>
+<p>The simplest page can load all active targets from <code>/r/data?name=logging_target</code>
+and group them client-side by product. If product-specific filtering is needed
+later, add a reference relation such as <code>logging-target-product</code> that links each
+target to <code>common</code>, <code>gtw</code>, <code>agt</code>, <code>api</code>, <code>dpl</code>, or <code>wf</code>. Operators can still
+type a custom target if the target is not present in the reference table.</p>
+<p>Suggested seed data:</p>
+<p>Common targets:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Target</th><th>Use</th></tr>
+</thead>
+<tbody>
+<tr><td><code>light_runtime</code></td><td>bootstrap, config loading, reload, controller registration</td></tr>
+<tr><td><code>light_client</code></td><td>outbound HTTP and OAuth client support</td></tr>
+<tr><td><code>portal_registry</code></td><td>control-plane websocket registration</td></tr>
+<tr><td><code>reqwest</code></td><td>outbound HTTP client internals</td></tr>
+<tr><td><code>hyper_util</code></td><td>connection and pooling internals</td></tr>
+<tr><td><code>rustls</code></td><td>TLS handshakes and certificates</td></tr>
+<tr><td><code>tungstenite</code></td><td>websocket handshake and frames</td></tr>
+</tbody>
+</table>
+</div>
+<p>Gateway targets:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Target</th><th>Use</th></tr>
+</thead>
+<tbody>
+<tr><td><code>light_gateway</code></td><td>gateway application and proxy glue</td></tr>
+<tr><td><code>light_pingora</code></td><td>shared Pingora framework code</td></tr>
+<tr><td><code>light_pingora::security</code></td><td>JWT validation and JWK loading</td></tr>
+<tr><td><code>light_pingora::unified_security</code></td><td>unified auth routing</td></tr>
+<tr><td><code>light_pingora::mcp</code></td><td>MCP router and backend MCP calls</td></tr>
+<tr><td><code>light_pingora::handler</code></td><td>handler duration diagnostics</td></tr>
+<tr><td><code>light_pingora::pii_tokenization</code></td><td>tokenization runtime warnings</td></tr>
+<tr><td><code>pingora_core</code></td><td>Pingora server and protocol lifecycle</td></tr>
+<tr><td><code>pingora_proxy</code></td><td>Pingora proxy request handling</td></tr>
+</tbody>
+</table>
+</div>
+<p>Agent targets:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Target</th><th>Use</th></tr>
+</thead>
+<tbody>
+<tr><td><code>light_agent</code></td><td>agent HTTP server and session handling</td></tr>
+<tr><td><code>model_provider</code></td><td>model-provider calls and fallback routing</td></tr>
+<tr><td><code>mcp_client</code></td><td>outbound MCP client requests</td></tr>
+</tbody>
+</table>
+</div>
+<p>API targets:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Target</th><th>Use</th></tr>
+</thead>
+<tbody>
+<tr><td><code>light_axum</code></td><td>HTTP transport and axum integration</td></tr>
+<tr><td><code>light_runtime</code></td><td>shared runtime modules</td></tr>
+<tr><td>service crate target</td><td>API-specific handlers, using the crate name with hyphens converted to underscores</td></tr>
+</tbody>
+</table>
+</div>
+<p>Deployer targets:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Target</th><th>Use</th></tr>
+</thead>
+<tbody>
+<tr><td><code>light_deployer</code></td><td>deployment workflow and git/Kubernetes operations</td></tr>
+<tr><td><code>light_runtime</code></td><td>shared runtime modules</td></tr>
+</tbody>
+</table>
+</div>
+<p>Workflow targets:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Target</th><th>Use</th></tr>
+</thead>
+<tbody>
+<tr><td><code>light_workflow</code></td><td>workflow engine, consumers, and task executor</td></tr>
+<tr><td><code>workflow_core</code></td><td>workflow model and shared core logic</td></tr>
+<tr><td><code>light_rule</code></td><td>rule execution</td></tr>
+<tr><td><code>model_provider</code></td><td>model-provider calls</td></tr>
+<tr><td><code>mcp_client</code></td><td>MCP tool calls</td></tr>
+</tbody>
+</table>
+</div>
+<p>The UI can also learn targets from returned history and live rows. Any target
+seen in logs can become a temporary suggestion for that browser session, but
+the authoritative dropdown source is the <code>logging_target</code> reference table.</p>
+<h2 id="history-tab"><a class="header" href="#history-tab">History Tab</a></h2>
+<p>The history tab fetches logs from the running application for a time range.</p>
+<p>Controls:</p>
+<ul>
+<li>presets: last 5, 10, 30, and 60 minutes</li>
+<li>required start time</li>
+<li>optional end time</li>
+<li>minimum level</li>
+<li>optional target filter</li>
+<li>text search</li>
+<li>result limit</li>
+</ul>
+<p>Request:</p>
+<pre><code class="language-json">{
+  "runtimeInstanceId": "019...",
+  "startTime": "2026-06-17T21:30:00Z",
+  "endTime": "2026-06-17T21:45:00Z",
+  "loggerLevel": "debug",
+  "loggerName": "light_pingora::security",
+  "limit": 1000
+}
+</code></pre>
+<p>For compatibility, <code>loggerName</code> maps to the Rust target and <code>loggerLevel</code> maps
+to the minimum tracing level. The controller can keep the existing
+<code>get_log_content</code> tool name.</p>
+<p>Recommended normalized row shape:</p>
+<pre><code class="language-json">{
+  "timestamp": "2026-06-17T21:37:43.147463Z",
+  "level": "DEBUG",
+  "logger": "light_pingora::security",
+  "target": "light_pingora::security",
+  "message": "JWT validation failed after JWKS refresh: InvalidSignature",
+  "fields": {
+    "error": "InvalidSignature"
+  }
+}
+</code></pre>
+<p>The response can preserve the current grouped shape for compatibility:</p>
+<pre><code class="language-json">{
+  "content": {
+    "light_pingora::security": {
+      "logs": [
+        {
+          "timestamp": "2026-06-17T21:37:43.147463Z",
+          "level": "DEBUG",
+          "message": "JWT validation failed after JWKS refresh: InvalidSignature"
+        }
+      ]
+    }
+  }
+}
+</code></pre>
+<p>Portal-view should flatten the grouped response into rows, as the current Java
+page already does.</p>
+<p>History source selection:</p>
+<ol>
+<li>If a JSON log file is configured, parse that file first. This should be the
+preferred source because the same file can be collected by Splunk or another
+logging system.</li>
+<li>If no log file is configured, use Kubernetes pod logs or container logs when
+the controller/runtime environment can access them.</li>
+<li>If neither source is available, return an explicit unsupported response.</li>
+</ol>
+<p>The browser must not read Kubernetes or container logs directly. The controller
+or runtime-side tool should own that platform access and return the normalized
+row shape above.</p>
+<p>When reading a JSON log file, the reader should filter by timestamp, level,
+target, and text search. If the file format is line-oriented JSON, each line
+should contain at least <code>timestamp</code>, <code>level</code>, <code>target</code>, and <code>message</code>.</p>
+<h2 id="live-stream-tab"><a class="header" href="#live-stream-tab">Live Stream Tab</a></h2>
+<p>The live stream tab starts and stops log streaming for the selected runtime
+instance.</p>
+<p>Controls:</p>
+<ul>
+<li>full filter expression</li>
+<li>start</li>
+<li>stop</li>
+<li>clear</li>
+<li>auto-scroll toggle</li>
+<li>bounded client buffer</li>
+<li>stream status</li>
+</ul>
+<p>Request:</p>
+<pre><code class="language-json">{
+  "runtimeInstanceId": "019...",
+  "filter": "info,light_pingora::security=debug"
+}
+</code></pre>
+<p><code>start_logs</code> should accept the full Rust filter expression because this is the
+syntax Rust operators already use. For backward compatibility, the controller
+can still accept <code>level</code> and <code>loggerName</code>, then translate them into a filter
+expression.</p>
+<p>The stream filter controls which events are sent to that stream subscription.
+It must not change the process-wide <code>logging.filter</code>; process-wide changes
+still go through <code>set_logging_filter</code>. Because <code>tracing</code> filters can suppress
+events before stream filtering sees them, the UI should warn when the stream
+filter is more verbose than the current active runtime filter.</p>
+<p>Notification:</p>
+<pre><code class="language-json">{
+  "method": "notifications/log",
+  "params": {
+    "runtimeInstanceId": "019...",
+    "timestamp": "2026-06-17T21:37:43.147463Z",
+    "level": "DEBUG",
+    "logger": "light_pingora::security",
+    "target": "light_pingora::security",
+    "message": "JWT validation failed after JWKS refresh: InvalidSignature"
+  }
+}
+</code></pre>
+<p>The portal-view live buffer should remain bounded. The current 1000-row FIFO
+buffer is a good default.</p>
+<p>Each browser/controller session must have its own stream subscription. Starting
+a stream from one operator must not replace another operator’s stream for the
+same runtime instance.</p>
+<h2 id="runtime-implementation"><a class="header" href="#runtime-implementation">Runtime Implementation</a></h2>
+<p>Add shared Rust logging support to <code>light-runtime</code>, not separately in every
+product.</p>
+<p>Recommended components:</p>
+<ul>
+<li><code>LoggingControl</code>: existing active <code>EnvFilter</code> control.</li>
+<li><code>JsonLogWriter</code>: optional line-oriented JSON file writer for services that
+need historical lookup or Splunk ingestion.</li>
+<li><code>LogFileReader</code>: reads and filters configured JSON log files.</li>
+<li><code>PlatformLogProvider</code>: controller-side or runtime-side abstraction for
+Kubernetes pod logs and container logs when no log file is configured.</li>
+<li><code>LogStreamHub</code>: per-client subscriptions for live streaming.</li>
+<li><code>LogRecord</code>: normalized timestamp, level, target, message, fields, and
+optional span/correlation fields.</li>
+</ul>
+<p>Recommended runtime MCP tools:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Tool</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>get_logging_filter</code></td><td>Return current Rust filter and source.</td></tr>
+<tr><td><code>set_logging_filter</code></td><td>Validate and apply a live filter expression.</td></tr>
+<tr><td><code>get_log_content</code></td><td>Return log rows from JSON file or platform log provider by time range, level, and target.</td></tr>
+<tr><td><code>start_logs</code></td><td>Start live log notifications for one controller client with a full filter expression.</td></tr>
+<tr><td><code>stop_logs</code></td><td>Stop live log notifications for one controller client.</td></tr>
+<tr><td><code>reload_modules</code></td><td>Reset <code>runtime/logging</code> from resolved config values.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The JSON log file should be configurable:</p>
+<pre><code class="language-yaml">logging.file.enabled: true
+logging.file.path: /var/log/light-gateway/app.log
+logging.file.format: json
+logging.file.maxBytes: 104857600
+logging.file.maxFiles: 10
+logging.stream.maxSubscribers: 20
+</code></pre>
+<p>Defaults should be conservative. If no JSON log file and no platform log
+provider are available, <code>get_log_content</code> should return a clear unsupported
+response instead of an empty success that looks like there were no logs.</p>
+<h2 id="controller-changes"><a class="header" href="#controller-changes">Controller Changes</a></h2>
+<p>The controller should expose Rust logging tools through the same <code>callTool</code>
+path used by the existing logger page.</p>
+<p>Add or pass through these tool names:</p>
+<ul>
+<li><code>get_logging_filter</code></li>
+<li><code>set_logging_filter</code></li>
+<li><code>reload_modules</code></li>
+<li><code>get_log_content</code></li>
+<li><code>start_logs</code></li>
+<li><code>stop_logs</code></li>
+</ul>
+<p>For Rust runtimes, <code>get_loggers</code> and <code>set_loggers</code> are not the primary control
+surface. The UI should use <code>get_logging_filter</code> and <code>set_logging_filter</code>
+instead. The controller may keep <code>get_loggers</code> and <code>set_loggers</code> for Java
+compatibility.</p>
+<p>The controller should route <code>notifications/log</code> back to the portal-view
+websocket with the originating <code>runtimeInstanceId</code> so the page can ignore logs
+from other selected services.</p>
+<p>For history, the controller should resolve sources in this order:</p>
+<ol>
+<li>configured JSON log file</li>
+<li>Kubernetes or container log provider</li>
+<li>unsupported response with a clear reason</li>
+</ol>
+<h2 id="portal-view-implementation"><a class="header" href="#portal-view-implementation">Portal-View Implementation</a></h2>
+<p>Recommended structure:</p>
+<ul>
+<li>keep <code>/app/controller/logger</code> as the route</li>
+<li>keep the existing <code>Logger</code> component as the shell</li>
+<li>split Java and Rust behavior into child panels:
+<ul>
+<li><code>JavaLoggerPanel</code></li>
+<li><code>RustLoggerPanel</code></li>
+</ul>
+</li>
+<li>reuse the current history and live table rendering where possible</li>
+<li>add a Rust filter builder for <code>logging.filter</code></li>
+</ul>
+<p>Rust filter builder state:</p>
+<pre><code class="language-ts">type RustFilterDraft = {
+  defaultLevel: "error" | "warn" | "info" | "debug" | "trace" | "off";
+  targets: Array&lt;{ target: string; level: string }&gt;;
+  advanced: string;
+  mode: "builder" | "advanced";
+};
+</code></pre>
+<p>In builder mode, portal-view generates the expression:</p>
+<pre><code class="language-text">&lt;defaultLevel&gt;,&lt;target&gt;=&lt;level&gt;,&lt;target&gt;=&lt;level&gt;
+</code></pre>
+<p>In advanced mode, portal-view sends the text exactly as entered and lets the
+runtime validate it.</p>
+<p>The page should show a warning when the current source is
+<code>mcp:set_logging_filter</code>, because that indicates a live override that can be
+lost on restart or reset by reloading <code>runtime/logging</code>.</p>
+<h2 id="baseline-configuration"><a class="header" href="#baseline-configuration">Baseline Configuration</a></h2>
+<p>Live debug changes should call <code>set_logging_filter</code>; they should not update
+config server by default.</p>
+<p>To persist a baseline filter, the operator should use the instance
+configuration page and update:</p>
+<pre><code class="language-yaml">logging.filter: info,light_pingora::security=debug
+</code></pre>
+<p>After saving the instance configuration, the config update flow can call:</p>
+<pre><code class="language-json">{
+  "name": "reload_modules",
+  "arguments": {
+    "modules": ["runtime/logging"]
+  }
+}
+</code></pre>
+<p>This makes the saved config the active baseline. Alternatively, the operator
+can return to the logger page and use <code>Reset From Config</code> to reload only
+<code>runtime/logging</code>.</p>
+<p>The Rust logger page can link to the selected instance configuration, but it
+should not write baseline config itself.</p>
+<h2 id="security-and-safety"><a class="header" href="#security-and-safety">Security And Safety</a></h2>
+<ul>
+<li>Gate filter changes and log access behind the same controller permissions as
+the Java logger page.</li>
+<li>Treat logs as sensitive operational data.</li>
+<li>Do not render raw ANSI escape sequences as HTML.</li>
+<li>Truncate very large messages and expose an expand action.</li>
+<li>Mask obvious token and secret fields in JSON log output, history responses,
+and live stream payloads.</li>
+<li>Rate-limit live streams per runtime instance and per controller client.</li>
+<li>Show a warning before enabling broad <code>trace</code> filters.</li>
+</ul>
+<h2 id="rollout-plan"><a class="header" href="#rollout-plan">Rollout Plan</a></h2>
+<ol>
+<li>Add controller pass-through for <code>get_logging_filter</code> and
+<code>set_logging_filter</code>.</li>
+<li>Add <code>RustLoggerPanel</code> in portal-view with filter control only.</li>
+<li>Add JSON file logging and a <code>get_log_content</code> reader for Rust services.</li>
+<li>Add Kubernetes/container log fallback when no log file is configured.</li>
+<li>Add Rust <code>start_logs</code> and <code>stop_logs</code> backed by per-client stream
+subscriptions.</li>
+<li>Seed the <code>logging_target</code> reference data and load dropdown options from
+<code>/r/data?name=logging_target</code>.</li>
+<li>Enable product-specific target presets for <code>gtw</code>, <code>agt</code>, <code>api</code>, <code>dpl</code>, and
+<code>wf</code>.</li>
+</ol>
+<h2 id="resolved-decisions"><a class="header" href="#resolved-decisions">Resolved Decisions</a></h2>
+<ul>
+<li>Historical logs are not kept in memory. Use a configured JSON log file first;
+if there is no file, fall back to Kubernetes or container logs when they are
+available.</li>
+<li><code>start_logs</code> accepts a full <code>filter</code> expression. Compatibility fields such as
+<code>level</code> and <code>loggerName</code> can be translated by the controller.</li>
+<li>The module dropdown is backed by the <code>logging_target</code> reference table exposed
+through <code>/r/data?name=logging_target</code>.</li>
+<li>The logger page does not save a baseline. Baseline changes belong in instance
+configuration.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="human-task-ui"><a class="header" href="#human-task-ui">Human Task UI</a></h1>
 <p><code>ask</code> is the workflow task type that pauses execution for human input. The
 runtime can now create <code>task_asst_t</code> and <code>worklist_t</code> rows when an <code>ask</code> task
@@ -1498,7 +2049,7 @@ waits, so <code>portal-view</code> needs a generic human-task interface that let
 assigned user open the task, provide the requested answer, and resume the
 workflow.</p>
 <p>This document proposes the portal UI and service contracts for that interface.</p>
-<h2 id="current-state"><a class="header" href="#current-state">Current State</a></h2>
+<h2 id="current-state-1"><a class="header" href="#current-state-1">Current State</a></h2>
 <p>The workflow engine persists waiting ask tasks in <code>task_info_t</code>. The ask
 configuration is stored in <code>task_info_t.task_output.ask</code>, and the workflow
 runtime context remains on <code>process_info_t.context_data</code>.</p>
@@ -1511,7 +2062,7 @@ per active user in the role.</li>
 </ul>
 <p>The Worklist page can show assigned tasks, but it does not yet provide a
 generic input screen for the user to approve or enter data.</p>
-<h2 id="goals-1"><a class="header" href="#goals-1">Goals</a></h2>
+<h2 id="goals-2"><a class="header" href="#goals-2">Goals</a></h2>
 <ul>
 <li>Provide one generic page for all human-input workflow tasks.</li>
 <li>Render the input controls from the ask task definition, not from a
@@ -1524,7 +2075,7 @@ side.</li>
 <li>Keep the UI useful for approval tasks first while leaving room for richer
 object-input tasks.</li>
 </ul>
-<h2 id="non-goals-2"><a class="header" href="#non-goals-2">Non-Goals</a></h2>
+<h2 id="non-goals-3"><a class="header" href="#non-goals-3">Non-Goals</a></h2>
 <ul>
 <li>Do not create a custom approval page for each workflow.</li>
 <li>Do not make every workflow task human-actionable; only <code>ask</code> tasks use this
@@ -1858,7 +2409,7 @@ portal authorization convention</li>
 the service defines workflow-specific scopes. If the current service only has a
 portal-level write scope, keep the OAuth scope broad and enforce
 <code>workflow.task.override</code> as the fine-grained application permission.</p>
-<h2 id="page-layout"><a class="header" href="#page-layout">Page Layout</a></h2>
+<h2 id="page-layout-1"><a class="header" href="#page-layout-1">Page Layout</a></h2>
 <p>The detail page should be compact and task-oriented:</p>
 <ul>
 <li>header with workflow name, task name, status, and due date if <code>deadlineTs</code> is
@@ -2002,7 +2553,7 @@ backend.</p>
 <li>Preserve host scoping and existing role-based page visibility.</li>
 <li>Avoid presenting UI-side filtering as a security boundary.</li>
 </ul>
-<h2 id="non-goals-3"><a class="header" href="#non-goals-3">Non-Goals</a></h2>
+<h2 id="non-goals-4"><a class="header" href="#non-goals-4">Non-Goals</a></h2>
 <ul>
 <li>Do not claim UI filtering is sufficient authorization.</li>
 <li>Do not replace service-layer rule-engine enforcement.</li>
@@ -2313,7 +2864,7 @@ support can read all APIs but cannot update
 </code></pre>
 <p>For tables that do not yet have explicit ownership fields, the policy can
 temporarily map ownership to <code>update_user</code>.</p>
-<h2 id="rollout-plan"><a class="header" href="#rollout-plan">Rollout Plan</a></h2>
+<h2 id="rollout-plan-1"><a class="header" href="#rollout-plan-1">Rollout Plan</a></h2>
 <h3 id="phase-1-fix-schedule-experiment"><a class="header" href="#phase-1-fix-schedule-experiment">Phase 1: Fix Schedule Experiment</a></h3>
 <ul>
 <li>Fix filter ordering so <code>updateUser</code> is included in the request.</li>
@@ -2528,7 +3079,7 @@ of them.</p>
 <li>Support future documentation search, related topics, and task-specific help.</li>
 <li>Preserve the ability to run the app locally with a configurable docs base URL.</li>
 </ul>
-<h2 id="non-goals-4"><a class="header" href="#non-goals-4">Non-Goals</a></h2>
+<h2 id="non-goals-5"><a class="header" href="#non-goals-5">Non-Goals</a></h2>
 <ul>
 <li>Do not build a full documentation authoring system inside <code>portal-view</code>.</li>
 <li>Do not duplicate long user guides in component source files.</li>
@@ -2752,7 +3303,7 @@ docs exist.</p>
 </ul>
 <p>This can start as a script in <code>light-portal-doc</code> or a shared CI check that
 accepts both repo paths.</p>
-<h2 id="rollout-plan-1"><a class="header" href="#rollout-plan-1">Rollout Plan</a></h2>
+<h2 id="rollout-plan-2"><a class="header" href="#rollout-plan-2">Rollout Plan</a></h2>
 <h3 id="phase-1-documentation-structure"><a class="header" href="#phase-1-documentation-structure">Phase 1: Documentation Structure</a></h3>
 <ul>
 <li>Create <code>src/help/portal-view/pages</code>.</li>
@@ -2902,7 +3453,7 @@ projection tables used by <code>portal-view</code>.</p>
 recent processing result for those events. Today the table and read path exist,
 but <code>notification_t</code> is not populated consistently, so the page cannot provide
 meaningful status.</p>
-<h2 id="current-state-1"><a class="header" href="#current-state-1">Current State</a></h2>
+<h2 id="current-state-2"><a class="header" href="#current-state-2">Current State</a></h2>
 <p>The command path already writes events through the common command handler:</p>
 <ol>
 <li>The command handler validates and enriches the request.</li>
@@ -2939,7 +3490,7 @@ processing boundary.</p>
 whose handler currently returns an empty response. That explains the browser
 error <code>Unexpected end of JSON input</code>, but it is separate from the notification
 status design.</p>
-<h2 id="goals-2"><a class="header" href="#goals-2">Goals</a></h2>
+<h2 id="goals-3"><a class="header" href="#goals-3">Goals</a></h2>
 <ul>
 <li>Show the current user the latest event processing results in the profile
 notification page.</li>
@@ -2952,7 +3503,7 @@ projection method.</li>
 <li>Keep enough diagnostic data to debug failed projections.</li>
 <li>Keep notification writes idempotent so event replay is safe.</li>
 </ul>
-<h2 id="non-goals-5"><a class="header" href="#non-goals-5">Non-Goals</a></h2>
+<h2 id="non-goals-6"><a class="header" href="#non-goals-6">Non-Goals</a></h2>
 <ul>
 <li>Do not replace <code>event_store_t</code>, <code>outbox_message_t</code>, or <code>dead_letter_queue</code>.</li>
 <li>Do not use notifications as the source of truth for projection state.</li>
@@ -3416,7 +3967,7 @@ projection table.</p>
 <p>It should be excluded from global snapshot export and conversion alongside
 <code>event_store_t</code>, <code>outbox_message_t</code>, <code>dead_letter_queue</code>, <code>log_counter</code>, and
 <code>consumer_offsets</code>.</p>
-<h2 id="rollout-plan-2"><a class="header" href="#rollout-plan-2">Rollout Plan</a></h2>
+<h2 id="rollout-plan-3"><a class="header" href="#rollout-plan-3">Rollout Plan</a></h2>
 <h3 id="phase-1-make-notifications-useful"><a class="header" href="#phase-1-make-notifications-useful">Phase 1: Make Notifications Useful</a></h3>
 <ul>
 <li>Add <code>status</code> and diagnostic columns to <code>notification_t</code>.</li>
@@ -3486,7 +4037,7 @@ protocol, lifecycle status, and governance metadata.</p>
 <p>The service query layer also returns <code>categoryIds</code>, <code>categories</code>, <code>tagIds</code>, and
 <code>tags</code> for API rows. The catalog should use those fields for display and
 filtering instead of reintroducing the legacy <code>apiTags</code> string field.</p>
-<h2 id="goals-3"><a class="header" href="#goals-3">Goals</a></h2>
+<h2 id="goals-4"><a class="header" href="#goals-4">Goals</a></h2>
 <ul>
 <li>Add a Marketplace menu entry for an API catalog.</li>
 <li>Use database-backed categories and tags, not hard-coded UI lists.</li>
@@ -3497,7 +4048,7 @@ filtering instead of reintroducing the legacy <code>apiTags</code> string field.
 runtime bindings, and owner actions.</li>
 <li>Preserve host scope and ownership rules already used by API administration.</li>
 </ul>
-<h2 id="non-goals-6"><a class="header" href="#non-goals-6">Non-Goals</a></h2>
+<h2 id="non-goals-7"><a class="header" href="#non-goals-7">Non-Goals</a></h2>
 <ul>
 <li>Do not replace API administration pages with the catalog.</li>
 <li>Do not store display names in API rows when they can be resolved from
@@ -3807,7 +4358,7 @@ to expose the effective agent metadata.</li>
 </ul>
 <p>The registration UX should make this model explicit. Operators should not have
 to understand the table split. They should see one task: register an AI agent.</p>
-<h2 id="goals-4"><a class="header" href="#goals-4">Goals</a></h2>
+<h2 id="goals-5"><a class="header" href="#goals-5">Goals</a></h2>
 <ul>
 <li>Add a focused Task Center flow named <code>Register AI Agent</code>.</li>
 <li>Register the agent first as an API and API version.</li>
@@ -3819,7 +4370,7 @@ table writes.</li>
 <li>Allow skills, tools, memory, access control, and deployment links to be added
 after the base agent is registered.</li>
 </ul>
-<h2 id="non-goals-7"><a class="header" href="#non-goals-7">Non-Goals</a></h2>
+<h2 id="non-goals-8"><a class="header" href="#non-goals-8">Non-Goals</a></h2>
 <ul>
 <li>Do not create a second standalone agent registry independent from APIs.</li>
 <li>Do not make <code>AgentDefinitionCreatedEvent</code> create <code>api_version_t</code>.</li>
@@ -4229,7 +4780,7 @@ exist, which endpoint projections are invokable by agents, which skills they
 belong to, and which agents are allowed or expected to use those skills. Without
 that catalog, the agent can list executable gateway tools, but it has no domain
 guidance beyond each tool description.</p>
-<h2 id="goals-5"><a class="header" href="#goals-5">Goals</a></h2>
+<h2 id="goals-6"><a class="header" href="#goals-6">Goals</a></h2>
 <ul>
 <li>Keep the gateway as the runtime source of truth for MCP tool execution.</li>
 <li>Keep direct gateway <code>tools/list</code> and <code>tools/call</code> working even when no skills
@@ -4253,7 +4804,7 @@ to be wrapped before it can be called.</li>
 portal-query can perform macro-filtering, keyword search, vector ranking,
 context viability checks, and safety filtering.</li>
 </ul>
-<h2 id="non-goals-8"><a class="header" href="#non-goals-8">Non-Goals</a></h2>
+<h2 id="non-goals-9"><a class="header" href="#non-goals-9">Non-Goals</a></h2>
 <ul>
 <li>Do not move MCP request routing or downstream REST calls into the controller.</li>
 <li>Do not implement <code>skill/search</code> in controller-rs. Controller-rs can
@@ -5294,7 +5845,7 @@ next phase:</p>
 </ul>
 <p>The design goal is to split deployment concerns without splitting the runtime
 network or the control-plane model.</p>
-<h2 id="goals-6"><a class="header" href="#goals-6">Goals</a></h2>
+<h2 id="goals-7"><a class="header" href="#goals-7">Goals</a></h2>
 <ul>
 <li>Move the two demo APIs and local <code>light-agent</code> services into a separate
 Docker Compose overlay file.</li>
@@ -5311,7 +5862,7 @@ workflows.</li>
 <li>Use <code>light-workflow</code> for deterministic orchestration, retries, human tasks,
 assertions, audit, and multi-agent coordination.</li>
 </ul>
-<h2 id="non-goals-9"><a class="header" href="#non-goals-9">Non-Goals</a></h2>
+<h2 id="non-goals-10"><a class="header" href="#non-goals-10">Non-Goals</a></h2>
 <ul>
 <li>Do not move the demo APIs or agent services into a different Compose project
 by default.</li>
@@ -5654,7 +6205,7 @@ agent.</p>
 <li>customer CA material,</li>
 <li>database credentials outside local defaults.</li>
 </ul>
-<h2 id="rollout-plan-3"><a class="header" href="#rollout-plan-3">Rollout Plan</a></h2>
+<h2 id="rollout-plan-4"><a class="header" href="#rollout-plan-4">Rollout Plan</a></h2>
 <h3 id="phase-1-compose-overlay"><a class="header" href="#phase-1-compose-overlay">Phase 1: Compose Overlay</a></h3>
 <ul>
 <li>Add <code>docker-compose.agent-api.yml</code> beside the current base compose files.</li>
@@ -5745,7 +6296,7 @@ owner:</p>
 </code></pre>
 <p>Once that contract is in place, snapshot export and conversion can safely
 include the event-backed memory state where appropriate.</p>
-<h2 id="non-goals-10"><a class="header" href="#non-goals-10">Non-Goals</a></h2>
+<h2 id="non-goals-11"><a class="header" href="#non-goals-11">Non-Goals</a></h2>
 <ul>
 <li>Do not promote existing direct-write memory rows into snapshots before a
 backfill/migration event strategy exists.</li>
@@ -5755,7 +6306,7 @@ decision requires exact cache promotion.</li>
 <li>Do not remove the current direct PostgreSQL path until <code>light-agent</code> has a
 stable command-backed memory store and operational validation.</li>
 </ul>
-<h2 id="current-state-2"><a class="header" href="#current-state-2">Current State</a></h2>
+<h2 id="current-state-3"><a class="header" href="#current-state-3">Current State</a></h2>
 <h3 id="snapshot-export-and-conversion"><a class="header" href="#snapshot-export-and-conversion">Snapshot Export And Conversion</a></h3>
 <p><code>GlobalSnapshotPersistenceImpl</code> excludes the memory tables from export and
 conversion. This prevents two bad outcomes:</p>
@@ -6050,7 +6601,7 @@ is enabled.</li>
 <li>end-to-end test: <code>light-agent</code> retain memory -&gt; command event -&gt; replay -&gt;
 recall reads the memory.</li>
 </ul>
-<h2 id="resolved-decisions"><a class="header" href="#resolved-decisions">Resolved Decisions</a></h2>
+<h2 id="resolved-decisions-1"><a class="header" href="#resolved-decisions-1">Resolved Decisions</a></h2>
 <ul>
 <li><code>agent_session_history_t</code> is exportable only as an explicit opt-in. Production
 export is blocked unless an administrative override and data masking/scrubbing
@@ -6084,7 +6635,7 @@ field, and the Portal UI should not expose raw vectors to users.</li>
 <p>As a result, new endpoint-backed tool rows start with a null
 <code>description_embedding</code>, and user edits can leave any future vector stale unless
 the write path marks it for regeneration.</p>
-<h2 id="goals-7"><a class="header" href="#goals-7">Goals</a></h2>
+<h2 id="goals-8"><a class="header" href="#goals-8">Goals</a></h2>
 <ul>
 <li>Populate <code>tool_t.description_embedding</code> for endpoint-backed and manually
 authored tools.</li>
@@ -6096,7 +6647,7 @@ latency.</li>
 disabled or temporarily failing.</li>
 <li>Keep the first implementation aligned with the existing <code>VECTOR(384)</code> schema.</li>
 </ul>
-<h2 id="non-goals-11"><a class="header" href="#non-goals-11">Non-Goals</a></h2>
+<h2 id="non-goals-12"><a class="header" href="#non-goals-12">Non-Goals</a></h2>
 <ul>
 <li>Do not require every tool to have an embedding before it can be listed,
 edited, linked to a skill, or executed through the gateway.</li>
@@ -6460,7 +7011,7 @@ and other endpoint details belong in LightAPI descriptions, OpenAPI/OpenRPC
 documents, protobuf metadata, or the portal endpoint catalog. Workflow tasks
 reference those descriptions and provide step-level wiring, guards, exports,
 and error handling.</p>
-<h2 id="current-state-3"><a class="header" href="#current-state-3">Current State</a></h2>
+<h2 id="current-state-4"><a class="header" href="#current-state-4">Current State</a></h2>
 <p>The current Portal implementation already has the persistence and generic CRUD
 surface needed for a first editor:</p>
 <ul>
@@ -6473,7 +7024,7 @@ forms whose <code>definition</code> field is a YAML textarea.</li>
 </ul>
 <p>The first Workflow Editor can therefore be an incremental UI improvement over
 the existing definition CRUD and start workflow command.</p>
-<h2 id="goals-8"><a class="header" href="#goals-8">Goals</a></h2>
+<h2 id="goals-9"><a class="header" href="#goals-9">Goals</a></h2>
 <ul>
 <li>Keep workflow YAML as the canonical persisted artifact.</li>
 <li>Provide a readable step outline or graph next to the YAML editor.</li>
@@ -6486,7 +7037,7 @@ flows.</li>
 authoring component with skill-specific constraints.</li>
 <li>Preserve owner scoping and existing Portal command/query conventions.</li>
 </ul>
-<h2 id="non-goals-12"><a class="header" href="#non-goals-12">Non-Goals</a></h2>
+<h2 id="non-goals-13"><a class="header" href="#non-goals-13">Non-Goals</a></h2>
 <ul>
 <li>Do not execute workflow logic in Portal View.</li>
 <li>Do not make skills the workflow runtime.</li>
@@ -6827,7 +7378,7 @@ should model catalog scope explicitly:</p>
 <li>a separate SPA may expose the same backend catalog, but it should not become
 the catalog authority.</li>
 </ul>
-<h2 id="goals-9"><a class="header" href="#goals-9">Goals</a></h2>
+<h2 id="goals-10"><a class="header" href="#goals-10">Goals</a></h2>
 <ul>
 <li>Avoid duplicating the full catalog for every tenant.</li>
 <li>Prevent catalog drift between tenants and between portal instances.</li>
@@ -6846,7 +7397,7 @@ agent-facing skills and tools.</li>
 <li>Support promotion or import/export between portal instances instead of
 relying on ad hoc row copies.</li>
 </ul>
-<h2 id="non-goals-13"><a class="header" href="#non-goals-13">Non-Goals</a></h2>
+<h2 id="non-goals-14"><a class="header" href="#non-goals-14">Non-Goals</a></h2>
 <ul>
 <li>Do not clone every global catalog row into every tenant by default.</li>
 <li>Do not make a separate SPA the source of truth for catalog data.</li>
@@ -7153,7 +7704,7 @@ entity-specific effective endpoints?</li>
 <h1 id="oauth-audit"><a class="header" href="#oauth-audit">OAuth Audit</a></h1>
 <p>The OAuth services keep authorization codes and refresh tokens as operational state. These rows are short lived and are now written directly to <code>auth_code_t</code> and <code>auth_refresh_token_t</code> instead of being created through the general event store. This avoids high-volume login and refresh-token churn in <code>event_store_t</code> and <code>outbox_message_t</code>.</p>
 <p>Audit and login history are recorded separately in append-oriented OAuth audit tables.</p>
-<h2 id="goals-10"><a class="header" href="#goals-10">Goals</a></h2>
+<h2 id="goals-11"><a class="header" href="#goals-11">Goals</a></h2>
 <ul>
 <li>Show administrators who is currently online.</li>
 <li>Show a user the last login time and session history.</li>
@@ -8200,7 +8751,7 @@ CREATE TABLE relation_t (
 <li><code>role_permission_t</code></li>
 </ul>
 <p>The <code>role_user_t</code> table has a foreign key to <code>(host_id, role_id)</code> in <code>role_t</code>, so role rows must exist before the user-role assignments are inserted.</p>
-<h2 id="goals-11"><a class="header" href="#goals-11">Goals</a></h2>
+<h2 id="goals-12"><a class="header" href="#goals-12">Goals</a></h2>
 <ol>
 <li>A claimed organization must be immediately usable by the selected organization owner and host owner.</li>
 <li>The default host must receive deterministic administrative roles.</li>
@@ -8208,7 +8759,7 @@ CREATE TABLE relation_t (
 <li>The event stream and projections must remain replayable and idempotent.</li>
 <li>The implementation must use the canonical role IDs already used by the portal data: <code>org-admin</code> and <code>host-admin</code>.</li>
 </ol>
-<h2 id="non-goals-14"><a class="header" href="#non-goals-14">Non-Goals</a></h2>
+<h2 id="non-goals-15"><a class="header" href="#non-goals-15">Non-Goals</a></h2>
 <p>This design does not introduce a new global organization-role table. Existing roles are host-scoped through <code>role_t.host_id</code>, so the organization administrator role for a claimed organization is represented as a role on the default host.</p>
 <p>This design also does not merge organization and host administration into one broad role. Organization ownership and host ownership are separate responsibilities, and the system should grant both roles only when the same user is selected for both owner fields.</p>
 <h2 id="role-model-1"><a class="header" href="#role-model-1">Role Model</a></h2>
@@ -8310,7 +8861,7 @@ CREATE TABLE relation_t (
 <li>Claim Org switches the selected host owner’s current host during creation after the master OAuth host login boundary is implemented.</li>
 <li>The UI tells the host owner to log out and log in again after Claim Org switches the current host.</li>
 </ul>
-<h2 id="resolved-decisions-1"><a class="header" href="#resolved-decisions-1">Resolved Decisions</a></h2>
+<h2 id="resolved-decisions-2"><a class="header" href="#resolved-decisions-2">Resolved Decisions</a></h2>
 <ol>
 <li>Claim Org creates the selected host owner’s user-host membership and switches that owner to the new host during the same command transaction.</li>
 <li><code>org-admin</code> and <code>host-admin</code> should remain separate roles. A user who needs both capabilities should receive both roles explicitly.</li>
@@ -8345,7 +8896,7 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 <p>The new tenant host does not and should not have duplicate OAuth provider/client rows. The FK therefore rejects login with:</p>
 <pre><code class="language-text">auth_session_t_host_id_client_id_provider_id_fkey
 </code></pre>
-<h2 id="goals-12"><a class="header" href="#goals-12">Goals</a></h2>
+<h2 id="goals-13"><a class="header" href="#goals-13">Goals</a></h2>
 <ol>
 <li>Keep <code>dev.lightapi.net</code> as the single master OAuth host for the instance.</li>
 <li>Allow users whose current host is a tenant host to log in through the master host’s provider/client.</li>
@@ -8354,7 +8905,7 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 <li>Allow Claim Org to switch the host owner to the new host and require logout/login for fresh claims.</li>
 <li>Keep session, auth-code, refresh-token, and audit lifecycle behavior deterministic and queryable.</li>
 </ol>
-<h2 id="non-goals-15"><a class="header" href="#non-goals-15">Non-Goals</a></h2>
+<h2 id="non-goals-16"><a class="header" href="#non-goals-16">Non-Goals</a></h2>
 <p>This design does not introduce tenant-specific OAuth provider IDs, client IDs, redirect URIs, or BFF configuration.</p>
 <p>This design does not change the portal UI or BFF to select a different OAuth provider per tenant host.</p>
 <p>This design does not remove database referential integrity. The provider-client relationship should remain enforced, but it should be enforced against the master OAuth host instead of the tenant host.</p>
@@ -8695,7 +9246,7 @@ auth_host_id = master OAuth host
 <li>Refresh token lookup uses <code>auth_refresh_token_t(refresh_token)</code> and still rejects mismatched client/provider/auth host.</li>
 <li>Provider and provider-key lookup is scoped by the configured master OAuth host.</li>
 </ul>
-<h2 id="resolved-decisions-2"><a class="header" href="#resolved-decisions-2">Resolved Decisions</a></h2>
+<h2 id="resolved-decisions-3"><a class="header" href="#resolved-decisions-3">Resolved Decisions</a></h2>
 <ol>
 <li><code>auth_session_audit_t</code> must add <code>auth_host_id</code> in the first migration.</li>
 <li>Provider and provider-key lookup must require the configured master OAuth host ID.</li>
@@ -8714,7 +9265,7 @@ support is not required for the initial hardening pass. This design focuses on
 hardening the current <code>schema-query</code>, <code>schema-command</code>, and <code>schema_t</code>
 implementation so it can safely validate configuration property values and
 support future schema reuse across portal features.</p>
-<h2 id="current-state-4"><a class="header" href="#current-state-4">Current State</a></h2>
+<h2 id="current-state-5"><a class="header" href="#current-state-5">Current State</a></h2>
 <p>The portal already has the core pieces of a schema registry:</p>
 <ul>
 <li><code>schema_t</code> stores schema metadata and the schema body.</li>
@@ -8741,7 +9292,7 @@ service yet. The main gaps are:</p>
 <li>tests for schema CRUD, tenant/global lookup, versioning, and config
 validation are incomplete</li>
 </ul>
-<h2 id="goals-13"><a class="header" href="#goals-13">Goals</a></h2>
+<h2 id="goals-14"><a class="header" href="#goals-14">Goals</a></h2>
 <ul>
 <li>Store JSON Schema documents with clear tenant/global ownership.</li>
 <li>Support immutable published schema versions.</li>
@@ -8758,7 +9309,7 @@ and loading schema bodies lazily.</li>
 JSON path.</li>
 <li>Categorize and tag schemas for easier discovery and filtering.</li>
 </ul>
-<h2 id="non-goals-16"><a class="header" href="#non-goals-16">Non-Goals</a></h2>
+<h2 id="non-goals-17"><a class="header" href="#non-goals-17">Non-Goals</a></h2>
 <ul>
 <li>Do not build a full schema compatibility engine in the first release.</li>
 <li>Do not require every config property to have a schema.</li>
@@ -10337,7 +10888,7 @@ without exposing email addresses to each other. The sender should only need a
 recipient user id or a display-safe user label. The backend can resolve email
 internally when it needs to send an external notification, but email must not be
 part of the user-facing message contract.</p>
-<h2 id="current-state-5"><a class="header" href="#current-state-5">Current State</a></h2>
+<h2 id="current-state-6"><a class="header" href="#current-state-6">Current State</a></h2>
 <p>The current codebase already has a partial private-message skeleton:</p>
 <ul>
 <li><code>user-command</code> exposes <code>lightapi.net/user/sendMessage/0.1.0</code>.</li>
@@ -10366,7 +10917,7 @@ model conversations, read state, participant visibility, or per-user delete.</li
 messages page should load its own data from the query API.</li>
 <li>The existing private-message tests are disabled stubs.</li>
 </ul>
-<h2 id="goals-14"><a class="header" href="#goals-14">Goals</a></h2>
+<h2 id="goals-15"><a class="header" href="#goals-15">Goals</a></h2>
 <ul>
 <li>Let one logged-in user send a message to another portal user without knowing
 or seeing the recipient email.</li>
@@ -10381,7 +10932,7 @@ recipient email internally.</li>
 <li>Provide a path from the existing <code>message_t</code> skeleton to a conversation-based
 model without breaking existing UI routes immediately.</li>
 </ul>
-<h2 id="non-goals-17"><a class="header" href="#non-goals-17">Non-Goals</a></h2>
+<h2 id="non-goals-18"><a class="header" href="#non-goals-18">Non-Goals</a></h2>
 <ul>
 <li>Do not build group chat in the first phase.</li>
 <li>Do not expose email addresses in message APIs, events, UI state, or task
@@ -12638,7 +13189,7 @@ should not be forced to match <code>sid</code> until the product-level authoriza
 is explicitly designed.</p>
 <p>The same exception does not apply to controller registry registration because
 <code>service/register</code> always carries a requested <code>serviceId</code>.</p>
-<h2 id="goals-15"><a class="header" href="#goals-15">Goals</a></h2>
+<h2 id="goals-16"><a class="header" href="#goals-16">Goals</a></h2>
 <ul>
 <li>Prevent one service token from downloading another service’s config, certs,
 or files.</li>
@@ -12684,7 +13235,7 @@ helper.</p>
 <p>The focused implementation tests cover missing and mismatched <code>host</code>, missing
 and mismatched <code>sid</code>, missing and mismatched <code>env</code> when <code>envTag</code> is requested,
 blank values, whitespace trimming, and case-sensitive identifier comparison.</p>
-<h2 id="non-goals-18"><a class="header" href="#non-goals-18">Non-Goals</a></h2>
+<h2 id="non-goals-19"><a class="header" href="#non-goals-19">Non-Goals</a></h2>
 <ul>
 <li>Do not replace JWT verification middleware.</li>
 <li>Do not redesign OAuth token issuance.</li>
@@ -17469,7 +18020,7 @@ unchanged products and to the new <code>productVersionId</code> for rebuilt prod
 </tbody>
 </table>
 </div>
-<h2 id="goals-16"><a class="header" href="#goals-16">Goals</a></h2>
+<h2 id="goals-17"><a class="header" href="#goals-17">Goals</a></h2>
 <ul>
 <li>Auto-populate config mappings for every new Java or Rust product release.</li>
 <li>Preserve event replay, auditability, and projection rebuild behavior.</li>
@@ -17482,7 +18033,7 @@ event amplification.</li>
 <li>Detect missing config and property definitions before a release appears
 complete.</li>
 </ul>
-<h2 id="non-goals-19"><a class="header" href="#non-goals-19">Non-Goals</a></h2>
+<h2 id="non-goals-20"><a class="header" href="#non-goals-20">Non-Goals</a></h2>
 <ul>
 <li>Do not change the config override hierarchy.</li>
 <li>Do not write directly to config mapping projection tables.</li>
@@ -18147,7 +18698,7 @@ and who approved publication.</li>
 <p>The release workflow should be flexible enough to call existing command-line
 tools, but controlled enough that it does not become an unrestricted shell
 inside Light Portal.</p>
-<h2 id="goals-17"><a class="header" href="#goals-17">Goals</a></h2>
+<h2 id="goals-18"><a class="header" href="#goals-18">Goals</a></h2>
 <ul>
 <li>Replace the current Java <code>light-bot</code> release path with <code>light-workflow</code> once
 parity is proven.</li>
@@ -18165,7 +18716,7 @@ reporting into the release gate.</li>
 behind explicit approval.</li>
 <li>Preserve release auditability and reproducibility.</li>
 </ul>
-<h2 id="non-goals-20"><a class="header" href="#non-goals-20">Non-Goals</a></h2>
+<h2 id="non-goals-21"><a class="header" href="#non-goals-21">Non-Goals</a></h2>
 <ul>
 <li>Do not run arbitrary release commands in the Light Portal service process.</li>
 <li>Do not replace Maven, Cargo, Docker, GitHub CLI, or existing release scripts
@@ -18177,7 +18728,7 @@ should be portable manifests, not customer import output.</li>
 <li>Do not remove <code>light-bot</code> until Java release parity has been demonstrated
 through several successful workflow-managed releases.</li>
 </ul>
-<h2 id="current-state-6"><a class="header" href="#current-state-6">Current State</a></h2>
+<h2 id="current-state-7"><a class="header" href="#current-state-7">Current State</a></h2>
 <p><code>light-bot</code> is the practical Java release automation path today. It contains
 working release knowledge and should remain available as a fallback during the
 migration.</p>
@@ -20090,7 +20641,7 @@ so the clear secret cannot be recovered later.</p>
 one-time response, close the page, or forget to copy the secret into their
 deployment system. Once that happens, the portal needs a way to issue a new
 secret without weakening the storage model.</p>
-<h2 id="current-state-7"><a class="header" href="#current-state-7">Current State</a></h2>
+<h2 id="current-state-8"><a class="header" href="#current-state-8">Current State</a></h2>
 <p>The current create flow in <code>oauth-command</code> generates both values in
 <code>CreateClient</code>:</p>
 <ul>
@@ -21578,7 +22129,7 @@ the provider <code>jwk</code> from <code>auth_provider_t</code>. The implementat
 that the JWT header <code>kid</code> is present in the returned JWKS for the same provider.
 That guarantee matters more once external AWS services cache the discovery and
 JWKS responses.</p>
-<h2 id="goals-18"><a class="header" href="#goals-18">Goals</a></h2>
+<h2 id="goals-19"><a class="header" href="#goals-19">Goals</a></h2>
 <ul>
 <li>Let AWS AgentCore use Rust <code>light-oauth</code> or Java <code>oauth-kafka</code> as a JWT
 bearer token issuer.</li>
@@ -21590,7 +22141,7 @@ claims working.</li>
 <li>Keep issuer, audience, and discovery URLs deterministic across environments.</li>
 <li>Add tests that prove discovery, JWKS, and signed token claims line up.</li>
 </ul>
-<h2 id="non-goals-21"><a class="header" href="#non-goals-21">Non-Goals</a></h2>
+<h2 id="non-goals-22"><a class="header" href="#non-goals-22">Non-Goals</a></h2>
 <ul>
 <li>Do not implement full OIDC identity-provider behavior in the first phase.</li>
 <li>Do not add dynamic client registration.</li>

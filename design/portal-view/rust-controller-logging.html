@@ -1,0 +1,786 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Rust Controller Logging - Light Portal Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../../css/general-0392ca55.css">
+        <link rel="stylesheet" href="../../css/chrome-fc474251.css">
+        <link rel="stylesheet" href="../../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../../searchindex-ace22544.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../../toc-a2571800.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Light Portal Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="rust-controller-logging"><a class="header" href="#rust-controller-logging">Rust Controller Logging</a></h1>
+<p>The controller service dashboard already has a logger page for Java runtimes.
+That page is built around Logback concepts: named loggers, per-logger levels,
+historical log content, and live streaming through controller-mediated MCP
+tools. Rust products need a similar operator workflow, but the underlying
+logging model is different. Rust services use <code>tracing</code> targets and one runtime
+<code>logging.filter</code> expression instead of mutable Logback logger objects.</p>
+<p>This document proposes a Rust-aware logger page for gateway, agent, API,
+deployer, and workflow runtimes:</p>
+<ul>
+<li><code>gtw</code>: <code>light-gateway</code></li>
+<li><code>agt</code>: <code>light-agent</code></li>
+<li><code>api</code>: Rust API services built on <code>light-axum</code> or <code>light-runtime</code></li>
+<li><code>dpl</code>: <code>light-deployer</code></li>
+<li><code>wf</code>: <code>light-workflow</code></li>
+</ul>
+<p>The goal is to keep the existing controller page entry point while switching
+the page behavior based on runtime capabilities.</p>
+<h2 id="current-state"><a class="header" href="#current-state">Current State</a></h2>
+<p><code>portal-view</code> has a unified controller logger page at
+<code>/app/controller/logger</code>. The page receives a runtime instance from the control
+pane dashboard and uses controller MCP tools:</p>
+<ul>
+<li><code>get_loggers</code></li>
+<li><code>set_loggers</code></li>
+<li><code>get_log_content</code></li>
+<li><code>start_logs</code></li>
+<li><code>stop_logs</code></li>
+</ul>
+<p>Those contracts work for Java services where the runtime can inspect and update
+Logback logger levels.</p>
+<p>Rust services already expose live logging filter control through the
+<code>light-runtime</code> MCP handler:</p>
+<ul>
+<li><code>get_logging_filter</code></li>
+<li><code>set_logging_filter</code></li>
+<li><code>reload_modules</code> with <code>modules: ["runtime/logging"]</code></li>
+</ul>
+<p>The tested config server baseline is:</p>
+<pre><code class="language-yaml">logging.filter: info,light_pingora::security=debug
+</code></pre>
+<p>This keeps the process at <code>info</code> by default and enables <code>debug</code> only for the
+gateway security target.</p>
+<h2 id="goals"><a class="header" href="#goals">Goals</a></h2>
+<ul>
+<li>Provide one operator page for Rust log filter control, time-based history,
+and live streaming.</li>
+<li>Reuse the controller-mediated MCP path instead of adding direct browser
+access to runtime instances.</li>
+<li>Preserve the existing Java logger page behavior.</li>
+<li>Use Rust <code>tracing</code> vocabulary in the UI: target, level, filter expression,
+and source.</li>
+<li>Let operators build common filters without memorizing module paths.</li>
+<li>Keep an advanced filter input for exact <code>EnvFilter</code> expressions.</li>
+<li>Support time-range log lookup from the running process.</li>
+<li>Support live log streaming through <code>notifications/log</code>.</li>
+<li>Make reset behavior explicit: live filter changes are temporary unless the
+instance configuration is updated separately.</li>
+</ul>
+<h2 id="non-goals"><a class="header" href="#non-goals">Non-Goals</a></h2>
+<ul>
+<li>Do not replace Java Logback logger management.</li>
+<li>Do not make the browser connect directly to pods, services, or container
+runtimes.</li>
+<li>Do not keep historical logs in portal-view or controller memory.</li>
+<li>Do not store full authorization headers, tokens, cookies, request bodies, or
+other secrets in log files, log responses, or live stream payloads.</li>
+</ul>
+<h2 id="runtime-detection"><a class="header" href="#runtime-detection">Runtime Detection</a></h2>
+<p>The logger page should select the Rust experience when either condition is
+true:</p>
+<ul>
+<li>the selected runtime instance advertises product type <code>gtw</code>, <code>agt</code>, <code>api</code>,
+<code>dpl</code>, or <code>wf</code></li>
+<li>the runtime MCP <code>tools/list</code> or controller tool discovery includes
+<code>get_logging_filter</code></li>
+</ul>
+<p>If detection is uncertain, portal-view can attempt <code>get_logging_filter</code> and
+fall back to the Java logger page if the response says logging control is not
+available.</p>
+<p>The page should show a capability banner when a selected runtime supports only
+some features:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Capability</th><th>Required runtime support</th></tr>
+</thead>
+<tbody>
+<tr><td>Filter control</td><td><code>get_logging_filter</code>, <code>set_logging_filter</code>, <code>reload_modules</code></td></tr>
+<tr><td>History</td><td><code>get_log_content</code> backed by a JSON log file or platform log provider</td></tr>
+<tr><td>Live stream</td><td><code>start_logs</code>, <code>stop_logs</code>, <code>notifications/log</code></td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="page-layout"><a class="header" href="#page-layout">Page Layout</a></h2>
+<p>Use the current logger page route and high-level structure, but render Rust
+content when the selected instance is Rust.</p>
+<p>Header:</p>
+<ul>
+<li>service label</li>
+<li>runtime instance ID</li>
+<li>service ID</li>
+<li>product type</li>
+<li>address and port</li>
+<li>connection status</li>
+<li>logging capability status</li>
+</ul>
+<p>Tabs:</p>
+<ul>
+<li><code>Filter</code></li>
+<li><code>History</code></li>
+<li><code>Live Stream</code></li>
+</ul>
+<p>The Java page can keep <code>Config</code>, <code>History</code>, and <code>Live Stream</code>; the Rust page
+uses <code>Filter</code> instead of <code>Config</code> because the operator edits one <code>tracing</code>
+filter expression, not a list of Logback logger objects.</p>
+<h2 id="filter-tab"><a class="header" href="#filter-tab">Filter Tab</a></h2>
+<p>The filter tab controls the active runtime <code>logging.filter</code>.</p>
+<p>Controls:</p>
+<ul>
+<li>current effective filter</li>
+<li>filter source, such as <code>values.yml:logging.filter</code>, <code>env:RUST_LOG</code>, or
+<code>mcp:set_logging_filter</code></li>
+<li>default level selector</li>
+<li>target rows for common Rust modules</li>
+<li>advanced filter text area</li>
+<li><code>Apply Live</code></li>
+<li><code>Reset From Config</code></li>
+</ul>
+<p>Levels:</p>
+<ul>
+<li><code>error</code></li>
+<li><code>warn</code></li>
+<li><code>info</code></li>
+<li><code>debug</code></li>
+<li><code>trace</code></li>
+<li><code>off</code></li>
+</ul>
+<p>Recommended default level is <code>info</code>.</p>
+<p>Example generated filter:</p>
+<pre><code class="language-text">info,light_pingora::security=debug
+</code></pre>
+<p>Apply flow:</p>
+<pre><code class="language-text">operator changes target rows
+  -&gt; portal-view builds EnvFilter expression
+  -&gt; controller calls runtime set_logging_filter
+  -&gt; runtime validates and applies the filter immediately
+  -&gt; portal-view refreshes get_logging_filter
+</code></pre>
+<p>Reset flow:</p>
+<pre><code class="language-text">operator clicks Reset From Config
+  -&gt; controller calls reload_modules with runtime/logging
+  -&gt; runtime reloads logging.filter from current resolved values
+  -&gt; portal-view refreshes get_logging_filter
+</code></pre>
+<p>Baseline changes are handled outside this page. If an operator wants the filter
+to survive restart or reset, they should update the selected instance
+configuration, for example:</p>
+<pre><code class="language-yaml">logging.filter: info,light_pingora::security=debug
+</code></pre>
+<h2 id="target-presets"><a class="header" href="#target-presets">Target Presets</a></h2>
+<p>The advanced filter must accept any valid Rust <code>tracing</code> target. The module
+picker should be backed by reference data so new targets can be added without a
+portal-view deployment.</p>
+<p>Portal-view should load the dropdown from:</p>
+<pre><code class="language-text">/r/data?name=logging_target
+</code></pre>
+<p>Recommended reference table mapping:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Reference field</th><th>Logging target use</th></tr>
+</thead>
+<tbody>
+<tr><td><code>ref_table_t.table_name</code></td><td><code>logging_target</code></td></tr>
+<tr><td><code>ref_value_t.value_code</code></td><td>exact Rust <code>tracing</code> target, such as <code>light_pingora::security</code></td></tr>
+<tr><td><code>value_locale_t.value_desc</code></td><td>dropdown label and short operator-facing description</td></tr>
+<tr><td><code>ref_value_t.display_order</code></td><td>stable dropdown order</td></tr>
+<tr><td><code>ref_value_t.active</code></td><td>retire a target without deleting the row</td></tr>
+</tbody>
+</table>
+</div>
+<p>The simplest page can load all active targets from <code>/r/data?name=logging_target</code>
+and group them client-side by product. If product-specific filtering is needed
+later, add a reference relation such as <code>logging-target-product</code> that links each
+target to <code>common</code>, <code>gtw</code>, <code>agt</code>, <code>api</code>, <code>dpl</code>, or <code>wf</code>. Operators can still
+type a custom target if the target is not present in the reference table.</p>
+<p>Suggested seed data:</p>
+<p>Common targets:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Target</th><th>Use</th></tr>
+</thead>
+<tbody>
+<tr><td><code>light_runtime</code></td><td>bootstrap, config loading, reload, controller registration</td></tr>
+<tr><td><code>light_client</code></td><td>outbound HTTP and OAuth client support</td></tr>
+<tr><td><code>portal_registry</code></td><td>control-plane websocket registration</td></tr>
+<tr><td><code>reqwest</code></td><td>outbound HTTP client internals</td></tr>
+<tr><td><code>hyper_util</code></td><td>connection and pooling internals</td></tr>
+<tr><td><code>rustls</code></td><td>TLS handshakes and certificates</td></tr>
+<tr><td><code>tungstenite</code></td><td>websocket handshake and frames</td></tr>
+</tbody>
+</table>
+</div>
+<p>Gateway targets:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Target</th><th>Use</th></tr>
+</thead>
+<tbody>
+<tr><td><code>light_gateway</code></td><td>gateway application and proxy glue</td></tr>
+<tr><td><code>light_pingora</code></td><td>shared Pingora framework code</td></tr>
+<tr><td><code>light_pingora::security</code></td><td>JWT validation and JWK loading</td></tr>
+<tr><td><code>light_pingora::unified_security</code></td><td>unified auth routing</td></tr>
+<tr><td><code>light_pingora::mcp</code></td><td>MCP router and backend MCP calls</td></tr>
+<tr><td><code>light_pingora::handler</code></td><td>handler duration diagnostics</td></tr>
+<tr><td><code>light_pingora::pii_tokenization</code></td><td>tokenization runtime warnings</td></tr>
+<tr><td><code>pingora_core</code></td><td>Pingora server and protocol lifecycle</td></tr>
+<tr><td><code>pingora_proxy</code></td><td>Pingora proxy request handling</td></tr>
+</tbody>
+</table>
+</div>
+<p>Agent targets:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Target</th><th>Use</th></tr>
+</thead>
+<tbody>
+<tr><td><code>light_agent</code></td><td>agent HTTP server and session handling</td></tr>
+<tr><td><code>model_provider</code></td><td>model-provider calls and fallback routing</td></tr>
+<tr><td><code>mcp_client</code></td><td>outbound MCP client requests</td></tr>
+</tbody>
+</table>
+</div>
+<p>API targets:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Target</th><th>Use</th></tr>
+</thead>
+<tbody>
+<tr><td><code>light_axum</code></td><td>HTTP transport and axum integration</td></tr>
+<tr><td><code>light_runtime</code></td><td>shared runtime modules</td></tr>
+<tr><td>service crate target</td><td>API-specific handlers, using the crate name with hyphens converted to underscores</td></tr>
+</tbody>
+</table>
+</div>
+<p>Deployer targets:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Target</th><th>Use</th></tr>
+</thead>
+<tbody>
+<tr><td><code>light_deployer</code></td><td>deployment workflow and git/Kubernetes operations</td></tr>
+<tr><td><code>light_runtime</code></td><td>shared runtime modules</td></tr>
+</tbody>
+</table>
+</div>
+<p>Workflow targets:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Target</th><th>Use</th></tr>
+</thead>
+<tbody>
+<tr><td><code>light_workflow</code></td><td>workflow engine, consumers, and task executor</td></tr>
+<tr><td><code>workflow_core</code></td><td>workflow model and shared core logic</td></tr>
+<tr><td><code>light_rule</code></td><td>rule execution</td></tr>
+<tr><td><code>model_provider</code></td><td>model-provider calls</td></tr>
+<tr><td><code>mcp_client</code></td><td>MCP tool calls</td></tr>
+</tbody>
+</table>
+</div>
+<p>The UI can also learn targets from returned history and live rows. Any target
+seen in logs can become a temporary suggestion for that browser session, but
+the authoritative dropdown source is the <code>logging_target</code> reference table.</p>
+<h2 id="history-tab"><a class="header" href="#history-tab">History Tab</a></h2>
+<p>The history tab fetches logs from the running application for a time range.</p>
+<p>Controls:</p>
+<ul>
+<li>presets: last 5, 10, 30, and 60 minutes</li>
+<li>required start time</li>
+<li>optional end time</li>
+<li>minimum level</li>
+<li>optional target filter</li>
+<li>text search</li>
+<li>result limit</li>
+</ul>
+<p>Request:</p>
+<pre><code class="language-json">{
+  "runtimeInstanceId": "019...",
+  "startTime": "2026-06-17T21:30:00Z",
+  "endTime": "2026-06-17T21:45:00Z",
+  "loggerLevel": "debug",
+  "loggerName": "light_pingora::security",
+  "limit": 1000
+}
+</code></pre>
+<p>For compatibility, <code>loggerName</code> maps to the Rust target and <code>loggerLevel</code> maps
+to the minimum tracing level. The controller can keep the existing
+<code>get_log_content</code> tool name.</p>
+<p>Recommended normalized row shape:</p>
+<pre><code class="language-json">{
+  "timestamp": "2026-06-17T21:37:43.147463Z",
+  "level": "DEBUG",
+  "logger": "light_pingora::security",
+  "target": "light_pingora::security",
+  "message": "JWT validation failed after JWKS refresh: InvalidSignature",
+  "fields": {
+    "error": "InvalidSignature"
+  }
+}
+</code></pre>
+<p>The response can preserve the current grouped shape for compatibility:</p>
+<pre><code class="language-json">{
+  "content": {
+    "light_pingora::security": {
+      "logs": [
+        {
+          "timestamp": "2026-06-17T21:37:43.147463Z",
+          "level": "DEBUG",
+          "message": "JWT validation failed after JWKS refresh: InvalidSignature"
+        }
+      ]
+    }
+  }
+}
+</code></pre>
+<p>Portal-view should flatten the grouped response into rows, as the current Java
+page already does.</p>
+<p>History source selection:</p>
+<ol>
+<li>If a JSON log file is configured, parse that file first. This should be the
+preferred source because the same file can be collected by Splunk or another
+logging system.</li>
+<li>If no log file is configured, use Kubernetes pod logs or container logs when
+the controller/runtime environment can access them.</li>
+<li>If neither source is available, return an explicit unsupported response.</li>
+</ol>
+<p>The browser must not read Kubernetes or container logs directly. The controller
+or runtime-side tool should own that platform access and return the normalized
+row shape above.</p>
+<p>When reading a JSON log file, the reader should filter by timestamp, level,
+target, and text search. If the file format is line-oriented JSON, each line
+should contain at least <code>timestamp</code>, <code>level</code>, <code>target</code>, and <code>message</code>.</p>
+<h2 id="live-stream-tab"><a class="header" href="#live-stream-tab">Live Stream Tab</a></h2>
+<p>The live stream tab starts and stops log streaming for the selected runtime
+instance.</p>
+<p>Controls:</p>
+<ul>
+<li>full filter expression</li>
+<li>start</li>
+<li>stop</li>
+<li>clear</li>
+<li>auto-scroll toggle</li>
+<li>bounded client buffer</li>
+<li>stream status</li>
+</ul>
+<p>Request:</p>
+<pre><code class="language-json">{
+  "runtimeInstanceId": "019...",
+  "filter": "info,light_pingora::security=debug"
+}
+</code></pre>
+<p><code>start_logs</code> should accept the full Rust filter expression because this is the
+syntax Rust operators already use. For backward compatibility, the controller
+can still accept <code>level</code> and <code>loggerName</code>, then translate them into a filter
+expression.</p>
+<p>The stream filter controls which events are sent to that stream subscription.
+It must not change the process-wide <code>logging.filter</code>; process-wide changes
+still go through <code>set_logging_filter</code>. Because <code>tracing</code> filters can suppress
+events before stream filtering sees them, the UI should warn when the stream
+filter is more verbose than the current active runtime filter.</p>
+<p>Notification:</p>
+<pre><code class="language-json">{
+  "method": "notifications/log",
+  "params": {
+    "runtimeInstanceId": "019...",
+    "timestamp": "2026-06-17T21:37:43.147463Z",
+    "level": "DEBUG",
+    "logger": "light_pingora::security",
+    "target": "light_pingora::security",
+    "message": "JWT validation failed after JWKS refresh: InvalidSignature"
+  }
+}
+</code></pre>
+<p>The portal-view live buffer should remain bounded. The current 1000-row FIFO
+buffer is a good default.</p>
+<p>Each browser/controller session must have its own stream subscription. Starting
+a stream from one operator must not replace another operator’s stream for the
+same runtime instance.</p>
+<h2 id="runtime-implementation"><a class="header" href="#runtime-implementation">Runtime Implementation</a></h2>
+<p>Add shared Rust logging support to <code>light-runtime</code>, not separately in every
+product.</p>
+<p>Recommended components:</p>
+<ul>
+<li><code>LoggingControl</code>: existing active <code>EnvFilter</code> control.</li>
+<li><code>JsonLogWriter</code>: optional line-oriented JSON file writer for services that
+need historical lookup or Splunk ingestion.</li>
+<li><code>LogFileReader</code>: reads and filters configured JSON log files.</li>
+<li><code>PlatformLogProvider</code>: controller-side or runtime-side abstraction for
+Kubernetes pod logs and container logs when no log file is configured.</li>
+<li><code>LogStreamHub</code>: per-client subscriptions for live streaming.</li>
+<li><code>LogRecord</code>: normalized timestamp, level, target, message, fields, and
+optional span/correlation fields.</li>
+</ul>
+<p>Recommended runtime MCP tools:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Tool</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>get_logging_filter</code></td><td>Return current Rust filter and source.</td></tr>
+<tr><td><code>set_logging_filter</code></td><td>Validate and apply a live filter expression.</td></tr>
+<tr><td><code>get_log_content</code></td><td>Return log rows from JSON file or platform log provider by time range, level, and target.</td></tr>
+<tr><td><code>start_logs</code></td><td>Start live log notifications for one controller client with a full filter expression.</td></tr>
+<tr><td><code>stop_logs</code></td><td>Stop live log notifications for one controller client.</td></tr>
+<tr><td><code>reload_modules</code></td><td>Reset <code>runtime/logging</code> from resolved config values.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The JSON log file should be configurable:</p>
+<pre><code class="language-yaml">logging.file.enabled: true
+logging.file.path: /var/log/light-gateway/app.log
+logging.file.format: json
+logging.file.maxBytes: 104857600
+logging.file.maxFiles: 10
+logging.stream.maxSubscribers: 20
+</code></pre>
+<p>Defaults should be conservative. If no JSON log file and no platform log
+provider are available, <code>get_log_content</code> should return a clear unsupported
+response instead of an empty success that looks like there were no logs.</p>
+<h2 id="controller-changes"><a class="header" href="#controller-changes">Controller Changes</a></h2>
+<p>The controller should expose Rust logging tools through the same <code>callTool</code>
+path used by the existing logger page.</p>
+<p>Add or pass through these tool names:</p>
+<ul>
+<li><code>get_logging_filter</code></li>
+<li><code>set_logging_filter</code></li>
+<li><code>reload_modules</code></li>
+<li><code>get_log_content</code></li>
+<li><code>start_logs</code></li>
+<li><code>stop_logs</code></li>
+</ul>
+<p>For Rust runtimes, <code>get_loggers</code> and <code>set_loggers</code> are not the primary control
+surface. The UI should use <code>get_logging_filter</code> and <code>set_logging_filter</code>
+instead. The controller may keep <code>get_loggers</code> and <code>set_loggers</code> for Java
+compatibility.</p>
+<p>The controller should route <code>notifications/log</code> back to the portal-view
+websocket with the originating <code>runtimeInstanceId</code> so the page can ignore logs
+from other selected services.</p>
+<p>For history, the controller should resolve sources in this order:</p>
+<ol>
+<li>configured JSON log file</li>
+<li>Kubernetes or container log provider</li>
+<li>unsupported response with a clear reason</li>
+</ol>
+<h2 id="portal-view-implementation"><a class="header" href="#portal-view-implementation">Portal-View Implementation</a></h2>
+<p>Recommended structure:</p>
+<ul>
+<li>keep <code>/app/controller/logger</code> as the route</li>
+<li>keep the existing <code>Logger</code> component as the shell</li>
+<li>split Java and Rust behavior into child panels:
+<ul>
+<li><code>JavaLoggerPanel</code></li>
+<li><code>RustLoggerPanel</code></li>
+</ul>
+</li>
+<li>reuse the current history and live table rendering where possible</li>
+<li>add a Rust filter builder for <code>logging.filter</code></li>
+</ul>
+<p>Rust filter builder state:</p>
+<pre><code class="language-ts">type RustFilterDraft = {
+  defaultLevel: "error" | "warn" | "info" | "debug" | "trace" | "off";
+  targets: Array&lt;{ target: string; level: string }&gt;;
+  advanced: string;
+  mode: "builder" | "advanced";
+};
+</code></pre>
+<p>In builder mode, portal-view generates the expression:</p>
+<pre><code class="language-text">&lt;defaultLevel&gt;,&lt;target&gt;=&lt;level&gt;,&lt;target&gt;=&lt;level&gt;
+</code></pre>
+<p>In advanced mode, portal-view sends the text exactly as entered and lets the
+runtime validate it.</p>
+<p>The page should show a warning when the current source is
+<code>mcp:set_logging_filter</code>, because that indicates a live override that can be
+lost on restart or reset by reloading <code>runtime/logging</code>.</p>
+<h2 id="baseline-configuration"><a class="header" href="#baseline-configuration">Baseline Configuration</a></h2>
+<p>Live debug changes should call <code>set_logging_filter</code>; they should not update
+config server by default.</p>
+<p>To persist a baseline filter, the operator should use the instance
+configuration page and update:</p>
+<pre><code class="language-yaml">logging.filter: info,light_pingora::security=debug
+</code></pre>
+<p>After saving the instance configuration, the config update flow can call:</p>
+<pre><code class="language-json">{
+  "name": "reload_modules",
+  "arguments": {
+    "modules": ["runtime/logging"]
+  }
+}
+</code></pre>
+<p>This makes the saved config the active baseline. Alternatively, the operator
+can return to the logger page and use <code>Reset From Config</code> to reload only
+<code>runtime/logging</code>.</p>
+<p>The Rust logger page can link to the selected instance configuration, but it
+should not write baseline config itself.</p>
+<h2 id="security-and-safety"><a class="header" href="#security-and-safety">Security And Safety</a></h2>
+<ul>
+<li>Gate filter changes and log access behind the same controller permissions as
+the Java logger page.</li>
+<li>Treat logs as sensitive operational data.</li>
+<li>Do not render raw ANSI escape sequences as HTML.</li>
+<li>Truncate very large messages and expose an expand action.</li>
+<li>Mask obvious token and secret fields in JSON log output, history responses,
+and live stream payloads.</li>
+<li>Rate-limit live streams per runtime instance and per controller client.</li>
+<li>Show a warning before enabling broad <code>trace</code> filters.</li>
+</ul>
+<h2 id="rollout-plan"><a class="header" href="#rollout-plan">Rollout Plan</a></h2>
+<ol>
+<li>Add controller pass-through for <code>get_logging_filter</code> and
+<code>set_logging_filter</code>.</li>
+<li>Add <code>RustLoggerPanel</code> in portal-view with filter control only.</li>
+<li>Add JSON file logging and a <code>get_log_content</code> reader for Rust services.</li>
+<li>Add Kubernetes/container log fallback when no log file is configured.</li>
+<li>Add Rust <code>start_logs</code> and <code>stop_logs</code> backed by per-client stream
+subscriptions.</li>
+<li>Seed the <code>logging_target</code> reference data and load dropdown options from
+<code>/r/data?name=logging_target</code>.</li>
+<li>Enable product-specific target presets for <code>gtw</code>, <code>agt</code>, <code>api</code>, <code>dpl</code>, and
+<code>wf</code>.</li>
+</ol>
+<h2 id="resolved-decisions"><a class="header" href="#resolved-decisions">Resolved Decisions</a></h2>
+<ul>
+<li>Historical logs are not kept in memory. Use a configured JSON log file first;
+if there is no file, fall back to Kubernetes or container logs when they are
+available.</li>
+<li><code>start_logs</code> accepts a full <code>filter</code> expression. Compatibility fields such as
+<code>level</code> and <code>loggerName</code> can be translated by the controller.</li>
+<li>The module dropdown is backed by the <code>logging_target</code> reference table exposed
+through <code>/r/data?name=logging_target</code>.</li>
+<li>The logger page does not save a baseline. Baseline changes belong in instance
+configuration.</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../../design/portal-view/config-update-page.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../../design/portal-view/human-task-ui.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../../design/portal-view/config-update-page.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../../design/portal-view/human-task-ui.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../../mark-09e88c2c.min.js"></script>
+        <script src="../../searcher-09f2665d.js"></script>
+
+        <script src="../../clipboard-1626706a.min.js"></script>
+        <script src="../../highlight-abc7f01d.js"></script>
+        <script src="../../book-c22b7243.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../../mermaid-3a6b472a.min.js"></script>
+        <script src="../../mermaid-init-025d9952.js"></script>
+
+
+
+    </div>
+    </body>
+</html>
