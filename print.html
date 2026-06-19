@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-ace22544.js";
+            window.path_to_searchindex_js = "searchindex-527d522a.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-a2571800.js"></script>
+        <script src="toc-7fc692fa.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -13826,6 +13826,192 @@ WHERE h.sub_domain || '.' || h.domain = ?
 <p>Deployment service allows users to deploy and manage their configured light products. This service is used by the application and api developers and operations.</p>
 <p>The deployment service contains pipeline management, platform management and deployment management. It also integrates with product management and instance management services.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="light-portal-install"><a class="header" href="#light-portal-install">Light Portal Install</a></h1>
+<h2 id="purpose-1"><a class="header" href="#purpose-1">Purpose</a></h2>
+<p><code>light-portal-install</code> provides a one-command local installation path for Light Portal. The target user should only need Docker Compose on the host machine and should not need to clone the individual service repositories, build Java or Rust projects, install Node.js, or manually copy static assets.</p>
+<p>The intended entrypoint is:</p>
+<pre><code class="language-bash">curl -sL https://raw.githubusercontent.com/networknt/light-portal-install/main/install.sh | bash
+</code></pre>
+<p>The installer downloads the install bundle, prepares the local data directory, writes the selected image and asset versions, and starts the stack with Docker Compose.</p>
+<h2 id="recommendation-10"><a class="header" href="#recommendation-10">Recommendation</a></h2>
+<p>This approach should work if the repo owns the local installation contract instead of acting as a thin pointer to the current developer checkout.</p>
+<p>The install repo contains:</p>
+<ul>
+<li><code>install.sh</code>, the idempotent installer and updater.</li>
+<li><code>docker-compose.yml</code>, the default local stack using the Rust services from <code>all-in-lt</code>.</li>
+<li><code>.env.example</code>, the documented image tags, ports, and optional secrets.</li>
+<li><code>VERSION</code>, the default portal bundle version.</li>
+<li>fixed R2 archive names for <code>hybrid-command</code>, <code>hybrid-query</code>, <code>lightapi</code>, and <code>signin</code> assets.</li>
+<li><code>README.md</code>, the short public usage guide.</li>
+</ul>
+<p>The repo should not require the user to clone <code>portal-config-loc</code>, <code>service-asset</code>, <code>portal-view</code>, <code>login-view</code>, or any service source repository. Those repos remain build and release inputs. <code>light-portal-install</code> consumes released images and released asset bundles.</p>
+<h2 id="runtime-shape"><a class="header" href="#runtime-shape">Runtime Shape</a></h2>
+<p>The first version should be a Rust-only <code>all-in-lt</code> stack:</p>
+<ul>
+<li><code>postgres</code></li>
+<li><code>config-server</code></li>
+<li><code>light-oauth</code></li>
+<li><code>controller</code></li>
+<li><code>portal-service</code></li>
+<li><code>hybrid-command</code></li>
+<li><code>hybrid-query</code></li>
+<li><code>light-workflow</code></li>
+<li><code>light-gateway</code></li>
+<li><code>light-agent</code></li>
+<li>demo customer profile API</li>
+<li>demo offer decision API</li>
+</ul>
+<p>The Compose service names should stay compatible with the current local stack names: <code>controller</code>, <code>config-server</code>, <code>light-oauth</code>, <code>portal-service</code>, <code>light-gateway</code>, <code>hybrid-command</code>, and <code>hybrid-query</code>. Internal URLs and existing bootstrap data already depend on those names.</p>
+<p><code>light-agent</code> and the demo APIs are part of the default local stack, not optional add-ons, because the install repo is meant to support a complete local demo. The Compose file should include an AI agent service based on the released <code>networknt/light-agent</code> image and wire it to PostgreSQL, controller, config-server, hybrid-query, and light-gateway the same way the current <code>all-in-lt</code> Rust profile does.</p>
+<p>The default host entrypoint should be the gateway:</p>
+<pre><code class="language-text">https://localhost
+</code></pre>
+<p>If binding to host port <code>443</code> fails, the installer should fall back to a documented high port such as <code>8443</code> and write the chosen value to <code>.env</code>.</p>
+<h2 id="compose-design"><a class="header" href="#compose-design">Compose Design</a></h2>
+<p><code>docker-compose.yml</code> should be self-contained for a released local install. It can preserve the current <code>all-in-lt</code> service topology, but it should not require local source-tree mounts for application jars, Rust config folders, SPA dist folders, or seed SQL unless the installer downloads them first.</p>
+<p>The Compose file should use image variables with released defaults:</p>
+<pre><code class="language-yaml">services:
+  config-server:
+    image: ${CONFIG_SERVER_IMAGE:-networknt/config-server:2.3.5}
+
+  light-oauth:
+    image: ${LIGHT_OAUTH_IMAGE:-networknt/light-oauth:2.3.5}
+
+  controller:
+    image: ${CONTROLLER_RS_IMAGE:-networknt/controller-rs:2.3.5}
+
+  portal-service:
+    image: ${PORTAL_SERVICE_IMAGE:-networknt/portal-service:2.3.5}
+
+  light-gateway:
+    image: ${LIGHT_GATEWAY_IMAGE:-networknt/light-gateway:2.3.5}
+
+  light-agent:
+    image: ${LIGHT_AGENT_IMAGE:-networknt/light-agent:2.3.5}
+
+  demo-customer-profile-api:
+    image: ${DEMO_CUSTOMER_PROFILE_API_IMAGE:-networknt/demo-customer-profile-api:2.3.5}
+
+  demo-offer-decision-api:
+    image: ${DEMO_OFFER_DECISION_API_IMAGE:-networknt/demo-offer-decision-api:2.3.5}
+</code></pre>
+<p>The image list is generated by <code>release-docker-images.sh</code>. With <code>--upload-r2</code>, the script uploads <code>docker-images.env</code> to:</p>
+<pre><code class="language-text">light-portal/releases/&lt;tag&gt;/docker-images.env
+light-portal/releases/latest/docker-images.env
+docker-images.env
+</code></pre>
+<p>For public installs, <code>install.sh</code> downloads <code>docker-images.env</code> for the selected <code>LIGHT_PORTAL_VERSION</code> and runs Compose with both the downloaded image env file and the local <code>.env</code> overrides:</p>
+<pre><code class="language-bash">docker compose --env-file docker-images.env --env-file .env up -d
+</code></pre>
+<p>The Compose file should keep persistent state in named volumes by default:</p>
+<ul>
+<li><code>postgres-data</code> for PostgreSQL.</li>
+<li><code>portal-data</code> for user-uploaded or generated portal data.</li>
+</ul>
+<p>The installer may support a <code>--dev-bind-mounts</code> option later, but the default public path should prefer downloaded, immutable release assets over bind mounts to a developer workspace.</p>
+<h2 id="local-authentication"><a class="header" href="#local-authentication">Local Authentication</a></h2>
+<p>The local install should use the same OAuth authorization code flow through <code>login-view</code> that is used by the current <code>portal-config-loc/all-in-lt</code> and <code>portal-config-dev</code> deployments. The gateway serves both the portal UI and the sign-in UI, and <code>light-oauth</code> remains the local authorization server.</p>
+<p>To keep the first public local install simple, the bundle should continue using the existing long-lived local demo tokens already used by the current local stack. Token generation can be revisited later, but it should not block the initial installer.</p>
+<h2 id="installer-flow"><a class="header" href="#installer-flow">Installer Flow</a></h2>
+<p><code>install.sh</code> should be idempotent and safe to rerun.</p>
+<ol>
+<li>Detect <code>docker compose</code>.</li>
+<li>Resolve the requested version. Default to the repo <code>VERSION</code>; allow <code>LIGHT_PORTAL_VERSION=...</code>.</li>
+<li>Create an install directory, defaulting to <code>$HOME/.light-portal</code>.</li>
+<li>Download <code>docker-images.env</code> from <code>light-portal/releases/&lt;version&gt;/docker-images.env</code>.</li>
+<li>Download <code>hybrid-command.zip</code>, <code>hybrid-query.zip</code>, <code>lightapi.zip</code>, <code>signin.zip</code>, and <code>events.zip</code> from R2.</li>
+<li>Use the checked-in bootstrap config, seed SQL, certificates, and Compose file.</li>
+<li>Preserve existing <code>.env</code> values when updating.</li>
+<li>Start the stack with <code>docker compose up -d</code>.</li>
+<li>Wait for health checks and print the portal URL.</li>
+</ol>
+<p>The script should provide explicit subcommands:</p>
+<pre><code class="language-bash">install.sh install
+install.sh update
+install.sh start
+install.sh stop
+install.sh status
+install.sh logs
+install.sh uninstall
+</code></pre>
+<p><code>uninstall</code> should ask for confirmation before deleting volumes or <code>$HOME/.light-portal</code>.</p>
+<h2 id="static-asset-distribution"><a class="header" href="#static-asset-distribution">Static Asset Distribution</a></h2>
+<p>The current <code>service-asset</code> GitHub repository is useful as a build artifact repository for developers, but it is not ideal as the long-term public CDN for local installers. Released static content and install scripts should move to Cloudflare R2 as the long-term artifact channel, with fixed archive objects, checksums, and rollback.</p>
+<p><code>update-asset.sh --upload-r2</code> currently uploads refreshed service assets to bucket <code>lightapi</code>. Directory assets are compressed before upload. The default object paths are:</p>
+<pre><code class="language-text">hybrid-command.zip
+hybrid-query.zip
+lightapi.zip
+signin.zip
+events.zip
+</code></pre>
+<p><code>release-docker-images.sh --upload-r2</code> uploads the image env file under:</p>
+<pre><code class="language-text">light-portal/releases/&lt;tag&gt;/docker-images.env
+light-portal/releases/latest/docker-images.env
+docker-images.env
+</code></pre>
+<p><code>daily-release.sh</code> is the top-level release entrypoint. It calls <code>update-asset.sh --upload-r2</code> first, then runs the dev copy steps, then calls <code>release-docker-images.sh --upload-r2</code>.</p>
+<p>The install repo should treat R2 as an artifact origin, not as the source of truth. Source of truth remains the service and UI repos plus the release pipeline. The release pipeline publishes immutable versioned objects to R2.</p>
+<p>Once the static bundles, scripts, generated manifests, and release asset publishing are fully moved to R2, the <code>service-asset</code> repository can be removed. During migration, it can remain as a staging or compatibility source until the install pipeline no longer depends on it.</p>
+<p>Current object layout:</p>
+<pre><code class="language-text">hybrid-command.zip
+hybrid-query.zip
+lightapi.zip
+signin.zip
+events.zip
+docker-images.env
+light-portal/releases/
+  &lt;tag&gt;/
+    docker-images.env
+  latest/
+    docker-images.env
+</code></pre>
+<p>The installer can default to <code>latest</code> for daily local demo installs, while still allowing <code>LIGHT_PORTAL_VERSION=&lt;tag&gt;</code> for reproducible installs.</p>
+<p>Because the installer should not depend on AWS CLI access, it cannot use <code>aws s3 ls</code> to discover R2 objects. It downloads the known compressed archives directly with <code>curl</code> and unpacks them with <code>unzip</code> into the Docker Compose bind-mount directories.</p>
+<h2 id="r2-tradeoffs"><a class="header" href="#r2-tradeoffs">R2 Tradeoffs</a></h2>
+<p>R2 is attractive because it supports S3-compatible tooling, public buckets, custom domains, caching through Cloudflare, and no R2 egress bandwidth charges. Cloudflare documents Standard storage pricing, request-class pricing, a free tier, and free egress for R2. Cloudflare also documents that public buckets can be exposed through custom domains for production use, while <code>r2.dev</code> public URLs are intended for non-production traffic.</p>
+<p>The main tradeoff is that heavy asset reads still have request-operation cost. The current implementation publishes five compressed archives for <code>hybrid-command</code>, <code>hybrid-query</code>, <code>lightapi</code>, <code>signin</code>, and <code>events.json</code>, plus <code>docker-images.env</code>, to keep install downloads coarse-grained.</p>
+<p>For production-quality public distribution, use a custom domain such as:</p>
+<pre><code class="language-text">https://assets.lightapi.net/light-portal/releases/2.3.5/manifest.json
+</code></pre>
+<p>Do not use an <code>r2.dev</code> URL as the documented installer default.</p>
+<h2 id="release-pipeline"><a class="header" href="#release-pipeline">Release Pipeline</a></h2>
+<p>The current release pipeline produces one installable daily version with these steps:</p>
+<ol>
+<li><code>daily-release.sh</code> calls <code>update-asset.sh --upload-r2</code>.</li>
+<li><code>update-asset.sh</code> rebuilds/copies <code>portal-view</code>, <code>login-view</code>, hybrid service jars, and <code>events.json</code>.</li>
+<li><code>update-asset.sh</code> replaces the configured R2 asset prefixes in bucket <code>lightapi</code>.</li>
+<li><code>daily-release.sh</code> runs <code>copy-service-dev.sh</code> and <code>copy-site-dev.sh</code> for dev.</li>
+<li><code>daily-release.sh</code> calls <code>release-docker-images.sh --upload-r2</code>.</li>
+<li><code>release-docker-images.sh</code> builds/pushes the selected image profile and writes <code>docker-images.env</code>.</li>
+<li><code>release-docker-images.sh</code> uploads <code>docker-images.env</code> to the versioned, <code>latest</code>, and compatibility R2 paths.</li>
+</ol>
+<p>The next release-pipeline improvement should generate and upload:</p>
+<ul>
+<li>checksums for each archive and metadata file</li>
+<li>an install smoke-test result</li>
+</ul>
+<p>The smoke test should run from an empty install directory and verify:</p>
+<ul>
+<li>Docker Compose starts all required services.</li>
+<li>PostgreSQL bootstrap completes.</li>
+<li>gateway is reachable.</li>
+<li>sign-in and portal static assets load through gateway.</li>
+<li>health checks pass for the Rust services.</li>
+</ul>
+<h2 id="settled-decisions"><a class="header" href="#settled-decisions">Settled Decisions</a></h2>
+<ul>
+<li>Include <code>light-agent</code> in the default <code>docker-compose.yml</code> as the AI agent service for local demos.</li>
+<li>Include the demo customer profile and offer decision APIs in the default local stack.</li>
+<li>Use the local OAuth authorization code flow with <code>login-view</code>, matching <code>portal-config-loc/all-in-lt</code> and <code>portal-config-dev</code>.</li>
+<li>Use the existing long-lived local demo tokens in the first version to keep the installer simple.</li>
+<li>Move static content, install scripts, generated manifests, and release bundles to Cloudflare R2 for long-term flexibility.</li>
+<li>Remove the <code>service-asset</code> repository after the R2-based release pipeline fully replaces it.</li>
+<li>Keep Docker Compose as the only container runtime dependency; use <code>curl</code> for R2 downloads, not AWS CLI.</li>
+<li>Use fixed archive names for the current R2 object set until the release pipeline publishes a richer manifest automatically.</li>
+</ul>
+<h2 id="decision-2"><a class="header" href="#decision-2">Decision</a></h2>
+<p>Create <code>light-portal-install</code> as the public local install repo with Docker Compose as the only container runtime dependency. Use the Rust <code>all-in-lt</code> service topology, including <code>light-agent</code> and the demo APIs, but package it as checked-in runtime config plus R2-downloaded service jars, SPA assets, <code>events.json</code>, and <code>docker-images.env</code>. Keep the local OAuth authorization code flow through <code>login-view</code> and use existing long-lived local demo tokens for the first version. Move static install artifacts from GitHub repo distribution to Cloudflare R2 behind a custom domain, download the fixed asset archives with <code>curl</code>, extract them with <code>unzip</code>, and remove <code>service-asset</code> after the R2 pipeline fully replaces it.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="timestamp"><a class="header" href="#timestamp">Timestamp</a></h1>
 <p>Okay, let’s break down the best way to persist Java’s <code>OffsetDateTime</code> in PostgreSQL.</p>
 <p><strong>1. Best Database Column Type: <code>TIMESTAMP WITH TIME ZONE</code> (or <code>TIMESTAMPTZ</code>)</strong></p>
@@ -16961,7 +17147,7 @@ function MyComponent() {
 <li>Add a timeout to stop polling after ~10-15 seconds to prevent infinite loops.</li>
 </ol>
 <p>As you can see, this is much more complicated than the optimistic update.</p>
-<h3 id="recommendation-10"><a class="header" href="#recommendation-10">Recommendation</a></h3>
+<h3 id="recommendation-11"><a class="header" href="#recommendation-11">Recommendation</a></h3>
 <p><strong>Adopt the Optimistic UI pattern (Option 1).</strong> It provides the best user experience, is resilient to timing issues caused by eventual consistency, and the implementation is clean and modern. The code provided for the optimistic <code>handleDelete</code> is a drop-in replacement that will solve your problem robustly.</p>
 <h3 id="should-you-poll-peroidically-to-sync-other-users-changes"><a class="header" href="#should-you-poll-peroidically-to-sync-other-users-changes">Should you poll peroidically to sync other users’ changes</a></h3>
 <p>The short answer is: <strong>No, you should still avoid client-side polling for this specific use case.</strong> It’s generally the wrong tool for this problem and creates more issues than it solves. The Optimistic UI approach is still preferable, but it needs to be combined with a robust backend and potentially other real-time technologies for a complete solution.</p>
@@ -18644,7 +18830,7 @@ regulated products?</li>
 <li>Do we need a profile-clone command for tenant-specific removals, or is manual
 profile creation enough for the MVP?</li>
 </ul>
-<h2 id="recommendation-11"><a class="header" href="#recommendation-11">Recommendation</a></h2>
+<h2 id="recommendation-12"><a class="header" href="#recommendation-12">Recommendation</a></h2>
 <p>Implement the profile schema and Phase 1 importer generator first, then add the
 sync command for live all-host operations.</p>
 <p>The long-term target is release-time automation:</p>
@@ -19161,7 +19347,7 @@ artifact type.</li>
 <li>The first implementation should decide whether AI patches create pull
 requests by default or only update the sandbox workspace for operator review.</li>
 </ul>
-<h2 id="recommendation-12"><a class="header" href="#recommendation-12">Recommendation</a></h2>
+<h2 id="recommendation-13"><a class="header" href="#recommendation-13">Recommendation</a></h2>
 <p>Moving Java and Rust releases to <code>light-workflow</code> is a good direction, provided
 the migration treats <code>light-workflow</code> as the orchestrator and uses sandboxed
 runners for command execution. This gives the release process durable state,
@@ -20690,7 +20876,7 @@ continuity.</li>
 <li>Enables a focused UI flow with explicit warning, confirmation, copy action,
 and audit trail.</li>
 </ul>
-<h2 id="decision-2"><a class="header" href="#decision-2">Decision</a></h2>
+<h2 id="decision-3"><a class="header" href="#decision-3">Decision</a></h2>
 <p>Add a dedicated “Regenerate Secret” action on the Auth Client page.</p>
 <p>Do not reuse delete/recreate as the normal path. Do not add a recoverable
 encrypted-secret store. The portal should continue treating client secrets as
@@ -21015,7 +21201,7 @@ The Importer processes the list in order:</p>
 </li>
 </ol>
 <h2 id="dry-run-technical-implementation"><a class="header" href="#dry-run-technical-implementation">Dry Run Technical Implementation</a></h2>
-<h3 id="purpose-1"><a class="header" href="#purpose-1">Purpose</a></h3>
+<h3 id="purpose-2"><a class="header" href="#purpose-2">Purpose</a></h3>
 <p>To guarantee the promotion will succeed without actually modifying the Higher Environment (Production).</p>
 <h3 id="option-1-application-layer-simulation-fast-recommended-for-planning"><a class="header" href="#option-1-application-layer-simulation-fast-recommended-for-planning">Option 1: Application-Layer Simulation (Fast, Recommended for Planning)</a></h3>
 <ul>
@@ -21044,7 +21230,7 @@ The Importer processes the list in order:</p>
 <li><strong>Pros:</strong> 100% certainty that the data is valid according to the database schema.</li>
 <li><strong>Cons:</strong> Slightly heavier key locks, but acceptable for admin operations.</li>
 </ul>
-<h3 id="recommendation-13"><a class="header" href="#recommendation-13">Recommendation</a></h3>
+<h3 id="recommendation-14"><a class="header" href="#recommendation-14">Recommendation</a></h3>
 <p>Use <strong>Option 1 (App Simulation)</strong> for the UI preview to show the user “what will happen”.
 Use <strong>Option 2 (Transaction Rollback)</strong> immediately when the user clicks “Promote” (as a pre-flight check) or as an explicit “Verify” button to ensure deep integrity.</p>
 <h2 id="sibling-deletion-handling-orphaned-items"><a class="header" href="#sibling-deletion-handling-orphaned-items">Sibling Deletion: Handling Orphaned Items</a></h2>
@@ -21987,7 +22173,7 @@ artifacts?</li>
 long-running deployment progress events?</li>
 <li>Should rollback require the same environment-level approval policy as deploy?</li>
 </ul>
-<h2 id="recommendation-14"><a class="header" href="#recommendation-14">Recommendation</a></h2>
+<h2 id="recommendation-15"><a class="header" href="#recommendation-15">Recommendation</a></h2>
 <p>Use an in-cluster Rust deployer as the default production model. The deployer
 should connect outbound to Light Controller and execute deployment commands via
 MCP-style tools. Direct deployer URL mode is useful for MicroK8s and managed
