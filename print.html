@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-527d522a.js";
+            window.path_to_searchindex_js = "searchindex-df9a1e46.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-7fc692fa.js"></script>
+        <script src="toc-f01d8590.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -4754,8 +4754,269 @@ processing, reject mixed API-type families, treat incomplete version-only
 registrations as repairable but non-runnable, default runtime invocation to
 deny-all, and make the broader skill/tool/access setup optional follow-up steps.</p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="agent-skill-and-api-endpoint-discovery"><a class="header" href="#agent-skill-and-api-endpoint-discovery">Agent Skill And API Endpoint Discovery</a></h1>
+<h1 id="oauth-kafka"><a class="header" href="#oauth-kafka">OAuth Kafka</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="token-exchange"><a class="header" href="#token-exchange">Token Exchange</a></h1>
+<p>This document outlines the design decisions and implementation details for supporting multiple token exchange flows in the <code>oauth-kafka</code> module.</p>
+<h2 id="comparison-of-detection-methods"><a class="header" href="#comparison-of-detection-methods">Comparison of Detection Methods</a></h2>
+<p>When implementing token exchange (RFC 8693), the server must determine which identity provider (IdP) issued the <code>subject_token</code> to verify it correctly and map claims.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Method</th><th style="text-align: left">Explanation</th><th style="text-align: left">Pros</th><th style="text-align: left">Cons</th><th style="text-align: left">Recommended For</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><strong>JWT Peek (<code>iss</code>)</strong></td><td style="text-align: left">Server decodes the token header/body without verification to read the <code>iss</code> claim.</td><td style="text-align: left">Zero client configuration; Uses standard parameters.</td><td style="text-align: left">Token is parsed twice; Sensitive to malformed tokens.</td><td style="text-align: left">Public OIDC providers (Azure, Okta, Google).</td></tr>
+<tr><td style="text-align: left"><strong>Custom URNs</strong></td><td style="text-align: left">Client sends a specific <code>requested_token_type</code> (e.g. <code>urn:networknt:msal</code>).</td><td style="text-align: left">Explicit and unambiguous; Follows standard extensibility.</td><td style="text-align: left">Clients must know the specific URNs for each flow.</td><td style="text-align: left">Mixed heterogeneous token types (SAML vs JWT).</td></tr>
+<tr><td style="text-align: left"><strong><code>subject_issuer</code></strong></td><td style="text-align: left">Client passes an extra <code>subject_issuer</code> parameter in the request.</td><td style="text-align: left">Clean API; Works with “opaque” (non-JWT) tokens.</td><td style="text-align: left">Non-standard parameter; Redundant for self-describing JWTs.</td><td style="text-align: left">Opaque tokens or overlapping issuers.</td></tr>
+<tr><td style="text-align: left"><strong>Client Context</strong></td><td style="text-align: left">Server maps the <code>client_id</code> of the caller to a specific flow.</td><td style="text-align: left">Highly secure; Enforces strict per-client policy.</td><td style="text-align: left">High management overhead; Inflexible for multi-source clients.</td><td style="text-align: left">Rigid, security-conscious B2B integrations.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="implementation-strategy"><a class="header" href="#implementation-strategy">Implementation Strategy</a></h2>
+<p>Our implementation in <code>ProviderIdTokenPostHandler</code> uses <strong>Option 4: Client Context</strong> as the primary strategy:</p>
+<ol>
+<li><strong>Database-Driven Configuration</strong>: A new column <code>token_ex_type</code> has been added to the <code>auth_client_t</code> table to specify the supported exchange type for each client.
+<pre><code class="language-sql">ALTER TABLE auth_client_t ADD COLUMN token_ex_type VARCHAR(64);
+</code></pre>
+</li>
+<li><strong>Supported Exchange Types</strong>:
+<ul>
+<li><code>msal</code>: Microsoft Authentication Library based exchange.</li>
+<li><code>ccac</code>: Client Credentials to Authorization Code exchange.</li>
+</ul>
+</li>
+<li><strong>Flow Determination</strong>: Instead of relying on client-supplied parameters like <code>requested_token_type</code>, the server retrieves the <code>token_ex_type</code> from the client context in the database to decide which handler to use. This ensures that only authorized exchange types are performed for each specific client.</li>
+</ol>
+<h2 id="recommendation-5"><a class="header" href="#recommendation-5">Recommendation</a></h2>
+<p>For the <code>light-portal</code> ecosystem:</p>
+<ul>
+<li><strong>Option 4: Client Context</strong> is the selected method. It provides the highest level of security by ensuring that token exchange flows are explicitly configured and restricted on a per-client basis in the database.</li>
+<li><strong><code>token_ex_type</code></strong> should be populated for any client that requires token exchange functionality. Clients without this configuration will not be allowed to perform token exchange.</li>
+</ul>
+<h2 id="future-considerations"><a class="header" href="#future-considerations">Future Considerations</a></h2>
+<ul>
+<li>Implement automated issuer discovery if the number of external providers grows.</li>
+<li>Support “opaque” token exchange by integrating with introspection endpoints of external IdPs.</li>
+<li>Extend the <code>auth_client_t</code> configuration to support multiple allowed exchange types per client if needed.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="light-oauth"><a class="header" href="#light-oauth">Light OAuth</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="light-oauth-ipv6-support"><a class="header" href="#light-oauth-ipv6-support">Light OAuth IPv6 Support</a></h1>
 <h2 id="problem-3"><a class="header" href="#problem-3">Problem</a></h2>
+<p>The Rust <code>light-oauth</code> service binds its HTTPS listener to <code>0.0.0.0</code>.
+That is correct for IPv4, but it does not accept connections sent to an IPv6
+address.</p>
+<p>In a dual-stack container network, Docker DNS can return the IPv6 address for
+<code>light-oauth</code> before the IPv4 address. A client that does not retry the next
+address can fail even though the service is healthy on IPv4. One observed
+failure is the gateway proxying <code>/oauth2/{providerId}/code</code> to
+<code>https://light-oauth:6881</code> and receiving <code>ECONNREFUSED</code> on the IPv6 address.</p>
+<h2 id="goals-6"><a class="header" href="#goals-6">Goals</a></h2>
+<ul>
+<li>Allow <code>light-oauth</code> to bind IPv4, IPv6, or a specific interface from config.</li>
+<li>Keep the current default behavior as IPv4 wildcard binding.</li>
+<li>Avoid breaking existing deployments whose <code>server.yml</code> does not contain the
+new property.</li>
+<li>Build the listener address with <code>SocketAddr</code> so IPv6 addresses are parsed
+correctly.</li>
+</ul>
+<h2 id="non-goals-9"><a class="header" href="#non-goals-9">Non-Goals</a></h2>
+<ul>
+<li>Do not enable IPv6 for every deployment by default.</li>
+<li>Do not change TLS, OIDC, token, or database behavior.</li>
+<li>Do not change gateway upstream retry behavior in this change.</li>
+</ul>
+<h2 id="configuration"><a class="header" href="#configuration">Configuration</a></h2>
+<p><code>light-oauth</code> adds a server bind IP property:</p>
+<pre><code class="language-yaml">ip: ${server_ip:0.0.0.0}
+</code></pre>
+<p>The default value remains:</p>
+<pre><code class="language-yaml">server_ip: "0.0.0.0"
+</code></pre>
+<p>To listen on IPv6 wildcard:</p>
+<pre><code class="language-yaml">server_ip: "::"
+</code></pre>
+<p>To listen on a specific IPv4 or IPv6 address:</p>
+<pre><code class="language-yaml">server_ip: "172.16.1.3"
+</code></pre>
+<pre><code class="language-yaml">server_ip: "fdd0:0:0:1::3"
+</code></pre>
+<h2 id="implementation"><a class="header" href="#implementation">Implementation</a></h2>
+<p>The Rust config model includes an <code>ip</code> field with a default of <code>0.0.0.0</code>.
+The default keeps old external <code>server.yml</code> files working.</p>
+<p>The listener address is built as:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let ip = config.ip.parse::&lt;IpAddr&gt;()?;
+let addr = SocketAddr::new(ip, config.port);
+<span class="boring">}</span></code></pre>
+<p>This avoids string formatting problems with IPv6 addresses. For example,
+<code>::</code> plus port <code>6881</code> must become <code>[::]:6881</code>, not <code>:::6881</code>.</p>
+<h2 id="deployment-guidance"><a class="header" href="#deployment-guidance">Deployment Guidance</a></h2>
+<p>Use IPv6 binding only when the runtime network is intentionally dual-stack and
+other services can reach the IPv6 address. In a container environment, confirm
+that:</p>
+<ul>
+<li>the container network has IPv6 enabled;</li>
+<li>the service has an IPv6 address;</li>
+<li>clients resolve or connect to the same address family;</li>
+<li>health checks cover the chosen address family.</li>
+</ul>
+<p>For local or single-stack deployments, keep the default IPv4 binding.</p>
+<h2 id="verification"><a class="header" href="#verification">Verification</a></h2>
+<p>For IPv4 default:</p>
+<pre><code class="language-bash">curl -k https://light-oauth:6881/oauth2/&lt;providerId&gt;/keys
+</code></pre>
+<p>For IPv6 wildcard binding in a dual-stack network, verify from another
+container:</p>
+<pre><code class="language-bash">curl -k -g https://[&lt;light-oauth-ipv6&gt;]:6881/oauth2/&lt;providerId&gt;/keys
+</code></pre>
+<p>If the client uses service DNS, verify that the first returned address family
+is reachable:</p>
+<pre><code class="language-bash">getent ahosts light-oauth
+curl -k -v https://light-oauth:6881/oauth2/&lt;providerId&gt;/keys
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="light-controller"><a class="header" href="#light-controller">Light Controller</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="light-controller-ipv6-support"><a class="header" href="#light-controller-ipv6-support">Light Controller IPv6 Support</a></h1>
+<h2 id="problem-4"><a class="header" href="#problem-4">Problem</a></h2>
+<p>The Rust <code>controller-rs</code> service is the control-plane endpoint for runtime
+registration, discovery, MCP admin traffic, and portal event streams. In
+dual-stack deployments, clients can resolve the controller hostname to either
+IPv4 or IPv6. The controller listener and its TLS configuration must therefore
+support IPv6 without changing the existing IPv4 deployment defaults.</p>
+<p>The important distinction is between socket addresses and service metadata:</p>
+<ul>
+<li>the controller listener uses a socket address such as <code>0.0.0.0:8438</code> or
+<code>[::]:8438</code>;</li>
+<li>registered runtime instances publish a host address string plus a separate
+port, such as <code>fdd0:0:0:1::3</code> and <code>8443</code>.</li>
+</ul>
+<h2 id="current-behavior"><a class="header" href="#current-behavior">Current Behavior</a></h2>
+<p><code>controller-rs</code> already stores its bind address as a Rust <code>SocketAddr</code>.
+The default remains IPv4 wildcard binding:</p>
+<pre><code class="language-text">0.0.0.0:8438
+</code></pre>
+<p>The listener address can be overridden with <code>CONTROLLER_ADDR</code>.
+For IPv6, the value must use bracketed socket-address syntax:</p>
+<pre><code class="language-bash">CONTROLLER_ADDR='[::]:8438'
+</code></pre>
+<p>This value is used directly by both server modes:</p>
+<ul>
+<li>HTTPS/WSS mode uses <code>axum_server::bind(settings.listen_addr)</code>.</li>
+<li>HTTP/WS mode uses <code>tokio::net::TcpListener::bind(settings.listen_addr)</code>.</li>
+</ul>
+<p>There is no string concatenation of IP and port in the controller listener
+path, so the common IPv6 failure form <code>:::8438</code> is avoided.</p>
+<h2 id="goals-7"><a class="header" href="#goals-7">Goals</a></h2>
+<ul>
+<li>Support IPv4, IPv6, and dual-stack controller listener binding.</li>
+<li>Keep the current default as IPv4 wildcard binding.</li>
+<li>Keep the existing <code>CONTROLLER_ADDR</code> configuration contract.</li>
+<li>Accept runtime registration metadata that uses IPv4 literals, IPv6 literals,
+or DNS hostnames.</li>
+<li>Reject unspecified runtime registration addresses such as <code>0.0.0.0</code> and
+<code>::</code>, because those are bind addresses, not reachable service addresses.</li>
+</ul>
+<h2 id="non-goals-10"><a class="header" href="#non-goals-10">Non-Goals</a></h2>
+<ul>
+<li>Do not enable IPv6 by default.</li>
+<li>Do not change controller WebSocket paths or JSON-RPC contracts.</li>
+<li>Do not change the runtime registration metadata shape.</li>
+<li>Do not add client-side IPv4 fallback in this change.</li>
+</ul>
+<h2 id="listener-configuration"><a class="header" href="#listener-configuration">Listener Configuration</a></h2>
+<p>Default IPv4 listener:</p>
+<pre><code class="language-bash">CONTROLLER_ADDR='0.0.0.0:8438'
+</code></pre>
+<p>IPv6 wildcard listener:</p>
+<pre><code class="language-bash">CONTROLLER_ADDR='[::]:8438'
+</code></pre>
+<p>Specific IPv6 interface:</p>
+<pre><code class="language-bash">CONTROLLER_ADDR='[fdd0:0:0:1::10]:8438'
+</code></pre>
+<p>Specific IPv4 interface:</p>
+<pre><code class="language-bash">CONTROLLER_ADDR='172.16.1.10:8438'
+</code></pre>
+<p>The brackets are required only because <code>CONTROLLER_ADDR</code> is a full socket
+address. They separate the IPv6 literal from the port.</p>
+<h2 id="tls-configuration"><a class="header" href="#tls-configuration">TLS Configuration</a></h2>
+<p>The controller starts with TLS enabled by default. IPv6 listener support does
+not remove the normal TLS hostname requirements.</p>
+<p>For production, provide a certificate whose Subject Alternative Name covers the
+DNS name or IP address clients use to reach the controller:</p>
+<pre><code class="language-bash">CONTROLLER_TLS_CERT_PATH=/config/server.pem
+CONTROLLER_TLS_KEY_PATH=/config/server.key
+CONTROLLER_TLS_TRUST_CERT_PATH=/config/ca.pem
+</code></pre>
+<p>For generated local self-signed certificates, include any IPv6 literal that
+clients will use:</p>
+<pre><code class="language-bash">CONTROLLER_TLS_SERVER_NAME=localhost
+CONTROLLER_TLS_ALT_NAMES='localhost,127.0.0.1,::1'
+</code></pre>
+<p>If clients connect by DNS name, prefer adding that DNS name to the certificate
+SAN and keep clients using the name instead of a raw IP literal.</p>
+<h2 id="runtime-registration-metadata"><a class="header" href="#runtime-registration-metadata">Runtime Registration Metadata</a></h2>
+<p>Runtime services connect outbound to Light Controller and send
+<code>service/register</code> metadata. The registration address is not a socket address;
+the address and port are separate fields.</p>
+<p>IPv6 registration metadata should use the raw IPv6 literal:</p>
+<pre><code class="language-json">{
+  "serviceId": "com.networknt.light-gateway-1.0.0",
+  "protocol": "https",
+  "address": "fdd0:0:0:1::3",
+  "port": 8443
+}
+</code></pre>
+<p>Do not use brackets in the <code>address</code> field:</p>
+<pre><code class="language-json">{
+  "address": "[fdd0:0:0:1::3]"
+}
+</code></pre>
+<p>Brackets are only used when constructing URL authorities or socket addresses.
+The controller validates registration addresses as IP literals or DNS hostnames
+and rejects unspecified bind addresses such as <code>0.0.0.0</code> and <code>::</code>.</p>
+<h2 id="discovery-behavior"><a class="header" href="#discovery-behavior">Discovery Behavior</a></h2>
+<p>Discovery returns the registered address and port separately. Downstream
+clients, such as <code>light-gateway</code>, are responsible for building a reachable
+upstream authority. For IPv6 literals, clients must bracket the address when
+they construct a URL or <code>host:port</code> authority:</p>
+<pre><code class="language-text">address = fdd0:0:0:1::3
+port    = 8443
+target  = [fdd0:0:0:1::3]:8443
+</code></pre>
+<h2 id="deployment-guidance-1"><a class="header" href="#deployment-guidance-1">Deployment Guidance</a></h2>
+<p>Only configure the controller with <code>CONTROLLER_ADDR='[::]:8438'</code> when the host,
+container network, Kubernetes Service, and ingress path are intended to accept
+IPv6 traffic.</p>
+<p>In a dual-stack environment, verify all of these:</p>
+<ul>
+<li>the controller process is listening on IPv6;</li>
+<li>DNS returns the expected address family;</li>
+<li>TLS SANs cover the hostname or IP clients use;</li>
+<li>runtime services can open outbound WebSocket connections to the controller;</li>
+<li>registered service metadata publishes reachable addresses, not wildcard bind
+addresses.</li>
+</ul>
+<h2 id="verification-1"><a class="header" href="#verification-1">Verification</a></h2>
+<p>From a peer in the same network:</p>
+<pre><code class="language-bash">getent ahosts &lt;controller-host&gt;
+curl -k -g https://[&lt;controller-ipv6&gt;]:8438/health
+curl -k -v https://&lt;controller-host&gt;:8438/health
+</code></pre>
+<p>For WebSocket clients, verify the same address family through the real endpoint:</p>
+<pre><code class="language-text">wss://&lt;controller-host&gt;:8438/ws/microservice
+wss://&lt;controller-host&gt;:8438/ws/discovery
+wss://&lt;controller-host&gt;:8438/ctrl/mcp
+</code></pre>
+<p>If a TLS client connects by IPv6 literal and fails certificate validation,
+check the certificate SANs before changing the controller listener.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="agent-skill-and-api-endpoint-discovery"><a class="header" href="#agent-skill-and-api-endpoint-discovery">Agent Skill And API Endpoint Discovery</a></h1>
+<h2 id="problem-5"><a class="header" href="#problem-5">Problem</a></h2>
 <p>The GenAI chat flow has two separate concepts that are easy to confuse:</p>
 <ul>
 <li>The <code>light-gateway</code> MCP endpoint is the runtime server that lists and executes
@@ -4780,7 +5041,7 @@ exist, which endpoint projections are invokable by agents, which skills they
 belong to, and which agents are allowed or expected to use those skills. Without
 that catalog, the agent can list executable gateway tools, but it has no domain
 guidance beyond each tool description.</p>
-<h2 id="goals-6"><a class="header" href="#goals-6">Goals</a></h2>
+<h2 id="goals-8"><a class="header" href="#goals-8">Goals</a></h2>
 <ul>
 <li>Keep the gateway as the runtime source of truth for MCP tool execution.</li>
 <li>Keep direct gateway <code>tools/list</code> and <code>tools/call</code> working even when no skills
@@ -4804,7 +5065,7 @@ to be wrapped before it can be called.</li>
 portal-query can perform macro-filtering, keyword search, vector ranking,
 context viability checks, and safety filtering.</li>
 </ul>
-<h2 id="non-goals-9"><a class="header" href="#non-goals-9">Non-Goals</a></h2>
+<h2 id="non-goals-11"><a class="header" href="#non-goals-11">Non-Goals</a></h2>
 <ul>
 <li>Do not move MCP request routing or downstream REST calls into the controller.</li>
 <li>Do not implement <code>skill/search</code> in controller-rs. Controller-rs can
@@ -5818,7 +6079,7 @@ persistence validation. Keep them as a diagnostics or governance item that
 compares cataloged/assigned tools with the selected gateway instance’s
 <code>tools/list</code> response before deployment or runtime enablement.</li>
 </ul>
-<h2 id="recommendation-5"><a class="header" href="#recommendation-5">Recommendation</a></h2>
+<h2 id="recommendation-6"><a class="header" href="#recommendation-6">Recommendation</a></h2>
 <p>Implement this as a progressive control-plane enhancement. The gateway remains
 the execution path, and portal-authored skills become the agent guidance layer
 served by portal-query. The agent should cache the effective catalog locally and
@@ -5828,7 +6089,7 @@ portal operators a clean path to organize tools into skills, assign those
 skills to agents, and improve retrieval over time.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="agent-api-compose-and-multi-agent-workflow"><a class="header" href="#agent-api-compose-and-multi-agent-workflow">Agent API Compose And Multi-Agent Workflow</a></h1>
-<h2 id="problem-4"><a class="header" href="#problem-4">Problem</a></h2>
+<h2 id="problem-6"><a class="header" href="#problem-6">Problem</a></h2>
 <p><code>portal-config-loc</code> and <code>portal-config-dev</code> are being updated so local Docker
 Compose stacks can run <code>light-agent</code> beside the portal services, demo APIs, and
 gateway. The first implementation adds one <code>light-agent</code> directly to the main
@@ -5845,7 +6106,7 @@ next phase:</p>
 </ul>
 <p>The design goal is to split deployment concerns without splitting the runtime
 network or the control-plane model.</p>
-<h2 id="goals-7"><a class="header" href="#goals-7">Goals</a></h2>
+<h2 id="goals-9"><a class="header" href="#goals-9">Goals</a></h2>
 <ul>
 <li>Move the two demo APIs and local <code>light-agent</code> services into a separate
 Docker Compose overlay file.</li>
@@ -5862,7 +6123,7 @@ workflows.</li>
 <li>Use <code>light-workflow</code> for deterministic orchestration, retries, human tasks,
 assertions, audit, and multi-agent coordination.</li>
 </ul>
-<h2 id="non-goals-10"><a class="header" href="#non-goals-10">Non-Goals</a></h2>
+<h2 id="non-goals-12"><a class="header" href="#non-goals-12">Non-Goals</a></h2>
 <ul>
 <li>Do not move the demo APIs or agent services into a different Compose project
 by default.</li>
@@ -6253,7 +6514,7 @@ agent.</p>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="agent-memory-event-refactor"><a class="header" href="#agent-memory-event-refactor">Agent Memory Event Refactor</a></h1>
-<h2 id="problem-5"><a class="header" href="#problem-5">Problem</a></h2>
+<h2 id="problem-7"><a class="header" href="#problem-7">Problem</a></h2>
 <p><code>GlobalSnapshotPersistenceImpl</code> currently skips these Hindsight memory tables
 for both snapshot export and snapshot-to-event conversion:</p>
 <pre><code class="language-text">agent_memory_bank_t
@@ -6296,7 +6557,7 @@ owner:</p>
 </code></pre>
 <p>Once that contract is in place, snapshot export and conversion can safely
 include the event-backed memory state where appropriate.</p>
-<h2 id="non-goals-11"><a class="header" href="#non-goals-11">Non-Goals</a></h2>
+<h2 id="non-goals-13"><a class="header" href="#non-goals-13">Non-Goals</a></h2>
 <ul>
 <li>Do not promote existing direct-write memory rows into snapshots before a
 backfill/migration event strategy exists.</li>
@@ -6617,7 +6878,7 @@ platform can re-embed after model upgrades.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="tool-description-embedding-population"><a class="header" href="#tool-description-embedding-population">Tool Description Embedding Population</a></h1>
-<h2 id="problem-6"><a class="header" href="#problem-6">Problem</a></h2>
+<h2 id="problem-8"><a class="header" href="#problem-8">Problem</a></h2>
 <p>The GenAI Tool page lets users update <code>tool_t.description</code> through the
 <code>updateTool</code> form. Endpoint-backed tools are also projected into <code>tool_t</code> when
 <code>api_endpoint_t</code> is populated from OpenAPI, MCP <code>tools/list</code>, or LightAPI
@@ -6635,7 +6896,7 @@ field, and the Portal UI should not expose raw vectors to users.</li>
 <p>As a result, new endpoint-backed tool rows start with a null
 <code>description_embedding</code>, and user edits can leave any future vector stale unless
 the write path marks it for regeneration.</p>
-<h2 id="goals-8"><a class="header" href="#goals-8">Goals</a></h2>
+<h2 id="goals-10"><a class="header" href="#goals-10">Goals</a></h2>
 <ul>
 <li>Populate <code>tool_t.description_embedding</code> for endpoint-backed and manually
 authored tools.</li>
@@ -6647,7 +6908,7 @@ latency.</li>
 disabled or temporarily failing.</li>
 <li>Keep the first implementation aligned with the existing <code>VECTOR(384)</code> schema.</li>
 </ul>
-<h2 id="non-goals-12"><a class="header" href="#non-goals-12">Non-Goals</a></h2>
+<h2 id="non-goals-14"><a class="header" href="#non-goals-14">Non-Goals</a></h2>
 <ul>
 <li>Do not require every tool to have an embedding before it can be listed,
 edited, linked to a skill, or executed through the gateway.</li>
@@ -7024,7 +7285,7 @@ forms whose <code>definition</code> field is a YAML textarea.</li>
 </ul>
 <p>The first Workflow Editor can therefore be an incremental UI improvement over
 the existing definition CRUD and start workflow command.</p>
-<h2 id="goals-9"><a class="header" href="#goals-9">Goals</a></h2>
+<h2 id="goals-11"><a class="header" href="#goals-11">Goals</a></h2>
 <ul>
 <li>Keep workflow YAML as the canonical persisted artifact.</li>
 <li>Provide a readable step outline or graph next to the YAML editor.</li>
@@ -7037,7 +7298,7 @@ flows.</li>
 authoring component with skill-specific constraints.</li>
 <li>Preserve owner scoping and existing Portal command/query conventions.</li>
 </ul>
-<h2 id="non-goals-13"><a class="header" href="#non-goals-13">Non-Goals</a></h2>
+<h2 id="non-goals-15"><a class="header" href="#non-goals-15">Non-Goals</a></h2>
 <ul>
 <li>Do not execute workflow logic in Portal View.</li>
 <li>Do not make skills the workflow runtime.</li>
@@ -7340,14 +7601,14 @@ workflow definition.</p>
 YAML cannot be parsed into a known workflow container, the editor keeps the
 source editor and validation panels usable and shows an empty graph state rather
 than blocking authoring.</p>
-<h2 id="recommendation-6"><a class="header" href="#recommendation-6">Recommendation</a></h2>
+<h2 id="recommendation-7"><a class="header" href="#recommendation-7">Recommendation</a></h2>
 <p>Build the generic Workflow Editor before the Skill Workspace embeds workflow
 authoring. The skill UI should provide context and constraints, while the
 workflow editor provides YAML editing, step preview, validation, and test runs
 for every workflow authoring use case in Portal.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="portal-catalog-scope"><a class="header" href="#portal-catalog-scope">Portal Catalog Scope</a></h1>
-<h2 id="problem-7"><a class="header" href="#problem-7">Problem</a></h2>
+<h2 id="problem-9"><a class="header" href="#problem-9">Problem</a></h2>
 <p>Light Portal supports multiple tenants through <code>host_id</code> and can also host
 multiple runtime environments in one portal instance. A common deployment shape
 is:</p>
@@ -7378,7 +7639,7 @@ should model catalog scope explicitly:</p>
 <li>a separate SPA may expose the same backend catalog, but it should not become
 the catalog authority.</li>
 </ul>
-<h2 id="goals-10"><a class="header" href="#goals-10">Goals</a></h2>
+<h2 id="goals-12"><a class="header" href="#goals-12">Goals</a></h2>
 <ul>
 <li>Avoid duplicating the full catalog for every tenant.</li>
 <li>Prevent catalog drift between tenants and between portal instances.</li>
@@ -7397,7 +7658,7 @@ agent-facing skills and tools.</li>
 <li>Support promotion or import/export between portal instances instead of
 relying on ad hoc row copies.</li>
 </ul>
-<h2 id="non-goals-14"><a class="header" href="#non-goals-14">Non-Goals</a></h2>
+<h2 id="non-goals-16"><a class="header" href="#non-goals-16">Non-Goals</a></h2>
 <ul>
 <li>Do not clone every global catalog row into every tenant by default.</li>
 <li>Do not make a separate SPA the source of truth for catalog data.</li>
@@ -7654,57 +7915,10 @@ promotion when UUIDs differ between portal databases?</li>
 entity-specific effective endpoints?</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="oauth-kafka"><a class="header" href="#oauth-kafka">OAuth Kafka</a></h1>
-<div style="break-before: page; page-break-before: always;"></div>
-<h1 id="token-exchange"><a class="header" href="#token-exchange">Token Exchange</a></h1>
-<p>This document outlines the design decisions and implementation details for supporting multiple token exchange flows in the <code>oauth-kafka</code> module.</p>
-<h2 id="comparison-of-detection-methods"><a class="header" href="#comparison-of-detection-methods">Comparison of Detection Methods</a></h2>
-<p>When implementing token exchange (RFC 8693), the server must determine which identity provider (IdP) issued the <code>subject_token</code> to verify it correctly and map claims.</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th style="text-align: left">Method</th><th style="text-align: left">Explanation</th><th style="text-align: left">Pros</th><th style="text-align: left">Cons</th><th style="text-align: left">Recommended For</th></tr>
-</thead>
-<tbody>
-<tr><td style="text-align: left"><strong>JWT Peek (<code>iss</code>)</strong></td><td style="text-align: left">Server decodes the token header/body without verification to read the <code>iss</code> claim.</td><td style="text-align: left">Zero client configuration; Uses standard parameters.</td><td style="text-align: left">Token is parsed twice; Sensitive to malformed tokens.</td><td style="text-align: left">Public OIDC providers (Azure, Okta, Google).</td></tr>
-<tr><td style="text-align: left"><strong>Custom URNs</strong></td><td style="text-align: left">Client sends a specific <code>requested_token_type</code> (e.g. <code>urn:networknt:msal</code>).</td><td style="text-align: left">Explicit and unambiguous; Follows standard extensibility.</td><td style="text-align: left">Clients must know the specific URNs for each flow.</td><td style="text-align: left">Mixed heterogeneous token types (SAML vs JWT).</td></tr>
-<tr><td style="text-align: left"><strong><code>subject_issuer</code></strong></td><td style="text-align: left">Client passes an extra <code>subject_issuer</code> parameter in the request.</td><td style="text-align: left">Clean API; Works with “opaque” (non-JWT) tokens.</td><td style="text-align: left">Non-standard parameter; Redundant for self-describing JWTs.</td><td style="text-align: left">Opaque tokens or overlapping issuers.</td></tr>
-<tr><td style="text-align: left"><strong>Client Context</strong></td><td style="text-align: left">Server maps the <code>client_id</code> of the caller to a specific flow.</td><td style="text-align: left">Highly secure; Enforces strict per-client policy.</td><td style="text-align: left">High management overhead; Inflexible for multi-source clients.</td><td style="text-align: left">Rigid, security-conscious B2B integrations.</td></tr>
-</tbody>
-</table>
-</div>
-<h2 id="implementation-strategy"><a class="header" href="#implementation-strategy">Implementation Strategy</a></h2>
-<p>Our implementation in <code>ProviderIdTokenPostHandler</code> uses <strong>Option 4: Client Context</strong> as the primary strategy:</p>
-<ol>
-<li><strong>Database-Driven Configuration</strong>: A new column <code>token_ex_type</code> has been added to the <code>auth_client_t</code> table to specify the supported exchange type for each client.
-<pre><code class="language-sql">ALTER TABLE auth_client_t ADD COLUMN token_ex_type VARCHAR(64);
-</code></pre>
-</li>
-<li><strong>Supported Exchange Types</strong>:
-<ul>
-<li><code>msal</code>: Microsoft Authentication Library based exchange.</li>
-<li><code>ccac</code>: Client Credentials to Authorization Code exchange.</li>
-</ul>
-</li>
-<li><strong>Flow Determination</strong>: Instead of relying on client-supplied parameters like <code>requested_token_type</code>, the server retrieves the <code>token_ex_type</code> from the client context in the database to decide which handler to use. This ensures that only authorized exchange types are performed for each specific client.</li>
-</ol>
-<h2 id="recommendation-7"><a class="header" href="#recommendation-7">Recommendation</a></h2>
-<p>For the <code>light-portal</code> ecosystem:</p>
-<ul>
-<li><strong>Option 4: Client Context</strong> is the selected method. It provides the highest level of security by ensuring that token exchange flows are explicitly configured and restricted on a per-client basis in the database.</li>
-<li><strong><code>token_ex_type</code></strong> should be populated for any client that requires token exchange functionality. Clients without this configuration will not be allowed to perform token exchange.</li>
-</ul>
-<h2 id="future-considerations"><a class="header" href="#future-considerations">Future Considerations</a></h2>
-<ul>
-<li>Implement automated issuer discovery if the number of external providers grows.</li>
-<li>Support “opaque” token exchange by integrating with introspection endpoints of external IdPs.</li>
-<li>Extend the <code>auth_client_t</code> configuration to support multiple allowed exchange types per client if needed.</li>
-</ul>
-<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="oauth-audit"><a class="header" href="#oauth-audit">OAuth Audit</a></h1>
 <p>The OAuth services keep authorization codes and refresh tokens as operational state. These rows are short lived and are now written directly to <code>auth_code_t</code> and <code>auth_refresh_token_t</code> instead of being created through the general event store. This avoids high-volume login and refresh-token churn in <code>event_store_t</code> and <code>outbox_message_t</code>.</p>
 <p>Audit and login history are recorded separately in append-oriented OAuth audit tables.</p>
-<h2 id="goals-11"><a class="header" href="#goals-11">Goals</a></h2>
+<h2 id="goals-13"><a class="header" href="#goals-13">Goals</a></h2>
 <ul>
 <li>Show administrators who is currently online.</li>
 <li>Show a user the last login time and session history.</li>
@@ -8721,7 +8935,7 @@ CREATE TABLE relation_t (
 <p>![“status”]</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="claim-org-role-bootstrap"><a class="header" href="#claim-org-role-bootstrap">Claim Org Role Bootstrap</a></h1>
-<h2 id="problem-8"><a class="header" href="#problem-8">Problem</a></h2>
+<h2 id="problem-10"><a class="header" href="#problem-10">Problem</a></h2>
 <p>The Claim Org action lets a signed-in user create an organization and its default host from the profile menu. The <code>createOrg</code> form captures the organization owner, default subdomain, host description, and host owner. The backend create-org flow then creates the organization, the default host, and user-host membership rows in one transaction.</p>
 <p>That transaction is not sufficient for a usable tenant. A new host membership without role assignments can leave the owner unable to authorize after switching to the newly claimed host. The user profile/login query joins roles through <code>role_user_t</code> by the current <code>user_host_t.host_id</code>; if the current host has no active role rows for that user, role-dependent reads can return no user context.</p>
 <p>The Claim Org bootstrap must create the minimum administration roles and assignments for the default host at the same time as the organization and host.</p>
@@ -8751,7 +8965,7 @@ CREATE TABLE relation_t (
 <li><code>role_permission_t</code></li>
 </ul>
 <p>The <code>role_user_t</code> table has a foreign key to <code>(host_id, role_id)</code> in <code>role_t</code>, so role rows must exist before the user-role assignments are inserted.</p>
-<h2 id="goals-12"><a class="header" href="#goals-12">Goals</a></h2>
+<h2 id="goals-14"><a class="header" href="#goals-14">Goals</a></h2>
 <ol>
 <li>A claimed organization must be immediately usable by the selected organization owner and host owner.</li>
 <li>The default host must receive deterministic administrative roles.</li>
@@ -8759,7 +8973,7 @@ CREATE TABLE relation_t (
 <li>The event stream and projections must remain replayable and idempotent.</li>
 <li>The implementation must use the canonical role IDs already used by the portal data: <code>org-admin</code> and <code>host-admin</code>.</li>
 </ol>
-<h2 id="non-goals-15"><a class="header" href="#non-goals-15">Non-Goals</a></h2>
+<h2 id="non-goals-17"><a class="header" href="#non-goals-17">Non-Goals</a></h2>
 <p>This design does not introduce a new global organization-role table. Existing roles are host-scoped through <code>role_t.host_id</code>, so the organization administrator role for a claimed organization is represented as a role on the default host.</p>
 <p>This design also does not merge organization and host administration into one broad role. Organization ownership and host ownership are separate responsibilities, and the system should grant both roles only when the same user is selected for both owner fields.</p>
 <h2 id="role-model-1"><a class="header" href="#role-model-1">Role Model</a></h2>
@@ -8872,7 +9086,7 @@ CREATE TABLE relation_t (
 <p>The owner-transfer role policy also remains open. The system should decide whether owner changes imply role grants, role revokes, both, or neither before adding role side effects to <code>UpdateOrg</code> or <code>UpdateHost</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="master-oauth-host-tenant-login"><a class="header" href="#master-oauth-host-tenant-login">Master OAuth Host Tenant Login</a></h1>
-<h2 id="problem-9"><a class="header" href="#problem-9">Problem</a></h2>
+<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
 <p>In a deployed portal instance, <code>dev.lightapi.net</code> is the master host for the instance. Its host ID is:</p>
 <pre><code class="language-text">01964b05-552a-7c4b-9184-6857e7f3dc5f
 </code></pre>
@@ -8896,7 +9110,7 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 <p>The new tenant host does not and should not have duplicate OAuth provider/client rows. The FK therefore rejects login with:</p>
 <pre><code class="language-text">auth_session_t_host_id_client_id_provider_id_fkey
 </code></pre>
-<h2 id="goals-13"><a class="header" href="#goals-13">Goals</a></h2>
+<h2 id="goals-15"><a class="header" href="#goals-15">Goals</a></h2>
 <ol>
 <li>Keep <code>dev.lightapi.net</code> as the single master OAuth host for the instance.</li>
 <li>Allow users whose current host is a tenant host to log in through the master host’s provider/client.</li>
@@ -8905,7 +9119,7 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 <li>Allow Claim Org to switch the host owner to the new host and require logout/login for fresh claims.</li>
 <li>Keep session, auth-code, refresh-token, and audit lifecycle behavior deterministic and queryable.</li>
 </ol>
-<h2 id="non-goals-16"><a class="header" href="#non-goals-16">Non-Goals</a></h2>
+<h2 id="non-goals-18"><a class="header" href="#non-goals-18">Non-Goals</a></h2>
 <p>This design does not introduce tenant-specific OAuth provider IDs, client IDs, redirect URIs, or BFF configuration.</p>
 <p>This design does not change the portal UI or BFF to select a different OAuth provider per tenant host.</p>
 <p>This design does not remove database referential integrity. The provider-client relationship should remain enforced, but it should be enforced against the master OAuth host instead of the tenant host.</p>
@@ -9292,7 +9506,7 @@ service yet. The main gaps are:</p>
 <li>tests for schema CRUD, tenant/global lookup, versioning, and config
 validation are incomplete</li>
 </ul>
-<h2 id="goals-14"><a class="header" href="#goals-14">Goals</a></h2>
+<h2 id="goals-16"><a class="header" href="#goals-16">Goals</a></h2>
 <ul>
 <li>Store JSON Schema documents with clear tenant/global ownership.</li>
 <li>Support immutable published schema versions.</li>
@@ -9309,7 +9523,7 @@ and loading schema bodies lazily.</li>
 JSON path.</li>
 <li>Categorize and tag schemas for easier discovery and filtering.</li>
 </ul>
-<h2 id="non-goals-17"><a class="header" href="#non-goals-17">Non-Goals</a></h2>
+<h2 id="non-goals-19"><a class="header" href="#non-goals-19">Non-Goals</a></h2>
 <ul>
 <li>Do not build a full schema compatibility engine in the first release.</li>
 <li>Do not require every config property to have a schema.</li>
@@ -9785,8 +9999,6 @@ property schemas. Do not implement a separate local schema convention in
 <code>portal-view</code>. Stabilize the registry enough for versioned, tenant-aware,
 published-schema lookup, then use it to validate <code>map</code> and <code>list</code> config
 property values in both the frontend editor and the backend command path.</p>
-<div style="break-before: page; page-break-before: always;"></div>
-<h1 id="light-controller"><a class="header" href="#light-controller">Light Controller</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="yaml-rule-registry"><a class="header" href="#yaml-rule-registry">YAML Rule Registry</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
@@ -10882,7 +11094,7 @@ GROUP BY
 <p>This approach provides a seamless experience while maintaining compatibility with applications requiring roles for authorization or UI customization.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="private-messages"><a class="header" href="#private-messages">Private Messages</a></h1>
-<h2 id="problem-10"><a class="header" href="#problem-10">Problem</a></h2>
+<h2 id="problem-12"><a class="header" href="#problem-12">Problem</a></h2>
 <p>Portal users need a way to exchange private messages from the user profile
 without exposing email addresses to each other. The sender should only need a
 recipient user id or a display-safe user label. The backend can resolve email
@@ -10917,7 +11129,7 @@ model conversations, read state, participant visibility, or per-user delete.</li
 messages page should load its own data from the query API.</li>
 <li>The existing private-message tests are disabled stubs.</li>
 </ul>
-<h2 id="goals-15"><a class="header" href="#goals-15">Goals</a></h2>
+<h2 id="goals-17"><a class="header" href="#goals-17">Goals</a></h2>
 <ul>
 <li>Let one logged-in user send a message to another portal user without knowing
 or seeing the recipient email.</li>
@@ -10932,7 +11144,7 @@ recipient email internally.</li>
 <li>Provide a path from the existing <code>message_t</code> skeleton to a conversation-based
 model without breaking existing UI routes immediately.</li>
 </ul>
-<h2 id="non-goals-18"><a class="header" href="#non-goals-18">Non-Goals</a></h2>
+<h2 id="non-goals-20"><a class="header" href="#non-goals-20">Non-Goals</a></h2>
 <ul>
 <li>Do not build group chat in the first phase.</li>
 <li>Do not expose email addresses in message APIs, events, UI state, or task
@@ -13072,7 +13284,7 @@ public class ConfigRollbackService {
 <p>This approach provides a clean and relatively robust way to restore the specific override state from your snapshots using the DELETE/INSERT strategy. Remember to test thoroughly!</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="sid-and-host-verification"><a class="header" href="#sid-and-host-verification">SID and Host Verification</a></h1>
-<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
+<h2 id="problem-13"><a class="header" href="#problem-13">Problem</a></h2>
 <p>GitHub issue https://github.com/lightapi/portal-service/issues/39 reports that
 <code>config-server</code> accepted a valid JWT whose service identity did not match the
 requested service configuration.</p>
@@ -13189,7 +13401,7 @@ should not be forced to match <code>sid</code> until the product-level authoriza
 is explicitly designed.</p>
 <p>The same exception does not apply to controller registry registration because
 <code>service/register</code> always carries a requested <code>serviceId</code>.</p>
-<h2 id="goals-16"><a class="header" href="#goals-16">Goals</a></h2>
+<h2 id="goals-18"><a class="header" href="#goals-18">Goals</a></h2>
 <ul>
 <li>Prevent one service token from downloading another service’s config, certs,
 or files.</li>
@@ -13235,7 +13447,7 @@ helper.</p>
 <p>The focused implementation tests cover missing and mismatched <code>host</code>, missing
 and mismatched <code>sid</code>, missing and mismatched <code>env</code> when <code>envTag</code> is requested,
 blank values, whitespace trimming, and case-sensitive identifier comparison.</p>
-<h2 id="non-goals-19"><a class="header" href="#non-goals-19">Non-Goals</a></h2>
+<h2 id="non-goals-21"><a class="header" href="#non-goals-21">Non-Goals</a></h2>
 <ul>
 <li>Do not replace JWT verification middleware.</li>
 <li>Do not redesign OAuth token issuance.</li>
@@ -13638,7 +13850,7 @@ mvn -q -Dtest=ServiceIdAuthorizationUtilTest test
 <li>Non-standard instance files are copied into <code>snapshot_instance_file_t</code>.</li>
 </ul>
 <p>The <code>/config-server/files</code> endpoint must return both sets. It already filters standard files by <code>config_phase</code> through <code>config_snapshot_property_t.config_phase</code>, but <code>instance_file_t</code> and <code>snapshot_instance_file_t</code> do not currently carry <code>config_phase</code>. That makes it impossible to union the two sources while preserving runtime, deployment, and generator phase semantics.</p>
-<h2 id="problem-12"><a class="header" href="#problem-12">Problem</a></h2>
+<h2 id="problem-14"><a class="header" href="#problem-14">Problem</a></h2>
 <p>When a service starts through <code>DefaultConfigLoader</code>, it calls <code>/config-server/files</code> with <code>host</code>, <code>serviceId</code>, and <code>envTag</code>. The endpoint resolves the current snapshot and returns the files that should be written into <code>/config</code>.</p>
 <p>For the sidecar case, <code>openapi.yaml</code> exists in both <code>instance_file_t</code> and <code>snapshot_instance_file_t</code>, but it does not exist in <code>config_snapshot_property_t</code>. Since the current <code>/files</code> query reads only <code>config_snapshot_property_t</code>, the response does not include <code>openapi.yaml</code>, and the sidecar cannot write it to <code>/config</code>.</p>
 <p>The correct endpoint behavior is:</p>
@@ -18105,7 +18317,7 @@ scale well if every Java or Rust release requires a hand-maintained set of
 mapping events across all portal instances. This design proposes a release
 mapping automation model that keeps the existing event-sourced write path and
 removes the need to manually recreate mapping files for every product release.</p>
-<h2 id="problem-13"><a class="header" href="#problem-13">Problem</a></h2>
+<h2 id="problem-15"><a class="header" href="#problem-15">Problem</a></h2>
 <p>Product versions are released often. Each new release can introduce a new
 <code>productVersionId</code>, and the config update page only knows which configs and
 properties are applicable when mappings exist for that exact product version.</p>
@@ -18206,7 +18418,7 @@ unchanged products and to the new <code>productVersionId</code> for rebuilt prod
 </tbody>
 </table>
 </div>
-<h2 id="goals-17"><a class="header" href="#goals-17">Goals</a></h2>
+<h2 id="goals-19"><a class="header" href="#goals-19">Goals</a></h2>
 <ul>
 <li>Auto-populate config mappings for every new Java or Rust product release.</li>
 <li>Preserve event replay, auditability, and projection rebuild behavior.</li>
@@ -18219,7 +18431,7 @@ event amplification.</li>
 <li>Detect missing config and property definitions before a release appears
 complete.</li>
 </ul>
-<h2 id="non-goals-20"><a class="header" href="#non-goals-20">Non-Goals</a></h2>
+<h2 id="non-goals-22"><a class="header" href="#non-goals-22">Non-Goals</a></h2>
 <ul>
 <li>Do not change the config override hierarchy.</li>
 <li>Do not write directly to config mapping projection tables.</li>
@@ -18865,7 +19077,7 @@ artifact publishing, AI-assisted failure diagnosis, and human approval.</p>
 portal service process. Command execution belongs in a sandboxed release
 runner, with <code>light-workflow</code> owning state, task routing, retries, approvals,
 and audit history.</p>
-<h2 id="problem-14"><a class="header" href="#problem-14">Problem</a></h2>
+<h2 id="problem-16"><a class="header" href="#problem-16">Problem</a></h2>
 <p>Java releases currently depend on <code>light-bot</code>, while Rust releases are handled
 through separate command-line and repository-specific steps. This works, but it
 keeps release knowledge outside the same workflow model used by Light Portal
@@ -18884,7 +19096,7 @@ and who approved publication.</li>
 <p>The release workflow should be flexible enough to call existing command-line
 tools, but controlled enough that it does not become an unrestricted shell
 inside Light Portal.</p>
-<h2 id="goals-18"><a class="header" href="#goals-18">Goals</a></h2>
+<h2 id="goals-20"><a class="header" href="#goals-20">Goals</a></h2>
 <ul>
 <li>Replace the current Java <code>light-bot</code> release path with <code>light-workflow</code> once
 parity is proven.</li>
@@ -18902,7 +19114,7 @@ reporting into the release gate.</li>
 behind explicit approval.</li>
 <li>Preserve release auditability and reproducibility.</li>
 </ul>
-<h2 id="non-goals-21"><a class="header" href="#non-goals-21">Non-Goals</a></h2>
+<h2 id="non-goals-23"><a class="header" href="#non-goals-23">Non-Goals</a></h2>
 <ul>
 <li>Do not run arbitrary release commands in the Light Portal service process.</li>
 <li>Do not replace Maven, Cargo, Docker, GitHub CLI, or existing release scripts
@@ -20360,7 +20572,7 @@ SELECT start_offset, end_offset FROM upd;
 <li><strong>No Blocking</strong>: The consumer never gets stuck on a single bad event.</li>
 <li><strong>Debuggability</strong>: The DLQ table preserves the full context (payload, exception, transaction_id) for manual investigation and replay.</li>
 </ul>
-<h2 id="configuration"><a class="header" href="#configuration">Configuration</a></h2>
+<h2 id="configuration-1"><a class="header" href="#configuration-1">Configuration</a></h2>
 <p>The consumer is configured via <code>db-event-consumer.yml</code> and runs in a Java 21 <strong>Virtual Thread</strong>. This ensures that the frequent <code>Thread.sleep</code> (during retries) and the blocking <code>pgConn.getNotifications()</code> (waiting for wake-ups) do not tie up native system threads, making the consumer extremely lightweight.</p>
 <pre><code class="language-yaml"># Postgres pub/sub event processor configuration
 # Consumer group id and it is default to user-query-group. Please only change it if you
@@ -20569,7 +20781,7 @@ if (transactionId == null) {
 <li>Framework exceptions during polling</li>
 <li>Fatal errors in fallback processing (after DLQ attempt)</li>
 </ul>
-<h2 id="configuration-1"><a class="header" href="#configuration-1">Configuration</a></h2>
+<h2 id="configuration-2"><a class="header" href="#configuration-2">Configuration</a></h2>
 <p>Consumer configuration in <code>kafka-consumer.yml</code>:</p>
 <pre><code class="language-yaml"># Kafka consumer properties
 topic: portal-event
@@ -20818,7 +21030,7 @@ Location: https://portal.lightapi.net/authorization?code=auth_code_abc&amp;state
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="auth-client-secret-regeneration"><a class="header" href="#auth-client-secret-regeneration">Auth Client Secret Regeneration</a></h1>
-<h2 id="problem-15"><a class="header" href="#problem-15">Problem</a></h2>
+<h2 id="problem-17"><a class="header" href="#problem-17">Problem</a></h2>
 <p>An OAuth auth client receives a <code>client_id</code> and <code>client_secret</code> when it is
 created. The clear text <code>client_secret</code> is intentionally a one-time value. The
 database projection stores only a verifier value in <code>auth_client_t.client_secret</code>
@@ -21643,7 +21855,7 @@ Kubernetes cluster from the Instance Admin page.</p>
 <p>The goal is to provide a production-like deployment path for small businesses
 and enterprise tenants without requiring Light Portal to have direct network
 access to every customer cluster.</p>
-<h2 id="problem-16"><a class="header" href="#problem-16">Problem</a></h2>
+<h2 id="problem-18"><a class="header" href="#problem-18">Problem</a></h2>
 <p>Each API or application repository can contain a <code>k8s/</code> folder with Kubernetes
 deployment templates. The templates contain variables in the following format:</p>
 <pre><code class="language-text">${key:defaultValue}
@@ -22185,7 +22397,7 @@ deployment intent and history, while the deployer owns safe cluster-local
 execution.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-oauth-and-oauth-kafka-agentcore-oidc-discovery"><a class="header" href="#light-oauth-and-oauth-kafka-agentcore-oidc-discovery">Light OAuth and OAuth Kafka AgentCore OIDC Discovery</a></h1>
-<h2 id="problem-17"><a class="header" href="#problem-17">Problem</a></h2>
+<h2 id="problem-19"><a class="header" href="#problem-19">Problem</a></h2>
 <p>Issue https://github.com/lightapi/portal-service/issues/44 asks whether
 <code>portal-service/apps/light-oauth</code> can support AWS AgentCore JWT inbound
 authorization.</p>
@@ -22315,7 +22527,7 @@ the provider <code>jwk</code> from <code>auth_provider_t</code>. The implementat
 that the JWT header <code>kid</code> is present in the returned JWKS for the same provider.
 That guarantee matters more once external AWS services cache the discovery and
 JWKS responses.</p>
-<h2 id="goals-19"><a class="header" href="#goals-19">Goals</a></h2>
+<h2 id="goals-21"><a class="header" href="#goals-21">Goals</a></h2>
 <ul>
 <li>Let AWS AgentCore use Rust <code>light-oauth</code> or Java <code>oauth-kafka</code> as a JWT
 bearer token issuer.</li>
@@ -22327,7 +22539,7 @@ claims working.</li>
 <li>Keep issuer, audience, and discovery URLs deterministic across environments.</li>
 <li>Add tests that prove discovery, JWKS, and signed token claims line up.</li>
 </ul>
-<h2 id="non-goals-22"><a class="header" href="#non-goals-22">Non-Goals</a></h2>
+<h2 id="non-goals-24"><a class="header" href="#non-goals-24">Non-Goals</a></h2>
 <ul>
 <li>Do not implement full OIDC identity-provider behavior in the first phase.</li>
 <li>Do not add dynamic client registration.</li>
@@ -22399,7 +22611,7 @@ return <code>404</code> to avoid publishing metadata for the wrong tenant or pro
 many discovery consumers expect it, even if <code>light-oauth</code> does not issue ID
 tokens yet. The design should document this as discovery compatibility metadata,
 not as a promise that ID-token grant flows are complete.</p>
-<h3 id="configuration-2"><a class="header" href="#configuration-2">Configuration</a></h3>
+<h3 id="configuration-3"><a class="header" href="#configuration-3">Configuration</a></h3>
 <p>Add explicit public URL configuration:</p>
 <pre><code class="language-yaml">oidcDiscoveryEnabled: ${oidc_discovery_enabled:true}
 publicIssuerBaseUrl: ${public_issuer_base_url}
@@ -24288,7 +24500,7 @@ selected creation context.</p>
 should manage only clients they own or can access through their position.
 Administrators can manage all clients for the host when their role allows it.</p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="implementation"><a class="header" href="#implementation">Implementation</a></h1>
+<h1 id="implementation-1"><a class="header" href="#implementation-1">Implementation</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="local-portal-setup"><a class="header" href="#local-portal-setup">Local Portal Setup</a></h1>
 <p>This guide starts the local Light Portal runtime from two sibling repositories:</p>
@@ -25147,7 +25359,7 @@ const defaultUrl =
 <li>The user is immediately signed out of the application.</li>
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="configuration-3"><a class="header" href="#configuration-3">Configuration</a></h1>
+<h1 id="configuration-4"><a class="header" href="#configuration-4">Configuration</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-gateway-1"><a class="header" href="#light-gateway-1">light-gateway</a></h1>
 <h2 id="client-credentials-token"><a class="header" href="#client-credentials-token">Client Credentials Token</a></h2>
