@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-b287d288.js";
+            window.path_to_searchindex_js = "../searchindex-19b2108c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-765e5a95.js"></script>
@@ -497,20 +497,29 @@ CREATE TABLE promotion_item_t (
 }
 </code></pre>
 <h4 id="import-execute-command"><a class="header" href="#import-execute-command">Import Execute (Command)</a></h4>
-<p>Executes the promotion plan, applying all changes to the target host.</p>
+<p>Executes supported promotion snapshots, applying changes to the target host through event sourcing.</p>
+<p>The current implementation supports <strong>global migration snapshots</strong> whose payload contains a top-level <code>tables</code> object. These snapshots are imported through the existing event-based global import pipeline, which converts table rows into ordered events and writes them to <code>event_store_t</code> and <code>outbox_message_t</code>.</p>
+<p>Selective entity promotion snapshots whose payload contains a top-level <code>entities</code> array are <strong>not executable yet</strong>. The dry-run planner can still calculate the diff plan, but <code>importExecute</code> must reject this snapshot shape until the selective entity event materializer is implemented. Returning <code>PLANNED</code> items from <code>importExecute</code> is not a valid execution result and the UI must not treat that response as a successful promotion.</p>
 <ul>
 <li><strong>Service:</strong> <code>user</code></li>
 <li><strong>Action:</strong> <code>importExecute</code></li>
 <li><strong>Request Data:</strong>
 <ul>
 <li><code>targetHostId</code> (UUID) – The host to apply changes to.</li>
-<li><code>promotionId</code> (UUID, optional) – From the dry run (for same-instance tracking).</li>
-<li><code>snapshot</code> (Object) – The canonical snapshot.</li>
-<li><code>orphanAction</code> (String) – <code>"keep"</code> | <code>"delete"</code> | <code>"sync"</code>.</li>
+<li><code>snapshot</code> (Object) – The canonical snapshot. Executable today only when it contains <code>tables</code>.</li>
+<li><code>promotionId</code> (UUID, optional) – Reserved for selective entity execution.</li>
+<li><code>orphanAction</code> (String) – Reserved for selective entity execution: <code>"keep"</code> | <code>"delete"</code> | <code>"sync"</code>.</li>
 </ul>
 </li>
-<li><strong>Response:</strong> Execution result with per-item status (Success/Failed) and error messages.</li>
+<li><strong>Response:</strong> For global snapshots, the global import result such as <code>{ "imported": 42, "total": 42 }</code>. For selective entity snapshots, a validation error until the selective execution path is implemented.</li>
 </ul>
+<p>Selective entity execution requires a new materialization layer:</p>
+<ol>
+<li>Translate each dry-run <code>CREATE</code>, <code>UPDATE</code>, and optional orphan <code>DELETE</code> item into the matching domain event.</li>
+<li>Preserve dependency order from the exported snapshot.</li>
+<li>Write generated events through the same event-store/outbox transaction pattern used by the global import pipeline.</li>
+<li>Return per-item execution status only after the event write succeeds or fails.</li>
+</ol>
 <h3 id="ui-pages"><a class="header" href="#ui-pages">UI Pages</a></h3>
 <p>All pages are located under <code>portal-view/src/pages/promotion/</code> and accessible via a top-level “Promotion” sidebar menu with children: Export, Import, History.</p>
 <h4 id="promotionexporttsx-apppromotionexport"><a class="header" href="#promotionexporttsx-apppromotionexport">PromotionExport.tsx (<code>/app/promotion/export</code>)</a></h4>
@@ -537,7 +546,7 @@ CREATE TABLE promotion_item_t (
 <li><strong>Orphaned</strong> items (red) – Exist in target but not in source.</li>
 </ul>
 </li>
-<li><strong>Execute:</strong> For orphaned items, user selects Keep/Delete/Sync via radio buttons. Clicking “Execute Promotion” applies all changes.</li>
+<li><strong>Execute:</strong> For selective entity snapshots, execution is disabled by the backend until event materialization is implemented. For global migration snapshots, the page bypasses the selective dry-run plan and calls <code>globalSnapshotImport</code> directly.</li>
 </ol>
 <h4 id="promotionhistorytsx-apppromotionhistory"><a class="header" href="#promotionhistorytsx-apppromotionhistory">PromotionHistory.tsx (<code>/app/promotion/history</code>)</a></h4>
 <p>A standard <code>MaterialReactTable</code> listing past promotions with columns: Source Host, Target Host, Entity Type, Status (color-coded chip), Created By, Timestamp, Promotion ID. Row action: View Details (navigates to diff view).</p>
@@ -546,8 +555,8 @@ CREATE TABLE promotion_item_t (
 <h3 id="implementation-phases"><a class="header" href="#implementation-phases">Implementation Phases</a></h3>
 <ol>
 <li><strong>Phase 1 – UI Foundation:</strong> Create promotion pages, sidebar menu entry, route registration. <em>(Completed)</em></li>
-<li><strong>Phase 2 – Backend Services:</strong> Implement <code>exportSnapshot</code>, <code>importDryRun</code>, <code>importExecute</code> services, and <code>promotion_t</code>/<code>promotion_item_t</code> DDL.</li>
-<li><strong>Phase 3 – Same-Instance Promotion:</strong> Integrate promotion tracking tables, add “Promote to Host” flow, orphan detection.</li>
+<li><strong>Phase 2 – Backend Services:</strong> Implement <code>exportSnapshot</code>, <code>importDryRun</code>, and validation for <code>importExecute</code>. <em>(Partially completed: selective execution is blocked until event materialization is implemented.)</em></li>
+<li><strong>Phase 3 – Same-Instance Promotion:</strong> Integrate promotion tracking tables, add “Promote to Host” flow, orphan detection, and selective event materialization.</li>
 <li><strong>Phase 4 – Additional Entity Types:</strong> Add support for <code>rule_t</code>, <code>schema_t</code>, <code>api_t</code>, <code>config_t</code> and extend the dependency resolver.</li>
 <li><strong>Phase 5 – Global Migration Export:</strong> Implement dynamic table discovery for full-database migration (see below).</li>
 </ol>
