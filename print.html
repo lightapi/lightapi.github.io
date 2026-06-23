@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-e38d9278.js";
+            window.path_to_searchindex_js = "searchindex-1e28f091.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-929b6397.js"></script>
+        <script src="toc-77aa7d7f.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -8934,6 +8934,553 @@ CREATE TABLE relation_t (
 <p>or</p>
 <p>![“status”]</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="light-portal-fine-grained-authorization"><a class="header" href="#light-portal-fine-grained-authorization">Light Portal Fine-Grained Authorization</a></h1>
+<h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
+<p>The existing fine-grained authorization model describes how Light Portal manages
+access control for APIs and MCP tools owned by customers. This document applies
+the same ideas to Light Portal itself.</p>
+<p>Light Portal has two different authorization surfaces:</p>
+<ul>
+<li>the browser application, where menus, routes, tasks, and action buttons decide
+what the user can discover and click</li>
+<li>the backend portal handlers, where query and command services read or mutate
+tenant data</li>
+</ul>
+<p>The browser must improve usability by hiding irrelevant admin menus, but it must
+not be the security boundary. The security boundary must be enforced by the
+gateway and by the portal query and command handlers.</p>
+<h2 id="goals-14"><a class="header" href="#goals-14">Goals</a></h2>
+<ul>
+<li>Limit admin menus based on the user’s roles, positions, groups, and
+attributes.</li>
+<li>Let <code>admin</code> access all eligible admin pages for data within all hosts.</li>
+<li>Let a <code>host-admin</code> access all eligible admin pages for data within the current
+tenant host only.</li>
+<li>Keep global platform administration separate from tenant administration.</li>
+<li>Enable request access control (<code>req-acc</code>) and response filtering (<code>res-fil</code>)
+for Light Portal hybrid handlers.</li>
+<li>Use <code>owner_user_id</code> and <code>owner_position_id</code> as the primary row ownership
+model for self-service admin pages.</li>
+<li>Keep authorization rules declarative enough that they can be managed from the
+existing rule and access-control pages.</li>
+</ul>
+<h2 id="non-goals-17"><a class="header" href="#non-goals-17">Non-Goals</a></h2>
+<ul>
+<li>Do not rely on menu hiding as authorization.</li>
+<li>Do not make <code>host-admin</code> a global portal super admin.</li>
+<li>Do not replace existing host scoping with ownership scoping. Host scoping
+remains mandatory.</li>
+<li>Do not require every portal table to be migrated before the model can be
+rolled out.</li>
+<li>Do not duplicate every rule in React. React should consume an effective menu
+and capability model from the backend over time.</li>
+</ul>
+<h2 id="recommended-model"><a class="header" href="#recommended-model">Recommended Model</a></h2>
+<p>Use three layers.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Layer</th><th>Purpose</th><th>Enforcement</th></tr>
+</thead>
+<tbody>
+<tr><td>Menu and route visibility</td><td>Usability and discoverability</td><td><code>portal-view</code> hides menus and blocks client routes</td></tr>
+<tr><td>Handler request access</td><td>Decide whether a user may call a query or command service/action</td><td>light-gateway <code>req-acc</code> for <code>/portal/query</code> and <code>/portal/command</code></td></tr>
+<tr><td>Data scope and response filtering</td><td>Decide which tenant rows and fields the user may see or mutate</td><td>service-side owner predicates and gateway/service <code>res-fil</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>This keeps the user experience responsive without trusting the browser.</p>
+<h2 id="roles-and-scopes"><a class="header" href="#roles-and-scopes">Roles And Scopes</a></h2>
+<p>Separate page access from row scope.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Role or claim</th><th>Meaning</th><th>Page access</th><th>Data scope</th></tr>
+</thead>
+<tbody>
+<tr><td><code>admin</code></td><td>global portal administrator</td><td>all portal admin pages</td><td>all hosts, only for global administration</td></tr>
+<tr><td><code>host-admin</code></td><td>tenant administrator</td><td>tenant-safe admin pages</td><td>current <code>hostId</code> only</td></tr>
+<tr><td><code>access-admin</code></td><td>tenant access-control administrator</td><td>access-control administration pages</td><td>current <code>hostId</code> only</td></tr>
+<tr><td><code>&lt;entity&gt;-admin</code></td><td>entity-specific administrator, such as <code>api-admin</code> or <code>instance-admin</code></td><td>pages for that entity</td><td>current <code>hostId</code>, all rows for that entity</td></tr>
+<tr><td><code>user</code></td><td>self-service user</td><td>approved self-service pages</td><td>owned rows only</td></tr>
+<tr><td>positions claim</td><td>team or org-unit membership</td><td>does not grant pages by itself unless mapped by rule</td><td>rows owned by matching effective positions</td></tr>
+<tr><td>groups and attributes</td><td>additional authorization dimensions</td><td>rule-dependent</td><td>rule-dependent</td></tr>
+</tbody>
+</table>
+</div>
+<p>The important distinction is that <code>host-admin</code> is powerful inside one tenant but
+must not bypass host ownership. If the current session host is
+<code>01964b05-...</code>, every query and command still needs that <code>hostId</code> enforced.</p>
+<h2 id="host-admin"><a class="header" href="#host-admin">Host Admin</a></h2>
+<p><code>host-admin</code> should be the standard tenant administrator role.</p>
+<p>A <code>host-admin</code> can:</p>
+<ul>
+<li>see tenant administration menus that are safe within the current host</li>
+<li>query all records whose <code>host_id</code> is the current session host</li>
+<li>create and update tenant-scoped records for the current host</li>
+<li>assign ownership inside the current host when the command supports it</li>
+</ul>
+<p>A <code>host-admin</code> cannot:</p>
+<ul>
+<li>access another <code>hostId</code> by changing a request payload</li>
+<li>manage global reference data unless explicitly granted a global role</li>
+<li>manage platform deployment records that are not tenant scoped</li>
+<li>manage access-control policy unless explicitly granted <code>access-admin</code> inside
+the current host</li>
+<li>bypass command-specific invariants, such as optimistic concurrency checks</li>
+</ul>
+<p>Backend handlers must treat <code>hostId</code> from the request as untrusted. The trusted
+tenant comes from the authenticated audit context or from a verified user-host
+membership lookup.</p>
+<h2 id="access-administration"><a class="header" href="#access-administration">Access Administration</a></h2>
+<p>Access-control administration is separate from general tenant administration.
+Changing role, group, position, attribute, row-filter, or column-filter policy
+can change who may read or mutate tenant data, so it should require
+<code>access-admin</code> within the current host instead of being implied by <code>host-admin</code>.</p>
+<p>An <code>access-admin</code> can manage policy for tenant-owned APIs, apps, clients,
+instances, workflows, schemas, schedules, and other tenant-scoped assets in the
+current host. An <code>access-admin</code> cannot manage global platform policy unless the
+user also has the global <code>admin</code> role.</p>
+<p>This keeps <code>host-admin</code> useful for normal tenant operations while preserving
+separation of duties for security policy changes.</p>
+<h2 id="platform-and-tenant-deployment-pages"><a class="header" href="#platform-and-tenant-deployment-pages">Platform And Tenant Deployment Pages</a></h2>
+<p>Deployment administration should be split into tenant deployment pages and
+global platform pages.</p>
+<p>Tenant deployment pages can be visible to <code>host-admin</code> when every operation is
+scoped to the current <code>hostId</code>, such as deploying tenant APIs, checking route
+health, or managing tenant client registrations.</p>
+<p>Global platform pages must require <code>admin</code>. These pages manage shared
+infrastructure, gateway clusters, physical deployment targets, shared database
+configuration, or cross-host platform state. They must not be exposed through a
+tenant-scoped <code>host-admin</code> rule.</p>
+<h2 id="menu-authorization"><a class="header" href="#menu-authorization">Menu Authorization</a></h2>
+<p>The current sidebar already supports role-based visibility with exact role
+tokens and treats <code>admin</code> and <code>host-admin</code> as broad admin roles. The design
+should evolve this into a backend-driven capability model.</p>
+<h3 id="phase-1-local-menu-policy"><a class="header" href="#phase-1-local-menu-policy">Phase 1: Local Menu Policy</a></h3>
+<p>Keep a local page registry in <code>portal-view</code>, but normalize it around page
+capabilities.</p>
+<pre><code class="language-ts">{
+  id: "api-admin",
+  route: "/app/service/admin",
+  requiredAny: ["admin", "host-admin", "api-admin", "user"],
+  scope: "owner-or-host",
+  entity: "api"
+}
+</code></pre>
+<p>The UI can show:</p>
+<ul>
+<li>all admin menus for <code>admin</code></li>
+<li>tenant-safe admin menus for <code>host-admin</code></li>
+<li>entity menus for <code>&lt;entity&gt;-admin</code></li>
+<li>approved self-service menus for <code>user</code></li>
+</ul>
+<p>Menus with no explicit rule inside the Administration group should not be shown
+to normal users.</p>
+<h3 id="phase-2-backend-menu-policy"><a class="header" href="#phase-2-backend-menu-policy">Phase 2: Backend Menu Policy</a></h3>
+<p>Add a backend query such as:</p>
+<pre><code class="language-text">lightapi.net/portal/getEffectiveMenu/0.1.0
+</code></pre>
+<p>or:</p>
+<pre><code class="language-text">lightapi.net/portal/getEffectiveCapabilities/0.1.0
+</code></pre>
+<p>The response should contain route-level capabilities, not raw policy internals.</p>
+<pre><code class="language-json">{
+  "hostId": "01964b05-552a-7c4b-9184-6857e7f3dc5f",
+  "pages": [
+    {
+      "pageId": "api-admin",
+      "route": "/app/service/admin",
+      "visible": true,
+      "readScope": "owned",
+      "writeScope": "owned"
+    },
+    {
+      "pageId": "instance-admin",
+      "route": "/app/instance/InstanceAdmin",
+      "visible": true,
+      "readScope": "host",
+      "writeScope": "host"
+    }
+  ]
+}
+</code></pre>
+<p>The sidebar, task launcher, command palette, and route guards should consume the
+same capability response.</p>
+<h2 id="request-access-for-portal-handlers"><a class="header" href="#request-access-for-portal-handlers">Request Access For Portal Handlers</a></h2>
+<p>Light Portal uses hybrid RPC-style endpoints:</p>
+<pre><code class="language-text">POST /portal/query
+POST /portal/command
+</code></pre>
+<p>The request body identifies the logical handler:</p>
+<pre><code class="language-json">{
+  "host": "lightapi.net",
+  "service": "service",
+  "action": "getApi",
+  "version": "0.1.0",
+  "data": {
+    "hostId": "01964b05-552a-7c4b-9184-6857e7f3dc5f"
+  }
+}
+</code></pre>
+<p>For <code>req-acc</code>, the gateway must authorize the logical service id, not only the
+HTTP path. The effective route key should be derived as:</p>
+<pre><code class="language-text">lightapi.net/{service}/{action}/{version}
+</code></pre>
+<p>Example:</p>
+<pre><code class="language-text">lightapi.net/service/getApi/0.1.0
+lightapi.net/service/createApi/0.1.0
+lightapi.net/role/createRolePermission/0.1.0
+</code></pre>
+<p>This lets the access-control registry treat portal handlers exactly like API
+operations.</p>
+<h3 id="request-context"><a class="header" href="#request-context">Request Context</a></h3>
+<p>The <code>req-acc</code> rule context should include:</p>
+<pre><code class="language-json">{
+  "serviceId": "lightapi.net/service/createApi/0.1.0",
+  "transport": "hybrid",
+  "portal": true,
+  "hostId": "01964b05-552a-7c4b-9184-6857e7f3dc5f",
+  "entity": "api",
+  "action": "create",
+  "jwt": {
+    "userId": "01964b05-5532-7c79-8cde-191dcbd421b8",
+    "roles": ["user", "api-admin"],
+    "positions": ["team-api"],
+    "groups": ["engineering"],
+    "attributes": {
+      "department": "platform"
+    }
+  },
+  "requestData": {
+    "hostId": "01964b05-552a-7c4b-9184-6857e7f3dc5f"
+  }
+}
+</code></pre>
+<p>Recommended built-in request rules:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Rule</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>portal-admin-global</code></td><td>allow <code>admin</code> for global admin handlers</td></tr>
+<tr><td><code>portal-host-admin</code></td><td>allow <code>host-admin</code> only when <code>requestData.hostId</code> matches the session host</td></tr>
+<tr><td><code>portal-access-admin</code></td><td>allow <code>access-admin</code> for tenant access-control handlers in the current host</td></tr>
+<tr><td><code>portal-entity-admin</code></td><td>allow <code>&lt;entity&gt;-admin</code> for entity handlers in the current host</td></tr>
+<tr><td><code>portal-owner-read</code></td><td>allow <code>user</code> to call approved read handlers; row scope is applied later</td></tr>
+<tr><td><code>portal-owner-write</code></td><td>allow <code>user</code> to call approved write handlers only when ownership can be verified</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="response-filtering-for-portal-handlers"><a class="header" href="#response-filtering-for-portal-handlers">Response Filtering For Portal Handlers</a></h2>
+<p>Response filtering has two jobs:</p>
+<ul>
+<li>remove rows that are outside the caller’s authorized scope</li>
+<li>optionally remove columns the caller should not see</li>
+</ul>
+<p>For list queries, service-side SQL filtering is preferred over gateway-only
+filtering because it protects pagination, counts, and performance. The gateway
+or common service layer can still apply <code>res-fil</code> as a defense-in-depth step.</p>
+<p>Recommended order:</p>
+<ol>
+<li><code>req-acc</code> decides whether the user may call the logical handler.</li>
+<li>Query handler injects host and owner predicates into SQL.</li>
+<li>Query handler returns only authorized rows and an authorized total.</li>
+<li>Shared query serialization or service-side <code>res-fil</code> removes rows only when
+it can also preserve authorized pagination totals.</li>
+<li>Gateway <code>res-fil</code> removes sensitive fields and can perform defense-in-depth
+row removal for non-paginated responses.</li>
+<li>Portal-view renders the already-authorized result.</li>
+</ol>
+<p>Gateway-only row filtering must not be the primary implementation for paginated
+lists. If rows are removed after the backend has already computed <code>total</code>,
+<code>offset</code>, or <code>limit</code>, the grid metadata becomes inaccurate. Row predicates
+belong in SQL or in shared query serialization that controls both the returned
+rows and the total count. Column filtering can run in the gateway because it
+does not change pagination.</p>
+<p>For command handlers, response filtering is less important than request
+authorization and command-side ownership checks. A command must verify that the
+target aggregate belongs to the current host and that the caller can mutate it.</p>
+<h2 id="owner-position"><a class="header" href="#owner-position">Owner Position</a></h2>
+<p>The owner model should prefer explicit owner fields:</p>
+<pre><code class="language-text">owner_user_id
+owner_position_id
+</code></pre>
+<p><code>owner_user_id</code> is assigned from the authenticated user on create. Normal forms
+should not submit it.</p>
+<p><code>owner_position_id</code> lets a team or org unit own a record. Users with an
+effective matching position can see or manage the record when the page rule
+allows owner-scoped access.</p>
+<p>Owner assignments must always remain inside the current host. When a command
+sets or transfers <code>owner_user_id</code> or <code>owner_position_id</code>, the command handler
+must verify that the target user or position belongs to the trusted session
+<code>hostId</code>. The browser-supplied owner value is not enough. Cross-host owner
+assignment must be rejected even when the caller has <code>host-admin</code> for the
+current host.</p>
+<p>Owner changes are security-sensitive events. Create, transfer, and clear
+operations for <code>owner_user_id</code> or <code>owner_position_id</code> must be written to the
+audit log with the old owner, new owner, entity id, trusted host, acting user,
+and logical portal service id.</p>
+<p>For owner-scoped reads, the service predicate should be:</p>
+<pre><code class="language-sql">AND (
+  owner_user_id = :currentUserId
+  OR owner_position_id = ANY(:effectivePositions)
+)
+</code></pre>
+<p>If the database dialect does not support array binding, use an <code>IN</code> list with
+validated position ids. Owner-scoped tables should index host and owner columns
+together, such as <code>(host_id, owner_user_id)</code> and
+<code>(host_id, owner_position_id)</code>, so owner predicates remain efficient.</p>
+<p>Rows with both owner fields null are unassigned legacy rows. They should be
+visible only to all-scope roles such as <code>admin</code>, <code>host-admin</code>, or an applicable
+<code>&lt;entity&gt;-admin</code> until ownership is assigned.</p>
+<h3 id="effective-positions"><a class="header" href="#effective-positions">Effective Positions</a></h3>
+<p>The JWT may contain direct positions, but direct positions are not always enough.
+The service should resolve effective positions from:</p>
+<ul>
+<li>direct position claims in the token</li>
+<li><code>user_position_t</code></li>
+<li>position inheritance rules when enabled</li>
+</ul>
+<p>The effective set should be computed in one shared utility and reused by query
+and command handlers. Existing <code>OwnerScopeUtil</code> is the right direction for query
+handlers; it should become the standard path rather than a page-specific helper.</p>
+<p>Position inheritance should not be recursively expanded inside every portal
+query. Materialize the transitive closure in a table such as
+<code>position_closure_t</code> and refresh it when position relationships change, or cache
+the user’s flat effective-position set in session state and invalidate it when
+membership changes. The query layer should receive a bounded, validated list of
+effective positions.</p>
+<h2 id="command-authorization"><a class="header" href="#command-authorization">Command Authorization</a></h2>
+<p>Commands need stronger checks than queries because they mutate state.</p>
+<p>Every tenant-scoped command should verify:</p>
+<ul>
+<li>the requested <code>hostId</code> is the authenticated session host, unless the caller is
+a global <code>admin</code></li>
+<li>the target aggregate exists in that host for update/delete commands</li>
+<li>owner-scoped users own the target through <code>owner_user_id</code> or
+<code>owner_position_id</code></li>
+<li>entity admins and host admins are still limited by host</li>
+<li>owner transfer is explicit and restricted</li>
+<li>target owners for <code>owner_user_id</code> and <code>owner_position_id</code> belong to the
+trusted session host</li>
+<li>owner transfer is audit logged with old and new owner values</li>
+</ul>
+<p>Recommended command scopes:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Scope</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>own:create</code></td><td>user can create records owned by self and optional owner position</td></tr>
+<tr><td><code>own:update</code></td><td>user can update records they own</td></tr>
+<tr><td><code>own:delete</code></td><td>user can delete records they own if the entity allows it</td></tr>
+<tr><td><code>host:read</code></td><td>user can read all rows in the current host</td></tr>
+<tr><td><code>host:write</code></td><td>user can mutate all rows in the current host</td></tr>
+<tr><td><code>global:admin</code></td><td>user can operate across hosts for platform administration</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="portal-access-control-registry"><a class="header" href="#portal-access-control-registry">Portal Access-Control Registry</a></h2>
+<p>The access-control registry should support portal handlers as first-class
+endpoints.</p>
+<p>Proposed endpoint identity:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td><code>apiId</code></td><td><code>PORTAL</code> or <code>light-portal</code></td></tr>
+<tr><td><code>apiVersion</code></td><td>portal release version or <code>1.0.0</code> for the logical control plane</td></tr>
+<tr><td><code>endpoint</code></td><td><code>lightapi.net/{service}/{action}/{version}</code></td></tr>
+<tr><td><code>httpMethod</code></td><td><code>POST</code></td></tr>
+<tr><td><code>endpointPath</code></td><td><code>/portal/query</code> or <code>/portal/command</code></td></tr>
+<tr><td><code>sourceProtocol</code></td><td><code>hybrid</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>This allows the existing Role Permission, Group Permission, Position Permission,
+Attribute Permission, Row Filter, and Column Filter pages to manage portal
+handler access without a separate policy store.</p>
+<p>The portal-handler catalog should be generated from service annotations and
+<code>spec.yaml</code> metadata during build or deployment. Manual registration may be used
+only as an override for descriptions, classifications, or temporary exclusions.
+Generation prevents drift when handlers are added, renamed, or removed.</p>
+<h2 id="example-policies"><a class="header" href="#example-policies">Example Policies</a></h2>
+<h3 id="host-admin-can-manage-tenant-apis"><a class="header" href="#host-admin-can-manage-tenant-apis">Host Admin Can Manage Tenant APIs</a></h3>
+<p>Request rule:</p>
+<pre><code class="language-yaml">ruleId: portal-host-admin-current-host
+ruleType: req-acc
+description: Allow host-admin to call tenant handlers for the current host.
+conditions:
+  - conditionId: role-host-admin
+    variableName: jwt
+    propertyPath: roles
+    operatorCode: CS
+    conditionValues:
+      - conditionValue: host-admin
+  - conditionId: same-host
+    variableName: requestData
+    propertyPath: hostId
+    operatorCode: EQ
+    conditionValues:
+      - conditionValue: "@host_id"
+actions:
+  - actionClassName: com.networknt.rule.FineGrainedAuthAction
+</code></pre>
+<p>The <code>@host_id</code> placeholder means the trusted host from the authenticated
+context, not a host id supplied by the browser.</p>
+<h3 id="user-can-see-owned-apis"><a class="header" href="#user-can-see-owned-apis">User Can See Owned APIs</a></h3>
+<p>Request rule allows the list handler:</p>
+<pre><code class="language-yaml">endpoint: lightapi.net/service/getApi/0.1.0
+ruleType: req-acc
+roles:
+  - user
+  - api-admin
+  - host-admin
+  - admin
+</code></pre>
+<p>The data rule is applied in SQL:</p>
+<pre><code class="language-sql">WHERE host_id = :hostId
+AND (
+  :allScope = TRUE
+  OR owner_user_id = :currentUserId
+  OR owner_position_id IN (:effectivePositions)
+)
+</code></pre>
+<h3 id="owner-position-can-manage-team-client-apps"><a class="header" href="#owner-position-can-manage-team-client-apps">Owner Position Can Manage Team Client Apps</a></h3>
+<p>If a client app has:</p>
+<pre><code class="language-text">owner_position_id = api-platform-team
+</code></pre>
+<p>and the user has effective position:</p>
+<pre><code class="language-text">api-platform-team
+</code></pre>
+<p>then the user can see and update the app when the page grants owner-scoped
+access. The user does not need a broad <code>app-admin</code> role.</p>
+<h2 id="handler-enablement-plan"><a class="header" href="#handler-enablement-plan">Handler Enablement Plan</a></h2>
+<h3 id="phase-1-inventory"><a class="header" href="#phase-1-inventory">Phase 1: Inventory</a></h3>
+<ul>
+<li>Register every portal query and command handler as a logical access-control
+endpoint from service annotations and <code>spec.yaml</code>.</li>
+<li>Classify each handler by entity, operation, and scope:
+<ul>
+<li>global admin</li>
+<li>host admin</li>
+<li>entity admin</li>
+<li>owner scoped</li>
+<li>public authenticated</li>
+</ul>
+</li>
+<li>Identify handlers that cannot yet be owner scoped because the table lacks
+owner fields.</li>
+</ul>
+<p>Implementation path:</p>
+<ul>
+<li><code>service-command</code> parses <code>apiType: hybrid</code> <code>spec.yaml</code> files in
+<code>SpecUtil.parseSpec</code>.</li>
+<li>Hybrid handlers are stored as logical endpoints such as
+<code>lightapi.net/service/getApi/0.1.0</code>, with <code>httpMethod: post</code> and
+<code>endpointPath</code> set to <code>/portal/query</code> or <code>/portal/command</code>.</li>
+<li>Handler name, request schema, transport path, action, version, scope,
+operation classification, and <code>skipAuth</code> are captured in endpoint metadata.</li>
+<li>Existing legacy hybrid endpoint ids keyed by <code>logicalEndpoint@post</code> are reused
+during migration so policy assignments can keep the same <code>endpointId</code>.</li>
+</ul>
+<h3 id="phase-2-menu-and-capability-cleanup"><a class="header" href="#phase-2-menu-and-capability-cleanup">Phase 2: Menu And Capability Cleanup</a></h3>
+<ul>
+<li>Normalize sidebar and task page registry roles around exact tokens.</li>
+<li>Treat <code>host-admin</code> as tenant admin, not global admin.</li>
+<li>Add route guards that use the same page capability model as the menu.</li>
+<li>Keep React-side hiding as usability only.</li>
+</ul>
+<h3 id="phase-3-query-enforcement"><a class="header" href="#phase-3-query-enforcement">Phase 3: Query Enforcement</a></h3>
+<ul>
+<li>Standardize <code>OwnerScopeUtil</code> for all owner-aware query handlers.</li>
+<li>Pass <code>ownerUserId</code>, <code>ownerPositions</code>, and <code>ownerScoped</code> into db-provider
+query methods.</li>
+<li>Ensure counts and pagination are computed after host and owner predicates.</li>
+<li>Return owner fields only when the caller has a reason to see them.</li>
+</ul>
+<h3 id="phase-4-command-enforcement"><a class="header" href="#phase-4-command-enforcement">Phase 4: Command Enforcement</a></h3>
+<ul>
+<li>Add common command guard helpers:
+<ul>
+<li>resolve trusted host</li>
+<li>verify target aggregate host ownership</li>
+<li>verify owner or all-scope access</li>
+<li>enforce owner-transfer rules</li>
+<li>verify transferred owner user or position belongs to the trusted host</li>
+<li>audit owner changes</li>
+</ul>
+</li>
+<li>Add explicit owner-transfer commands for records that need ownership changes.</li>
+<li>Reject requests where browser-supplied <code>hostId</code> conflicts with the trusted
+session host.</li>
+</ul>
+<h3 id="phase-5-gateway-req-acc-and-res-fil"><a class="header" href="#phase-5-gateway-req-acc-and-res-fil">Phase 5: Gateway <code>req-acc</code> And <code>res-fil</code></a></h3>
+<ul>
+<li>Update light-gateway access-control extraction for hybrid portal requests.</li>
+<li>Derive logical service id from <code>host</code>, <code>service</code>, <code>action</code>, and <code>version</code>.</li>
+<li>Build the CEL/rule context with JWT claims, trusted host, request data, and
+handler metadata.</li>
+<li>Run <code>req-acc</code> before forwarding to the portal handler.</li>
+<li>Run gateway <code>res-fil</code> for column filtering and defense-in-depth response
+filtering where endpoint filters are configured.</li>
+</ul>
+<h3 id="phase-6-policy-management-ui"><a class="header" href="#phase-6-policy-management-ui">Phase 6: Policy Management UI</a></h3>
+<ul>
+<li>Reuse existing access-control pages to assign portal handler permissions.</li>
+<li>Add a portal-handler catalog view that lists logical handlers and their
+current permission configuration.</li>
+<li>Add an overview page for effective menu and data access per role or user.</li>
+<li>Make access-control pages require <code>access-admin</code> for tenant policy changes and
+<code>admin</code> for global policy changes.</li>
+</ul>
+<h2 id="recommendations"><a class="header" href="#recommendations">Recommendations</a></h2>
+<ol>
+<li>Use <code>host-admin</code> as the tenant administrator role and keep <code>admin</code> as global
+super admin.</li>
+<li>Make every backend handler validate host scope, even when the UI already
+selected the host.</li>
+<li>Prefer service-side row filtering over response-only filtering for list
+queries.</li>
+<li>Use <code>owner_position_id</code> for team ownership instead of adding group ownership
+to every table.</li>
+<li>Keep <code>owner_user_id</code> server-assigned and make ownership transfer explicit.</li>
+<li>Validate transferred owners against the trusted host and audit all ownership
+changes.</li>
+<li>Materialize or cache effective positions before query execution instead of
+recursively resolving position inheritance on every request.</li>
+<li>Register portal handlers in the same access-control registry used for
+customer APIs so <code>req-acc</code> and <code>res-fil</code> are managed consistently.</li>
+<li>Generate the portal-handler catalog from service annotations and <code>spec.yaml</code>,
+with manual metadata overrides only where needed.</li>
+<li>Split tenant deployment pages from global platform pages.</li>
+<li>Require <code>access-admin</code> for tenant access-control administration instead of
+granting it implicitly to <code>host-admin</code>.</li>
+<li>Roll out one entity family at a time, starting with API, client app,
+instance, workflow, schema, and schedule pages because they already have the
+clearest ownership model.</li>
+</ol>
+<h2 id="design-decisions-2"><a class="header" href="#design-decisions-2">Design Decisions</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Question</th><th>Decision</th></tr>
+</thead>
+<tbody>
+<tr><td>Access-control administration</td><td>Require <code>access-admin</code> inside the host; do not grant it implicitly to <code>host-admin</code>.</td></tr>
+<tr><td>Deployment pages</td><td>Split tenant deployment pages from global platform pages. Tenant pages can use <code>host-admin</code>; global platform pages require <code>admin</code>.</td></tr>
+<tr><td>Position inheritance</td><td>Materialize <code>position_closure_t</code> or cache the effective-position set; do not recursively compute inheritance in every query.</td></tr>
+<tr><td>Portal handler registration</td><td>Generate the catalog from service annotations and <code>spec.yaml</code>, with manual metadata overrides only.</td></tr>
+<tr><td>Portal response filtering</td><td>Apply row filtering in SQL or shared query serialization so pagination totals remain exact. Use gateway <code>res-fil</code> mainly for column filtering and defense-in-depth checks.</td></tr>
+</tbody>
+</table>
+</div>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="claim-org-role-bootstrap"><a class="header" href="#claim-org-role-bootstrap">Claim Org Role Bootstrap</a></h1>
 <h2 id="problem-10"><a class="header" href="#problem-10">Problem</a></h2>
 <p>The Claim Org action lets a signed-in user create an organization and its default host from the profile menu. The <code>createOrg</code> form captures the organization owner, default subdomain, host description, and host owner. The backend create-org flow then creates the organization, the default host, and user-host membership rows in one transaction.</p>
@@ -8965,7 +9512,7 @@ CREATE TABLE relation_t (
 <li><code>role_permission_t</code></li>
 </ul>
 <p>The <code>role_user_t</code> table has a foreign key to <code>(host_id, role_id)</code> in <code>role_t</code>, so role rows must exist before the user-role assignments are inserted.</p>
-<h2 id="goals-14"><a class="header" href="#goals-14">Goals</a></h2>
+<h2 id="goals-15"><a class="header" href="#goals-15">Goals</a></h2>
 <ol>
 <li>A claimed organization must be immediately usable by the selected organization owner and host owner.</li>
 <li>The default host must receive deterministic administrative roles.</li>
@@ -8973,7 +9520,7 @@ CREATE TABLE relation_t (
 <li>The event stream and projections must remain replayable and idempotent.</li>
 <li>The implementation must use the canonical role IDs already used by the portal data: <code>org-admin</code> and <code>host-admin</code>.</li>
 </ol>
-<h2 id="non-goals-17"><a class="header" href="#non-goals-17">Non-Goals</a></h2>
+<h2 id="non-goals-18"><a class="header" href="#non-goals-18">Non-Goals</a></h2>
 <p>This design does not introduce a new global organization-role table. Existing roles are host-scoped through <code>role_t.host_id</code>, so the organization administrator role for a claimed organization is represented as a role on the default host.</p>
 <p>This design also does not merge organization and host administration into one broad role. Organization ownership and host ownership are separate responsibilities, and the system should grant both roles only when the same user is selected for both owner fields.</p>
 <h2 id="role-model-1"><a class="header" href="#role-model-1">Role Model</a></h2>
@@ -9110,7 +9657,7 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 <p>The new tenant host does not and should not have duplicate OAuth provider/client rows. The FK therefore rejects login with:</p>
 <pre><code class="language-text">auth_session_t_host_id_client_id_provider_id_fkey
 </code></pre>
-<h2 id="goals-15"><a class="header" href="#goals-15">Goals</a></h2>
+<h2 id="goals-16"><a class="header" href="#goals-16">Goals</a></h2>
 <ol>
 <li>Keep <code>dev.lightapi.net</code> as the single master OAuth host for the instance.</li>
 <li>Allow users whose current host is a tenant host to log in through the master host’s provider/client.</li>
@@ -9119,7 +9666,7 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 <li>Allow Claim Org to switch the host owner to the new host and require logout/login for fresh claims.</li>
 <li>Keep session, auth-code, refresh-token, and audit lifecycle behavior deterministic and queryable.</li>
 </ol>
-<h2 id="non-goals-18"><a class="header" href="#non-goals-18">Non-Goals</a></h2>
+<h2 id="non-goals-19"><a class="header" href="#non-goals-19">Non-Goals</a></h2>
 <p>This design does not introduce tenant-specific OAuth provider IDs, client IDs, redirect URIs, or BFF configuration.</p>
 <p>This design does not change the portal UI or BFF to select a different OAuth provider per tenant host.</p>
 <p>This design does not remove database referential integrity. The provider-client relationship should remain enforced, but it should be enforced against the master OAuth host instead of the tenant host.</p>
@@ -9506,7 +10053,7 @@ service yet. The main gaps are:</p>
 <li>tests for schema CRUD, tenant/global lookup, versioning, and config
 validation are incomplete</li>
 </ul>
-<h2 id="goals-16"><a class="header" href="#goals-16">Goals</a></h2>
+<h2 id="goals-17"><a class="header" href="#goals-17">Goals</a></h2>
 <ul>
 <li>Store JSON Schema documents with clear tenant/global ownership.</li>
 <li>Support immutable published schema versions.</li>
@@ -9523,7 +10070,7 @@ and loading schema bodies lazily.</li>
 JSON path.</li>
 <li>Categorize and tag schemas for easier discovery and filtering.</li>
 </ul>
-<h2 id="non-goals-19"><a class="header" href="#non-goals-19">Non-Goals</a></h2>
+<h2 id="non-goals-20"><a class="header" href="#non-goals-20">Non-Goals</a></h2>
 <ul>
 <li>Do not build a full schema compatibility engine in the first release.</li>
 <li>Do not require every config property to have a schema.</li>
@@ -11129,7 +11676,7 @@ model conversations, read state, participant visibility, or per-user delete.</li
 messages page should load its own data from the query API.</li>
 <li>The existing private-message tests are disabled stubs.</li>
 </ul>
-<h2 id="goals-17"><a class="header" href="#goals-17">Goals</a></h2>
+<h2 id="goals-18"><a class="header" href="#goals-18">Goals</a></h2>
 <ul>
 <li>Let one logged-in user send a message to another portal user without knowing
 or seeing the recipient email.</li>
@@ -11144,7 +11691,7 @@ recipient email internally.</li>
 <li>Provide a path from the existing <code>message_t</code> skeleton to a conversation-based
 model without breaking existing UI routes immediately.</li>
 </ul>
-<h2 id="non-goals-20"><a class="header" href="#non-goals-20">Non-Goals</a></h2>
+<h2 id="non-goals-21"><a class="header" href="#non-goals-21">Non-Goals</a></h2>
 <ul>
 <li>Do not build group chat in the first phase.</li>
 <li>Do not expose email addresses in message APIs, events, UI state, or task
@@ -13401,7 +13948,7 @@ should not be forced to match <code>sid</code> until the product-level authoriza
 is explicitly designed.</p>
 <p>The same exception does not apply to controller registry registration because
 <code>service/register</code> always carries a requested <code>serviceId</code>.</p>
-<h2 id="goals-18"><a class="header" href="#goals-18">Goals</a></h2>
+<h2 id="goals-19"><a class="header" href="#goals-19">Goals</a></h2>
 <ul>
 <li>Prevent one service token from downloading another service’s config, certs,
 or files.</li>
@@ -13447,7 +13994,7 @@ helper.</p>
 <p>The focused implementation tests cover missing and mismatched <code>host</code>, missing
 and mismatched <code>sid</code>, missing and mismatched <code>env</code> when <code>envTag</code> is requested,
 blank values, whitespace trimming, and case-sensitive identifier comparison.</p>
-<h2 id="non-goals-21"><a class="header" href="#non-goals-21">Non-Goals</a></h2>
+<h2 id="non-goals-22"><a class="header" href="#non-goals-22">Non-Goals</a></h2>
 <ul>
 <li>Do not replace JWT verification middleware.</li>
 <li>Do not redesign OAuth token issuance.</li>
@@ -13842,7 +14389,7 @@ mvn -q -Dtest=ServiceIdAuthorizationUtilTest test
 <p>No open questions for SID, host, and environment binding in this phase.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="instance-file-config-phase"><a class="header" href="#instance-file-config-phase">Instance File Config Phase</a></h1>
-<h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
+<h2 id="overview-1"><a class="header" href="#overview-1">Overview</a></h2>
 <p><code>instance_file_t</code> stores instance-specific files that are not modeled as standard <code>config_property_t</code> rows. Examples include API specifications such as <code>openapi.yaml</code> and custom certificates or supporting files.</p>
 <p>The config snapshot model currently separates two kinds of file data:</p>
 <ul>
@@ -18418,7 +18965,7 @@ unchanged products and to the new <code>productVersionId</code> for rebuilt prod
 </tbody>
 </table>
 </div>
-<h2 id="goals-19"><a class="header" href="#goals-19">Goals</a></h2>
+<h2 id="goals-20"><a class="header" href="#goals-20">Goals</a></h2>
 <ul>
 <li>Auto-populate config mappings for every new Java or Rust product release.</li>
 <li>Preserve event replay, auditability, and projection rebuild behavior.</li>
@@ -18431,7 +18978,7 @@ event amplification.</li>
 <li>Detect missing config and property definitions before a release appears
 complete.</li>
 </ul>
-<h2 id="non-goals-22"><a class="header" href="#non-goals-22">Non-Goals</a></h2>
+<h2 id="non-goals-23"><a class="header" href="#non-goals-23">Non-Goals</a></h2>
 <ul>
 <li>Do not change the config override hierarchy.</li>
 <li>Do not write directly to config mapping projection tables.</li>
@@ -19096,7 +19643,7 @@ and who approved publication.</li>
 <p>The release workflow should be flexible enough to call existing command-line
 tools, but controlled enough that it does not become an unrestricted shell
 inside Light Portal.</p>
-<h2 id="goals-20"><a class="header" href="#goals-20">Goals</a></h2>
+<h2 id="goals-21"><a class="header" href="#goals-21">Goals</a></h2>
 <ul>
 <li>Replace the current Java <code>light-bot</code> release path with <code>light-workflow</code> once
 parity is proven.</li>
@@ -19114,7 +19661,7 @@ reporting into the release gate.</li>
 behind explicit approval.</li>
 <li>Preserve release auditability and reproducibility.</li>
 </ul>
-<h2 id="non-goals-23"><a class="header" href="#non-goals-23">Non-Goals</a></h2>
+<h2 id="non-goals-24"><a class="header" href="#non-goals-24">Non-Goals</a></h2>
 <ul>
 <li>Do not run arbitrary release commands in the Light Portal service process.</li>
 <li>Do not replace Maven, Cargo, Docker, GitHub CLI, or existing release scripts
@@ -20641,7 +21188,7 @@ waitPeriodMs: ${db-event-consumer.waitPeriodMs:1000}
 <p>In light-portal, we use the <strong>Scheduler (Leader)</strong> to reliably “kick off” tasks by emitting events, and the <strong>Pub/Sub (Competing Consumers)</strong> to at-scale process those events.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="kafka-event-processor"><a class="header" href="#kafka-event-processor">Kafka Event Processor</a></h1>
-<h2 id="overview-1"><a class="header" href="#overview-1">Overview</a></h2>
+<h2 id="overview-2"><a class="header" href="#overview-2">Overview</a></h2>
 <p>The Kafka Event Processor (<code>PortalEventConsumerStartupHook</code>) consumes events from Kafka topics that are populated by Debezium CDC from the <code>outbox_message_t</code> table. It provides robust event processing with transaction-level granularity and Dead Letter Queue (DLQ) support.</p>
 <h2 id="architecture-3"><a class="header" href="#architecture-3">Architecture</a></h2>
 <p>The processor uses a <strong>two-phase processing strategy</strong> with automatic fallback to ensure both performance and reliability:</p>
@@ -20824,7 +21371,7 @@ waitPeriod: 1000  # ms to wait between polls when no records
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="configuration-snapshot-design"><a class="header" href="#configuration-snapshot-design">Configuration Snapshot Design</a></h1>
 <p>This document describes the design and implementation of the configuration snapshot feature in the light-portal.</p>
-<h2 id="overview-2"><a class="header" href="#overview-2">Overview</a></h2>
+<h2 id="overview-3"><a class="header" href="#overview-3">Overview</a></h2>
 <p>A configuration snapshot captures the state of an instance’s configuration at a specific point in time. It includes all properties, files, and relationships defined for that instance, merging overrides from various levels (Product, Environment, Product Version) into a “burned-in” effective configuration.</p>
 <p>Snapshots are created in two scenarios:</p>
 <ol>
@@ -20948,7 +21495,7 @@ This procedure performs the heavy lifting:</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="oauth-20-state-parameter-design"><a class="header" href="#oauth-20-state-parameter-design">OAuth 2.0 State Parameter Design</a></h1>
 <p>This document outlines the design, generation, and flow of the <code>state</code> parameter within the LightAPI OAuth 2.0 architecture.</p>
-<h2 id="overview-3"><a class="header" href="#overview-3">Overview</a></h2>
+<h2 id="overview-4"><a class="header" href="#overview-4">Overview</a></h2>
 <p>The <code>state</code> parameter is an opaque value used by the client to maintain state between the request and callback. In the OAuth 2.0 Authorization Code Flow, its primary and critical function is to prevent <strong>Cross-Site Request Forgery (CSRF)</strong> attacks.</p>
 <h2 id="workflow"><a class="header" href="#workflow">Workflow</a></h2>
 <p>The flow involves three parties:</p>
@@ -21324,7 +21871,7 @@ unchanged.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="event-promotion-design-state-based-reconciliation-with-composite-keys"><a class="header" href="#event-promotion-design-state-based-reconciliation-with-composite-keys">Event Promotion Design: State-Based Reconciliation with Composite Keys</a></h1>
-<h2 id="overview-4"><a class="header" href="#overview-4">Overview</a></h2>
+<h2 id="overview-5"><a class="header" href="#overview-5">Overview</a></h2>
 <p>Traditional event sourcing replication involves copying raw events from one environment to another. However, this fails when the target environment has diverged (e.g., hotfixes), causing <code>aggregateVersion</code> conflicts. Additionally, strict global UUID constraints can prevent reusing the same ID across environments (Tenants). Finally, partial promotions can fail if parent dependencies (referential integrity) are missing in the target.</p>
 <p>To resolve this, we adopt a <strong>State-Based Reconciliation</strong> approach (Semantic Replay) combined with <strong>Composite Keys</strong> for identity and <strong>Recursive Dependency Resolution</strong> for integrity.</p>
 <h2 id="core-strategy-state-based-reconciliation"><a class="header" href="#core-strategy-state-based-reconciliation">Core Strategy: State-Based Reconciliation</a></h2>
@@ -22536,7 +23083,7 @@ the provider <code>jwk</code> from <code>auth_provider_t</code>. The implementat
 that the JWT header <code>kid</code> is present in the returned JWKS for the same provider.
 That guarantee matters more once external AWS services cache the discovery and
 JWKS responses.</p>
-<h2 id="goals-21"><a class="header" href="#goals-21">Goals</a></h2>
+<h2 id="goals-22"><a class="header" href="#goals-22">Goals</a></h2>
 <ul>
 <li>Let AWS AgentCore use Rust <code>light-oauth</code> or Java <code>oauth-kafka</code> as a JWT
 bearer token issuer.</li>
@@ -22548,7 +23095,7 @@ claims working.</li>
 <li>Keep issuer, audience, and discovery URLs deterministic across environments.</li>
 <li>Add tests that prove discovery, JWKS, and signed token claims line up.</li>
 </ul>
-<h2 id="non-goals-24"><a class="header" href="#non-goals-24">Non-Goals</a></h2>
+<h2 id="non-goals-25"><a class="header" href="#non-goals-25">Non-Goals</a></h2>
 <ul>
 <li>Do not implement full OIDC identity-provider behavior in the first phase.</li>
 <li>Do not add dynamic client registration.</li>
@@ -24478,7 +25025,7 @@ logging.filter: info,light_pingora::security=debug,reqwest=warn,hyper_util=warn,
 <pre><code class="language-yaml">logging.filter: info,light_pingora::security=debug
 </code></pre>
 <p>Then reload the runtime configuration from the control plane. The new filter applies without restarting the gateway.</p>
-<h2 id="recommendations"><a class="header" href="#recommendations">Recommendations</a></h2>
+<h2 id="recommendations-1"><a class="header" href="#recommendations-1">Recommendations</a></h2>
 <ul>
 <li>Keep the default at <code>info</code> in shared environments.</li>
 <li>Add <code>debug</code> or <code>trace</code> only for the module under investigation.</li>
@@ -24934,7 +25481,7 @@ IMPORT_EVENTS=true \
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="login-view-1"><a class="header" href="#login-view-1">Login View</a></h1>
 <p>The <code>login-view</code> is a Single Page Application (SPA) built with React and Vite. It serves as the user interface for the OAuth 2.0 Authorization Code flow within the LightAPI ecosystem.</p>
-<h2 id="overview-5"><a class="header" href="#overview-5">Overview</a></h2>
+<h2 id="overview-6"><a class="header" href="#overview-6">Overview</a></h2>
 <p>This application acts as the front-end for the Authorization Server. When a user attempts to access a protected resource on a client application (the “Portal”), they are redirected to this application to authenticate and grant consent.</p>
 <p>It handles:</p>
 <ul>
@@ -25333,7 +25880,7 @@ IMPORT_EVENTS=true \
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="oauth-20-state-verification"><a class="header" href="#oauth-20-state-verification">OAuth 2.0 State Verification</a></h1>
 <p>This document describes the implementation of CSRF protection for the OAuth 2.0 authorization code flow in the portal-view application.</p>
-<h2 id="overview-6"><a class="header" href="#overview-6">Overview</a></h2>
+<h2 id="overview-7"><a class="header" href="#overview-7">Overview</a></h2>
 <p>To prevent Cross-Site Request Forgery (CSRF) attacks during the OAuth 2.0 authentication process, we implement a state parameter check. A random state string is generated before the authentication request and verified upon the callback.</p>
 <h2 id="implementation-details-2"><a class="header" href="#implementation-details-2">Implementation Details</a></h2>
 <h3 id="state-generation"><a class="header" href="#state-generation">State Generation</a></h3>
