@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-1e28f091.js";
+            window.path_to_searchindex_js = "searchindex-5dc2a330.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-77aa7d7f.js"></script>
+        <script src="toc-9fdd3313.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -25032,6 +25032,134 @@ logging.filter: info,light_pingora::security=debug,reqwest=warn,hyper_util=warn,
 <li>Remove short-term <code>debug</code> or <code>trace</code> overrides after the issue is resolved.</li>
 <li>Avoid logging full tokens, secrets, request bodies, or response bodies unless the target log point is known to mask sensitive data.</li>
 </ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="msal-auth-cookie-samesite"><a class="header" href="#msal-auth-cookie-samesite">MSAL Auth: Cookie SameSite</a></h1>
+<p>The <code>cookieSameSite</code> property in the <code>msal-auth</code> (and <code>msal-exchange</code> / <code>stateless-auth</code>) configuration maps directly to the <code>SameSite</code> attribute in HTTP <code>Set-Cookie</code> headers. It controls whether the browser should send session cookies (such as <code>accessToken</code> and <code>csrf</code>) along with cross-site requests. This is a foundational browser security mechanism designed to protect against Cross-Site Request Forgery (CSRF) and govern cross-origin tracking.</p>
+<h2 id="configuration-options"><a class="header" href="#configuration-options">Configuration Options</a></h2>
+<p>You can configure this property in your handler’s configuration file (e.g., <code>msal-auth.yml</code>):</p>
+<pre><code class="language-yaml">cookieSameSite: None
+</code></pre>
+<p>The gateway maps this property directly to the standard HTTP options (case-sensitive as <code>None</code>, <code>Lax</code>, or <code>Strict</code>):</p>
+<ul>
+<li><strong><code>None</code></strong>: The browser sends the cookie with <em>both</em> cross-site and same-site requests.
+<ul>
+<li><em>Requirement</em>: Modern browsers mandate that if <code>SameSite=None</code>, the cookie <strong>must</strong> also be marked as <code>Secure</code> (meaning <code>cookieSecure: true</code>). If you set <code>None</code> with <code>Secure: false</code>, browsers like Chrome and Edge will silently block the cookie.</li>
+</ul>
+</li>
+<li><strong><code>Lax</code></strong>: The cookie is not sent on cross-site API requests (e.g., AJAX/Fetch), <em>except</em> for top-level navigations (like a user clicking a standard link to your site from another site). This is the default behavior of modern browsers if the <code>SameSite</code> attribute is missing entirely.</li>
+<li><strong><code>Strict</code></strong>: The cookie is sent <em>only</em> if the request originates from the exact same site that set the cookie. Cross-site requests will never include the cookie.</li>
+</ul>
+<h2 id="why-default-to-none"><a class="header" href="#why-default-to-none">Why Default to <code>None</code>?</a></h2>
+<p>In modern microservice and Single Page Application (SPA) architectures, the frontend UI and the backend API Gateway are frequently hosted on different origins, especially during development.</p>
+<p>For example:</p>
+<ul>
+<li><strong>Frontend SPA</strong>: <code>http://localhost:3000</code> (Local React/Angular dev server)</li>
+<li><strong>Backend Gateway</strong>: <code>https://api.dev.mycompany.com</code> (or <code>https://localhost:8443</code>)</li>
+</ul>
+<p>Because the ports and/or domains don’t match, the browser considers API requests between them as “cross-site”. If <code>cookieSameSite</code> defaulted to <code>Lax</code> or <code>Strict</code>, the browser would refuse to send the authentication cookies when the local UI calls the backend API, leading to immediate <code>401 Unauthorized</code> errors out of the box.</p>
+<p>Defaulting to <code>None</code> provides a seamless developer experience for decoupled SPAs. To safely allow <code>None</code>, <code>light-fabric</code> pairs this behavior with robust <strong>Double Submit Cookie CSRF</strong> protections (requiring the <code>X-CSRF-TOKEN</code> header). This ensures that even though the browser attaches the cookie cross-origin, an attacker cannot successfully forge a state-changing request because they cannot read or supply the necessary CSRF header token.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="msal-auth-enabled"><a class="header" href="#msal-auth-enabled">MSAL Auth: Enabled</a></h1>
+<p>The <code>enabled</code> property controls whether the <code>msal-auth</code> handler is active and processing requests in the gateway.</p>
+<h2 id="configuration-options-1"><a class="header" href="#configuration-options-1">Configuration Options</a></h2>
+<pre><code class="language-yaml">enabled: true
+</code></pre>
+<ul>
+<li><strong><code>true</code></strong>: The handler is fully active. It will intercept requests to the <code>loginPath</code> and <code>logoutPath</code>, validate sessions on protected routes, and enforce CSRF protections.</li>
+<li><strong><code>false</code></strong>: The handler is effectively disabled. Even if it is listed in the execution chain in <code>handler.yml</code>, it will immediately yield control to the next handler without performing any authentication checks or modifications.</li>
+</ul>
+<h2 id="usage"><a class="header" href="#usage">Usage</a></h2>
+<p>This toggle is extremely useful for temporarily bypassing authentication in local development or test environments without having to re-write the entire <code>handler.yml</code> routing chain.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="msal-auth-login-path"><a class="header" href="#msal-auth-login-path">MSAL Auth: Login Path</a></h1>
+<p>The <code>loginPath</code> property specifies the endpoint where the Single Page Application (SPA) submits a Microsoft Entra ID token to establish a gateway session.</p>
+<h2 id="configuration-options-2"><a class="header" href="#configuration-options-2">Configuration Options</a></h2>
+<pre><code class="language-yaml">loginPath: /auth/ms/login
+</code></pre>
+<h2 id="usage-1"><a class="header" href="#usage-1">Usage</a></h2>
+<p>When the <code>msal-auth</code> handler receives a request (typically a <code>POST</code>) matching this exact path:</p>
+<ol>
+<li>It expects a valid Microsoft Entra ID token in the <code>Authorization: Bearer</code> header.</li>
+<li>It validates the token using the <code>security-msal.yml</code> configuration.</li>
+<li>If valid, it generates a fresh CSRF token and responds with the <code>accessToken</code> and <code>csrf</code> cookies using <code>Set-Cookie</code> headers.</li>
+</ol>
+<p>This path <strong>must</strong> also be mapped in <code>handler.yml</code> to trigger the <code>msal-auth</code> handler.</p>
+<pre><code class="language-yaml">paths:
+  - path: /auth/ms/login
+    method: POST
+    exec:
+      - msal-auth
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="msal-auth-logout-path"><a class="header" href="#msal-auth-logout-path">MSAL Auth: Logout Path</a></h1>
+<p>The <code>logoutPath</code> property specifies the endpoint where the Single Page Application (SPA) can explicitly terminate an active session.</p>
+<h2 id="configuration-options-3"><a class="header" href="#configuration-options-3">Configuration Options</a></h2>
+<pre><code class="language-yaml">logoutPath: /auth/ms/logout
+</code></pre>
+<h2 id="usage-2"><a class="header" href="#usage-2">Usage</a></h2>
+<p>When the <code>msal-auth</code> handler receives a request matching this exact path, it handles the session termination by clearing the session cookies.</p>
+<p>Specifically, it returns <code>Set-Cookie</code> headers with a past expiration date for the <code>accessToken</code> and <code>csrf</code> cookies, ensuring the browser immediately removes them from storage.</p>
+<p>This path <strong>must</strong> also be mapped in <code>handler.yml</code> to trigger the <code>msal-auth</code> handler.</p>
+<pre><code class="language-yaml">paths:
+  - path: /auth/ms/logout
+    exec:
+      - msal-auth
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="msal-auth-cookie-domain"><a class="header" href="#msal-auth-cookie-domain">MSAL Auth: Cookie Domain</a></h1>
+<p>The <code>cookieDomain</code> property controls the <code>Domain</code> attribute applied to all <code>Set-Cookie</code> headers generated by the handler.</p>
+<h2 id="configuration-options-4"><a class="header" href="#configuration-options-4">Configuration Options</a></h2>
+<pre><code class="language-yaml">cookieDomain: localhost
+</code></pre>
+<p>or</p>
+<pre><code class="language-yaml">cookieDomain: .mycompany.com
+</code></pre>
+<h2 id="usage-3"><a class="header" href="#usage-3">Usage</a></h2>
+<p>The <code>Domain</code> attribute tells the browser which hosts are allowed to receive the cookie.</p>
+<ul>
+<li>If you specify a host without a leading dot (e.g., <code>localhost</code> or <code>api.mycompany.com</code>), the browser will only send the cookie to that exact domain.</li>
+<li>If you specify a domain with a leading dot (e.g., <code>.mycompany.com</code>), the browser will send the cookie to that domain and all of its subdomains (e.g., <code>app.mycompany.com</code>, <code>admin.mycompany.com</code>).</li>
+</ul>
+<p><strong>Note:</strong> If the domain is misconfigured or doesn’t match the URL you are using to access the gateway, the browser will refuse to save the cookie entirely.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="msal-auth-cookie-path"><a class="header" href="#msal-auth-cookie-path">MSAL Auth: Cookie Path</a></h1>
+<p>The <code>cookiePath</code> property controls the <code>Path</code> attribute applied to all <code>Set-Cookie</code> headers generated by the handler.</p>
+<h2 id="configuration-options-5"><a class="header" href="#configuration-options-5">Configuration Options</a></h2>
+<pre><code class="language-yaml">cookiePath: /
+</code></pre>
+<h2 id="usage-4"><a class="header" href="#usage-4">Usage</a></h2>
+<p>The <code>Path</code> attribute dictates the URL paths for which the cookie is valid. The browser will only send the cookie if the request URL matches or is a subdirectory of this path.</p>
+<p>In most Single Page Application (SPA) configurations, this should be set to <code>/</code>. Setting it to <code>/</code> ensures that the <code>accessToken</code> and <code>csrf</code> cookies are sent on every API request directed at the gateway, regardless of the API’s specific path (e.g., <code>/api/v1/users</code>, <code>/v2/data</code>).</p>
+<p>If you run multiple distinct applications behind the same domain and want to isolate their cookies by route, you can specify a narrower path (e.g., <code>/my-app/</code>).</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="msal-auth-cookie-secure"><a class="header" href="#msal-auth-cookie-secure">MSAL Auth: Cookie Secure</a></h1>
+<p>The <code>cookieSecure</code> property maps to the <code>Secure</code> attribute on the <code>Set-Cookie</code> headers generated by the gateway.</p>
+<h2 id="configuration-options-6"><a class="header" href="#configuration-options-6">Configuration Options</a></h2>
+<pre><code class="language-yaml">cookieSecure: false
+</code></pre>
+<p>or</p>
+<pre><code class="language-yaml">cookieSecure: true
+</code></pre>
+<h2 id="usage-5"><a class="header" href="#usage-5">Usage</a></h2>
+<p>When <code>cookieSecure</code> is set to <code>true</code>, the browser will only transmit the cookie over a secure, encrypted connection (HTTPS). It will flatly refuse to send the cookie over plain HTTP.</p>
+<ul>
+<li><strong>Development</strong>: You typically set this to <code>false</code> when developing locally over <code>http://localhost</code>.</li>
+<li><strong>Production</strong>: You <strong>must</strong> set this to <code>true</code> in production to prevent cookies from being intercepted by network eavesdroppers.</li>
+<li><strong>SameSite Dependency</strong>: If you configure <code>cookieSameSite: None</code> (which allows cross-origin requests), modern browsers <em>require</em> <code>cookieSecure</code> to be <code>true</code>. If <code>cookieSameSite: None</code> is paired with <code>cookieSecure: false</code>, browsers like Chrome and Edge will reject the cookie outright.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="msal-auth-session-timeout"><a class="header" href="#msal-auth-session-timeout">MSAL Auth: Session Timeout</a></h1>
+<p>The <code>sessionTimeout</code> property specifies the default expiration time (in seconds) for the session cookies, if the provided Microsoft Entra ID token lacks an explicit <code>exp</code> claim.</p>
+<h2 id="configuration-options-7"><a class="header" href="#configuration-options-7">Configuration Options</a></h2>
+<pre><code class="language-yaml">sessionTimeout: 3600
+</code></pre>
+<h2 id="usage-6"><a class="header" href="#usage-6">Usage</a></h2>
+<p>When a user logs in via the <code>/auth/ms/login</code> endpoint, the gateway parses the Microsoft Entra ID token and looks for the <code>exp</code> (expiration) claim.</p>
+<ul>
+<li>If the token contains a valid <code>exp</code> claim, the cookies are set to expire exactly when the Entra ID token expires.</li>
+<li>If the token lacks an <code>exp</code> claim, the <code>sessionTimeout</code> value is used as a fallback to calculate the expiration duration.</li>
+</ul>
+<p>When the cookies expire, the browser will stop sending them. To maintain uninterrupted access, the SPA is responsible for silently refreshing the Entra ID token via MSAL.js and calling <code>/auth/ms/login</code> again before the cookies expire.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="handler-config"><a class="header" href="#handler-config">Handler Config</a></h1>
 <p>Use the handler config to define which handlers are available, how handler chains are composed, and which chain runs for each request path.</p>
