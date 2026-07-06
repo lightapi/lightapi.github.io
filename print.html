@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-5dc2a330.js";
+            window.path_to_searchindex_js = "searchindex-1761987b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-9fdd3313.js"></script>
+        <script src="toc-a58d0112.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -24939,6 +24939,158 @@ GenAI agent profile as one logical asset instead of two separate identities.</p>
 <li>handler chains and paths</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="access-control"><a class="header" href="#access-control">Access Control</a></h1>
+<p>The Access Control configuration defines the global policies for request authorization and response filtering in the gateway. The configuration resides in <code>access-control.yml</code> and is managed through the portal-view interface and config server.</p>
+<p>The gateway uses a shared access-control runtime (implemented in <code>light-pingora</code>) that applies to both <strong>HTTP API access control</strong> and <strong>MCP router access control</strong>.</p>
+<h2 id="overview-of-configuration-properties"><a class="header" href="#overview-of-configuration-properties">Overview of Configuration Properties</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Property</th><th style="text-align: left">Type</th><th style="text-align: left">Default</th><th style="text-align: left">Description</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><strong><a href="#access-control-enabled">enabled</a></strong></td><td style="text-align: left">Boolean</td><td style="text-align: left"><code>false</code></td><td style="text-align: left">Global switch to enable or disable access-control checking and response filtering.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#access-control-access-rule-logic">accessRuleLogic</a></strong></td><td style="text-align: left">String</td><td style="text-align: left"><code>"any"</code></td><td style="text-align: left">Rule execution logic (<code>any</code> or <code>all</code>) when multiple <code>req-acc</code> rules are matched.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#access-control-default-deny">defaultDeny</a></strong></td><td style="text-align: left">Boolean</td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Fallback policy when no authorization rules are defined for a requested endpoint.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#access-control-default-include">defaultInclude</a></strong></td><td style="text-align: left">Boolean</td><td style="text-align: left"><code>false</code></td><td style="text-align: left">Fallback policy for response row filtering when a user’s claims do not match any rules.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#access-control-skip-path-prefixes">skipPathPrefixes</a></strong></td><td style="text-align: left">Array of String</td><td style="text-align: left"><code>[]</code></td><td style="text-align: left">List of path or tool name prefixes that bypass access control checking and filtering.</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="http-api-access-control-vs-mcp-router-access-control"><a class="header" href="#http-api-access-control-vs-mcp-router-access-control">HTTP API Access Control vs. MCP Router Access Control</a></h2>
+<p>The properties configured in <code>access-control.yml</code> affect HTTP API traffic and Model Context Protocol (MCP) tools in complementary ways.</p>
+<h3 id="1-http-api-access-control"><a class="header" href="#1-http-api-access-control">1. HTTP API Access Control</a></h3>
+<p>For regular HTTP API traffic, the access control runtime operates in the gateway handler chain:</p>
+<ul>
+<li><strong>Request Authorization (<code>req-acc</code>)</strong>: Evaluates Celsius (CEL) expressions and role-based policies before forwarding the request to downstream services.</li>
+<li><strong>Response Filtering (<code>res-fil</code>)</strong>: Modifies the downstream HTTP response (filtering out unauthorized JSON fields/columns or rows) before returning the response to the client.</li>
+</ul>
+<h3 id="2-mcp-router-access-control"><a class="header" href="#2-mcp-router-access-control">2. MCP Router Access Control</a></h3>
+<p>For MCP traffic, the router leverages the same runtime but adapts the phases specifically for JSON-RPC tool calls (<code>tools/call</code>):</p>
+<ul>
+<li><strong>Request Authorization (<code>req-acc</code>)</strong>: Runs prior to invoking the downstream HTTP or local MCP tool. If authorized, the tool is called.</li>
+<li><strong>Response Filtering (<code>res-fil</code>)</strong>: Evaluates row and column filters on the JSON payload contained within the MCP result (<code>structuredContent</code> and text content) before delivering it back to the AI agent.</li>
+<li><strong>System Operations</strong>: Standard MCP lifecycle requests (e.g., <code>initialize</code>, <code>tools/list</code>) bypass access control and are handled directly by the router.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="access-control-enabled"><a class="header" href="#access-control-enabled">Access Control: Enabled</a></h1>
+<p>The <code>enabled</code> property acts as the master switch for the access control runtime within the gateway.</p>
+<h2 id="configuration-options"><a class="header" href="#configuration-options">Configuration Options</a></h2>
+<pre><code class="language-yaml">enabled: true
+</code></pre>
+<ul>
+<li><strong><code>true</code></strong>: The access control system is active. Both request authorization and response filtering are enforced.</li>
+<li><strong><code>false</code></strong>: The access control system is bypassed. All incoming requests and downstream responses are permitted to pass through without evaluation.</li>
+</ul>
+<hr>
+<h2 id="behavior-separation"><a class="header" href="#behavior-separation">Behavior Separation</a></h2>
+<h3 id="http-api-access-control"><a class="header" href="#http-api-access-control">HTTP API Access Control</a></h3>
+<p>When set to <code>false</code>, the HTTP handler chain bypasses request authorization (<code>req-acc</code>) and response filtering (<code>res-fil</code>) checks. Requests are forwarded directly to downstream microservices, and responses are returned unfiltered.</p>
+<h3 id="mcp-router-access-control"><a class="header" href="#mcp-router-access-control">MCP Router Access Control</a></h3>
+<p>When set to <code>false</code>, the MCP router bypasses security checks for tool calls (<code>tools/call</code>):</p>
+<ul>
+<li>AI agents can invoke any configured MCP tool without <code>req-acc</code> checks.</li>
+<li>Response payloads from downstream tools are returned to the agent without <code>res-fil</code> filtering.</li>
+</ul>
+<blockquote class="blockquote-tag blockquote-tag-note">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.5 7.75A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Note</p>
+<p>Even if <code>enabled</code> is set to <code>false</code>, access rules defined in <code>rule.yml</code> remain loaded in memory, allowing them to take effect immediately when access control is re-enabled or reloaded.</p>
+</blockquote>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="access-control-access-rule-logic"><a class="header" href="#access-control-access-rule-logic">Access Control: Access Rule Logic</a></h1>
+<p>The <code>accessRuleLogic</code> property determines the logic applied when evaluating multiple request authorization (<code>req-acc</code>) rules for a single endpoint.</p>
+<h2 id="configuration-options-1"><a class="header" href="#configuration-options-1">Configuration Options</a></h2>
+<pre><code class="language-yaml">accessRuleLogic: any
+</code></pre>
+<ul>
+<li><strong><code>any</code></strong> (Default): At least one matching request authorization rule must evaluate to <code>true</code> (logical OR). If any matching rule allows the request, access is granted.</li>
+<li><strong><code>all</code></strong>: Every matching request authorization rule must evaluate to <code>true</code> (logical AND). If any rule fails, access is denied.</li>
+</ul>
+<hr>
+<h2 id="behavior-separation-1"><a class="header" href="#behavior-separation-1">Behavior Separation</a></h2>
+<h3 id="http-api-access-control-1"><a class="header" href="#http-api-access-control-1">HTTP API Access Control</a></h3>
+<p>Applies when an HTTP API endpoint maps to multiple <code>req-acc</code> rules in <code>rule.yml</code>.</p>
+<ul>
+<li>Under <code>any</code> logic, the gateway permits the request if any matched CEL or role condition succeeds.</li>
+<li>Under <code>all</code> logic, every matched rule is executed, and all must succeed for the gateway to forward the request to the backend.</li>
+</ul>
+<h3 id="mcp-router-access-control-1"><a class="header" href="#mcp-router-access-control-1">MCP Router Access Control</a></h3>
+<p>Applies when an MCP tool endpoint (derived from the tool name and method, e.g. <code>accounts@call</code>) matches multiple <code>req-acc</code> rules.</p>
+<ul>
+<li>Under <code>any</code> logic, a tool call is authorized as long as one rule allows it.</li>
+<li>Under <code>all</code> logic, a tool call is authorized only if all matching rules allow it.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="access-control-default-deny"><a class="header" href="#access-control-default-deny">Access Control: Default Deny</a></h1>
+<p>The <code>defaultDeny</code> property defines the fallback authorization policy for endpoints that do not have any explicitly configured rules in <code>rule.yml</code>.</p>
+<h2 id="configuration-options-2"><a class="header" href="#configuration-options-2">Configuration Options</a></h2>
+<pre><code class="language-yaml">defaultDeny: true
+</code></pre>
+<ul>
+<li><strong><code>true</code></strong> (Default): The gateway fails closed. If a request is received for an endpoint with no mapping in <code>rule.endpointRules</code>, or no rules listed under <code>req-acc</code>, the request is denied.</li>
+<li><strong><code>false</code></strong>: The gateway fails open. If an endpoint does not have explicit authorization rules, access is allowed by default.</li>
+</ul>
+<hr>
+<h2 id="behavior-separation-2"><a class="header" href="#behavior-separation-2">Behavior Separation</a></h2>
+<h3 id="http-api-access-control-2"><a class="header" href="#http-api-access-control-2">HTTP API Access Control</a></h3>
+<ul>
+<li><strong><code>defaultDeny: true</code></strong>: Every HTTP endpoint exposed by the gateway must have a matching entry in <code>rule.yml</code> with at least one passing <code>req-acc</code> rule. Unconfigured endpoints will return a <code>403 Forbidden</code> response.</li>
+<li><strong><code>defaultDeny: false</code></strong>: Only HTTP endpoints explicitly configured with <code>req-acc</code> rules in <code>rule.yml</code> are guarded. Unlisted API endpoints are publicly accessible without authentication/authorization checks.</li>
+</ul>
+<h3 id="mcp-router-access-control-2"><a class="header" href="#mcp-router-access-control-2">MCP Router Access Control</a></h3>
+<ul>
+<li><strong><code>defaultDeny: true</code></strong>: Every MCP tool must map to an endpoint key (e.g. <code>accounts@call</code>) in <code>rule.endpointRules</code> with a defined request access policy. If no policy is found, the tool call is blocked, returning a JSON-RPC authorization error to the calling AI agent.</li>
+<li><strong><code>defaultDeny: false</code></strong>: The MCP router permits tool calls for any tools that do not have explicit rules configured in <code>rule.yml</code>. This is useful in staging or development environments where you want to expose new MCP tools without writing policy rules for every endpoint.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="access-control-default-include"><a class="header" href="#access-control-default-include">Access Control: Default Include</a></h1>
+<p>The <code>defaultInclude</code> property determines the row-filtering fallback behavior when a user’s request context does not match any role-based row filter conditions in the response filtering phase.</p>
+<h2 id="configuration-options-3"><a class="header" href="#configuration-options-3">Configuration Options</a></h2>
+<pre><code class="language-yaml">defaultInclude: false
+</code></pre>
+<ul>
+<li><strong><code>true</code></strong>: The gateway retains all rows by default. If the user’s claims do not match any configured role conditions, the response data is returned unfiltered (retaining all rows).</li>
+<li><strong><code>false</code></strong>: The gateway filters out all rows by default. If the user’s claims do not match any configured role conditions, the response payload returns empty (no rows).</li>
+</ul>
+<hr>
+<h2 id="behavior-separation-3"><a class="header" href="#behavior-separation-3">Behavior Separation</a></h2>
+<h3 id="http-api-access-control-3"><a class="header" href="#http-api-access-control-3">HTTP API Access Control</a></h3>
+<p>When the response filtering (<code>res-fil</code>) phase invokes a row-filter action:</p>
+<ul>
+<li>If the user’s roles or attributes do not match any role definition in the filter, <code>defaultInclude: false</code> cleanses the JSON array completely, returning an empty list <code>[]</code> to the client.</li>
+<li>If <code>defaultInclude: true</code> is configured, the gateway retains the original list of rows, logging a warning about the fallback bypass.</li>
+</ul>
+<h3 id="mcp-router-access-control-3"><a class="header" href="#mcp-router-access-control-3">MCP Router Access Control</a></h3>
+<p>When response filtering (<code>res-fil</code>) is applied to an MCP tool result:</p>
+<ul>
+<li>The JSON payload inside the tool response is filtered.</li>
+<li>If the agent/caller claims do not match the row-filter role specifications, <code>defaultInclude: false</code> empties the rows in the structured content.</li>
+<li>If <code>defaultInclude: true</code>, the MCP tool results remain intact and are delivered to the agent without row filtration.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="access-control-skip-path-prefixes"><a class="header" href="#access-control-skip-path-prefixes">Access Control: Skip Path Prefixes</a></h1>
+<p>The <code>skipPathPrefixes</code> property specifies a list of path or tool name prefixes that bypass access control checking and filtering entirely.</p>
+<h2 id="configuration-options-4"><a class="header" href="#configuration-options-4">Configuration Options</a></h2>
+<pre><code class="language-yaml">skipPathPrefixes:
+  - /api/v1/public
+  - local_mcp
+</code></pre>
+<hr>
+<h2 id="behavior-separation-4"><a class="header" href="#behavior-separation-4">Behavior Separation</a></h2>
+<h3 id="http-api-access-control-4"><a class="header" href="#http-api-access-control-4">HTTP API Access Control</a></h3>
+<p>For HTTP API traffic, the gateway compares the request URI path against the configured prefixes:</p>
+<ul>
+<li>If the request path starts with one of the prefixes in <code>skipPathPrefixes</code> (e.g., <code>/api/v1/public</code>), the request bypasses the request authorization (<code>req-acc</code>) phase and the response bypasses response filtering (<code>res-fil</code>).</li>
+<li>This is commonly used for health check endpoints, public documentation, or unauthenticated assets.</li>
+</ul>
+<h3 id="mcp-router-access-control-4"><a class="header" href="#mcp-router-access-control-4">MCP Router Access Control</a></h3>
+<p>For MCP traffic, the router applies prefix matching in two distinct ways:</p>
+<ol>
+<li><strong>Tool Name Prefix</strong>: If the invoked tool name starts with a prefix listed in <code>skipPathPrefixes</code> (e.g. <code>local_mcp</code> matching a tool named <code>local_mcp_echo</code>), the tool call bypasses <code>req-acc</code> and the results bypass <code>res-fil</code> response filtering.</li>
+<li><strong>Endpoint Key Prefix</strong>: If the target endpoint key derived for the tool call starts with a configured prefix (e.g. <code>accounts</code> matching <code>accounts@call</code>), the tool call and response also bypass all access control enforcement.</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="logging-filter"><a class="header" href="#logging-filter">Logging Filter</a></h1>
 <p>Use <code>logging.filter</code> to control Rust runtime logging for <code>light-gateway</code> and other <code>light-fabric</code> services from config server <code>values.yml</code>.</p>
 <p>The value uses the Rust <code>tracing</code> filter syntax. Set a default level first, then add more specific module targets when you need detailed logs for one area.</p>
@@ -25035,7 +25187,7 @@ logging.filter: info,light_pingora::security=debug,reqwest=warn,hyper_util=warn,
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="msal-auth-cookie-samesite"><a class="header" href="#msal-auth-cookie-samesite">MSAL Auth: Cookie SameSite</a></h1>
 <p>The <code>cookieSameSite</code> property in the <code>msal-auth</code> (and <code>msal-exchange</code> / <code>stateless-auth</code>) configuration maps directly to the <code>SameSite</code> attribute in HTTP <code>Set-Cookie</code> headers. It controls whether the browser should send session cookies (such as <code>accessToken</code> and <code>csrf</code>) along with cross-site requests. This is a foundational browser security mechanism designed to protect against Cross-Site Request Forgery (CSRF) and govern cross-origin tracking.</p>
-<h2 id="configuration-options"><a class="header" href="#configuration-options">Configuration Options</a></h2>
+<h2 id="configuration-options-5"><a class="header" href="#configuration-options-5">Configuration Options</a></h2>
 <p>You can configure this property in your handler’s configuration file (e.g., <code>msal-auth.yml</code>):</p>
 <pre><code class="language-yaml">cookieSameSite: None
 </code></pre>
@@ -25061,7 +25213,7 @@ logging.filter: info,light_pingora::security=debug,reqwest=warn,hyper_util=warn,
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="msal-auth-enabled"><a class="header" href="#msal-auth-enabled">MSAL Auth: Enabled</a></h1>
 <p>The <code>enabled</code> property controls whether the <code>msal-auth</code> handler is active and processing requests in the gateway.</p>
-<h2 id="configuration-options-1"><a class="header" href="#configuration-options-1">Configuration Options</a></h2>
+<h2 id="configuration-options-6"><a class="header" href="#configuration-options-6">Configuration Options</a></h2>
 <pre><code class="language-yaml">enabled: true
 </code></pre>
 <ul>
@@ -25073,7 +25225,7 @@ logging.filter: info,light_pingora::security=debug,reqwest=warn,hyper_util=warn,
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="msal-auth-login-path"><a class="header" href="#msal-auth-login-path">MSAL Auth: Login Path</a></h1>
 <p>The <code>loginPath</code> property specifies the endpoint where the Single Page Application (SPA) submits a Microsoft Entra ID token to establish a gateway session.</p>
-<h2 id="configuration-options-2"><a class="header" href="#configuration-options-2">Configuration Options</a></h2>
+<h2 id="configuration-options-7"><a class="header" href="#configuration-options-7">Configuration Options</a></h2>
 <pre><code class="language-yaml">loginPath: /auth/ms/login
 </code></pre>
 <h2 id="usage-1"><a class="header" href="#usage-1">Usage</a></h2>
@@ -25093,7 +25245,7 @@ logging.filter: info,light_pingora::security=debug,reqwest=warn,hyper_util=warn,
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="msal-auth-logout-path"><a class="header" href="#msal-auth-logout-path">MSAL Auth: Logout Path</a></h1>
 <p>The <code>logoutPath</code> property specifies the endpoint where the Single Page Application (SPA) can explicitly terminate an active session.</p>
-<h2 id="configuration-options-3"><a class="header" href="#configuration-options-3">Configuration Options</a></h2>
+<h2 id="configuration-options-8"><a class="header" href="#configuration-options-8">Configuration Options</a></h2>
 <pre><code class="language-yaml">logoutPath: /auth/ms/logout
 </code></pre>
 <h2 id="usage-2"><a class="header" href="#usage-2">Usage</a></h2>
@@ -25108,7 +25260,7 @@ logging.filter: info,light_pingora::security=debug,reqwest=warn,hyper_util=warn,
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="msal-auth-cookie-domain"><a class="header" href="#msal-auth-cookie-domain">MSAL Auth: Cookie Domain</a></h1>
 <p>The <code>cookieDomain</code> property controls the <code>Domain</code> attribute applied to all <code>Set-Cookie</code> headers generated by the handler.</p>
-<h2 id="configuration-options-4"><a class="header" href="#configuration-options-4">Configuration Options</a></h2>
+<h2 id="configuration-options-9"><a class="header" href="#configuration-options-9">Configuration Options</a></h2>
 <pre><code class="language-yaml">cookieDomain: localhost
 </code></pre>
 <p>or</p>
@@ -25124,7 +25276,7 @@ logging.filter: info,light_pingora::security=debug,reqwest=warn,hyper_util=warn,
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="msal-auth-cookie-path"><a class="header" href="#msal-auth-cookie-path">MSAL Auth: Cookie Path</a></h1>
 <p>The <code>cookiePath</code> property controls the <code>Path</code> attribute applied to all <code>Set-Cookie</code> headers generated by the handler.</p>
-<h2 id="configuration-options-5"><a class="header" href="#configuration-options-5">Configuration Options</a></h2>
+<h2 id="configuration-options-10"><a class="header" href="#configuration-options-10">Configuration Options</a></h2>
 <pre><code class="language-yaml">cookiePath: /
 </code></pre>
 <h2 id="usage-4"><a class="header" href="#usage-4">Usage</a></h2>
@@ -25134,7 +25286,7 @@ logging.filter: info,light_pingora::security=debug,reqwest=warn,hyper_util=warn,
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="msal-auth-cookie-secure"><a class="header" href="#msal-auth-cookie-secure">MSAL Auth: Cookie Secure</a></h1>
 <p>The <code>cookieSecure</code> property maps to the <code>Secure</code> attribute on the <code>Set-Cookie</code> headers generated by the gateway.</p>
-<h2 id="configuration-options-6"><a class="header" href="#configuration-options-6">Configuration Options</a></h2>
+<h2 id="configuration-options-11"><a class="header" href="#configuration-options-11">Configuration Options</a></h2>
 <pre><code class="language-yaml">cookieSecure: false
 </code></pre>
 <p>or</p>
@@ -25150,7 +25302,7 @@ logging.filter: info,light_pingora::security=debug,reqwest=warn,hyper_util=warn,
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="msal-auth-session-timeout"><a class="header" href="#msal-auth-session-timeout">MSAL Auth: Session Timeout</a></h1>
 <p>The <code>sessionTimeout</code> property specifies the default expiration time (in seconds) for the session cookies, if the provided Microsoft Entra ID token lacks an explicit <code>exp</code> claim.</p>
-<h2 id="configuration-options-7"><a class="header" href="#configuration-options-7">Configuration Options</a></h2>
+<h2 id="configuration-options-12"><a class="header" href="#configuration-options-12">Configuration Options</a></h2>
 <pre><code class="language-yaml">sessionTimeout: 3600
 </code></pre>
 <h2 id="usage-6"><a class="header" href="#usage-6">Usage</a></h2>
