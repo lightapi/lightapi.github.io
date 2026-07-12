@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-5de8c92c.js";
+            window.path_to_searchindex_js = "searchindex-b3255f85.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-cae7f886.js"></script>
+        <script src="toc-6a908e9b.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -25164,6 +25164,104 @@ for the host.</p>
 <li>review linked APIs and apps</li>
 <li>open runtime endpoints and configuration links</li>
 </ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="clone-an-instance"><a class="header" href="#clone-an-instance">Clone an Instance</a></h1>
+<p>Instance Clone creates a new instance from the active, projected configuration
+of an existing instance. Open <strong>Instance Admin</strong> and select the <strong>Clone</strong> action
+on an instance you own. Administrators may clone any visible instance. A
+read-only source cannot be cloned.</p>
+<p>The page reloads and authorizes the source on the server. Values passed from
+the Instance Admin row are navigation hints only and are not trusted as the
+clone source.</p>
+<h2 id="what-is-cloned"><a class="header" href="#what-is-cloned">What is cloned</a></h2>
+<p>The plan can copy the following active instance graph:</p>
+<ul>
+<li>the instance definition, tags, and categories;</li>
+<li>instance APIs, path prefixes, apps, and app/API links;</li>
+<li>overridden configuration properties at instance, API, app, app/API, and
+deployment-instance scope;</li>
+<li>selected instance files;</li>
+<li>selected deployment definitions and their overridden properties;</li>
+<li>an optional current configuration snapshot.</li>
+</ul>
+<p>Runtime instances, OAuth clients, authorization sessions/tokens, deployment
+jobs and operational status, audit history, notifications, and other transient
+records are not cloned. Create the target OAuth client after the clone reaches
+a successful terminal status.</p>
+<h2 id="target-identity"><a class="header" href="#target-identity">Target identity</a></h2>
+<p>Enter a unique target instance name and environment tag. Environment defaults
+to the environment tag. Service and product version default to the source when
+left blank. The preview shows the resolved <code>(host, service, environment)</code>
+snapshot lookup tuple.</p>
+<p>For the portal BFF workflow, use separate environment tags and instances:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Environment tag</th><th>Configuration source</th><th>Typical instance</th></tr>
+</thead>
+<tbody>
+<tr><td><code>loc</code></td><td><code>portal-config-loc</code></td><td>local portal BFF</td></tr>
+<tr><td><code>dev</code></td><td><code>portal-config-dev</code></td><td>development portal BFF</td></tr>
+<tr><td><code>demo</code></td><td><code>light-portal-install</code></td><td>install/demo portal BFF</td></tr>
+</tbody>
+</table>
+</div>
+<p>Keeping these instances separate prevents one environment’s gateway redirect,
+cookie, host, or service configuration from being reused by another.</p>
+<h2 id="masked-configuration-values"><a class="header" href="#masked-configuration-values">Masked configuration values</a></h2>
+<p>Every overridden property is masked initially. Choose one action per stable
+scope/property selector:</p>
+<ul>
+<li><strong>COPY</strong> copies the source value server-side without revealing it;</li>
+<li><strong>REPLACE</strong> validates and stores the replacement entered on the page;</li>
+<li><strong>OMIT</strong> leaves the target override absent so effective lower-precedence
+configuration can apply.</li>
+</ul>
+<p><strong>Reveal</strong> returns one property value through a separate audited request. It
+never reveals file or certificate content. Revealed values are cleared when a
+selector changes or the plan is refreshed, and they are not included in the
+plan fingerprint.</p>
+<p>COPY and REPLACE are checked against the current property schema. OMIT is
+checked against the resulting effective target configuration. If a source
+value no longer satisfies the current schema, replace or omit it and plan
+again.</p>
+<h2 id="optional-resources"><a class="header" href="#optional-resources">Optional resources</a></h2>
+<p>Files and deployment definitions are excluded by default. Enable them and
+select individual IDs explicitly. Confirm certificate copying before planning
+any selected certificate/file set. File content remains server-side and is not
+returned in the preview.</p>
+<p>Creating a current snapshot is also optional. When selected, the snapshot
+event is written last and successful completion is reported as
+<code>SNAPSHOT_READY</code>.</p>
+<h2 id="plan-and-execute"><a class="header" href="#plan-and-execute">Plan and execute</a></h2>
+<p>Select <strong>Plan Clone</strong> to validate authorization, target uniqueness, current
+schemas, selected resources, limits, and source projection parity. The preview
+shows warnings plus exact event and serialized-byte counts.</p>
+<p>Any target, property, file, deployment, certificate-confirmation, or snapshot
+change invalidates the preview and disables <strong>Clone</strong> until planning succeeds
+again. <strong>Clone</strong> submits the complete plan once. A browser timeout does not
+mean the clone failed and must not be followed by another submission; use
+<strong>Refresh status</strong> with the original request instead.</p>
+<h2 id="status-and-recovery"><a class="header" href="#status-and-recovery">Status and recovery</a></h2>
+<p>The status values are:</p>
+<ul>
+<li><code>ACCEPTED</code>: the atomic event/outbox transaction committed and is waiting for
+projection;</li>
+<li><code>PROJECTED</code>: the target projected successfully without a requested snapshot;</li>
+<li><code>SNAPSHOT_READY</code>: the target and requested snapshot projected successfully;</li>
+<li><code>FAILED_DLQ</code>: projection rolled back and the transaction was moved to the
+dead-letter queue.</li>
+</ul>
+<p>While accepted, the page polls one request at a time with capped backoff and
+pauses when the tab is hidden or the browser is offline. A transient status
+failure displays <strong>Still processing</strong> and offers a manual refresh; it does not
+resubmit the clone.</p>
+<p>For <code>FAILED_DLQ</code>, record the clone request ID and safe error code and contact an
+administrator. Do not create another clone request until the original DLQ
+transaction is diagnosed. A repaired replay must use the original transaction
+metadata.</p>
+<p>After <code>PROJECTED</code> or <code>SNAPSHOT_READY</code>, use <strong>Open Instance</strong>, <strong>Open
+Configuration</strong>, or <strong>Create OAuth Client</strong> to continue setup.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="runtime-instance"><a class="header" href="#runtime-instance">Runtime Instance</a></h1>
 <p>Use Runtime Instance to review runtime endpoints for services.</p>
