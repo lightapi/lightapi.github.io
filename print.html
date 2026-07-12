@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-6487b775.js";
+            window.path_to_searchindex_js = "searchindex-5de8c92c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-a58d0112.js"></script>
+        <script src="toc-cae7f886.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -14388,6 +14388,887 @@ mvn -q -Dtest=ServiceIdAuthorizationUtilTest test
 <h2 id="open-questions-3"><a class="header" href="#open-questions-3">Open Questions</a></h2>
 <p>No open questions for SID, host, and environment binding in this phase.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="instance-clone"><a class="header" href="#instance-clone">Instance Clone</a></h1>
+<h2 id="context-2"><a class="header" href="#context-2">Context</a></h2>
+<p>One portal database can serve several runtime environments. For example, the
+<code>portal-bff</code> service can have separate instances for these environment tags:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Deployment</th><th><code>env_tag</code></th><th>Example instance</th></tr>
+</thead>
+<tbody>
+<tr><td><code>portal-config-loc</code></td><td><code>loc</code></td><td><code>portal-bff-loc</code></td></tr>
+<tr><td><code>portal-config-dev</code></td><td><code>dev</code></td><td><code>portal-bff-dev</code></td></tr>
+<tr><td><code>light-portal-install</code></td><td><code>demo</code></td><td><code>portal-bff-demo</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Creating the second and third instances manually is error-prone because an
+instance is the root of a bounded configuration graph, not one row in
+<code>instance_t</code>. Instance Admin should offer a <strong>Clone Instance</strong> action that
+copies the current active state of this graph and lets the administrator change
+the target identity and environment-specific configuration.</p>
+<p>This is a same-host operation. Cross-host or cross-database copying remains an
+event-promotion/import concern.</p>
+<h2 id="goals-20"><a class="header" href="#goals-20">Goals</a></h2>
+<ul>
+<li>Clone an active instance and its selected active children with one command.</li>
+<li>Require a target instance name and environment tag while allowing other
+instance fields to be overridden.</li>
+<li>Generate ordinary create events so replay produces the same target graph.</li>
+<li>Remap owned aggregate identifiers while preserving references to shared host
+catalog entities.</li>
+<li>Bind preview and execution to the same source graph and normalized request.</li>
+<li>Store the complete event/outbox batch atomically and make retries idempotent.</li>
+<li>Show every source configuration override and let the user copy, replace, or
+omit it without exposing values unnecessarily.</li>
+<li>Optionally clone deployment definitions and selected files.</li>
+<li>Create a new current configuration snapshot as the last event in the clone
+transaction when requested.</li>
+<li>Report durable projection and snapshot status after command acceptance.</li>
+</ul>
+<h2 id="non-goals-23"><a class="header" href="#non-goals-23">Non-goals</a></h2>
+<ul>
+<li>Copy raw historical events or preserve source aggregate versions.</li>
+<li>Copy an existing configuration snapshot, runtime registration, deployment
+execution, audit timestamp, or soft-deleted row.</li>
+<li>Copy OAuth client owners, OAuth clients, client secrets, client tokens, or
+authorization grants.</li>
+<li>Automatically infer which values are environment-specific.</li>
+<li>Perform a cross-host or cross-database promotion.</li>
+<li>Split one logical clone across independently committed event batches.</li>
+</ul>
+<h2 id="current-state-7"><a class="header" href="#current-state-7">Current State</a></h2>
+<p><code>instance-command</code> already declares <code>cloneInstance</code>. Its handler currently
+emits <code>InstanceClonedEvent</code> with a bare <code>targetInstanceId</code> aggregate subject.
+Normal Instance aggregates use <code>hostId|instanceId</code>, so the placeholder event is
+not compatible with the normal Instance stream.</p>
+<p><code>InstanceDeploymentPersistenceImpl.cloneInstance</code> currently discovers related
+historical events and logs them but does not create a target. There are also
+older direct-SQL clone helpers near the promotion implementation. The new
+implementation must replace and remove these incomplete paths. It must not
+replay source history or copy projection rows directly.</p>
+<h2 id="clone-boundary"><a class="header" href="#clone-boundary">Clone Boundary</a></h2>
+<h3 id="included-graph"><a class="header" href="#included-graph">Included graph</a></h3>
+<p>Only active projection rows are clone candidates:</p>
+<pre><code class="language-text">instance_t
+├── entity_tag_t                  entity_type = 'instance'
+├── entity_category_t             entity_type = 'instance'
+├── instance_property_t
+├── instance_file_t               selected explicitly
+├── instance_api_t
+│   ├── instance_api_property_t
+│   └── instance_api_path_prefix_t
+├── instance_app_t
+│   ├── instance_app_property_t
+│   └── instance_app_api_t
+│       └── instance_app_api_property_t
+└── deployment_instance_t         selected explicitly
+    └── deployment_instance_property_t
+</code></pre>
+<p>Instance tag and category associations are copied by default using the existing
+tag/category IDs and the new target instance ID.</p>
+<h3 id="explicit-exclusions"><a class="header" href="#explicit-exclusions">Explicit exclusions</a></h3>
+<p>The following rows are not cloned:</p>
+<ul>
+<li><code>config_snapshot_t</code> and every <code>snapshot_*</code> row;</li>
+<li><code>runtime_instance_t</code>;</li>
+<li><code>deployment_t</code> and deployment execution history;</li>
+<li><code>auth_client_owner_t</code>, <code>auth_client_t</code>, <code>auth_client_token_t</code>, secrets, and
+grants, even when an OAuth owner references the source instance;</li>
+<li>event-store, outbox, notification, and dead-letter rows from the source;</li>
+<li>inactive children, deletion metadata, source aggregate versions, audit users,
+and audit timestamps;</li>
+<li>deployment job IDs, IP addresses, ports, and execution status.</li>
+</ul>
+<p>After cloning, the UI offers <strong>Create OAuth Client</strong> for the target. OAuth
+material must be created or associated through its normal audited workflow.</p>
+<h2 id="authorization-and-transport"><a class="header" href="#authorization-and-transport">Authorization and Transport</a></h2>
+<p>Planning and execution both require <code>portal.w</code>. The server applies host,
+owner-user, and owner-position authorization; the row button is not an
+authorization boundary.</p>
+<ul>
+<li>Administrators may clone any visible source, including a read-only source.</li>
+<li>Non-administrators may clone only a source they own and may not clone a
+read-only source.</li>
+<li>A non-administrator becomes the target owner and cannot override ownership.</li>
+<li>An administrator may select the target owner user or position.</li>
+</ul>
+<p>Planning, value reveal, execution, and status lookup use POST bodies. Clone
+data must never be placed in a <code>/portal/query?cmd=...</code> URL, browser history, or
+proxy query string. Responses carrying configuration data use
+<code>Cache-Control: no-store</code>.</p>
+<h2 id="frozen-version-1-protocol"><a class="header" href="#frozen-version-1-protocol">Frozen Version 1 Protocol</a></h2>
+<p>Phase 0 freezes the initial wire contract as follows:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Operation</th><th>Kind</th><th>Service/action/version</th></tr>
+</thead>
+<tbody>
+<tr><td>Plan</td><td>Query</td><td><code>lightapi.net/instance/planInstanceClone/0.1.0</code></td></tr>
+<tr><td>Reveal one property value</td><td>Query</td><td><code>lightapi.net/instance/revealInstanceCloneValue/0.1.0</code></td></tr>
+<tr><td>Execute</td><td>Command</td><td><code>lightapi.net/instance/cloneInstance/0.1.0</code></td></tr>
+<tr><td>Status</td><td>Query</td><td><code>lightapi.net/instance/getInstanceCloneStatus/0.1.0</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>All four operations use POST RPC envelopes and require <code>portal.w</code>. Public JSON
+uses the camel-case field names shown in this document. CloudEvent extension
+names must satisfy the lowercase CloudEvents wire-name rule:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Meaning</th><th>CloudEvent extension</th></tr>
+</thead>
+<tbody>
+<tr><td>Clone correlation</td><td><code>clonerequestid</code></td></tr>
+<tr><td>Root instance</td><td><code>rootinstanceid</code></td></tr>
+<tr><td>Accepted graph revision</td><td><code>instancegraphrevision</code></td></tr>
+<tr><td>Redact payload in diagnostics</td><td><code>sensitivepayload</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Every clone event has the first three extensions. Property and file events also
+set <code>sensitivepayload=true</code>. Ordinary graph mutation events have
+<code>rootinstanceid</code> and <code>instancegraphrevision</code> but no clone request ID.</p>
+<p>The initial status vocabulary is <code>ACCEPTED</code>, <code>PROJECTED</code>, <code>SNAPSHOT_READY</code>, and
+<code>FAILED_DLQ</code>. The public error codes frozen for version 1 are:</p>
+<ul>
+<li><code>SOURCE_PROJECTION_LAGGING</code>;</li>
+<li><code>SOURCE_VALUE_INVALID_FOR_CURRENT_SCHEMA</code>;</li>
+<li><code>PLAN_DEPENDENCY_CHANGED</code>;</li>
+<li><code>CLONE_LIMIT_EXCEEDED</code>;</li>
+<li><code>IDEMPOTENCY_KEY_REUSED</code>;</li>
+<li><code>CONCURRENCY_CONFLICT</code>;</li>
+<li><code>TARGET_LOGICAL_IDENTITY_CONFLICT</code>.</li>
+</ul>
+<h3 id="canonical-encoding-and-hmacs"><a class="header" href="#canonical-encoding-and-hmacs">Canonical encoding and HMACs</a></h3>
+<p>The canonical format identifier and limit-policy version are both
+<code>instance-clone-v1</code>. Normalization occurs before encoding: UUIDs are lowercase,
+enumerations use their documented uppercase token, integers use minimal base-10
+form, strings use Unicode NFC without implicit trimming, and null is distinct
+from an empty string.</p>
+<p>The encoder writes an ordered sequence of typed fields. Each field contains a
+one-byte type tag, a four-byte unsigned big-endian byte length, and the value
+bytes. Strings use UTF-8, booleans use <code>0</code> or <code>1</code>, and collections include their
+count followed by their members. Maps are not encoded directly; each contract
+defines a field order or converts the map to a sorted record list. Graph rows
+sort by entity type and stable source identity. Property selectors sort by
+scope, source parent identities, property ID, and expected aggregate version.</p>
+<p><code>sourceGraphDigest</code>, <code>catalogSchemaDigest</code>, <code>planHash</code>, and the ledger
+<code>request_hash</code> use HMAC-SHA-256 with distinct domain strings. A value digest is
+itself an HMAC over its stable selector and raw value before it enters a graph
+record. The domain strings are:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Artifact</th><th>HMAC domain string</th></tr>
+</thead>
+<tbody>
+<tr><td>Property/file value digest</td><td><code>lightapi.instance-clone.value.v1</code></td></tr>
+<tr><td>Source graph digest</td><td><code>lightapi.instance-clone.source-graph.v1</code></td></tr>
+<tr><td>Catalog schema digest</td><td><code>lightapi.instance-clone.catalog-schema.v1</code></td></tr>
+<tr><td>Plan hash</td><td><code>lightapi.instance-clone.plan.v1</code></td></tr>
+<tr><td>Ledger request hash</td><td><code>lightapi.instance-clone.request.v1</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>The wire/storage representation is:</p>
+<pre><code class="language-text">v1.&lt;keyId&gt;.&lt;base64url-without-padding&gt;
+</code></pre>
+<p><code>keyId</code> matches <code>[A-Za-z0-9_-]{1,32}</code>. The raw HMAC key and unkeyed value
+digests are never stored or returned. Query and command processes must use the
+same active key ID and key. Key rotation invalidates outstanding previews unless
+the old key remains explicitly configured for verification.</p>
+<h2 id="instance-graph-revision"><a class="header" href="#instance-graph-revision">Instance Graph Revision</a></h2>
+<p><code>instance_t.aggregate_version</code> is insufficient for clone consistency because
+each child aggregate has its own version. Add a root graph revision:</p>
+<pre><code class="language-sql">CREATE TABLE instance_graph_revision_t (
+    host_id             UUID NOT NULL,
+    instance_id         UUID NOT NULL,
+    accepted_revision   BIGINT NOT NULL DEFAULT 0,
+    projected_revision  BIGINT NOT NULL DEFAULT 0,
+    accepted_ts         TIMESTAMPTZ,
+    projected_ts        TIMESTAMPTZ,
+    PRIMARY KEY (host_id, instance_id),
+    FOREIGN KEY (host_id) REFERENCES host_t(host_id) ON DELETE CASCADE,
+    CHECK (accepted_revision &gt;= 0 AND projected_revision &gt;= 0),
+    CHECK (projected_revision &lt;= accepted_revision)
+);
+
+CREATE INDEX instance_graph_revision_lag_idx
+  ON instance_graph_revision_t(host_id, instance_id)
+  WHERE accepted_revision &lt;&gt; projected_revision;
+</code></pre>
+<p>The revision row is command-side coordination state and may exist before the
+corresponding <code>InstanceCreatedEvent</code> projects, so it intentionally has no
+foreign key to <code>instance_t</code>. Instance deletion retains its revision tombstone
+for replay and idempotency; an explicit retention job may remove old tombstones.</p>
+<p>During the staged rollout, an instance created after the Phase 1 backfill but
+before graph-aware writers deploy can temporarily have no revision row. Planning
+remains read-only and treats that missing row as the baseline
+<code>accepted_revision=0, projected_revision=0</code>. Execution and ordinary graph
+commands acquire the graph advisory lock first, then insert the missing baseline
+row with <code>ON CONFLICT DO NOTHING</code> before locking and updating it. Before clone is
+enabled, a reconciliation pass repeats the idempotent backfill and requires zero
+remaining instances without revision rows.</p>
+<p>Every command that creates, updates, deletes, locks, or unlocks an instance or
+one of the included child entities must:</p>
+<ol>
+<li>acquire the same transaction-scoped advisory lock derived from
+<code>(host_id, root_instance_id)</code>;</li>
+<li>increment <code>accepted_revision</code> in the same transaction that appends its
+event/outbox batch;</li>
+<li>attach <code>rootInstanceId</code> and <code>instanceGraphRevision</code> to each event’s metadata.</li>
+</ol>
+<p>After the corresponding projection transaction succeeds, the consumer advances
+<code>projected_revision</code>. A clone can execute only when the source
+<code>accepted_revision</code> equals <code>projected_revision</code>. If not, it returns
+<code>SOURCE_PROJECTION_LAGGING</code>; the caller retries after the projection catches up.</p>
+<p>The preview response contains the projected graph revision and an opaque
+<code>sourceGraphDigest</code>. The digest is an HMAC over canonical, sorted active rows,
+including entity type, identity, aggregate version, and a digest of each value.
+It must not expose a reusable unsalted hash of a secret.</p>
+<h2 id="api"><a class="header" href="#api">API</a></h2>
+<h3 id="plan"><a class="header" href="#plan">Plan</a></h3>
+<p><code>planInstanceClone</code> is a non-mutating POST query. <code>cloneRequestId</code> is optional
+on the first call. The server generates one when absent; subsequent preview
+calls reuse it so proposed IDs remain stable while the user edits selections.</p>
+<pre><code class="language-json">{
+  "host": "lightapi.net",
+  "service": "instance",
+  "action": "planInstanceClone",
+  "version": "0.1.0",
+  "data": {
+    "hostId": "...",
+    "cloneRequestId": "...",
+    "sourceInstanceId": "...",
+    "targetInstanceName": "portal-bff-demo",
+    "targetEnvTag": "demo",
+    "targetEnvironment": "demo",
+    "targetServiceId": "com.networknt.portal.gateway-1.0.0",
+    "targetProductVersionId": "...",
+    "includeFiles": false,
+    "fileSelections": [],
+    "includeDeployments": false,
+    "deploymentSelections": [],
+    "createSnapshot": true,
+    "propertySelections": [
+      {
+        "scopeType": "INSTANCE",
+        "sourceParentIds": {
+          "instanceId": "..."
+        },
+        "propertyId": "...",
+        "expectedAggregateVersion": 2,
+        "action": "REPLACE",
+        "replacementValue": "https://local.localhost/#/app/dashboard"
+      }
+    ]
+  }
+}
+</code></pre>
+<p><code>targetInstanceName</code> and <code>targetEnvTag</code> are required. <code>targetEnvironment</code>
+defaults to <code>targetEnvTag</code>, and <code>targetServiceId</code> defaults to the source service
+ID. <code>targetProductVersionId</code> defaults to the source product version. The
+resolved snapshot lookup tuple <code>(host, serviceId, environment)</code> is shown in
+preview. For the <code>loc</code>, <code>dev</code>, and <code>demo</code> BFF instances, environment and
+environment tag should normally have the same value.</p>
+<p>Optional instance overrides include description, zone, region, line of
+business, resource name, business name, topic classification, and ownership
+when the caller is an administrator.</p>
+<h3 id="property-selector"><a class="header" href="#property-selector">Property selector</a></h3>
+<p>Property choices are an array, not a map keyed by configuration/property name.
+The stable selector is:</p>
+<pre><code class="language-text">scopeType + sourceParentIds + propertyId + expectedAggregateVersion
+</code></pre>
+<p>Supported scopes are <code>INSTANCE</code>, <code>INSTANCE_API</code>, <code>INSTANCE_APP</code>,
+<code>INSTANCE_APP_API</code>, and <code>DEPLOYMENT_INSTANCE</code>. The server resolves source IDs
+through the immutable target ID mapping. Actions are:</p>
+<ul>
+<li><code>COPY</code>: copy the source value server-side;</li>
+<li><code>REPLACE</code>: validate and use <code>replacementValue</code>;</li>
+<li><code>OMIT</code>: do not create the target override, allowing lower-precedence
+configuration to apply.</li>
+</ul>
+<p>The default is <code>COPY</code> for every included active override. A stale selector or a
+selector outside the source graph fails planning or execution.</p>
+<p>Both <code>COPY</code> and <code>REPLACE</code> are validated against the current property schema,
+value type, and constraints during planning and again during execution.
+<code>COPY</code> does not grandfather a source value merely because it was valid when it
+was originally saved. If a copied source value violates the current schema,
+planning returns <code>SOURCE_VALUE_INVALID_FOR_CURRENT_SCHEMA</code> for that selector
+and blocks execution until the user chooses <code>REPLACE</code> with a valid value or
+<code>OMIT</code>.</p>
+<p>For <code>OMIT</code>, planning validates the resulting effective target configuration.
+It fails if omission would leave a required property missing or would expose an
+invalid lower-precedence value.</p>
+<h3 id="sensitive-values"><a class="header" href="#sensitive-values">Sensitive values</a></h3>
+<p>The property inventory always returns property metadata but does not return raw
+values by default. It includes configuration name, property name, scope,
+<code>valueType</code>, parent display identity, aggregate version, and <code>valueState</code>.</p>
+<p><code>COPY</code> never requires the raw value to leave the server. A user who needs to
+inspect a value uses a separate audited POST reveal action with the same owner
+and <code>portal.w</code> checks. Until reliable sensitivity metadata exists, every value
+is masked initially. Reveal responses are not cached or logged.</p>
+<p>Files are also metadata-only during preview. File content is copied server-side
+only after explicit selection. A <code>Cert</code> selection requires an additional
+confirmation; no certificate or file content appears in preview responses.</p>
+<h3 id="reveal"><a class="header" href="#reveal">Reveal</a></h3>
+<p><code>revealInstanceCloneValue</code> reveals one property value, never file or
+certificate content. It accepts the stable property selector plus the plan
+correlation and source digest:</p>
+<pre><code class="language-json">{
+  "host": "lightapi.net",
+  "service": "instance",
+  "action": "revealInstanceCloneValue",
+  "version": "0.1.0",
+  "data": {
+    "hostId": "...",
+    "cloneRequestId": "...",
+    "sourceInstanceId": "...",
+    "sourceGraphDigest": "v1.primary.&lt;base64url&gt;",
+    "selector": {
+      "scopeType": "INSTANCE",
+      "sourceParentIds": { "instanceId": "..." },
+      "propertyId": "...",
+      "expectedAggregateVersion": 2
+    }
+  }
+}
+</code></pre>
+<p>The server reauthorizes the actor and rejects a stale or out-of-graph selector.
+The response contains only the selector, value type, and selected raw value,
+sets <code>Cache-Control: no-store</code>, and is never logged. The audit record contains
+the actor, host, source instance, selector, timestamp, and outcome without the
+value.</p>
+<h3 id="plan-response"><a class="header" href="#plan-response">Plan response</a></h3>
+<p>The response contains:</p>
+<ul>
+<li><code>cloneRequestId</code> and deterministic proposed target IDs;</li>
+<li>source instance version, graph revision, and opaque graph digest;</li>
+<li><code>catalogSchemaDigest</code> over the current schemas and constraints referenced by
+the plan;</li>
+<li><code>planHash</code>, an HMAC over the canonical request, graph digest, schema digest,
+target mapping, and limit-policy version;</li>
+<li>property, file, deployment, tag, and category inventories;</li>
+<li>event counts and serialized event-byte estimates by entity type;</li>
+<li>resolved snapshot lookup identity;</li>
+<li>validation errors and warnings.</li>
+</ul>
+<p>Planning is read-only; it does not create a request-ledger row. The plan hash
+binds the later execution to exactly the previewed graph and choices.</p>
+<h3 id="execute"><a class="header" href="#execute">Execute</a></h3>
+<p><code>cloneInstance</code> is a POST command containing the complete normalized plan plus
+the returned <code>sourceGraphDigest</code> and <code>planHash</code>:</p>
+<pre><code class="language-json">{
+  "host": "lightapi.net",
+  "service": "instance",
+  "action": "cloneInstance",
+  "version": "0.1.0",
+  "data": {
+    "hostId": "...",
+    "cloneRequestId": "...",
+    "planHash": "...",
+    "sourceGraphDigest": "...",
+    "catalogSchemaDigest": "...",
+    "sourceInstanceId": "...",
+    "targetInstanceId": "...",
+    "targetInstanceName": "portal-bff-demo",
+    "targetEnvTag": "demo",
+    "targetEnvironment": "demo",
+    "targetServiceId": "com.networknt.portal.gateway-1.0.0",
+    "targetProductVersionId": "...",
+    "includeFiles": false,
+    "fileSelections": [],
+    "includeDeployments": false,
+    "deploymentSelections": [],
+    "createSnapshot": true,
+    "propertySelections": []
+  }
+}
+</code></pre>
+<p>The server canonicalizes the request, recomputes the graph digest and plan
+hash, and rejects any mismatch. It also recomputes <code>catalogSchemaDigest</code>, which
+covers the current schemas and value-type constraints of every referenced
+configuration property. A schema change after preview returns
+<code>PLAN_DEPENDENCY_CHANGED</code> and requires a new preview. Client-provided target or
+child IDs that do not match the deterministic mapping are rejected.</p>
+<p>The immediate response is <code>ACCEPTED</code>, not completed. It contains the clone
+request ID, target instance ID, transaction ID, terminal event ID, event counts,
+and status URL/action.</p>
+<h3 id="status-1"><a class="header" href="#status-1">Status</a></h3>
+<p><code>getInstanceCloneStatus</code> accepts <code>hostId</code> and <code>cloneRequestId</code> in a POST query
+and returns one of:</p>
+<ul>
+<li><code>ACCEPTED</code>: the event/outbox batch committed but has not projected;</li>
+<li><code>PROJECTED</code>: the clone projected successfully without a requested snapshot;</li>
+<li><code>SNAPSHOT_READY</code>: the clone and requested current snapshot projected;</li>
+<li><code>FAILED_DLQ</code>: the complete projection transaction rolled back and its events
+were moved to the dead-letter queue.</li>
+</ul>
+<p>The response never returns copied values or file content.</p>
+<h2 id="durable-idempotency-ledger"><a class="header" href="#durable-idempotency-ledger">Durable Idempotency Ledger</a></h2>
+<p>Add a command-side ledger:</p>
+<pre><code class="language-sql">CREATE TABLE instance_clone_request_t (
+    host_id              UUID NOT NULL,
+    clone_request_id     UUID NOT NULL,
+    request_hash         VARCHAR(128) NOT NULL,
+    source_instance_id   UUID NOT NULL,
+    source_graph_digest  VARCHAR(128) NOT NULL,
+    catalog_schema_digest VARCHAR(128) NOT NULL,
+    target_instance_id   UUID NOT NULL,
+    target_instance_name VARCHAR(126) NOT NULL,
+    target_service_id    VARCHAR(512) NOT NULL,
+    target_env_tag       VARCHAR(16),
+    target_product_version_id UUID NOT NULL,
+    transaction_id       UUID NOT NULL,
+    terminal_event_id    UUID NOT NULL,
+    snapshot_id          UUID,
+    clone_status         VARCHAR(32) NOT NULL DEFAULT 'ACCEPTED',
+    event_count          INTEGER NOT NULL,
+    payload_bytes        BIGINT NOT NULL,
+    result_summary       JSONB NOT NULL DEFAULT '{}'::jsonb,
+    error_code           VARCHAR(64),
+    error_message        VARCHAR(2048),
+    requested_by         UUID NOT NULL,
+    created_ts           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_ts           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (host_id, clone_request_id),
+    FOREIGN KEY (host_id) REFERENCES host_t(host_id) ON DELETE CASCADE,
+    CHECK (clone_status IN (
+      'ACCEPTED', 'PROJECTED', 'SNAPSHOT_READY', 'FAILED_DLQ'
+    )),
+    CHECK (event_count &gt;= 0),
+    CHECK (payload_bytes &gt;= 0),
+    CHECK (jsonb_typeof(result_summary) = 'object'),
+    CHECK (clone_status &lt;&gt; 'SNAPSHOT_READY' OR snapshot_id IS NOT NULL)
+);
+
+CREATE INDEX instance_clone_request_target_id_idx
+  ON instance_clone_request_t(host_id, target_instance_id);
+
+CREATE INDEX instance_clone_request_target_identity_idx
+  ON instance_clone_request_t(
+    host_id, target_service_id, target_env_tag, target_product_version_id
+  );
+
+CREATE UNIQUE INDEX instance_clone_request_transaction_uk
+  ON instance_clone_request_t(host_id, transaction_id);
+
+CREATE INDEX instance_clone_request_status_idx
+  ON instance_clone_request_t(host_id, clone_status, updated_ts);
+</code></pre>
+<p><code>request_hash</code> is computed over the normalized execute request, using digests
+rather than storing replacement values in <code>result_summary</code>. Repeating the same
+<code>cloneRequestId</code> and request hash returns the existing status and result.
+Reusing an ID with different input returns <code>IDEMPOTENCY_KEY_REUSED</code>.</p>
+<p><code>ACCEPTED</code> is the only persisted starting status and is therefore the schema
+default, although application inserts should still set it explicitly for
+clarity. <code>error_message</code> is a redacted diagnostic capped at 2048 characters by
+the column type. When <code>createSnapshot=true</code>, the deterministic <code>snapshot_id</code> is
+known and retained while the request is <code>ACCEPTED</code> and, if projection fails,
+<code>FAILED_DLQ</code>; the constraint enforces the reverse invariant that
+<code>SNAPSHOT_READY</code> can never have a null snapshot ID.</p>
+<p>The ledger insert and event/outbox append occur in the same command
+transaction. A browser timeout therefore has an unambiguous status lookup.</p>
+<p><code>target_instance_id</code> is deterministically derived from <code>cloneRequestId</code>, so a
+unique constraint on <code>(host_id, target_instance_id)</code> would add no protection
+beyond the primary key and is intentionally omitted. The actual instance
+logical uniqueness rule is <code>(host_id, service_id, env_tag, product_version_id)</code>. <code>instance_name</code> is not unique; a duplicate name produces
+a preview warning rather than a conflict.</p>
+<p>Clone is an administrative operation with low expected volume, so the first
+release retains ledger rows indefinitely. An <code>ACCEPTED</code> or recoverable
+<code>FAILED_DLQ</code> row must never be removed. If later volume requires archival,
+terminal rows may be compacted only into a permanent tombstone containing
+<code>host_id</code>, <code>clone_request_id</code>, <code>request_hash</code>, target ID, and final status.
+Clone request IDs are never reusable, even after the target is hard-deleted.</p>
+<h2 id="identity-mapping"><a class="header" href="#identity-mapping">Identity Mapping</a></h2>
+<p>The fixed UUIDv5 namespace is
+<code>a4594c48-03f3-54f1-83c2-106aa1e7ce67</code>, derived from the DNS namespace and
+<code>lightapi.net/instance-clone/v1</code>. The UUID name is a concatenation of
+length-prefixed UTF-8 components, where <code>lp(value)</code> is the decimal UTF-8 byte
+length, <code>:</code>, and the value. Entity IDs use:</p>
+<pre><code class="language-text">lp("instance-clone-id-v1") + lp(cloneRequestId) +
+lp(entityType) + lp(each stable source identity component)
+</code></pre>
+<p>Event IDs use <code>lp("instance-clone-event-v1")</code>, the clone request ID, and the
+eight-digit zero-padded event sequence. Entity-type tokens are the uppercase
+names in the identity table. For the golden fixture request
+<code>00000000-0000-0000-0000-000000000001</code> and source instance
+<code>00000000-0000-0000-0000-000000000002</code>, the target <code>INSTANCE</code> ID is
+<code>e0196b37-d81d-5d66-878d-d23457949457</code>; event sequence 1 is
+<code>578e7c91-0225-53de-8106-c68ca56dc411</code>.</p>
+<p>The server applies this mapping to <code>cloneRequestId</code>, entity type, and source
+identity:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Entity</th><th>Target identity</th></tr>
+</thead>
+<tbody>
+<tr><td>Instance</td><td>UUIDv5 of request and source instance</td></tr>
+<tr><td>Instance file</td><td>UUIDv5 of request and source file</td></tr>
+<tr><td>Instance API</td><td>UUIDv5 of request and source instance API</td></tr>
+<tr><td>Instance app</td><td>UUIDv5 of request and source instance app</td></tr>
+<tr><td>Deployment instance</td><td>UUIDv5 of request and source deployment instance</td></tr>
+<tr><td>New snapshot</td><td>UUIDv5 of request, <code>SNAPSHOT</code>, and target instance ID</td></tr>
+<tr><td>Property override</td><td>Target parent identity plus existing <code>property_id</code></td></tr>
+<tr><td>API path prefix</td><td>Target instance API ID plus existing path prefix</td></tr>
+<tr><td>App/API link</td><td>Target app ID plus target API ID</td></tr>
+</tbody>
+</table>
+</div>
+<p>Event IDs are also deterministic by clone request and event sequence. This
+supports diagnosis and protects against accidental duplicate construction;
+the ledger remains the authoritative idempotency mechanism.</p>
+<p>References to <code>product_version_id</code>, <code>api_version_id</code>, <code>app_id</code>, <code>app_version</code>,
+<code>property_id</code>, <code>pipeline_id</code>, <code>tag_id</code>, and <code>category_id</code> are reused because
+they identify shared host catalog entities. All target aggregates begin at
+version <code>1</code>.</p>
+<h2 id="ordered-event-batch"><a class="header" href="#ordered-event-batch">Ordered Event Batch</a></h2>
+<p>Generate ordinary events in foreign-key order:</p>
+<ol>
+<li><code>InstanceCreatedEvent</code></li>
+<li><code>EntityTagCreatedEvent</code> for selected instance tags</li>
+<li><code>EntityCategoryCreatedEvent</code> for selected instance categories</li>
+<li><code>ConfigInstanceCreatedEvent</code> for included instance properties</li>
+<li><code>ConfigInstanceFileCreatedEvent</code> for selected files</li>
+<li><code>InstanceApiCreatedEvent</code> for each API</li>
+<li><code>InstanceApiPathPrefixCreatedEvent</code> for each path prefix</li>
+<li><code>ConfigInstanceApiCreatedEvent</code> for included API properties</li>
+<li><code>InstanceAppCreatedEvent</code> for each app</li>
+<li><code>ConfigInstanceAppCreatedEvent</code> for included app properties</li>
+<li><code>InstanceAppApiCreatedEvent</code> for each app/API association</li>
+<li><code>ConfigInstanceAppApiCreatedEvent</code> for included association properties</li>
+<li><code>DeploymentInstanceCreatedEvent</code> for selected deployment definitions</li>
+<li><code>ConfigDeploymentInstanceCreatedEvent</code> for included deployment properties</li>
+<li><code>ConfigSnapshotCreatedEvent</code> when <code>createSnapshot</code> is true</li>
+</ol>
+<p>Every event carries <code>cloneRequestId</code>, <code>rootInstanceId</code>, and
+<code>instanceGraphRevision</code> metadata. Replaying the batch reconstructs the target
+graph.</p>
+<p>The new path never emits <code>InstanceClonedEvent</code>. Clone audit and idempotency come
+from the ledger plus correlation metadata; no clone audit event consumes or
+bypasses the target Instance aggregate stream. The first release retains a
+deprecated replay-compatible dispatcher because only the current local database
+has been verified to contain zero historical events. Remove the dispatcher and
+constant only after every target database and exported fixture has been scanned.</p>
+<h2 id="transactional-execution"><a class="header" href="#transactional-execution">Transactional Execution</a></h2>
+<p><code>CloneInstance</code> cannot use the standard <code>AbstractCommandHandler</code> sequence,
+which enriches input and later opens a separate event-store transaction. Add a
+dedicated clone orchestration/provider operation with connection-aware nonce,
+revision, ledger, and event-persistence APIs.</p>
+<p>Execution uses this sequence:</p>
+<ol>
+<li>Authorize the caller and canonicalize the request.</li>
+<li>Start a <code>SERIALIZABLE</code> database transaction.</li>
+<li>Acquire source and target graph advisory locks in stable UUID order, then
+acquire a logical-target advisory lock derived from <code>(host_id, service_id, env_tag, product_version_id)</code>.</li>
+<li>Look up the idempotency-ledger row. Return the existing result for an
+identical request; reject a changed request.</li>
+<li>Require source <code>accepted_revision = projected_revision</code>.</li>
+<li>Read the complete selected active graph in the transaction and recompute
+its digest and plan hash.</li>
+<li>Validate target uniqueness, catalog references, selections, limits, and
+every expected child aggregate version.</li>
+<li>Allocate the next target graph revision and reserve all user nonces using
+the same connection.</li>
+<li>Build the deterministic event array and choose one transaction ID.</li>
+<li>Insert the ledger row, event-store rows, and outbox rows using that
+connection and transaction ID.</li>
+<li>Attempt to commit. Return <code>ACCEPTED</code> only after commit succeeds. On SQLSTATE
+<code>40001</code>, roll back and retry the complete transaction with a bounded retry
+count. If retries are exhausted, return HTTP <code>409 Conflict</code> with
+<code>CONCURRENCY_CONFLICT</code>, <code>retryable: true</code>, and no accepted clone result.
+The rolled-back attempt must leave no ledger, event-store, outbox, revision,
+or nonce reservation behind. Other transient database-unavailability
+failures return HTTP <code>503 Service Unavailable</code>; they never return
+<code>ACCEPTED</code>.</li>
+</ol>
+<p>All instance and child mutation commands must adopt the same graph lock and
+revision protocol before clone is enabled. Without it, clone cannot promise a
+stable graph.</p>
+<p>All commands that create an instance or change its service ID, environment tag,
+or product version should also use the same logical-target lock. Within clone,
+that lock plus the command-side ledger prevents two concurrent clone requests
+from reserving the same logical target while the first remains unprojected.</p>
+<p>Do not generate child events from the <code>InstanceClonedEvent</code> projection handler
+and do not use the old direct-copy SQL helpers. Both approaches bypass command
+validation and can leave event history inconsistent with projections.</p>
+<h2 id="projection-and-snapshot-completion"><a class="header" href="#projection-and-snapshot-completion">Projection and Snapshot Completion</a></h2>
+<p>The existing outbox assigns one transaction ID to an inserted event array, and
+the database consumer processes all events with that transaction ID in offset
+order inside one projection transaction. The clone design relies on this
+contract.</p>
+<p><code>ConfigSnapshotCreatedEvent</code>, when requested, is always last. It therefore sees
+all earlier target rows and creates the new current snapshot in the same
+projection transaction. There is no separate snapshot job in the first
+release.</p>
+<p>After the transaction projects successfully, a transaction-outcome hook:</p>
+<ul>
+<li>advances the target <code>projected_revision</code>;</li>
+<li>sets the clone ledger to <code>PROJECTED</code> or <code>SNAPSHOT_READY</code>;</li>
+<li>records only counts, IDs, and timing.</li>
+</ul>
+<p>If any clone event fails, the consumer rolls back the complete transaction,
+moves the complete batch to the DLQ, and sets the ledger to <code>FAILED_DLQ</code> using
+the transaction ID. Replaying a repaired DLQ transaction can advance the same
+ledger to success without appending another clone batch.</p>
+<h2 id="validation-4"><a class="header" href="#validation-4">Validation</a></h2>
+<p>Before append, validate:</p>
+<ul>
+<li>source exists, is active, is caught up, and is visible to the caller;</li>
+<li>graph revision, graph digest, catalog schema digest, plan hash, and all
+selected aggregate versions still match preview;</li>
+<li>target IDs match the deterministic mapping and are unused;</li>
+<li><code>(host_id, service_id, env_tag, product_version_id)</code> is unique;</li>
+<li>referenced catalog, tag, category, property, API version, app, and pipeline
+rows exist and are active;</li>
+<li>file selections remain unique by target instance and configuration phase;</li>
+<li>target app/API links refer to children in the same target instance;</li>
+<li>both copied and replacement values pass the current schema and value-type
+validation, and omitted values leave a valid effective target configuration;</li>
+<li>deployment overrides satisfy deployment constraints;</li>
+<li>event count and serialized-byte limits are not exceeded.</li>
+</ul>
+<h3 id="logical-target-collisions"><a class="header" href="#logical-target-collisions">Logical target collisions</a></h3>
+<p><code>instance_name</code> is a display field and is not unique in the current schema.
+The enforced logical identity is <code>(host_id, service_id, env_tag, product_version_id)</code>, including the separate null-environment-tag rule.</p>
+<p>Under the logical-target lock, clone checks both <code>instance_t</code> and non-failed
+clone-ledger rows for this tuple. This prevents concurrent clone-versus-clone
+requests from both appending while one projection is still pending. A soft-
+deleted instance continues to reserve the tuple under the current database
+indexes; clone rejects it and directs the user to the normal reactivation flow.</p>
+<p>Command-side checks against <code>instance_t</code> remain best-effort because it is an
+asynchronous projection. A concurrent non-clone <code>createInstance</code> command that
+was accepted but has not projected may not yet be visible. The database unique
+constraint is therefore the final authority: if such a cross-command race
+survives command validation, one projection transaction succeeds and the other
+complete transaction becomes <code>FAILED_DLQ</code>. The status response reports
+<code>TARGET_LOGICAL_IDENTITY_CONFLICT</code>; it must not leave a partial clone.</p>
+<h2 id="clone-policy"><a class="header" href="#clone-policy">Clone Policy</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Data</th><th>Default</th><th>Policy</th></tr>
+</thead>
+<tbody>
+<tr><td>Instance properties</td><td>Copy</td><td>User may replace or omit each override</td></tr>
+<tr><td>APIs, apps, links, and properties</td><td>Copy</td><td>Preserve topology with remapped parent IDs</td></tr>
+<tr><td>Tags and categories</td><td>Copy</td><td>Reuse shared tag/category IDs</td></tr>
+<tr><td>Files</td><td>Exclude</td><td>User selects each file; <code>Cert</code> needs confirmation</td></tr>
+<tr><td>Deployment definitions</td><td>Exclude</td><td>User selects and reviews each definition</td></tr>
+<tr><td>OAuth clients and credentials</td><td>Never</td><td>Create through the OAuth workflow afterward</td></tr>
+<tr><td>Runtime instances</td><td>Never</td><td>Ephemeral registration state</td></tr>
+<tr><td>Snapshots</td><td>Never copy</td><td>Optionally create a new current snapshot</td></tr>
+<tr><td><code>current</code></td><td><code>false</code></td><td>Avoid changing the default instance implicitly</td></tr>
+<tr><td><code>readonly</code></td><td><code>false</code></td><td>Target is customizable even from read-only source</td></tr>
+<tr><td>Ownership</td><td>Current caller</td><td>Administrator may explicitly override</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="deployment-selections"><a class="header" href="#deployment-selections">Deployment selections</a></h3>
+<p>Each included deployment definition is addressed by
+<code>sourceDeploymentInstanceId</code>. The preview exposes and lets the user override:</p>
+<ul>
+<li>target deployment service ID;</li>
+<li>system environment and runtime environment;</li>
+<li>pipeline ID;</li>
+<li>owner position;</li>
+<li>each deployment property through the normal stable property selector.</li>
+</ul>
+<p>The target receives a new deployment instance ID. <code>platform_job_id</code>, IP address,
+port, and execution identifiers are cleared, and <code>deploy_status</code> is always
+<code>NotDeployed</code>.</p>
+<h2 id="size-and-resource-limits"><a class="header" href="#size-and-resource-limits">Size and Resource Limits</a></h2>
+<p>Planning calculates both event count and serialized event bytes before values
+are appended. Recommended initial configurable limits are:</p>
+<pre><code class="language-text">maxEvents = 2000
+maxSerializedEventBytes = 16 MiB
+maxSingleFileBytes = 4 MiB
+</code></pre>
+<p>These defaults must be benchmarked and may be lowered by an operator. The
+estimate accounts for both event-store and outbox payloads. A plan exceeding a
+limit returns <code>CLONE_LIMIT_EXCEEDED</code> with counts and the limiting category. The
+user can omit files or deployments and preview again.</p>
+<p>The first release does not chunk an oversized clone because independently
+committed chunks violate the atomic-clone guarantee.</p>
+<h2 id="portal-ui-2"><a class="header" href="#portal-ui-2">Portal UI</a></h2>
+<p>Add a <code>ContentCopyIcon</code> row action to
+<code>/app/instance/InstanceAdmin</code>. It is enabled according to the source ownership
+and read-only rules, but the server always reauthorizes.</p>
+<p>The Clone Instance form contains:</p>
+<ul>
+<li>read-only source identity and graph revision;</li>
+<li>target name, environment tag, environment, service ID, and instance fields;</li>
+<li>searchable property inventory grouped by scope;</li>
+<li><code>COPY</code>, <code>REPLACE</code>, and <code>OMIT</code> actions for every property;</li>
+<li>explicit file selection with certificate warnings;</li>
+<li>explicit deployment selection and per-deployment overrides;</li>
+<li>Create Snapshot option;</li>
+<li>event-count and byte estimates;</li>
+<li><strong>Preview</strong> and <strong>Clone</strong> actions.</li>
+</ul>
+<p>Any form change invalidates the previous <code>planHash</code> and disables <strong>Clone</strong> until
+preview succeeds again. The form never embeds clone input in a URL.</p>
+<p>After <code>ACCEPTED</code>, the UI polls status by <code>cloneRequestId</code>. It navigates or
+enables <strong>Open Instance</strong>, <strong>Open Configuration</strong>, and <strong>Create OAuth Client</strong>
+only after <code>PROJECTED</code> or <code>SNAPSHOT_READY</code>. <code>FAILED_DLQ</code> displays the safe error
+code, correlation ID, and recovery guidance without property or file values.</p>
+<p>For the <code>loc</code>, <code>dev</code>, and <code>demo</code> BFF use case, administrators can locate and
+replace properties such as:</p>
+<ul>
+<li><code>statelessAuth.redirectUri</code></li>
+<li><code>statelessAuth.denyUri</code></li>
+<li><code>statelessAuth.cookieDomain</code></li>
+<li>OAuth redirect URI settings</li>
+<li>CORS allowed origins</li>
+<li>virtual-host names</li>
+<li>portal reset/sign-in host</li>
+</ul>
+<p>The generic selector UI remains product-neutral. Product-specific suggestions
+may be added later as metadata, but clone correctness never depends on a
+curated property list.</p>
+<h2 id="sensitive-logging-and-audit"><a class="header" href="#sensitive-logging-and-audit">Sensitive Logging and Audit</a></h2>
+<p>Every clone event is necessarily stored in the event store and outbox, but raw
+values must not be copied into application logs. Before enabling clone:</p>
+<ul>
+<li>replace full CloudEvent trace logging in the common command handler with an
+ID/type/subject summary for sensitive events;</li>
+<li>replace database-consumer error logging of complete payloads with bounded,
+redacted diagnostics;</li>
+<li>mark clone property/file events as sensitive in event metadata;</li>
+<li>exclude property values, replacement values, file contents, certificates,
+tokens, and secrets from the ledger, notifications, metrics, and status API;</li>
+<li>audit value-reveal operations separately.</li>
+</ul>
+<p>Structured clone logs contain only host, request ID, source and target IDs,
+caller, graph revision, event counts, byte counts, duration, transaction ID,
+status, and safe error code.</p>
+<h2 id="implementation-plan-3"><a class="header" href="#implementation-plan-3">Implementation Plan</a></h2>
+<ol>
+<li>Add <code>instance_graph_revision_t</code>, shared graph-lock/revision handling, and the
+logical-instance-identity lock to the relevant instance and child mutation
+command/projection paths.</li>
+<li>Add <code>instance_clone_request_t</code>, transaction outcome updates, and status
+query support.</li>
+<li>Add provider queries that return the complete active clone graph, current
+property schemas, and canonical graph/schema HMAC digests without logging
+values.</li>
+<li>Add POST <code>planInstanceClone</code>, value-reveal, and status query contracts with
+server-side ownership authorization.</li>
+<li>Replace <code>CloneInstance</code> with the dedicated <code>SERIALIZABLE</code> transactional
+orchestration path and connection-aware nonce/event append.</li>
+<li>Add deterministic ID/event builders and the ordered ordinary create-event
+batch. Stop emitting <code>InstanceClonedEvent</code>; remove historical-event discovery
+and unused direct-SQL clone helpers. Retain only the temporary compatibility
+dispatcher until the fleet-wide history gate permits its removal.</li>
+<li>Add transaction-aware projection completion/DLQ ledger updates and place
+snapshot creation last in the same transaction.</li>
+<li>Redact common command and database-consumer payload logging.</li>
+<li>Add the Instance Admin form, generic selector tables, previews, limits,
+status polling, and post-clone actions.</li>
+</ol>
+<h2 id="test-plan"><a class="header" href="#test-plan">Test Plan</a></h2>
+<h3 id="state-and-mapping"><a class="header" href="#state-and-mapping">State and mapping</a></h3>
+<ul>
+<li>Clone a graph containing every included child type and compare source and
+target after applying the deterministic mapping.</li>
+<li>Verify tags/categories copy, while OAuth owners, clients, secrets, tokens,
+runtime instances, old snapshots, and deployment executions do not.</li>
+<li>Verify inactive and soft-deleted rows are absent.</li>
+<li>Replay the emitted events into empty projections and obtain the same target.</li>
+</ul>
+<h3 id="consistency-and-idempotency"><a class="header" href="#consistency-and-idempotency">Consistency and idempotency</a></h3>
+<ul>
+<li>Change each child type after preview and verify graph revision/digest rejects
+execution.</li>
+<li>Verify execution rejects while accepted and projected source revisions differ.</li>
+<li>Race a child mutation against clone and verify the shared lock serializes
+them or the serializable transaction retries/fails safely.</li>
+<li>Execute identical requests concurrently and verify one event transaction.</li>
+<li>Retry the same request ID and hash and return the original result.</li>
+<li>Reuse a request ID with changed input and receive
+<code>IDEMPOTENCY_KEY_REUSED</code>.</li>
+<li>Verify a serialization retry does not reserve duplicate nonces or events.</li>
+<li>Exhaust serialization retries and verify HTTP <code>409</code>,
+<code>CONCURRENCY_CONFLICT</code>, and no committed ledger/event/revision/nonce state.</li>
+<li>Verify a transient database outage returns HTTP <code>503</code>, never <code>ACCEPTED</code>.</li>
+<li>Race two clones with the same logical target tuple and verify the logical
+lock/ledger rejects one before event append.</li>
+<li>Race clone with a non-clone instance creation and verify at most one projects;
+any loser becomes <code>FAILED_DLQ</code> with <code>TARGET_LOGICAL_IDENTITY_CONFLICT</code> and no
+partial graph.</li>
+</ul>
+<h3 id="security-and-authorization-1"><a class="header" href="#security-and-authorization-1">Security and authorization</a></h3>
+<ul>
+<li>Verify plan, reveal, execute, and status enforce host and ownership scope.</li>
+<li>Verify only administrators can clone read-only sources or override ownership.</li>
+<li>Verify raw properties/files never occur in URLs, clone logs, status, ledger,
+notifications, or DLQ diagnostics.</li>
+<li>Verify COPY works without revealing a value and that reveal is audited and
+returned with <code>no-store</code>.</li>
+<li>Verify ambiguous property names at different scopes are independently
+selectable.</li>
+<li>Tighten a property schema after the source value was saved and verify <code>COPY</code>
+returns <code>SOURCE_VALUE_INVALID_FOR_CURRENT_SCHEMA</code> until the user selects a
+valid <code>REPLACE</code> or <code>OMIT</code>.</li>
+<li>Change a referenced property schema after preview and verify execution returns
+<code>PLAN_DEPENDENCY_CHANGED</code> and requires another preview.</li>
+</ul>
+<h3 id="projection-and-recovery"><a class="header" href="#projection-and-recovery">Projection and recovery</a></h3>
+<ul>
+<li>Force failure on every event group and verify the whole projection
+transaction rolls back and status becomes <code>FAILED_DLQ</code>.</li>
+<li>Replay the repaired transaction and verify status advances without new
+source events.</li>
+<li>Verify status remains <code>ACCEPTED</code> before projection completion.</li>
+<li>Verify a requested snapshot is last, current, and retrievable using target
+<code>serviceId</code> and environment tag before status becomes <code>SNAPSHOT_READY</code>.</li>
+</ul>
+<h3 id="policy-and-limits"><a class="header" href="#policy-and-limits">Policy and limits</a></h3>
+<ul>
+<li>Verify files are excluded by default, selected files preserve phase and
+metadata, and certificates require confirmation.</li>
+<li>Verify deployments are excluded by default and selected definitions apply
+overrides, clear operational fields, and use <code>NotDeployed</code>.</li>
+<li>Verify replacements pass schema/value validation and affect only the target.</li>
+<li>Verify copied values are revalidated against the current schema and omitted
+values still produce a valid effective target configuration.</li>
+<li>Verify duplicate instance names produce a warning, while duplicate logical
+identity tuples are rejected or resolved by the projection/DLQ contract.</li>
+<li>Verify <code>current=false</code>, <code>readonly=false</code>, and target ownership defaults.</li>
+<li>Verify event-count, total-byte, and single-file limits at the boundary and
+return <code>CLONE_LIMIT_EXCEEDED</code> without writes.</li>
+</ul>
+<h2 id="design-decisions-3"><a class="header" href="#design-decisions-3">Design Decisions</a></h2>
+<ul>
+<li>Clone is state-based and event-producing; it never replays history or copies
+projections directly.</li>
+<li>A root graph revision, opaque graph digest, and plan hash bind preview to
+execution.</li>
+<li>The plan also binds the current referenced property schemas; <code>COPY</code> and
+<code>REPLACE</code> are both revalidated at plan and execution time.</li>
+<li>A durable request ledger provides idempotency and asynchronous status.</li>
+<li>Property selectors use scope, parent identity, property ID, and expected
+version; names are display fields only.</li>
+<li>Values are copied server-side and masked by default.</li>
+<li>Files and deployments are explicit user selections and default to excluded.</li>
+<li>OAuth material and runtime/deployment execution state are never cloned.</li>
+<li>Snapshot creation is the last event in the same projection transaction.</li>
+<li>The new path never emits <code>InstanceClonedEvent</code>; its compatibility dispatcher
+remains for one release unless a fleet-wide history scan proves immediate
+removal safe.</li>
+<li>Administrators may clone read-only sources; targets are writable by default.</li>
+<li>Oversized clones fail planning rather than losing atomicity through chunks.</li>
+<li><code>ACCEPTED</code> is returned only after a successful commit; exhausted serialization
+retries return a retryable conflict with no committed clone state.</li>
+<li>Logical target uniqueness follows <code>(host_id, service_id, env_tag, product_version_id)</code>, not instance name or deterministic target UUID.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="instance-file-config-phase"><a class="header" href="#instance-file-config-phase">Instance File Config Phase</a></h1>
 <h2 id="overview-1"><a class="header" href="#overview-1">Overview</a></h2>
 <p><code>instance_file_t</code> stores instance-specific files that are not modeled as standard <code>config_property_t</code> rows. Examples include API specifications such as <code>openapi.yaml</code> and custom certificates or supporting files.</p>
@@ -14560,7 +15441,7 @@ WHERE h.sub_domain || '.' || h.domain = ?
 <li><code>portal-service/apps/config-server</code> response assembly if duplicate precedence is handled outside SQL</li>
 <li><code>portal-view</code> schemas/forms/pages for instance files</li>
 </ul>
-<h2 id="validation-4"><a class="header" href="#validation-4">Validation</a></h2>
+<h2 id="validation-5"><a class="header" href="#validation-5">Validation</a></h2>
 <p>Minimum checks:</p>
 <ol>
 <li>Create or migrate an instance file named <code>openapi.yaml</code> with <code>config_phase = 'R'</code>.</li>
@@ -18965,7 +19846,7 @@ unchanged products and to the new <code>productVersionId</code> for rebuilt prod
 </tbody>
 </table>
 </div>
-<h2 id="goals-20"><a class="header" href="#goals-20">Goals</a></h2>
+<h2 id="goals-21"><a class="header" href="#goals-21">Goals</a></h2>
 <ul>
 <li>Auto-populate config mappings for every new Java or Rust product release.</li>
 <li>Preserve event replay, auditability, and projection rebuild behavior.</li>
@@ -18978,7 +19859,7 @@ event amplification.</li>
 <li>Detect missing config and property definitions before a release appears
 complete.</li>
 </ul>
-<h2 id="non-goals-23"><a class="header" href="#non-goals-23">Non-Goals</a></h2>
+<h2 id="non-goals-24"><a class="header" href="#non-goals-24">Non-Goals</a></h2>
 <ul>
 <li>Do not change the config override hierarchy.</li>
 <li>Do not write directly to config mapping projection tables.</li>
@@ -19614,7 +20495,7 @@ event-sourced product release model without duplicating standard mappings for
 every tenant.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="release-workflow"><a class="header" href="#release-workflow">Release Workflow</a></h1>
-<h2 id="status-1"><a class="header" href="#status-1">Status</a></h2>
+<h2 id="status-2"><a class="header" href="#status-2">Status</a></h2>
 <p>Proposed design.</p>
 <p>Light Portal should use <code>light-workflow</code> as the durable release orchestrator
 for Java and Rust releases. The workflow should coordinate repository checkout,
@@ -19643,7 +20524,7 @@ and who approved publication.</li>
 <p>The release workflow should be flexible enough to call existing command-line
 tools, but controlled enough that it does not become an unrestricted shell
 inside Light Portal.</p>
-<h2 id="goals-21"><a class="header" href="#goals-21">Goals</a></h2>
+<h2 id="goals-22"><a class="header" href="#goals-22">Goals</a></h2>
 <ul>
 <li>Replace the current Java <code>light-bot</code> release path with <code>light-workflow</code> once
 parity is proven.</li>
@@ -19661,7 +20542,7 @@ reporting into the release gate.</li>
 behind explicit approval.</li>
 <li>Preserve release auditability and reproducibility.</li>
 </ul>
-<h2 id="non-goals-24"><a class="header" href="#non-goals-24">Non-Goals</a></h2>
+<h2 id="non-goals-25"><a class="header" href="#non-goals-25">Non-Goals</a></h2>
 <ul>
 <li>Do not run arbitrary release commands in the Light Portal service process.</li>
 <li>Do not replace Maven, Cargo, Docker, GitHub CLI, or existing release scripts
@@ -19673,7 +20554,7 @@ should be portable manifests, not customer import output.</li>
 <li>Do not remove <code>light-bot</code> until Java release parity has been demonstrated
 through several successful workflow-managed releases.</li>
 </ul>
-<h2 id="current-state-7"><a class="header" href="#current-state-7">Current State</a></h2>
+<h2 id="current-state-8"><a class="header" href="#current-state-8">Current State</a></h2>
 <p><code>light-bot</code> is the practical Java release automation path today. It contains
 working release knowledge and should remain available as a fallback during the
 migration.</p>
@@ -21586,7 +22467,7 @@ so the clear secret cannot be recovered later.</p>
 one-time response, close the page, or forget to copy the secret into their
 deployment system. Once that happens, the portal needs a way to issue a new
 secret without weakening the storage model.</p>
-<h2 id="current-state-8"><a class="header" href="#current-state-8">Current State</a></h2>
+<h2 id="current-state-9"><a class="header" href="#current-state-9">Current State</a></h2>
 <p>The current create flow in <code>oauth-command</code> generates both values in
 <code>CreateClient</code>:</p>
 <ul>
@@ -21853,7 +22734,7 @@ should not return the stored verifier as if it were a usable secret.</li>
 <li>Add user help for the Auth Client page explaining one-time secret display and
 regeneration.</li>
 </ul>
-<h2 id="test-plan"><a class="header" href="#test-plan">Test Plan</a></h2>
+<h2 id="test-plan-1"><a class="header" href="#test-plan-1">Test Plan</a></h2>
 <ul>
 <li>Create client still returns a one-time secret and stores only a verifier.</li>
 <li>Regenerate secret returns a new one-time secret and updates only the verifier.</li>
@@ -23083,7 +23964,7 @@ the provider <code>jwk</code> from <code>auth_provider_t</code>. The implementat
 that the JWT header <code>kid</code> is present in the returned JWKS for the same provider.
 That guarantee matters more once external AWS services cache the discovery and
 JWKS responses.</p>
-<h2 id="goals-22"><a class="header" href="#goals-22">Goals</a></h2>
+<h2 id="goals-23"><a class="header" href="#goals-23">Goals</a></h2>
 <ul>
 <li>Let AWS AgentCore use Rust <code>light-oauth</code> or Java <code>oauth-kafka</code> as a JWT
 bearer token issuer.</li>
@@ -23095,7 +23976,7 @@ claims working.</li>
 <li>Keep issuer, audience, and discovery URLs deterministic across environments.</li>
 <li>Add tests that prove discovery, JWKS, and signed token claims line up.</li>
 </ul>
-<h2 id="non-goals-25"><a class="header" href="#non-goals-25">Non-Goals</a></h2>
+<h2 id="non-goals-26"><a class="header" href="#non-goals-26">Non-Goals</a></h2>
 <ul>
 <li>Do not implement full OIDC identity-provider behavior in the first phase.</li>
 <li>Do not add dynamic client registration.</li>
@@ -23277,7 +24158,7 @@ URL:</p>
 <p>If the customer wants <code>allowedAudience</code> to be the AgentCore runtime or an API
 identifier instead of <code>urn:com.networknt</code>, make <code>jwtAudience</code> environment
 specific and align it with the AgentCore authorizer configuration.</p>
-<h2 id="implementation-plan-3"><a class="header" href="#implementation-plan-3">Implementation Plan</a></h2>
+<h2 id="implementation-plan-4"><a class="header" href="#implementation-plan-4">Implementation Plan</a></h2>
 <h3 id="phase-1-discovery-metadata"><a class="header" href="#phase-1-discovery-metadata">Phase 1: Discovery Metadata</a></h3>
 <ul>
 <li>Rust: add <code>publicIssuerBaseUrl</code>, <code>oidcDiscoveryEnabled</code>, and
