@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-52b1c8b3.js";
+            window.path_to_searchindex_js = "../searchindex-96ebff35.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-19391689.js"></script>
@@ -254,7 +254,7 @@ workflow.</li>
 </thead>
 <tbody>
 <tr><td>Live source</td><td><code>outbox_message_t</code></td><td>Debezium-derived Kafka topic</td></tr>
-<tr><td>Transaction identity</td><td><code>outbox_message_t.transaction_id</code></td><td><code>transaction_id</code> Kafka header, with legacy key fallback</td></tr>
+<tr><td>Transaction identity</td><td><code>outbox_message_t.transaction_id</code></td><td><code>transaction_id</code>, <code>transaction_ordinal</code>, and <code>transaction_count</code> Kafka headers; legacy key fallback is not replay evidence</td></tr>
 <tr><td>Source position</td><td>logical partition plus <code>c_offset</code></td><td>Kafka topic, partition, and offset</td></tr>
 <tr><td>Failure destination</td><td><code>dead_letter_queue</code></td><td><code>{topic}{deadLetterTopicExt}</code></td></tr>
 <tr><td>Progress</td><td><code>consumer_offsets</code></td><td>Kafka consumer-group offsets</td></tr>
@@ -637,6 +637,15 @@ aggregates.</p>
 <li>pause the complete projection only for an explicitly approved, bounded
 maintenance operation.</li>
 </ol>
+<p>The initial production implementation deliberately registers only executable
+<code>GRAPH_ROOT</code> policies. It fails closed with <code>UNSUPPORTED_ISOLATION</code> for an
+event that would require one of the fallback pauses. The control and worker
+tables, live-worker acknowledgement path, metrics, and UI vocabulary are
+forward-compatible infrastructure; planner/worker coordination for fallback
+pause execution is not enabled by the v1 registry and must not be represented
+as available in an operator plan. Enabling a non-graph policy therefore
+requires a separate implementation gate and integration test of the complete
+pause lifecycle.</p>
 <p><code>event_projection_control_t</code> and <code>event_projection_worker_t</code> coordinate these
 fallback pauses by epoch. Only workers assigned to the affected partition or
 projection must acknowledge. Kafka workers continue heartbeats while paused so
@@ -974,10 +983,10 @@ that the affected scope is consistent.</p>
 <ol>
 <li>The execute command atomically changes an approved request to
 <code>INSTALLING_BARRIER</code>.</li>
-<li>The coordinator acquires the canonical dependency-scope advisory locks and
-installs the planned barrier epoch. If scoped isolation is unavailable, it
-requests the approved partition, host, or projection pause and waits only
-for the affected workers to acknowledge.</li>
+<li>The v1 coordinator acquires the canonical graph-root advisory locks and
+installs the planned barrier epoch. A plan requiring partition, host, or
+projection fallback isolation is rejected before approval; those pause
+modes remain a gated extension as described above.</li>
 <li>The coordinator rechecks the plan hash, content fingerprints, payload
 digests, registry version, projection metadata, and isolation epoch, then
 changes the request to <code>RUNNING</code>.</li>

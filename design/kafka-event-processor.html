@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-52b1c8b3.js";
+            window.path_to_searchindex_js = "../searchindex-96ebff35.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-19391689.js"></script>
@@ -196,11 +196,17 @@
   "transforms": "unwrap,addTransactionIdHeader,timestamp_converter,...",
   
   "transforms.addTransactionIdHeader.type": "org.apache.kafka.connect.transforms.HeaderFrom$Value",
-  "transforms.addTransactionIdHeader.fields": "transaction_id",
-  "transforms.addTransactionIdHeader.headers": "transaction_id",
+  "transforms.addTransactionIdHeader.fields": "transaction_id,transaction_ordinal,transaction_count",
+  "transforms.addTransactionIdHeader.headers": "transaction_id,transaction_ordinal,transaction_count",
   "transforms.addTransactionIdHeader.operation": "copy"
 }
 </code></pre>
+<p>All three headers are mandatory when canonical capture is enabled. The command
+side writes the zero-based ordinal and complete member count into every outbox
+row in the same database transaction. The Kafka processor refuses to advance
+offsets unless the poll contains exactly ordinals <code>0..transaction_count-1</code>
+with a consistent transaction ID and count. Deploy the outbox migration and
+connector header change before enabling Kafka capture for a rollout scope.</p>
 <h2 id="processing-flow"><a class="header" href="#processing-flow">Processing Flow</a></h2>
 <h3 id="phase-1-optimistic-batch-processing"><a class="header" href="#phase-1-optimistic-batch-processing">Phase 1: Optimistic Batch Processing</a></h3>
 <pre><code class="language-java">// 1. Group events by transaction_id from headers
