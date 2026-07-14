@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-96ebff35.js";
+            window.path_to_searchindex_js = "searchindex-f7edcbc6.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-19391689.js"></script>
+        <script src="toc-1602f04f.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -1491,6 +1491,711 @@ validation in the config update page. The raw JSON/YAML editor and scalar
 <code>valueType</code> validation can be built in parallel, but the Form tab and backend
 schema enforcement should wait for the registry work.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="config-snapshot-output-and-comparison"><a class="header" href="#config-snapshot-output-and-comparison">Config Snapshot Output and Comparison</a></h1>
+<p>The <code>/app/config/configSnapshot</code> page lists effective configuration snapshots
+and links to the raw snapshot tables, but it does not show the final
+<code>values.yml</code> represented by a snapshot. It also requires users to inspect
+snapshots one at a time. This document adds a deterministic <code>values.yml</code>
+output for each row and a comparison workflow for two to four snapshots. The
+same comparison engine supports historical selection from the snapshot page
+and current-snapshot selection across instances from
+<code>/app/instance/instanceAdmin</code>.</p>
+<h2 id="decision-summary"><a class="header" href="#decision-summary">Decision Summary</a></h2>
+<ul>
+<li>Add a <code>View values.yml</code> row action. It opens a read-only preview with Copy
+and Download actions.</li>
+<li>Generate the YAML on the server from the complete snapshot. Do not assemble
+it from the paginated property table in the browser.</li>
+<li>Select historical data by explicit <code>hostId + snapshotId</code>; do not reuse the
+runtime query that implicitly selects only the snapshot marked <code>current</code>.</li>
+<li>Add <code>Compare current snapshots</code> to <code>InstanceAdmin</code>. It resolves the current
+snapshot for each selected instance, then opens the same comparison route
+with exact snapshot ids.</li>
+<li>Define one canonical YAML contract for the portal query and both the Java and
+Rust config servers. The Java services share one codec; the Rust service
+implements the same contract against the same golden test vectors.</li>
+<li>Let users compare two, three, or four snapshots in a semantic property
+matrix. Two snapshots remain the normal and simplest case.</li>
+<li>Offer a literal side-by-side YAML diff only when exactly two snapshots are
+selected. Three or four full YAML panes are too narrow to read reliably.</li>
+<li>Compare effective typed values by default and show source-only changes
+separately.</li>
+</ul>
+<h2 id="current-implementation-1"><a class="header" href="#current-implementation-1">Current Implementation</a></h2>
+<p><code>portal-view/src/pages/snapshot/ConfigSnapshot.tsx</code> renders a server-paginated
+Material React Table. It calls
+<code>lightapi.net/config/getConfigSnapshot/0.1.0</code>, defaults the <code>current</code> filter to
+<code>true</code>, and identifies each row by <code>instanceId + snapshotId</code>. Existing row
+actions update or delete the header and navigate to the effective property,
+file, deployment, API, app, app-api, instance, environment, product, and
+product-version snapshot tables.</p>
+<p><code>portal-view/src/pages/instance/InstanceAdmin.tsx</code> is also server-paginated. Its
+rows already contain <code>hostId</code>, <code>instanceId</code>, <code>instanceName</code>, <code>serviceId</code>, and
+<code>envTag</code>, and each row has a Snapshot action that opens the snapshot page for
+that instance. It does not currently support row selection. Its <code>current</code>
+field belongs to the instance record and is not a config snapshot id or proof
+that <code>config_snapshot_t</code> contains a current row.</p>
+<p>Snapshot creation calls the PostgreSQL <code>create_snapshot</code> procedure. The
+procedure copies the raw override levels and materializes one effective row per
+<code>snapshotId + configPhase + configId + propertyId</code> in
+<code>config_snapshot_property_t</code>. Each effective row records:</p>
+<ul>
+<li><code>config_phase</code></li>
+<li><code>config_id</code> and <code>property_id</code></li>
+<li><code>property_name</code> and <code>property_type</code></li>
+<li><code>property_value</code> and <code>value_type</code></li>
+<li><code>source_level</code></li>
+</ul>
+<p>The Java <code>light-config-server</code> already turns current snapshot rows into YAML.
+Its snapshot query joins <code>config_snapshot_property_t</code> to <code>config_t</code>, emits the
+key as <code>configName.propertyName</code> for <code>Config</code> properties, orders by the emitted
+key, parses values according to <code>value_type</code>, and writes a <code># source_level</code>
+comment before each entry. However, that query locates a snapshot indirectly
+with <code>current = true</code>, <code>serviceId</code>, and environment. It cannot output a
+specific historical row selected in <code>portal-view</code>.</p>
+<p>The Rust config server in <code>portal-service/apps/config-server</code> independently
+exposes <code>/config-server/configs</code>. It loads current snapshot rows through
+<code>portal-service/crates/portal-core</code>, then currently formats each
+<code>property_value</code> directly into YAML without using the returned <code>value_type</code>.
+It cannot consume a Java shared utility class, so it requires a Rust canonical
+codec and cross-language parity fixtures if both config-server implementations
+are supported.</p>
+<p>The current PostgreSQL schema does not enforce the resolver’s cardinality
+assumption. <code>config_snapshot_t</code> has no index beginning with
+<code>(host_id, instance_id, current)</code> and no partial uniqueness constraint for
+current rows. Its broader scope index begins with <code>host_id, environment</code>, so it
+does not directly cover a host/instance/current lookup. The Java persistence
+path attempts to clear an older current row, but its update is scoped by
+<code>instance_id</code> rather than the full <code>host_id + instance_id</code> identity. The
+database can therefore contain duplicate current rows and the resolver must not
+depend on application convention alone.</p>
+<p>The existing <code>getConfigSnapshotProperty</code> action is not an appropriate export
+API. It is paginated, accepts only <code>snapshotId</code>, returns stored strings rather
+than typed values, and does not enforce the full YAML serialization contract.
+Using it from the browser could silently omit properties or produce values
+whose YAML types differ from runtime configuration.</p>
+<h2 id="goals-1"><a class="header" href="#goals-1">Goals</a></h2>
+<ul>
+<li>Let an authorized user view, copy, and download the runtime <code>values.yml</code> for
+any current or historical configuration snapshot.</li>
+<li>Make output deterministic so two semantically identical snapshots generate
+identical YAML and the same digest.</li>
+<li>Make effective configuration drift visible without requiring users to open
+every snapshot property page.</li>
+<li>Let users compare the current effective configuration of two to four
+same-service instances directly from <code>InstanceAdmin</code>.</li>
+<li>Support the common two-snapshot comparison and useful three- or four-snapshot
+comparisons without making the page unreadable.</li>
+<li>Keep snapshot metadata visible so users know which instance, environment,
+timestamp, and current state each value belongs to.</li>
+<li>Preserve value types, nested maps, and list order.</li>
+<li>Prevent cross-host snapshot access and avoid persisting sensitive output in
+browser storage.</li>
+</ul>
+<h2 id="non-goals-2"><a class="header" href="#non-goals-2">Non-Goals</a></h2>
+<ul>
+<li>Do not compare raw override tables in the first release. The comparison is of
+the effective <code>values.yml</code> materialized in <code>config_snapshot_property_t</code>.</li>
+<li>Do not include <code>File</code> or <code>Cert</code> snapshot rows in <code>values.yml</code>. The existing
+Snapshot Files action remains the inspection path for those artifacts.</li>
+<li>Do not compare more than four snapshots on screen.</li>
+<li>Do not edit or restore configuration from the comparison page.</li>
+<li>Do not treat YAML formatting differences as configuration changes.</li>
+<li>Do not replace the existing snapshot property pages.</li>
+<li>Do not turn the feature into a general instance-drift comparison for files,
+certificates, deployments, APIs, apps, or other instance state.</li>
+<li>Do not compare instances with different <code>serviceId</code> values in the first
+release.</li>
+</ul>
+<h2 id="repository-scope"><a class="header" href="#repository-scope">Repository Scope</a></h2>
+<ul>
+<li><code>portal-db</code> for current-snapshot integrity audits, remediation tooling, and
+the database-enforced current-row invariant</li>
+<li><code>light-portal</code> for the Java canonical codec and snapshot persistence contract</li>
+<li><code>config-query</code> for the historical snapshot output/comparison query</li>
+<li><code>light-config-server</code> for Java runtime <code>values.yml</code> parity</li>
+<li><code>portal-service</code> for Rust runtime <code>values.yml</code> parity</li>
+<li><code>portal-view</code> for snapshot-page and <code>InstanceAdmin</code> selection plus the shared
+output/comparison experience</li>
+<li>deployment/config repositories for packaging and live verification</li>
+</ul>
+<h2 id="why-support-more-than-two-snapshots"><a class="header" href="#why-support-more-than-two-snapshots">Why Support More Than Two Snapshots</a></h2>
+<p>Two snapshots answer the most common question: “what changed?” Three snapshots
+also have clear operational uses:</p>
+<ul>
+<li>before, candidate, and current</li>
+<li>dev, QA, and production</li>
+<li>last known good, failed rollout, and repaired rollout</li>
+</ul>
+<p>Four columns are still usable in a full-width property matrix and cover a
+typical staged rollout. Beyond four, value columns become too narrow and users
+lose the baseline while horizontally scrolling. Larger comparisons are better
+handled later as a downloadable report or drift dashboard.</p>
+<p>The initial limit should therefore be:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>View</th><th style="text-align: right">Supported snapshots</th><th>Reason</th></tr>
+</thead>
+<tbody>
+<tr><td>Effective property matrix</td><td style="text-align: right">2–4</td><td>Values remain scannable as dynamic table columns.</td></tr>
+<tr><td>Side-by-side YAML diff</td><td style="text-align: right">2</td><td>Raw text needs enough horizontal width and has a natural left/right baseline.</td></tr>
+<tr><td>Download one <code>values.yml</code></td><td style="text-align: right">1</td><td>Produces the exact artifact for one snapshot.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="valuesyml-row-action"><a class="header" href="#valuesyml-row-action"><code>values.yml</code> Row Action</a></h2>
+<p>Add a row action with tooltip <code>View values.yml</code>. Selecting it requests the
+snapshot by its explicit <code>hostId</code> and <code>snapshotId</code> and opens a large dialog or
+right-side drawer containing:</p>
+<ul>
+<li>snapshot timestamp, snapshot id, instance name/id, environment, service id,
+and whether it is current</li>
+<li>configuration phase, initially fixed to runtime phase <code>R</code></li>
+<li>property count and SHA-256 digest</li>
+<li>a read-only monospace YAML preview</li>
+<li>Copy and Download buttons</li>
+<li>a link back to Snapshot Properties for source-level inspection</li>
+</ul>
+<p>The preview must show the entire output, not only the current table page. While
+loading, disable Copy and Download. If the snapshot contains no runtime
+<code>Config</code> properties, show an explicit empty-state message rather than an empty
+dialog that looks like a failed request.</p>
+<p>Use a stable, filesystem-safe download name such as:</p>
+<pre><code class="language-text">values-&lt;instanceName&gt;-&lt;snapshotTs&gt;-&lt;snapshotId&gt;.yml
+</code></pre>
+<p>The downloaded media type should be <code>application/yaml;charset=utf-8</code>. The file
+should end with one newline.</p>
+<p>The download helper must remove its temporary anchor and call
+<code>URL.revokeObjectURL(...)</code> in a <code>finally</code> block after triggering the download.
+This follows the cleanup pattern already used by <code>portal-view</code>’s
+<code>downloadJson</code> helper and prevents repeated exports from retaining Blob URLs in
+the single-page application.</p>
+<p>The snapshot procedure captures both runtime and promote phases, but
+<code>values.yml</code> is the runtime startup artifact. Phase <code>R</code> is therefore the first
+release contract. A later phase selector can expose <code>P</code> if operators establish
+a concrete promote-time verification use case.</p>
+<h2 id="canonical-yaml-contract"><a class="header" href="#canonical-yaml-contract">Canonical YAML Contract</a></h2>
+<p>The output and comparison API must use the same typed conversion rules as the
+config server:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th><code>valueType</code></th><th>Typed representation</th></tr>
+</thead>
+<tbody>
+<tr><td><code>string</code></td><td>YAML string</td></tr>
+<tr><td><code>boolean</code></td><td>YAML boolean</td></tr>
+<tr><td><code>integer</code></td><td>YAML integer</td></tr>
+<tr><td><code>float</code></td><td>YAML number</td></tr>
+<tr><td><code>map</code></td><td>Parse stored JSON into a YAML mapping.</td></tr>
+<tr><td><code>list</code></td><td>Parse stored JSON into a YAML sequence.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Canonicalization rules are:</p>
+<ol>
+<li>Include only <code>config_phase = 'R'</code> and <code>property_type = 'Config'</code>.</li>
+<li>Form the top-level key as <code>configName.propertyName</code>, matching the current
+config-server behavior.</li>
+<li>Sort top-level entries by that complete emitted key, not by
+<code>property_name</code> alone.</li>
+<li>Sort keys recursively inside map values.</li>
+<li>Preserve list order because sequence order can be semantically significant.</li>
+<li>Preserve the effective <code>source_level</code> as the comment immediately before its
+property.</li>
+<li>Use fixed block style, two-space indentation, stable quoting rules, UTF-8,
+and a single final newline.</li>
+<li>Reject an invalid stored value for its declared type. Do not quietly coerce
+it to a string or omit it.</li>
+<li>Reject duplicate emitted keys instead of letting one overwrite another.</li>
+</ol>
+<p>Map key order does not change YAML meaning, but recursive sorting prevents
+nested map insertion order from creating noisy diffs. Source comments are
+useful diagnostics, but a source-comment change alone is not an effective value
+change.</p>
+<p>Move or extract the current Java typed YAML conversion in
+<code>ServiceConfigurationUtil</code> into a shared canonical serializer that both
+<code>light-config-server</code> and <code>config-query</code> can call. A suitable home is the
+shared <code>light-portal</code> utility/domain layer already used by both Java services.</p>
+<p>Implement the same contract in Rust, preferably beside <code>ConfigEntry</code> and the
+snapshot query in <code>portal-service/crates/portal-core</code>, and make
+<code>portal-service/apps/config-server</code> call it instead of formatting raw values.
+Because Java and Rust cannot share a runtime class, both codecs must consume
+the same language-neutral input/output test vectors, including expected UTF-8
+YAML bytes and digest.</p>
+<p>The fixture corpus has an explicit contract version and a machine-readable
+manifest containing the SHA-256 of the raw rows and expected YAML. Vendored
+copies live in the Java and Rust test suites so unit tests remain hermetic. A
+cross-repository CI job checks the copies from explicitly checked-out revisions
+for byte equality. Tests must not download fixtures from a mutable branch or a
+<code>latest</code> raw URL because that would make an otherwise unchanged build depend on
+network availability and moving remote state.</p>
+<p>For a current snapshot, add parity tests proving the portal output and the Java
+and Rust config-server outputs are byte-for-byte identical. This is the
+strongest check that the preview represents the artifact a runtime service
+receives regardless of which supported config server is deployed.</p>
+<h2 id="query-api"><a class="header" href="#query-api">Query API</a></h2>
+<p>Add a read action:</p>
+<pre><code class="language-text">lightapi.net/config/getConfigSnapshotValues/0.1.0
+</code></pre>
+<p>It should retain the existing <code>portal.r</code> scope and use a batch-shaped request
+for both output and comparison:</p>
+<pre><code class="language-json">{
+  "hostId": "019...",
+  "snapshotIds": ["019...", "019..."],
+  "configPhase": "R",
+  "include": ["entries"]
+}
+</code></pre>
+<p><code>snapshotIds</code> must contain between one and four unique ids. <code>include</code> may
+contain <code>entries</code>, <code>yaml</code>, or both. The output dialog requests <code>yaml</code>; the
+comparison matrix requests <code>entries</code>; the two-pane YAML tab loads <code>yaml</code> only
+when opened. This avoids sending both a large structured representation and a
+duplicate YAML string when only one is needed.</p>
+<p>The response preserves request order:</p>
+<pre><code class="language-json">{
+  "configPhase": "R",
+  "snapshots": [
+    {
+      "snapshotId": "019...",
+      "snapshotTs": "2026-07-13T14:30:00Z",
+      "instanceId": "019...",
+      "instanceName": "light-gateway-dev",
+      "environment": "dev",
+      "serviceId": "com.networknt.light-gateway-1.0.0",
+      "current": false,
+      "propertyCount": 2,
+      "sha256": "sha256:...",
+      "entries": [
+        {
+          "key": "server.enableHttp",
+          "value": true,
+          "valueType": "boolean",
+          "sourceLevel": "instance"
+        },
+        {
+          "key": "server.httpPort",
+          "value": 8080,
+          "valueType": "integer",
+          "sourceLevel": "default"
+        }
+      ]
+    }
+  ]
+}
+</code></pre>
+<p>When <code>yaml</code> is requested, each snapshot object also contains the canonical
+<code>yaml</code> string. The digest is calculated from the exact UTF-8 YAML bytes.</p>
+<p>The persistence query should join <code>config_snapshot_t</code>,
+<code>config_snapshot_property_t</code>, and <code>config_t</code>, and scope every selected id by
+<code>cs.host_id = ?</code>. It must not require <code>current = true</code>. Load all requested
+metadata and properties in bounded batch queries rather than one query per
+snapshot.</p>
+<p>Reject the whole request if any selected snapshot is missing, belongs to
+another host, has malformed typed data, or exceeds the configured response
+limit. A partial comparison can look authoritative while silently omitting a
+column, so partial success is unsafe here.</p>
+<h2 id="snapshot-page-selection"><a class="header" href="#snapshot-page-selection">Snapshot-Page Selection</a></h2>
+<p>Enable row selection on <code>ConfigSnapshot.tsx</code> and add a <code>Compare selected</code>
+toolbar button. It is disabled until at least two snapshots are selected.</p>
+<p>The current <code>getConfigSnapshot</code> response does not contain a property count.
+Extend it additively with <code>propertyCount</code>, defined as the count of phase <code>R</code>,
+type <code>Config</code> rows for that snapshot, and a response-level
+<code>comparisonLimits.maxProperties</code> sourced from the same backend configuration
+used by <code>getConfigSnapshotValues</code>. Load page counts in one aggregate query, not
+one count query per row.</p>
+<p>The selection state retains <code>propertyCount</code>. Disable <code>Compare selected</code> when
+the sum across selected snapshots exceeds <code>maxProperties</code> and explain the
+configured limit in the button tooltip. This check is advisory: the API still
+enforces both property and serialized-byte limits and remains authoritative.
+If it returns <code>413</code> because the byte limit is exceeded or metadata changed,
+show an actionable error that suggests selecting fewer snapshots or
+downloading them individually.</p>
+<p>The page uses server-side pagination, so selected snapshot metadata must be
+stored independently of the currently loaded <code>data</code> array. Selection should
+survive paging and sorting and should be cleared explicitly by the user or when
+the host changes. Reject a fifth selection with a short explanation.</p>
+<p>The page currently defaults <code>current</code> to <code>true</code>, which often exposes only one
+snapshot per instance. When compare mode is activated with fewer than two
+visible candidates, show a <code>Show snapshot history</code> action that removes the
+<code>current</code> filter. Do not silently change a filter merely because one checkbox
+was selected.</p>
+<p>Same-instance history is the default use case. Cross-instance comparison is
+also valuable for environment drift, so permit it when all selected snapshots
+have the same <code>serviceId</code>. Show a <code>Cross-instance comparison</code> banner and keep
+instance and environment metadata pinned above each column. Reject snapshots
+with different service ids in the first release; comparing unrelated services
+mostly produces missing-key noise and is better handled as separate exports.</p>
+<p>All selected snapshots must belong to the signed-in host. This is enforced by
+the server even though the list query is already host-scoped.</p>
+<h2 id="instanceadmin-current-snapshot-entry-point"><a class="header" href="#instanceadmin-current-snapshot-entry-point"><code>InstanceAdmin</code> Current-Snapshot Entry Point</a></h2>
+<p>Add controlled row selection and a <code>Compare current snapshots</code> toolbar action
+to <code>/app/instance/instanceAdmin</code>. This is a second selector for the shared
+comparison page, not a separate comparison implementation.</p>
+<p>Selection rules are:</p>
+<ul>
+<li>select two to four unique instances</li>
+<li>preserve selection across server-side pagination and sorting</li>
+<li>clear selection when the authenticated host changes</li>
+<li>require a non-empty, identical <code>serviceId</code> across all selected instances</li>
+<li>use only rows visible under the existing <code>InstanceAdmin</code> read/ownership scope</li>
+<li>do not infer config snapshot availability from the instance row’s <code>current</code>
+field</li>
+</ul>
+<p>Reject a fifth instance and mixed-service selections before making a resolver
+request. Show selected instance names, environments, and a Clear action in the
+toolbar. Do not silently change the page’s active/current filters when compare
+mode is enabled.</p>
+<h3 id="current-snapshot-resolver-api"><a class="header" href="#current-snapshot-resolver-api">Current-Snapshot Resolver API</a></h3>
+<p>Add a read action:</p>
+<pre><code class="language-text">lightapi.net/config/getCurrentConfigSnapshotsByInstances/0.1.0
+</code></pre>
+<p>Request:</p>
+<pre><code class="language-json">{
+  "hostId": "019...",
+  "instanceIds": ["019...", "019..."],
+  "configPhase": "R"
+}
+</code></pre>
+<p><code>instanceIds</code> must contain two to four unique ids. The handler validates the
+authenticated host and instance-read scope, then resolves all ids in one
+bounded query against <code>config_snapshot_t</code> and <code>instance_t</code>. It requires
+<code>cs.current = true</code>, phase <code>R</code> property counts, and one current config snapshot
+per selected instance. It must preserve request order and must not issue one
+query per instance.</p>
+<p>Response:</p>
+<pre><code class="language-json">{
+  "resolvedAt": "2026-07-13T18:30:00Z",
+  "comparisonLimits": {
+    "maxProperties": 10000,
+    "maxResponseBytes": 5242880
+  },
+  "snapshots": [
+    {
+      "instanceId": "019...",
+      "instanceName": "light-gateway-dev",
+      "serviceId": "com.networknt.light-gateway-1.0.0",
+      "environment": "dev",
+      "snapshotId": "019...",
+      "snapshotTs": "2026-07-13T18:00:00Z",
+      "propertyCount": 125
+    }
+  ]
+}
+</code></pre>
+<p>The server revalidates that all resolved snapshots have the same non-empty
+<code>serviceId</code>; the UI check is only an early usability check. Resolution is
+all-or-nothing. A missing instance, missing current snapshot, multiple current
+snapshots, mixed service ids, ownership failure, or property-limit violation
+must not produce a partial set. Error responses contain ids and counts only,
+never configuration values.</p>
+<p>Before enabling the resolver, add a partial unique index matching the intended
+identity and access path:</p>
+<pre><code class="language-sql">CREATE UNIQUE INDEX uq_config_snapshot_current_instance
+ON config_snapshot_t (host_id, instance_id)
+WHERE current IS TRUE;
+</code></pre>
+<p>This both supports the resolver query and guarantees at most one current
+snapshot per host/instance. Deployment must first audit every target database
+for duplicate current rows and for current snapshot rows whose <code>service_id</code>
+does not match the authoritative <code>instance_t.service_id</code>. Any current-row
+violation blocks rollout until an operator reviews and applies an idempotent,
+recorded remediation. Historical service-id mismatches are reported
+separately and are not rewritten automatically: historical snapshot metadata
+is evidence of the captured state and needs an explicitly approved migration
+if the product decides it is corrupt. Verify the final resolver with
+<code>EXPLAIN (ANALYZE, BUFFERS)</code> on representative data and require an index-backed
+plan without per-instance queries.</p>
+<p>After successful resolution, navigate to:</p>
+<pre><code class="language-text">/app/config/configSnapshotCompare?snapshotIds=&lt;id1&gt;,&lt;id2&gt;[,&lt;id3&gt;,&lt;id4&gt;]&amp;source=current-instances
+</code></pre>
+<p>The comparison request continues to use explicit snapshot ids. This freezes
+the result to the snapshots that were current when the user started the
+comparison and keeps refresh/deep links reproducible. If one becomes
+non-current before or after the values request, show its normal current badge
+as false and offer <code>Refresh current snapshots</code>, which resolves the instance ids
+from the loaded snapshot metadata again. Never silently replace a comparison
+column while the user is inspecting it.</p>
+<h2 id="comparison-page"><a class="header" href="#comparison-page">Comparison Page</a></h2>
+<p>Add a route such as:</p>
+<pre><code class="language-text">/app/config/configSnapshotCompare?snapshotIds=&lt;id1&gt;,&lt;id2&gt;[,&lt;id3&gt;,&lt;id4&gt;]
+</code></pre>
+<p>Keeping the ids in the URL makes refresh and task-aware navigation reliable.
+The host continues to come from authenticated user context and is not trusted
+from the URL.</p>
+<p>The page header contains ordered snapshot cards. Each card shows:</p>
+<ul>
+<li>a short label (<code>A</code>, <code>B</code>, <code>C</code>, or <code>D</code>)</li>
+<li>instance and environment</li>
+<li>snapshot timestamp and id</li>
+<li>description, snapshot type, and current badge</li>
+<li>property count and digest</li>
+</ul>
+<p>The snapshot list continues to show the stored <code>userId</code> as the authoritative
+audit identity. The first release does not resolve it through a user-profile
+service: display names can change, and profile availability must not affect
+snapshot inspection. A later enhancement may show a human-readable name
+alongside the raw <code>userId</code>, but must not replace or obscure the identifier.</p>
+<p>The user can choose any selected snapshot as the baseline and reorder the
+cards. The initial baseline is the oldest selected snapshot, using
+<code>snapshotTs</code> and then <code>snapshotId</code> as a deterministic tie-breaker.</p>
+<h3 id="effective-property-matrix"><a class="header" href="#effective-property-matrix">Effective Property Matrix</a></h3>
+<p>The default view is a table built from the union of every emitted key:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Configuration key</th><th>Snapshot A</th><th>Snapshot B</th><th>Snapshot C</th><th>Status</th></tr>
+</thead>
+<tbody>
+<tr><td><code>server.enableHttp</code></td><td><code>true</code></td><td><code>false</code></td><td><code>false</code></td><td>Value changed</td></tr>
+<tr><td><code>server.httpPort</code></td><td><code>8080</code></td><td><code>8080</code></td><td><code>8080</code></td><td>Same</td></tr>
+<tr><td><code>oauth.tokenKeyUrl</code></td><td>Missing</td><td>Present</td><td>Present</td><td>Added after baseline</td></tr>
+</tbody>
+</table>
+</div>
+<p>Each value cell renders scalars compactly and maps/lists in an expandable
+formatted block. It also shows <code>valueType</code> and <code>sourceLevel</code> as secondary text.
+Use typed deep equality after canonicalizing map keys; never compare JSON or
+YAML strings. Equal-looking values with different types remain changes: for
+example, integer <code>1</code> differs from float <code>1.0</code>, and string <code>"true"</code> differs from
+boolean <code>true</code>.</p>
+<p>Status rules are:</p>
+<ul>
+<li><code>Same</code>: the key exists in all snapshots with the same type and value.</li>
+<li><code>Value changed</code>: at least two selected snapshots have different typed
+values or value types.</li>
+<li><code>Missing</code>: the key is absent from at least one selected snapshot.</li>
+<li><code>Source changed</code>: all effective values match but <code>sourceLevel</code> differs.</li>
+</ul>
+<p>For three or four snapshots, the row status describes the selected set and
+each non-baseline cell additionally receives a same/changed/missing marker
+relative to the baseline.</p>
+<p>Provide filters for All, Changed, Missing, Source changed, and Same, plus a key
+search. Default to Changed + Missing so the first view focuses on drift. Keep
+unchanged rows available because users also need to prove that a critical
+property did not change.</p>
+<h3 id="two-snapshot-yaml-diff"><a class="header" href="#two-snapshot-yaml-diff">Two-Snapshot YAML Diff</a></h3>
+<p>When exactly two snapshots are selected, add a <code>YAML diff</code> tab with synchronized
+left and right panes. Both panes use canonical YAML, so line differences are
+meaningful. Support wrapping, next/previous difference, copy, and download.</p>
+<p>Use the official <a href="https://codemirror.net/docs/ref/#merge.MergeView">CodeMirror <code>MergeView</code>
+API</a> from
+<code>@codemirror/merge</code> as the preferred implementation because the application
+already uses CodeMirror 6 and the YAML language extension. Configure both
+editors as read-only, set bounded <code>scanLimit</code> and <code>timeout</code> diff options for
+large or highly divergent files, lazy-load the merge module with the YAML tab,
+and call <code>destroy()</code> when the tab unmounts. Phase 0 still verifies
+accessibility, license, bundle impact, and compatibility before freezing the
+dependency.</p>
+<p>Do not show this tab for three or four snapshots. The property matrix is the
+side-by-side representation for those counts.</p>
+<h2 id="security-and-privacy"><a class="header" href="#security-and-privacy">Security and Privacy</a></h2>
+<p>Snapshot values can contain credentials and other sensitive configuration.</p>
+<ul>
+<li>Authorize the query with <code>portal.r</code> and validate authenticated host access
+for every requested snapshot.</li>
+<li>Return <code>Cache-Control: no-store</code> through the portal query path.</li>
+<li>Do not write YAML, typed values, or comparison responses to application logs.</li>
+<li>Do not store selected values or YAML in <code>localStorage</code>, <code>sessionStorage</code>, task
+context, or analytics events.</li>
+<li>Store only snapshot ids in the URL.</li>
+<li>Make Copy and Download explicit user actions.</li>
+<li>Preserve normal portal session expiry and CSRF behavior.</li>
+</ul>
+<p>If fine-grained config-read permissions are introduced later, this endpoint
+must use the same effective permission as the runtime snapshot property view,
+not a weaker generic page permission.</p>
+<h2 id="performance-and-limits"><a class="header" href="#performance-and-limits">Performance and Limits</a></h2>
+<ul>
+<li>Cap the request at four snapshots.</li>
+<li>Apply the proposed 10,000-property cap to the total entries across the
+request, not independently to each snapshot.</li>
+<li>Batch metadata and property loading.</li>
+<li>Return only requested representations through <code>include</code>.</li>
+<li>Enable HTTP compression for JSON/YAML responses.</li>
+<li>Virtualize or paginate the rendered comparison rows in the browser, but build
+the comparison from the complete server response.</li>
+<li>Abort an in-flight request when the user changes selection or leaves the
+page.</li>
+<li>Enforce a configurable property-count and serialized-response-size limit and
+return an explicit error instead of truncating.</li>
+<li>Build the sorted key union, typed deep comparisons, and row classifications
+in a module Web Worker. Use request generations, ignore stale replies, and
+terminate the worker when the request changes or the page unmounts.</li>
+<li>Keep React rendering, progress/error state, and the virtualized matrix on the
+main thread. <code>useTransition</code> may lower the priority of committing a completed
+result or changing filters, but it does not replace the worker for the
+comparison calculation itself.</li>
+</ul>
+<p>The server must never paginate the data used to calculate a comparison. A
+rendered table may paginate after the full key union is known.</p>
+<h2 id="implementation-areas"><a class="header" href="#implementation-areas">Implementation Areas</a></h2>
+<h3 id="light-portal"><a class="header" href="#light-portal"><code>light-portal</code></a></h3>
+<ul>
+<li>Add a host-scoped persistence method that loads one to four snapshots by
+explicit id, including metadata and effective <code>Config</code> rows.</li>
+<li>Add the method to <code>PortalDbProvider</code> and <code>PortalDbProviderImpl</code>.</li>
+<li>Extract the canonical typed YAML serializer into a shared utility/domain
+class.</li>
+<li>Add a host-scoped batch resolver that maps two to four instance ids to exactly
+one current snapshot each and returns runtime property counts in request
+order.</li>
+<li>Scope current-snapshot reset/update statements by both <code>host_id</code> and
+<code>instance_id</code> so the write path matches the database identity.</li>
+</ul>
+<h3 id="portal-db"><a class="header" href="#portal-db"><code>portal-db</code></a></h3>
+<ul>
+<li>Add pre-deployment audits for duplicate current rows and current/historical
+snapshot-to-instance <code>service_id</code> mismatches.</li>
+<li>Add an operator-reviewed, idempotent remediation path for blocking current
+rows; do not silently choose a duplicate winner or rewrite history.</li>
+<li>Add the partial unique current-snapshot index to baseline DDL and an additive
+patch, with a deployment choice between concurrent creation and a maintenance
+window based on table size and patch-runner transaction constraints.</li>
+<li>Add schema and query-plan gates proving duplicate current rows are rejected
+and the resolver lookup uses the new index.</li>
+</ul>
+<h3 id="light-config-server"><a class="header" href="#light-config-server"><code>light-config-server</code></a></h3>
+<ul>
+<li>Update the Java config-server path to use the shared Java serializer.</li>
+<li>Run the shared golden test vectors through the Java runtime path.</li>
+</ul>
+<h3 id="portal-service"><a class="header" href="#portal-service"><code>portal-service</code></a></h3>
+<ul>
+<li>Add the Rust implementation of the canonical typed YAML contract, preferably
+in <code>crates/portal-core</code> beside the snapshot row model.</li>
+<li>Update <code>apps/config-server</code> to use the Rust codec instead of interpolating raw
+<code>property_value</code> strings.</li>
+<li>Run the same golden test vectors through the Rust runtime path.</li>
+</ul>
+<h3 id="config-query"><a class="header" href="#config-query"><code>config-query</code></a></h3>
+<ul>
+<li>Add <code>GetConfigSnapshotValues</code> and register
+<code>lightapi.net/config/getConfigSnapshotValues/0.1.0</code> in <code>spec.yaml</code>.</li>
+<li>Validate snapshot count, duplicates, phase, <code>include</code>, and host ownership.</li>
+<li>Return ordered snapshot objects and stable error responses.</li>
+<li>Add <code>GetCurrentConfigSnapshotsByInstances</code>, reuse the comparison limit model,
+enforce host/instance-read scope, and return only resolver metadata.</li>
+</ul>
+<h3 id="portal-view-1"><a class="header" href="#portal-view-1"><code>portal-view</code></a></h3>
+<ul>
+<li>Add a <code>values.yml</code> row action, preview component, copy helper, and YAML
+download helper.</li>
+<li>Add cross-page row-selection state with a four-snapshot cap.</li>
+<li>Add the Compare selected toolbar action and Show snapshot history helper.</li>
+<li>Add <code>ConfigSnapshotCompare.tsx</code>, its route, task/page registry metadata, and
+contextual help registration.</li>
+<li>Add reusable typed-value and source-change comparison helpers.</li>
+<li>Add cross-page <code>InstanceAdmin</code> selection, same-service validation, the
+current-snapshot resolver call, and navigation into the shared comparison
+route.</li>
+</ul>
+<p>No new table or column is required because effective typed values and snapshot
+metadata are already materialized. The dependent cross-instance workflow does
+require the partial unique current-snapshot index above; the per-snapshot
+output/comparison workflow can ship independently of that index.</p>
+<h2 id="testing"><a class="header" href="#testing">Testing</a></h2>
+<h3 id="backend"><a class="header" href="#backend">Backend</a></h3>
+<ul>
+<li>An explicit historical <code>snapshotId</code> is returned even when <code>current = false</code>.</li>
+<li>A snapshot outside <code>hostId</code> is rejected.</li>
+<li>One to four ids are accepted in request order; zero, five, duplicates, and
+unknown ids are rejected.</li>
+<li>Only runtime <code>Config</code> rows are emitted.</li>
+<li>Top-level and nested map keys are stable and sorted while list order is
+preserved.</li>
+<li>String, boolean, integer, float, map, and list values retain their types.</li>
+<li>Integer <code>1</code> and float <code>1.0</code>, and string <code>"true"</code> and boolean <code>true</code>, remain
+distinct typed values.</li>
+<li>Invalid typed values and duplicate emitted keys fail loudly.</li>
+<li>Source comments are emitted deterministically.</li>
+<li>The current snapshot output is byte-for-byte equal to both supported
+config-server implementations’ <code>values.yml</code> output.</li>
+<li>Batch loading does not execute one property query per selected snapshot.</li>
+<li>Snapshot list counts include only phase <code>R</code> <code>Config</code> rows and are loaded
+without an N+1 query.</li>
+<li>The instance resolver returns one ordered current snapshot per selected
+instance and rejects missing, duplicate-current, mixed-service, cross-host,
+and unauthorized selections without partial output.</li>
+<li>The database rejects a second current snapshot for the same host/instance
+while allowing current rows for different host/instance pairs.</li>
+<li>The resolver’s representative <code>EXPLAIN (ANALYZE, BUFFERS)</code> plan uses the
+partial current-snapshot index and the resolver remains free of N+1 queries.</li>
+<li>Pre-deployment audits classify duplicate current rows and current versus
+historical service-id mismatches without mutating data by default.</li>
+</ul>
+<h3 id="frontend"><a class="header" href="#frontend">Frontend</a></h3>
+<ul>
+<li>The row action requests the clicked snapshot id, including a historical row.</li>
+<li>Preview loading, empty, error, Copy, and Download states work.</li>
+<li>The download has the expected filename, MIME type, and bytes.</li>
+<li>Selection survives server-side paging and rejects a fifth snapshot.</li>
+<li>Selection proactively blocks a total over the server-provided property cap,
+while a later authoritative <code>413</code> still produces actionable guidance.</li>
+<li>Show snapshot history removes only the <code>current</code> filter.</li>
+<li>Different-service selections are rejected; same-service cross-instance
+selections show a warning.</li>
+<li>Two, three, and four snapshot matrices use the complete key union.</li>
+<li>Value, missing, and source-only changes are classified correctly.</li>
+<li>Map key order does not create a false change and list order does.</li>
+<li>Equal-looking cross-type values are marked changed and display their types.</li>
+<li>Worst-case permitted comparison computation runs in the worker, ignores stale
+replies, and terminates on selection change or unmount.</li>
+<li>The YAML diff tab appears only for exactly two snapshots.</li>
+<li>The merge view is read-only, uses bounded diff work, and is destroyed on
+unmount.</li>
+<li>Every download revokes its Blob URL and removes its temporary anchor on
+success or failure.</li>
+<li>A comparison URL restores selection after refresh without storing values.</li>
+<li><code>InstanceAdmin</code> selection survives paging, rejects mixed services and a fifth
+instance, and never treats the instance <code>current</code> flag as snapshot state.</li>
+<li>Current-instance resolution navigates with exact snapshot ids and an
+<code>source=current-instances</code> marker.</li>
+<li>A snapshot that becomes non-current remains visible as the resolved artifact;
+refresh requires an explicit user action.</li>
+</ul>
+<h2 id="acceptance-criteria"><a class="header" href="#acceptance-criteria">Acceptance Criteria</a></h2>
+<ul>
+<li>Every row on <code>/app/config/configSnapshot</code> can output a complete, sorted,
+type-correct runtime <code>values.yml</code> for that exact snapshot.</li>
+<li>Output for a current snapshot matches what both supported config-server
+implementations serve for the same service and environment.</li>
+<li>Users can select two to four snapshots and compare all effective keys in one
+view.</li>
+<li>Oversized selections are rejected proactively when counts prove they exceed
+the property cap, without weakening the API’s count and byte-limit checks.</li>
+<li>Users can select two to four same-service instances in <code>InstanceAdmin</code> and
+compare the snapshots that were current when comparison started.</li>
+<li>The database enforces at most one current config snapshot per
+<code>host_id + instance_id</code>, and resolver rollout is blocked by unresolved
+current-row integrity violations.</li>
+<li>Two selected snapshots can also be inspected as a canonical side-by-side
+YAML diff.</li>
+<li>The comparison clearly distinguishes value changes, missing keys, and
+source-only changes.</li>
+<li>Requests cannot read snapshots from another host and no sensitive value is
+persisted in browser storage.</li>
+</ul>
+<h2 id="rollout"><a class="header" href="#rollout">Rollout</a></h2>
+<ol>
+<li>Freeze the canonical contract and cross-language golden test vectors.</li>
+<li>Add the shared Java serializer, equivalent Rust serializer, explicit
+snapshot query, parity tests, and the <code>getConfigSnapshotValues</code> action.</li>
+<li>Add the per-row <code>values.yml</code> preview, Copy, and Download actions.</li>
+<li>Add selection and the two-snapshot property matrix/YAML diff.</li>
+<li>Enable the already-designed third and fourth matrix columns after the same
+comparison tests pass with dynamic columns.</li>
+<li>Audit current-snapshot integrity in each target database, apply reviewed
+remediation for blocking current rows, deploy the partial unique index, and
+verify the resolver query plan.</li>
+<li>Add <code>InstanceAdmin</code> current-snapshot resolution and selection after the
+shared comparison route, backend values API, and database gates have passed.</li>
+</ol>
+<p>The API and selection cap support four snapshots from the beginning, even if
+the UI rollout enables two first. This avoids an API redesign while still
+allowing the simpler two-snapshot experience to be validated independently.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="rust-controller-logging"><a class="header" href="#rust-controller-logging">Rust Controller Logging</a></h1>
 <p>The controller service dashboard already has a logger page for Java runtimes.
 That page is built around Logback concepts: named loggers, per-logger levels,
@@ -1534,7 +2239,7 @@ Logback logger levels.</p>
 </code></pre>
 <p>This keeps the process at <code>info</code> by default and enables <code>debug</code> only for the
 gateway security target.</p>
-<h2 id="goals-1"><a class="header" href="#goals-1">Goals</a></h2>
+<h2 id="goals-2"><a class="header" href="#goals-2">Goals</a></h2>
 <ul>
 <li>Provide one operator page for Rust log filter control, time-based history,
 and live streaming.</li>
@@ -1550,7 +2255,7 @@ and source.</li>
 <li>Make reset behavior explicit: live filter changes are temporary unless the
 instance configuration is updated separately.</li>
 </ul>
-<h2 id="non-goals-2"><a class="header" href="#non-goals-2">Non-Goals</a></h2>
+<h2 id="non-goals-3"><a class="header" href="#non-goals-3">Non-Goals</a></h2>
 <ul>
 <li>Do not replace Java Logback logger management.</li>
 <li>Do not make the browser connect directly to pods, services, or container
@@ -2062,7 +2767,7 @@ per active user in the role.</li>
 </ul>
 <p>The Worklist page can show assigned tasks, but it does not yet provide a
 generic input screen for the user to approve or enter data.</p>
-<h2 id="goals-2"><a class="header" href="#goals-2">Goals</a></h2>
+<h2 id="goals-3"><a class="header" href="#goals-3">Goals</a></h2>
 <ul>
 <li>Provide one generic page for all human-input workflow tasks.</li>
 <li>Render the input controls from the ask task definition, not from a
@@ -2075,7 +2780,7 @@ side.</li>
 <li>Keep the UI useful for approval tasks first while leaving room for richer
 object-input tasks.</li>
 </ul>
-<h2 id="non-goals-3"><a class="header" href="#non-goals-3">Non-Goals</a></h2>
+<h2 id="non-goals-4"><a class="header" href="#non-goals-4">Non-Goals</a></h2>
 <ul>
 <li>Do not create a custom approval page for each workflow.</li>
 <li>Do not make every workflow task human-actionable; only <code>ask</code> tasks use this
@@ -2553,7 +3258,7 @@ backend.</p>
 <li>Preserve host scoping and existing role-based page visibility.</li>
 <li>Avoid presenting UI-side filtering as a security boundary.</li>
 </ul>
-<h2 id="non-goals-4"><a class="header" href="#non-goals-4">Non-Goals</a></h2>
+<h2 id="non-goals-5"><a class="header" href="#non-goals-5">Non-Goals</a></h2>
 <ul>
 <li>Do not claim UI filtering is sufficient authorization.</li>
 <li>Do not replace service-layer rule-engine enforcement.</li>
@@ -3079,7 +3784,7 @@ of them.</p>
 <li>Support future documentation search, related topics, and task-specific help.</li>
 <li>Preserve the ability to run the app locally with a configurable docs base URL.</li>
 </ul>
-<h2 id="non-goals-5"><a class="header" href="#non-goals-5">Non-Goals</a></h2>
+<h2 id="non-goals-6"><a class="header" href="#non-goals-6">Non-Goals</a></h2>
 <ul>
 <li>Do not build a full documentation authoring system inside <code>portal-view</code>.</li>
 <li>Do not duplicate long user guides in component source files.</li>
@@ -3490,7 +4195,7 @@ processing boundary.</p>
 whose handler currently returns an empty response. That explains the browser
 error <code>Unexpected end of JSON input</code>, but it is separate from the notification
 status design.</p>
-<h2 id="goals-3"><a class="header" href="#goals-3">Goals</a></h2>
+<h2 id="goals-4"><a class="header" href="#goals-4">Goals</a></h2>
 <ul>
 <li>Show the current user the latest event processing results in the profile
 notification page.</li>
@@ -3503,7 +4208,7 @@ projection method.</li>
 <li>Keep enough diagnostic data to debug failed projections.</li>
 <li>Keep notification writes idempotent so event replay is safe.</li>
 </ul>
-<h2 id="non-goals-6"><a class="header" href="#non-goals-6">Non-Goals</a></h2>
+<h2 id="non-goals-7"><a class="header" href="#non-goals-7">Non-Goals</a></h2>
 <ul>
 <li>Do not replace <code>event_store_t</code>, <code>outbox_message_t</code>, or <code>dead_letter_queue</code>.</li>
 <li>Do not use notifications as the source of truth for projection state.</li>
@@ -3819,7 +4524,7 @@ it or override it with the token <code>user_id</code>.</li>
 to a specific user by providing <code>userId</code>.</li>
 <li>The backend should enforce this using token claims, not only UI filters.</li>
 </ul>
-<h2 id="portal-view-1"><a class="header" href="#portal-view-1">Portal View</a></h2>
+<h2 id="portal-view-2"><a class="header" href="#portal-view-2">Portal View</a></h2>
 <p>The profile notification page should become a processing-status view.</p>
 <p>Recommended columns:</p>
 <ul>
@@ -4037,7 +4742,7 @@ protocol, lifecycle status, and governance metadata.</p>
 <p>The service query layer also returns <code>categoryIds</code>, <code>categories</code>, <code>tagIds</code>, and
 <code>tags</code> for API rows. The catalog should use those fields for display and
 filtering instead of reintroducing the legacy <code>apiTags</code> string field.</p>
-<h2 id="goals-4"><a class="header" href="#goals-4">Goals</a></h2>
+<h2 id="goals-5"><a class="header" href="#goals-5">Goals</a></h2>
 <ul>
 <li>Add a Marketplace menu entry for an API catalog.</li>
 <li>Use database-backed categories and tags, not hard-coded UI lists.</li>
@@ -4048,7 +4753,7 @@ filtering instead of reintroducing the legacy <code>apiTags</code> string field.
 runtime bindings, and owner actions.</li>
 <li>Preserve host scope and ownership rules already used by API administration.</li>
 </ul>
-<h2 id="non-goals-7"><a class="header" href="#non-goals-7">Non-Goals</a></h2>
+<h2 id="non-goals-8"><a class="header" href="#non-goals-8">Non-Goals</a></h2>
 <ul>
 <li>Do not replace API administration pages with the catalog.</li>
 <li>Do not store display names in API rows when they can be resolved from
@@ -4358,7 +5063,7 @@ to expose the effective agent metadata.</li>
 </ul>
 <p>The registration UX should make this model explicit. Operators should not have
 to understand the table split. They should see one task: register an AI agent.</p>
-<h2 id="goals-5"><a class="header" href="#goals-5">Goals</a></h2>
+<h2 id="goals-6"><a class="header" href="#goals-6">Goals</a></h2>
 <ul>
 <li>Add a focused Task Center flow named <code>Register AI Agent</code>.</li>
 <li>Register the agent first as an API and API version.</li>
@@ -4370,7 +5075,7 @@ table writes.</li>
 <li>Allow skills, tools, memory, access control, and deployment links to be added
 after the base agent is registered.</li>
 </ul>
-<h2 id="non-goals-8"><a class="header" href="#non-goals-8">Non-Goals</a></h2>
+<h2 id="non-goals-9"><a class="header" href="#non-goals-9">Non-Goals</a></h2>
 <ul>
 <li>Do not create a second standalone agent registry independent from APIs.</li>
 <li>Do not make <code>AgentDefinitionCreatedEvent</code> create <code>api_version_t</code>.</li>
@@ -4745,7 +5450,7 @@ and required skill assignment would block simple conversational agents.</li>
 <code>ApiCreatedEvent</code> separate until automation needs a full create-everything
 command.</li>
 </ul>
-<h2 id="decision-summary"><a class="header" href="#decision-summary">Decision Summary</a></h2>
+<h2 id="decision-summary-1"><a class="header" href="#decision-summary-1">Decision Summary</a></h2>
 <p>Register AI agents through a Task Center flow that starts from API and API
 version registration. Create <code>api_version_t</code> first, then create
 <code>agent_definition_t</code> with <code>agentDefId</code> equal to <code>apiVersionId</code>. Use two domain
@@ -4813,7 +5518,7 @@ address.</p>
 address can fail even though the service is healthy on IPv4. One observed
 failure is the gateway proxying <code>/oauth2/{providerId}/code</code> to
 <code>https://light-oauth:6881</code> and receiving <code>ECONNREFUSED</code> on the IPv6 address.</p>
-<h2 id="goals-6"><a class="header" href="#goals-6">Goals</a></h2>
+<h2 id="goals-7"><a class="header" href="#goals-7">Goals</a></h2>
 <ul>
 <li>Allow <code>light-oauth</code> to bind IPv4, IPv6, or a specific interface from config.</li>
 <li>Keep the current default behavior as IPv4 wildcard binding.</li>
@@ -4822,7 +5527,7 @@ new property.</li>
 <li>Build the listener address with <code>SocketAddr</code> so IPv6 addresses are parsed
 correctly.</li>
 </ul>
-<h2 id="non-goals-9"><a class="header" href="#non-goals-9">Non-Goals</a></h2>
+<h2 id="non-goals-10"><a class="header" href="#non-goals-10">Non-Goals</a></h2>
 <ul>
 <li>Do not enable IPv6 for every deployment by default.</li>
 <li>Do not change TLS, OIDC, token, or database behavior.</li>
@@ -4911,7 +5616,7 @@ For IPv6, the value must use bracketed socket-address syntax:</p>
 </ul>
 <p>There is no string concatenation of IP and port in the controller listener
 path, so the common IPv6 failure form <code>:::8438</code> is avoided.</p>
-<h2 id="goals-7"><a class="header" href="#goals-7">Goals</a></h2>
+<h2 id="goals-8"><a class="header" href="#goals-8">Goals</a></h2>
 <ul>
 <li>Support IPv4, IPv6, and dual-stack controller listener binding.</li>
 <li>Keep the current default as IPv4 wildcard binding.</li>
@@ -4921,7 +5626,7 @@ or DNS hostnames.</li>
 <li>Reject unspecified runtime registration addresses such as <code>0.0.0.0</code> and
 <code>::</code>, because those are bind addresses, not reachable service addresses.</li>
 </ul>
-<h2 id="non-goals-10"><a class="header" href="#non-goals-10">Non-Goals</a></h2>
+<h2 id="non-goals-11"><a class="header" href="#non-goals-11">Non-Goals</a></h2>
 <ul>
 <li>Do not enable IPv6 by default.</li>
 <li>Do not change controller WebSocket paths or JSON-RPC contracts.</li>
@@ -5043,7 +5748,7 @@ exist, which endpoint projections are invokable by agents, which skills they
 belong to, and which agents are allowed or expected to use those skills. Without
 that catalog, the agent can list executable gateway tools, but it has no domain
 guidance beyond each tool description.</p>
-<h2 id="goals-8"><a class="header" href="#goals-8">Goals</a></h2>
+<h2 id="goals-9"><a class="header" href="#goals-9">Goals</a></h2>
 <ul>
 <li>Keep the gateway as the runtime source of truth for MCP tool execution.</li>
 <li>Keep direct gateway <code>tools/list</code> and <code>tools/call</code> working even when no skills
@@ -5067,7 +5772,7 @@ to be wrapped before it can be called.</li>
 portal-query can perform macro-filtering, keyword search, vector ranking,
 context viability checks, and safety filtering.</li>
 </ul>
-<h2 id="non-goals-11"><a class="header" href="#non-goals-11">Non-Goals</a></h2>
+<h2 id="non-goals-12"><a class="header" href="#non-goals-12">Non-Goals</a></h2>
 <ul>
 <li>Do not move MCP request routing or downstream REST calls into the controller.</li>
 <li>Do not implement <code>skill/search</code> in controller-rs. Controller-rs can
@@ -6108,7 +6813,7 @@ next phase:</p>
 </ul>
 <p>The design goal is to split deployment concerns without splitting the runtime
 network or the control-plane model.</p>
-<h2 id="goals-9"><a class="header" href="#goals-9">Goals</a></h2>
+<h2 id="goals-10"><a class="header" href="#goals-10">Goals</a></h2>
 <ul>
 <li>Move the two demo APIs and local <code>light-agent</code> services into a separate
 Docker Compose overlay file.</li>
@@ -6125,7 +6830,7 @@ workflows.</li>
 <li>Use <code>light-workflow</code> for deterministic orchestration, retries, human tasks,
 assertions, audit, and multi-agent coordination.</li>
 </ul>
-<h2 id="non-goals-12"><a class="header" href="#non-goals-12">Non-Goals</a></h2>
+<h2 id="non-goals-13"><a class="header" href="#non-goals-13">Non-Goals</a></h2>
 <ul>
 <li>Do not move the demo APIs or agent services into a different Compose project
 by default.</li>
@@ -6559,7 +7264,7 @@ owner:</p>
 </code></pre>
 <p>Once that contract is in place, snapshot export and conversion can safely
 include the event-backed memory state where appropriate.</p>
-<h2 id="non-goals-13"><a class="header" href="#non-goals-13">Non-Goals</a></h2>
+<h2 id="non-goals-14"><a class="header" href="#non-goals-14">Non-Goals</a></h2>
 <ul>
 <li>Do not promote existing direct-write memory rows into snapshots before a
 backfill/migration event strategy exists.</li>
@@ -6851,7 +7556,7 @@ emits synthetic Hindsight events in dependency order.</li>
 </code></pre>
 <p>Do not remove skip rules for production exports until backfill has been run or
 the deployment has no legacy direct-write rows.</p>
-<h2 id="testing"><a class="header" href="#testing">Testing</a></h2>
+<h2 id="testing-1"><a class="header" href="#testing-1">Testing</a></h2>
 <p>Add focused tests:</p>
 <ul>
 <li><code>GlobalSnapshotPersistenceImplTest</code>: memory tables remain skipped before
@@ -6898,7 +7603,7 @@ field, and the Portal UI should not expose raw vectors to users.</li>
 <p>As a result, new endpoint-backed tool rows start with a null
 <code>description_embedding</code>, and user edits can leave any future vector stale unless
 the write path marks it for regeneration.</p>
-<h2 id="goals-10"><a class="header" href="#goals-10">Goals</a></h2>
+<h2 id="goals-11"><a class="header" href="#goals-11">Goals</a></h2>
 <ul>
 <li>Populate <code>tool_t.description_embedding</code> for endpoint-backed and manually
 authored tools.</li>
@@ -6910,7 +7615,7 @@ latency.</li>
 disabled or temporarily failing.</li>
 <li>Keep the first implementation aligned with the existing <code>VECTOR(384)</code> schema.</li>
 </ul>
-<h2 id="non-goals-14"><a class="header" href="#non-goals-14">Non-Goals</a></h2>
+<h2 id="non-goals-15"><a class="header" href="#non-goals-15">Non-Goals</a></h2>
 <ul>
 <li>Do not require every tool to have an embedding before it can be listed,
 edited, linked to a skill, or executed through the gateway.</li>
@@ -7287,7 +7992,7 @@ forms whose <code>definition</code> field is a YAML textarea.</li>
 </ul>
 <p>The first Workflow Editor can therefore be an incremental UI improvement over
 the existing definition CRUD and start workflow command.</p>
-<h2 id="goals-11"><a class="header" href="#goals-11">Goals</a></h2>
+<h2 id="goals-12"><a class="header" href="#goals-12">Goals</a></h2>
 <ul>
 <li>Keep workflow YAML as the canonical persisted artifact.</li>
 <li>Provide a readable step outline or graph next to the YAML editor.</li>
@@ -7300,7 +8005,7 @@ flows.</li>
 authoring component with skill-specific constraints.</li>
 <li>Preserve owner scoping and existing Portal command/query conventions.</li>
 </ul>
-<h2 id="non-goals-15"><a class="header" href="#non-goals-15">Non-Goals</a></h2>
+<h2 id="non-goals-16"><a class="header" href="#non-goals-16">Non-Goals</a></h2>
 <ul>
 <li>Do not execute workflow logic in Portal View.</li>
 <li>Do not make skills the workflow runtime.</li>
@@ -7641,7 +8346,7 @@ should model catalog scope explicitly:</p>
 <li>a separate SPA may expose the same backend catalog, but it should not become
 the catalog authority.</li>
 </ul>
-<h2 id="goals-12"><a class="header" href="#goals-12">Goals</a></h2>
+<h2 id="goals-13"><a class="header" href="#goals-13">Goals</a></h2>
 <ul>
 <li>Avoid duplicating the full catalog for every tenant.</li>
 <li>Prevent catalog drift between tenants and between portal instances.</li>
@@ -7660,7 +8365,7 @@ agent-facing skills and tools.</li>
 <li>Support promotion or import/export between portal instances instead of
 relying on ad hoc row copies.</li>
 </ul>
-<h2 id="non-goals-16"><a class="header" href="#non-goals-16">Non-Goals</a></h2>
+<h2 id="non-goals-17"><a class="header" href="#non-goals-17">Non-Goals</a></h2>
 <ul>
 <li>Do not clone every global catalog row into every tenant by default.</li>
 <li>Do not make a separate SPA the source of truth for catalog data.</li>
@@ -7920,7 +8625,7 @@ entity-specific effective endpoints?</li>
 <h1 id="oauth-audit"><a class="header" href="#oauth-audit">OAuth Audit</a></h1>
 <p>The OAuth services keep authorization codes and refresh tokens as operational state. These rows are short lived and are now written directly to <code>auth_code_t</code> and <code>auth_refresh_token_t</code> instead of being created through the general event store. This avoids high-volume login and refresh-token churn in <code>event_store_t</code> and <code>outbox_message_t</code>.</p>
 <p>Audit and login history are recorded separately in append-oriented OAuth audit tables.</p>
-<h2 id="goals-13"><a class="header" href="#goals-13">Goals</a></h2>
+<h2 id="goals-14"><a class="header" href="#goals-14">Goals</a></h2>
 <ul>
 <li>Show administrators who is currently online.</li>
 <li>Show a user the last login time and session history.</li>
@@ -8951,7 +9656,7 @@ tenant data</li>
 <p>The browser must improve usability by hiding irrelevant admin menus, but it must
 not be the security boundary. The security boundary must be enforced by the
 gateway and by the portal query and command handlers.</p>
-<h2 id="goals-14"><a class="header" href="#goals-14">Goals</a></h2>
+<h2 id="goals-15"><a class="header" href="#goals-15">Goals</a></h2>
 <ul>
 <li>Limit admin menus based on the user’s roles, positions, groups, and
 attributes.</li>
@@ -8966,7 +9671,7 @@ model for self-service admin pages.</li>
 <li>Keep authorization rules declarative enough that they can be managed from the
 existing rule and access-control pages.</li>
 </ul>
-<h2 id="non-goals-17"><a class="header" href="#non-goals-17">Non-Goals</a></h2>
+<h2 id="non-goals-18"><a class="header" href="#non-goals-18">Non-Goals</a></h2>
 <ul>
 <li>Do not rely on menu hiding as authorization.</li>
 <li>Do not make <code>host-admin</code> a global portal super admin.</li>
@@ -9514,7 +10219,7 @@ clearest ownership model.</li>
 <li><code>role_permission_t</code></li>
 </ul>
 <p>The <code>role_user_t</code> table has a foreign key to <code>(host_id, role_id)</code> in <code>role_t</code>, so role rows must exist before the user-role assignments are inserted.</p>
-<h2 id="goals-15"><a class="header" href="#goals-15">Goals</a></h2>
+<h2 id="goals-16"><a class="header" href="#goals-16">Goals</a></h2>
 <ol>
 <li>A claimed organization must be immediately usable by the selected organization owner and host owner.</li>
 <li>The default host must receive deterministic administrative roles.</li>
@@ -9522,7 +10227,7 @@ clearest ownership model.</li>
 <li>The event stream and projections must remain replayable and idempotent.</li>
 <li>The implementation must use the canonical role IDs already used by the portal data: <code>org-admin</code> and <code>host-admin</code>.</li>
 </ol>
-<h2 id="non-goals-18"><a class="header" href="#non-goals-18">Non-Goals</a></h2>
+<h2 id="non-goals-19"><a class="header" href="#non-goals-19">Non-Goals</a></h2>
 <p>This design does not introduce a new global organization-role table. Existing roles are host-scoped through <code>role_t.host_id</code>, so the organization administrator role for a claimed organization is represented as a role on the default host.</p>
 <p>This design also does not merge organization and host administration into one broad role. Organization ownership and host ownership are separate responsibilities, and the system should grant both roles only when the same user is selected for both owner fields.</p>
 <h2 id="role-model-1"><a class="header" href="#role-model-1">Role Model</a></h2>
@@ -9659,7 +10364,7 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 <p>The new tenant host does not and should not have duplicate OAuth provider/client rows. The FK therefore rejects login with:</p>
 <pre><code class="language-text">auth_session_t_host_id_client_id_provider_id_fkey
 </code></pre>
-<h2 id="goals-16"><a class="header" href="#goals-16">Goals</a></h2>
+<h2 id="goals-17"><a class="header" href="#goals-17">Goals</a></h2>
 <ol>
 <li>Keep <code>dev.lightapi.net</code> as the single master OAuth host for the instance.</li>
 <li>Allow users whose current host is a tenant host to log in through the master host’s provider/client.</li>
@@ -9668,7 +10373,7 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 <li>Allow Claim Org to switch the host owner to the new host and require logout/login for fresh claims.</li>
 <li>Keep session, auth-code, refresh-token, and audit lifecycle behavior deterministic and queryable.</li>
 </ol>
-<h2 id="non-goals-19"><a class="header" href="#non-goals-19">Non-Goals</a></h2>
+<h2 id="non-goals-20"><a class="header" href="#non-goals-20">Non-Goals</a></h2>
 <p>This design does not introduce tenant-specific OAuth provider IDs, client IDs, redirect URIs, or BFF configuration.</p>
 <p>This design does not change the portal UI or BFF to select a different OAuth provider per tenant host.</p>
 <p>This design does not remove database referential integrity. The provider-client relationship should remain enforced, but it should be enforced against the master OAuth host instead of the tenant host.</p>
@@ -10055,7 +10760,7 @@ service yet. The main gaps are:</p>
 <li>tests for schema CRUD, tenant/global lookup, versioning, and config
 validation are incomplete</li>
 </ul>
-<h2 id="goals-17"><a class="header" href="#goals-17">Goals</a></h2>
+<h2 id="goals-18"><a class="header" href="#goals-18">Goals</a></h2>
 <ul>
 <li>Store JSON Schema documents with clear tenant/global ownership.</li>
 <li>Support immutable published schema versions.</li>
@@ -10072,7 +10777,7 @@ and loading schema bodies lazily.</li>
 JSON path.</li>
 <li>Categorize and tag schemas for easier discovery and filtering.</li>
 </ul>
-<h2 id="non-goals-20"><a class="header" href="#non-goals-20">Non-Goals</a></h2>
+<h2 id="non-goals-21"><a class="header" href="#non-goals-21">Non-Goals</a></h2>
 <ul>
 <li>Do not build a full schema compatibility engine in the first release.</li>
 <li>Do not require every config property to have a schema.</li>
@@ -10489,7 +11194,7 @@ The backend lookup must enforce this even if the UI sends a forged <code>hostId<
 only return active schemas that are explicitly marked <code>external_visible = TRUE</code>.
 It should return <code>404</code> for missing, private, draft, inactive, or unauthorized
 aliases so external callers cannot enumerate private schema names.</p>
-<h2 id="testing-1"><a class="header" href="#testing-1">Testing</a></h2>
+<h2 id="testing-2"><a class="header" href="#testing-2">Testing</a></h2>
 <p>The first hardening pass should include tests for:</p>
 <ul>
 <li>create draft schema</li>
@@ -11678,7 +12383,7 @@ model conversations, read state, participant visibility, or per-user delete.</li
 messages page should load its own data from the query API.</li>
 <li>The existing private-message tests are disabled stubs.</li>
 </ul>
-<h2 id="goals-18"><a class="header" href="#goals-18">Goals</a></h2>
+<h2 id="goals-19"><a class="header" href="#goals-19">Goals</a></h2>
 <ul>
 <li>Let one logged-in user send a message to another portal user without knowing
 or seeing the recipient email.</li>
@@ -11693,7 +12398,7 @@ recipient email internally.</li>
 <li>Provide a path from the existing <code>message_t</code> skeleton to a conversation-based
 model without breaking existing UI routes immediately.</li>
 </ul>
-<h2 id="non-goals-21"><a class="header" href="#non-goals-21">Non-Goals</a></h2>
+<h2 id="non-goals-22"><a class="header" href="#non-goals-22">Non-Goals</a></h2>
 <ul>
 <li>Do not build group chat in the first phase.</li>
 <li>Do not expose email addresses in message APIs, events, UI state, or task
@@ -11930,7 +12635,7 @@ is needed later.</li>
 messaging is later needed, the contract must model the recipient host
 explicitly and pass a product/security review.</li>
 </ul>
-<h2 id="portal-view-2"><a class="header" href="#portal-view-2">Portal View</a></h2>
+<h2 id="portal-view-3"><a class="header" href="#portal-view-3">Portal View</a></h2>
 <p>Use the current profile surfaces but make them data-driven:</p>
 <ul>
 <li><code>MailMenu</code> should poll unread count and show a small list of recent
@@ -11979,7 +12684,7 @@ and hide/delete APIs.</li>
 purges only messages deleted by all participants after the retention window.</li>
 <li>Add optional push delivery later if polling becomes insufficient.</li>
 </ul>
-<h2 id="testing-2"><a class="header" href="#testing-2">Testing</a></h2>
+<h2 id="testing-3"><a class="header" href="#testing-3">Testing</a></h2>
 <p>Backend tests should cover:</p>
 <ul>
 <li>Sender is derived from token and cannot be spoofed.</li>
@@ -13950,7 +14655,7 @@ should not be forced to match <code>sid</code> until the product-level authoriza
 is explicitly designed.</p>
 <p>The same exception does not apply to controller registry registration because
 <code>service/register</code> always carries a requested <code>serviceId</code>.</p>
-<h2 id="goals-19"><a class="header" href="#goals-19">Goals</a></h2>
+<h2 id="goals-20"><a class="header" href="#goals-20">Goals</a></h2>
 <ul>
 <li>Prevent one service token from downloading another service’s config, certs,
 or files.</li>
@@ -13996,7 +14701,7 @@ helper.</p>
 <p>The focused implementation tests cover missing and mismatched <code>host</code>, missing
 and mismatched <code>sid</code>, missing and mismatched <code>env</code> when <code>envTag</code> is requested,
 blank values, whitespace trimming, and case-sensitive identifier comparison.</p>
-<h2 id="non-goals-22"><a class="header" href="#non-goals-22">Non-Goals</a></h2>
+<h2 id="non-goals-23"><a class="header" href="#non-goals-23">Non-Goals</a></h2>
 <ul>
 <li>Do not replace JWT verification middleware.</li>
 <li>Do not redesign OAuth token issuance.</li>
@@ -14413,7 +15118,7 @@ copies the current active state of this graph and lets the administrator change
 the target identity and environment-specific configuration.</p>
 <p>This is a same-host operation. Cross-host or cross-database copying remains an
 event-promotion/import concern.</p>
-<h2 id="goals-20"><a class="header" href="#goals-20">Goals</a></h2>
+<h2 id="goals-21"><a class="header" href="#goals-21">Goals</a></h2>
 <ul>
 <li>Clone an active instance and its selected active children with one command.</li>
 <li>Require a target instance name and environment tag while allowing other
@@ -14430,7 +15135,7 @@ omit it without exposing values unnecessarily.</li>
 transaction when requested.</li>
 <li>Report durable projection and snapshot status after command acceptance.</li>
 </ul>
-<h2 id="non-goals-23"><a class="header" href="#non-goals-23">Non-goals</a></h2>
+<h2 id="non-goals-24"><a class="header" href="#non-goals-24">Non-goals</a></h2>
 <ul>
 <li>Copy raw historical events or preserve source aggregate versions.</li>
 <li>Copy an existing configuration snapshot, runtime registration, deployment
@@ -19848,7 +20553,7 @@ unchanged products and to the new <code>productVersionId</code> for rebuilt prod
 </tbody>
 </table>
 </div>
-<h2 id="goals-21"><a class="header" href="#goals-21">Goals</a></h2>
+<h2 id="goals-22"><a class="header" href="#goals-22">Goals</a></h2>
 <ul>
 <li>Auto-populate config mappings for every new Java or Rust product release.</li>
 <li>Preserve event replay, auditability, and projection rebuild behavior.</li>
@@ -19861,7 +20566,7 @@ event amplification.</li>
 <li>Detect missing config and property definitions before a release appears
 complete.</li>
 </ul>
-<h2 id="non-goals-24"><a class="header" href="#non-goals-24">Non-Goals</a></h2>
+<h2 id="non-goals-25"><a class="header" href="#non-goals-25">Non-Goals</a></h2>
 <ul>
 <li>Do not change the config override hierarchy.</li>
 <li>Do not write directly to config mapping projection tables.</li>
@@ -20526,7 +21231,7 @@ and who approved publication.</li>
 <p>The release workflow should be flexible enough to call existing command-line
 tools, but controlled enough that it does not become an unrestricted shell
 inside Light Portal.</p>
-<h2 id="goals-22"><a class="header" href="#goals-22">Goals</a></h2>
+<h2 id="goals-23"><a class="header" href="#goals-23">Goals</a></h2>
 <ul>
 <li>Replace the current Java <code>light-bot</code> release path with <code>light-workflow</code> once
 parity is proven.</li>
@@ -20544,7 +21249,7 @@ reporting into the release gate.</li>
 behind explicit approval.</li>
 <li>Preserve release auditability and reproducibility.</li>
 </ul>
-<h2 id="non-goals-25"><a class="header" href="#non-goals-25">Non-Goals</a></h2>
+<h2 id="non-goals-26"><a class="header" href="#non-goals-26">Non-Goals</a></h2>
 <ul>
 <li>Do not run arbitrary release commands in the Light Portal service process.</li>
 <li>Do not replace Maven, Cargo, Docker, GitHub CLI, or existing release scripts
@@ -22294,7 +22999,7 @@ multi-event transaction in that closure must remain atomic.</p>
 <p>This design adds a transport-neutral replay control plane. The original live
 processors still consume from PostgreSQL or Kafka, but failure capture,
 planning, execution, status, authorization, and audit use one shared contract.</p>
-<h2 id="goals-23"><a class="header" href="#goals-23">Goals</a></h2>
+<h2 id="goals-24"><a class="header" href="#goals-24">Goals</a></h2>
 <ul>
 <li>Replay a failed business transaction without rewinding a shared consumer
 offset.</li>
@@ -22316,7 +23021,7 @@ lists, metrics, or approval screens.</li>
 <li>Bound archive and publication-outbox growth during a failure storm without
 discarding the only replayable payload.</li>
 </ul>
-<h2 id="non-goals-26"><a class="header" href="#non-goals-26">Non-Goals</a></h2>
+<h2 id="non-goals-27"><a class="header" href="#non-goals-27">Non-Goals</a></h2>
 <ul>
 <li>Replay is not an event editor. Operators cannot change an event payload,
 event ID, aggregate version, graph revision, or transaction ID.</li>
@@ -22547,7 +23252,7 @@ Kafka does not define cross-partition order.</li>
 <p>The following tables are the intended logical model. Column sizes and indexes
 should follow the portal database conventions when the migration is written.
 Phase 1 implements this model in
-<code>portal-db/postgres/patch_20260713_event_replay.sql</code>, with the same replay block
+<code>portal-db/postgres/patch_20260713_01_event_replay.sql</code>, with the same replay block
 in both fresh-install DDL sources. The implementation adds the envelope-key,
 object-version, byte-accounting, fencing, retention, and trigger columns needed
 to enforce the invariants described below.</p>
@@ -23203,7 +23908,7 @@ not cascade through immutable attempts or audit history implicitly.</p>
 <p>Kafka DLQ retention must be long enough for external incident tooling, but
 replay correctness no longer depends on the topic retaining the only payload
 copy.</p>
-<h2 id="security-and-privacy"><a class="header" href="#security-and-privacy">Security and Privacy</a></h2>
+<h2 id="security-and-privacy-1"><a class="header" href="#security-and-privacy-1">Security and Privacy</a></h2>
 <ul>
 <li>Encrypt archived payloads with a rotatable application key and store the key
 ID per event.</li>
@@ -25430,7 +26135,7 @@ the provider <code>jwk</code> from <code>auth_provider_t</code>. The implementat
 that the JWT header <code>kid</code> is present in the returned JWKS for the same provider.
 That guarantee matters more once external AWS services cache the discovery and
 JWKS responses.</p>
-<h2 id="goals-24"><a class="header" href="#goals-24">Goals</a></h2>
+<h2 id="goals-25"><a class="header" href="#goals-25">Goals</a></h2>
 <ul>
 <li>Let AWS AgentCore use Rust <code>light-oauth</code> or Java <code>oauth-kafka</code> as a JWT
 bearer token issuer.</li>
@@ -25442,7 +26147,7 @@ claims working.</li>
 <li>Keep issuer, audience, and discovery URLs deterministic across environments.</li>
 <li>Add tests that prove discovery, JWKS, and signed token claims line up.</li>
 </ul>
-<h2 id="non-goals-27"><a class="header" href="#non-goals-27">Non-Goals</a></h2>
+<h2 id="non-goals-28"><a class="header" href="#non-goals-28">Non-Goals</a></h2>
 <ul>
 <li>Do not implement full OIDC identity-provider behavior in the first phase.</li>
 <li>Do not add dynamic client registration.</li>
@@ -28194,7 +28899,7 @@ IMPORT_EVENTS=true \
 <p>It processes the MarketCodeCreatedEvent and calls dbProvider.createMarketCode with the event.</p>
 <h2 id="createmarketcode"><a class="header" href="#createmarketcode">createMarketCode</a></h2>
 <p>This method in dbProvider will put the event value into cacheManager cache named “auth_code”. Now, the code is ready to be query from the market-query.</p>
-<h2 id="portal-view-3"><a class="header" href="#portal-view-3">Portal View</a></h2>
+<h2 id="portal-view-4"><a class="header" href="#portal-view-4">Portal View</a></h2>
 <p>The HostIdCodePostHandler redirects the code to the Portal View with /authorization?code=??? and this request will be sent to the light-gateway StatelessAuthHandler.</p>
 <h2 id="statelessauthhandler"><a class="header" href="#statelessauthhandler">StatelessAuthHandler</a></h2>
 <p>If the request path matches to the configured authPath, it will retrieve the code from the query parameter. Then create a csrf UUID token and an AuthorizationCodeRequest to get a token via OauthHelper. This request will have the auth code, the csrf token and other properties from the configuration. The request is sent to the HostIdTokenPostHandler to create the authorization code token.</p>
@@ -28598,7 +29303,7 @@ IMPORT_EVENTS=true \
 <li><code>service-query</code></li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="portal-view-4"><a class="header" href="#portal-view-4">Portal View</a></h1>
+<h1 id="portal-view-5"><a class="header" href="#portal-view-5">Portal View</a></h1>
 <ul>
 <li><a href="#oauth-20-state-verification">OAuth 2.0 State Verification</a></li>
 </ul>
