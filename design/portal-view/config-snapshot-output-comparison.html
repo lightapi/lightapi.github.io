@@ -35,7 +35,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-f7edcbc6.js";
+            window.path_to_searchindex_js = "../../searchindex-44a6c64e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-1602f04f.js"></script>
@@ -204,7 +204,11 @@ selected. Three or four full YAML panes are too narrow to read reliably.</li>
 <li>Compare effective typed values by default and show source-only changes
 separately.</li>
 </ul>
-<h2 id="current-implementation"><a class="header" href="#current-implementation">Current Implementation</a></h2>
+<h2 id="pre-implementation-baseline"><a class="header" href="#pre-implementation-baseline">Pre-Implementation Baseline</a></h2>
+<p>This section records the baseline that motivated the design. The feature has
+since been implemented; the authoritative implementation and acceptance state
+is recorded in the two linked implementation plans and their shared
+<code>2026-07-14-config-snapshot-live-acceptance.md</code> evidence record.</p>
 <p><code>portal-view/src/pages/snapshot/ConfigSnapshot.tsx</code> renders a server-paginated
 Material React Table. It calls
 <code>lightapi.net/config/getConfigSnapshot/0.1.0</code>, defaults the <code>current</code> filter to
@@ -392,6 +396,8 @@ and a single final newline.</li>
 <li>Reject an invalid stored value for its declared type. Do not quietly coerce
 it to a string or omit it.</li>
 <li>Reject duplicate emitted keys instead of letting one overwrite another.</li>
+<li>Require <code>source_level</code> to be non-blank and single-line before inserting it
+into a YAML comment.</li>
 </ol>
 <p>Map key order does not change YAML meaning, but recursive sorting prevents
 nested map insertion order from creating noisy diffs. Source comments are
@@ -470,11 +476,12 @@ duplicate YAML string when only one is needed.</p>
 </code></pre>
 <p>When <code>yaml</code> is requested, each snapshot object also contains the canonical
 <code>yaml</code> string. The digest is calculated from the exact UTF-8 YAML bytes.</p>
-<p>The persistence query should join <code>config_snapshot_t</code>,
-<code>config_snapshot_property_t</code>, and <code>config_t</code>, and scope every selected id by
-<code>cs.host_id = ?</code>. It must not require <code>current = true</code>. Load all requested
-metadata and properties in bounded batch queries rather than one query per
-snapshot.</p>
+<p>The persistence query should join <code>config_snapshot_t</code>, <code>instance_t</code>,
+<code>config_snapshot_property_t</code>, and <code>config_t</code>, scope every selected id by
+<code>cs.host_id = ?</code>, and apply the same <code>InstanceAdmin</code> ownership predicate to
+<code>instance_t</code> for owner-scoped users. <code>admin</code> and <code>host-admin</code> retain host-wide
+scope. It must not require <code>current = true</code>. Load all requested metadata and
+properties in bounded batch queries rather than one query per snapshot.</p>
 <p>Reject the whole request if any selected snapshot is missing, belongs to
 another host, has malformed typed data, or exceeds the configured response
 limit. A partial comparison can look authoritative while silently omitting a
@@ -510,8 +517,10 @@ have the same <code>serviceId</code>. Show a <code>Cross-instance comparison</co
 instance and environment metadata pinned above each column. Reject snapshots
 with different service ids in the first release; comparing unrelated services
 mostly produces missing-key noise and is better handled as separate exports.</p>
-<p>All selected snapshots must belong to the signed-in host. This is enforced by
-the server even though the list query is already host-scoped.</p>
+<p>All selected snapshots must belong to the signed-in host and be visible under
+the caller’s effective instance ownership scope. This is enforced by the
+server even though the list query is already scoped. A hidden snapshot id and
+an unknown snapshot id both return the same unavailable response.</p>
 <h2 id="instanceadmin-current-snapshot-entry-point"><a class="header" href="#instanceadmin-current-snapshot-entry-point"><code>InstanceAdmin</code> Current-Snapshot Entry Point</a></h2>
 <p>Add controlled row selection and a <code>Compare current snapshots</code> toolbar action
 to <code>/app/instance/instanceAdmin</code>. This is a second selector for the shared
@@ -573,6 +582,15 @@ all-or-nothing. A missing instance, missing current snapshot, multiple current
 snapshots, mixed service ids, ownership failure, or property-limit violation
 must not produce a partial set. Error responses contain ids and counts only,
 never configuration values.</p>
+<p>Stable unavailable/cardinality behavior is:</p>
+<ul>
+<li><code>404 CURRENT_CONFIG_SNAPSHOT_UNAVAILABLE</code> when an instance is missing,
+hidden by owner scope, or has no current snapshot</li>
+<li><code>409 CURRENT_CONFIG_SNAPSHOT_CARDINALITY</code> when an instance has multiple
+current snapshots</li>
+<li><code>409 CURRENT_CONFIG_SNAPSHOT_SERVICE_MISMATCH</code> when current snapshot and
+instance service ids disagree</li>
+</ul>
 <p>Before enabling the resolver, add a partial unique index matching the intended
 identity and access path:</p>
 <pre><code class="language-sql">CREATE UNIQUE INDEX uq_config_snapshot_current_instance
@@ -676,8 +694,11 @@ side-by-side representation for those counts.</p>
 <h2 id="security-and-privacy"><a class="header" href="#security-and-privacy">Security and Privacy</a></h2>
 <p>Snapshot values can contain credentials and other sensitive configuration.</p>
 <ul>
-<li>Authorize the query with <code>portal.r</code> and validate authenticated host access
-for every requested snapshot.</li>
+<li>Enforce both authorization layers: gateway endpoint policy requires
+<code>portal.r</code> and one of <code>admin</code>, <code>config-admin</code>, or <code>config-viewer</code>; the handler
+then validates authenticated host access and applies <code>InstanceAdmin</code> owner
+scope for every requested snapshot or instance. <code>admin</code> and <code>host-admin</code> are
+the owner-scope bypass roles at the persistence layer.</li>
 <li>Return <code>Cache-Control: no-store</code> through the portal query path.</li>
 <li>Do not write YAML, typed values, or comparison responses to application logs.</li>
 <li>Do not store selected values or YAML in <code>localStorage</code>, <code>sessionStorage</code>, task
@@ -738,6 +759,8 @@ patch, with a deployment choice between concurrent creation and a maintenance
 window based on table size and patch-runner transaction constraints.</li>
 <li>Add schema and query-plan gates proving duplicate current rows are rejected
 and the resolver lookup uses the new index.</li>
+<li>Register both additive query actions in the endpoint/access-control catalog,
+mirroring the established config-query request-access rule and config roles.</li>
 </ul>
 <h3 id="light-config-server"><a class="header" href="#light-config-server"><code>light-config-server</code></a></h3>
 <ul>
@@ -857,8 +880,9 @@ current-row integrity violations.</li>
 YAML diff.</li>
 <li>The comparison clearly distinguishes value changes, missing keys, and
 source-only changes.</li>
-<li>Requests cannot read snapshots from another host and no sensitive value is
-persisted in browser storage.</li>
+<li>Requests cannot read snapshots from another host or outside the caller’s
+effective instance ownership scope, and no sensitive value is persisted in
+browser storage.</li>
 </ul>
 <h2 id="rollout"><a class="header" href="#rollout">Rollout</a></h2>
 <ol>
@@ -874,6 +898,15 @@ remediation for blocking current rows, deploy the partial unique index, and
 verify the resolver query plan.</li>
 <li>Add <code>InstanceAdmin</code> current-snapshot resolution and selection after the
 shared comparison route, backend values API, and database gates have passed.</li>
+<li>Apply
+<code>portal-db/postgres/patch_20260714_02_config_snapshot_compare_endpoints.sql</code>
+to register both actions in the portal endpoint/access-control catalog, run
+normal <code>syncConfigInstanceApi</code> for config API <code>LPS1120/1.0.0</code> on each
+affected gateway, create and promote a new gateway configuration snapshot,
+and restart or reload the gateway so its effective endpoint rules contain
+both actions.</li>
+<li>Deploy the portal bundle to the actual served/mounted <code>dist</code> and verify its
+asset hash before acceptance.</li>
 </ol>
 <p>The API and selection cap support four snapshots from the beginning, even if
 the UI rollout enables two first. This avoids an API redesign while still
