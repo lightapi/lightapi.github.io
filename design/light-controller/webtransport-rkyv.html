@@ -35,7 +35,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-0cc9dd37.js";
+            window.path_to_searchindex_js = "../../searchindex-95bdc8ed.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-1602f04f.js"></script>
@@ -181,7 +181,8 @@ application semantics, serialization, framing, transport, and gateway routing
 are separate decisions. It covers both the Rust runtime control channel and the
 browser MCP path through <code>light-gateway</code>.</p>
 <ul>
-<li><strong>Status:</strong> proposed architecture; Phase 0 completed with a no-go result</li>
+<li><strong>Status:</strong> proposed architecture; Phase 0 completed with a no-go result and
+the separately justified WebSocket-only Phase 1 extraction is complete</li>
 <li><strong>Protocol baseline tested:</strong> 2026-07-15</li>
 <li><strong>Implementation gate:</strong> WebTransport implementation remains blocked until a
 future Phase 0 rerun satisfies the browser, native-library, and current-draft
@@ -1887,9 +1888,10 @@ and release process for <code>controller-wire</code> and the benchmark workload.
 <p>Phase 0 is an approval gate. Phase 1 must not begin until these artifacts are
 reviewed, the pinned compatibility tuple is recorded, and no unresolved item
 requires changing the authentication trust model, gateway topology, or wire
-profile boundaries. A failed spike keeps WebTransport disabled and redirects
-evaluation to binary WebSocket or raw QUIC without first performing the shared
-session refactor.</p>
+profile boundaries. A failed spike keeps WebTransport disabled. A shared-session
+refactor may still proceed when it is separately justified as WebSocket
+hardening or preparation for binary WebSocket/raw QUIC evaluation, but it must
+not introduce or assume WebTransport behavior.</p>
 <p>The 2026-07-15 Phase 0 implementation produced that failed-spike result. Native
 direct and same-transport relay mechanics, current certificate reuse, bounded
 reconnect, and Redis atomic consume passed. Chrome 150 did not send the supplied
@@ -1897,9 +1899,16 @@ Authorization header. The server observed the supplied profile offer, and
 stream echo/reset/close passed, but Chrome did not expose the selected protocol,
 response headers, or required reliability result. The pinned <code>wtransport 0.7.1</code>
 native client also discarded response headers, and its protocol generation did
-not implement draft 16. Production WebTransport remains disabled and Phase 1 is
-not approved on a WebTransport justification. The executable evidence and
+not implement draft 16. Production WebTransport remains disabled and Phase 1
+was not approved on a WebTransport justification. The executable evidence and
 closure decision are in <code>implementation/light-controller/phase0</code>.</p>
+<p>The separately justified WebSocket-only Phase 1 extraction completed on
+2026-07-15. It introduced bounded command admission, explicit WebSocket message
+limits, transport-neutral controller session modules, a logical-message
+<code>PortalRegistryClient</code>, a private WebSocket adapter, and shared legacy JSON
+fixtures. It did not enable WebTransport or change the Phase 0 decision. The
+closure record and executable gates are in
+<code>implementation/light-controller/phase1</code>.</p>
 <h3 id="phase-1-extract-shared-session-behavior"><a class="header" href="#phase-1-extract-shared-session-behavior">Phase 1: Extract Shared Session Behavior</a></h3>
 <ul>
 <li>Refactor <code>controller-rs</code> runtime and MCP message handling into
@@ -1908,10 +1917,11 @@ transport- and codec-neutral service functions.</li>
 messages.</li>
 <li>Separate wire-profile adapters from WebSocket and WebTransport session
 adapters.</li>
-<li>Extract the gateway’s route resolver without changing its WebSocket tunnel.</li>
 <li>Keep behavior and wire output unchanged.</li>
 <li>Run the complete existing WebSocket test suite.</li>
 </ul>
+<p>Gateway route-resolver extraction remains part of the later gateway phase; it
+was not required for the controller/client shared-session boundary.</p>
 <h3 id="phase-2-runtime-profile-matrix"><a class="header" href="#phase-2-runtime-profile-matrix">Phase 2: Runtime Profile Matrix</a></h3>
 <ul>
 <li>Add the shared <code>controller-wire</code> crate and golden fixtures.</li>
