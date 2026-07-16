@@ -35,7 +35,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-3e65ef91.js";
+            window.path_to_searchindex_js = "../../searchindex-de903df3.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-1602f04f.js"></script>
@@ -181,10 +181,10 @@ application semantics, serialization, framing, transport, and gateway routing
 are separate decisions. It covers both the Rust runtime control channel and the
 browser MCP path through <code>light-gateway</code>.</p>
 <ul>
-<li><strong>Status:</strong> proposed architecture; Phase 0 completed with a no-go result, the
-separately justified WebSocket-only Phase 1 extraction is complete, and the
-inactive shared wire-profile/conformance foundation is implemented</li>
-<li><strong>Protocol baseline tested:</strong> 2026-07-15</li>
+<li><strong>Status:</strong> proposed future transport architecture; the active production
+milestone is JSON/WebSocket Control Plane V1. WebTransport remains blocked,
+and the N5 codec decision did not authorize a production <code>rkyv</code> canary</li>
+<li><strong>Protocol baseline tested:</strong> 2026-07-16</li>
 <li><strong>Implementation gate:</strong> WebTransport implementation remains blocked until a
 future Phase 0 rerun satisfies the browser, native-library, and current-draft
 contracts</li>
@@ -201,6 +201,146 @@ runtime JSON-RPC over WebSocket</li>
 <p>WebTransport remains disabled. WebSocket and JSON remain the defaults until a
 future feasibility run satisfies protocol compatibility, browser
 authentication, gateway routing, deployment support, and performance gates.</p>
+<h3 id="completed-implementation-status"><a class="header" href="#completed-implementation-status">Completed implementation status</a></h3>
+<p>The WebSocket-only near-term sequence N0 through N5 is complete:</p>
+<ul>
+<li>N0 froze the comparable JSON/WebSocket workload and baseline;</li>
+<li>N1 extracted codec-neutral session inputs and outputs;</li>
+<li>N2 added explicit WebSocket profile negotiation and handshake authentication;</li>
+<li>N3 completed the opt-in <code>rkyv</code>-over-WebSocket vertical slice;</li>
+<li>N4 completed bounded decoding, fuzzing, and resilience gates; and</li>
+<li>N5 found no qualifying material codec benefit and selected
+<code>KEEP_JSON_WEBSOCKET_DEFAULT_NO_CANARY</code>.</li>
+</ul>
+<p>N6 is not authorized. The dormant <code>rkyv</code> implementation remains disabled and
+is not an available production profile. Reopening it requires a new comparable
+N5 result that satisfies the existing material-benefit threshold. Reopening
+WebTransport separately requires a new Phase 0 result that satisfies the
+browser, native Rust, gateway, and deployment contracts.</p>
+<h2 id="active-jsonwebsocket-control-plane-v1-contract"><a class="header" href="#active-jsonwebsocket-control-plane-v1-contract">Active JSON/WebSocket Control Plane V1 Contract</a></h2>
+<p>This section is normative for the stabilization milestone. The remainder of
+this document describes both the current baseline and possible future profiles;
+where a future-profile section conflicts with this section, this V1 contract
+wins for production configuration.</p>
+<h3 id="enabled-surfaces-and-profiles"><a class="header" href="#enabled-surfaces-and-profiles">Enabled surfaces and profiles</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Hop</th><th>V1 profile</th></tr>
+</thead>
+<tbody>
+<tr><td>Browser to <code>light-gateway</code></td><td>MCP/JSON-RPC 2.0 over <code>/ctrl/mcp</code> WebSocket</td></tr>
+<tr><td><code>light-gateway</code> to <code>controller-rs</code></td><td>Payload-opaque <code>/ctrl/mcp</code> WebSocket tunnel</td></tr>
+<tr><td>Light-Fabric runtime to <code>controller-rs</code></td><td>Legacy JSON over <code>/ws/microservice</code> WebSocket</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>CONTROLLER_WEBSOCKET_BINARY_PROFILES</code> is empty, runtime
+<code>controlCandidates</code> do not select <code>rkyv</code>, and no WebTransport listener,
+capability endpoint, browser ticket, QUIC route, or HTTP/3 inference is enabled.
+<code>/ctrl/mcp</code> is the single browser control and notification socket; the obsolete
+<code>/ws/mcp</code> and <code>/ws/portal-events</code> split is not a supported V1 topology.</p>
+<h3 id="cumulative-authorization-boundaries"><a class="header" href="#cumulative-authorization-boundaries">Cumulative authorization boundaries</a></h3>
+<p>The gateway makes one connection decision before discovery, connection permit
+acquisition, or upstream connection. It constructs the canonical policy key
+<code>/ctrl/mcp@connect</code> from the matched <code>/ctrl/mcp</code> route and admits only an exact
+<code>admin</code>, <code>host-admin</code>, or <code>instance-admin</code> role token. Missing, invalid, or
+unavailable policy denies when <code>defaultDeny</code> is true. Service-to-service routes
+remain outside this human-role decision.</p>
+<p>The gateway registers and enables the shared access-control runtime, injects it
+into <code>WebSocketRouterRuntime</code>, and does not also run the generic HTTP
+access-control handler in the normal <code>chat</code> chain. That chain remains
+<code>exception -&gt; stateless -&gt; security -&gt; websocket</code>.</p>
+<p>The gateway remains payload-opaque after upgrade. The controller independently
+verifies the forwarded Bearer JWT, requires <code>portal.r</code> for MCP connection/read
+operations, and requires <code>portal.w</code> for mutations. Gateway roles never replace
+controller scopes. The exhaustive controller tool policy is frozen as data in
+<code>implementation/light-controller/stabilization/s0/fixtures/controller-tool-policy-v1.json</code>.
+Any catalog change must update that manifest and its conformance cases in the
+same pull request.</p>
+<p>The Rust OAuth issuer advertises <code>portal.r</code> and <code>portal.w</code>, validates requested
+scopes as complete tokens rather than substrings, and grants <code>portal.w</code> only to
+registered clients/users that are entitled to it. Tokens with write authority
+contain both <code>portal.r</code> and <code>portal.w</code>.</p>
+<p>All runtime mutation requires <code>CONTROLLER_MCP_MUTATIONS_ENABLED=true</code> plus
+<code>portal.w</code>. Shutdown additionally requires
+<code>CONTROLLER_MCP_SHUTDOWN_ENABLED=true</code>; chaos mutation/fault injection
+additionally requires <code>CONTROLLER_MCP_CHAOS_ENABLED=true</code>. All three settings
+default to false. Reading chaos configuration remains a read operation but is
+hidden unless the chaos feature is enabled.</p>
+<h3 id="browser-handshake-and-origin"><a class="header" href="#browser-handshake-and-origin">Browser handshake and Origin</a></h3>
+<p>The browser supplies its CSRF token through the existing WebSocket subprotocol
+mechanism. The gateway validates exactly one matching CSRF token, removes it
+from the upstream protocol offer, strips browser Cookie/Authorization and
+untrusted identity headers, and injects only trusted routing context and the
+gateway-produced Bearer token.</p>
+<p><code>websocket-router.originAllowlist[/ctrl/mcp]</code> is non-empty. The gateway compares
+the complete normalized scheme, host, and effective port. Missing, opaque/null,
+malformed, suffix, substring, or unlisted Origins deny before upstream
+connection. The controller listener is not exposed to the browser network.</p>
+<h3 id="mcp-lifecycle-messages-and-errors"><a class="header" href="#mcp-lifecycle-messages-and-errors">MCP lifecycle, messages, and errors</a></h3>
+<p>The external session moves through <code>connecting</code>, <code>awaiting-initialize-result</code>,
+<code>sending-initialized</code>, and <code>ready</code>. Before ready, only <code>initialize</code>, the
+subsequent <code>notifications/initialized</code>, and WebSocket control frames are valid.
+The V1 MCP protocol version is <code>2025-11-25</code>.</p>
+<p>Requests and responses use JSON-RPC 2.0. IDs are strings or numbers and are
+never reused while pending. Notifications omit <code>id</code>. Parse error,
+invalid-request, method-not-found, invalid-params, internal, timeout,
+unavailable, resource-limit, and structured tool-error outcomes are bounded and
+must not expose credentials or full sensitive arguments. An unsupported or
+unavailable runtime capability never becomes generic success.</p>
+<h3 id="notification-ownership"><a class="header" href="#notification-ownership">Notification ownership</a></h3>
+<p>Host lifecycle notices may reach every admitted MCP connection for that host.
+Log and other runtime streams are bounded per-connection subscriptions keyed by
+runtime instance and notification class. <code>start_logs</code> adds only the caller’s
+subscription; <code>stop_logs</code> removes only that caller’s subscription. If the
+runtime stream is shared, controller reference counting prevents one caller
+from stopping another. Disconnect, token expiry, runtime reconnect, or explicit
+stop revokes the affected subscription.</p>
+<p>Notification delivery is at-most-once and has no durable cursor in V1. A
+disconnect may lose notifications. After reconnect, <code>portal-view</code> must complete
+MCP initialization, rerun the authoritative hybrid query, refresh runtime
+capabilities, reconcile the live overlay, and only then recreate the user’s
+requested stream subscriptions. It must not replay mutations or assume an old
+<code>start_logs</code> subscription survived the connection.</p>
+<h3 id="runtime-list-and-host-binding"><a class="header" href="#runtime-list-and-host-binding">Runtime list and host binding</a></h3>
+<p><code>lightapi.net/instance/getRuntimeInstance/0.1.0</code> is the authoritative set of UI
+runtime rows. Its gateway <code>req-acc</code> rule admits the same three administrative
+roles. The handler reads the independently verified <code>host</code> claim and requires
+an exact match with requested <code>data.hostId</code>; missing, malformed, mismatched, or
+client-only host context fails closed even for <code>admin</code>. Controller live state
+may update only IDs already returned by the hybrid query and never creates a
+new row.</p>
+<p>Non-administrative user/position ownership is deferred until a durable
+runtime-to-configured-instance association and authoritative human owner source
+exist. V1 does not widen <code>/ctrl/mcp</code> or this control-page query to those users.
+V1 also has no cross-host wildcard, <code>portal.global_r</code> bypass, or super-admin
+exception. A future global view requires a separate design for issuer grants,
+audit, query fan-out, pagination, failure isolation, and per-host enforcement;
+it must not weaken the exact verified-host rule in place.</p>
+<h3 id="limits-and-policy-convergence"><a class="header" href="#limits-and-policy-convergence">Limits and policy convergence</a></h3>
+<p>The controller enforces a 1 MiB MCP JSON message/frame limit plus bounded
+connections, pending commands, queues, subscriptions, initialization, and
+request deadlines. The payload-opaque gateway enforces transport/header,
+connection, rate, idle, upstream-connect, and read/write limits; it does not
+claim application-message parsing.</p>
+<p>An authenticated MCP connection is limited to one active dispatch, 32 requests
+per second with a burst of 64, and JSON nesting depth 128. Controller-wide MCP
+admission is limited to 1,024 requests per second with a burst of 2,048.
+Exceeding a request bound returns a resource-limit outcome; repeated abuse
+closes the connection. These limits apply before expensive tool dispatch and
+are independent of the runtime command permits.</p>
+<p>A valid policy reload applies atomically to new upgrades. A malformed reload
+retains the last known-good revision. Existing opaque tunnels are not
+force-closed by reload; their effective lifetime is the lesser of the verified
+JWT lifetime and <code>websocket-router.maxConnectionDurationMs=900000</code>. Immediate
+incident revocation disables the external route or restarts the gateway.
+Critical off-boarding must use that immediate operational path; routine policy
+reload alone is not an immediate revocation mechanism for an existing tunnel.</p>
+<p>The immutable V1 examples, authorization corpora, limit contract, tool-policy
+manifest, and baseline gate live under
+<code>implementation/light-controller/stabilization/s0</code>. They are contract inputs,
+not runtime dependencies shared between TypeScript and Rust.</p>
 <h2 id="problem"><a class="header" href="#problem">Problem</a></h2>
 <p>Rust services currently connect to <code>controller-rs</code> through
 <code>/ws/microservice</code>. The channel carries JSON-RPC messages for:</p>
