@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-95bdc8ed.js";
+            window.path_to_searchindex_js = "searchindex-3e65ef91.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-1602f04f.js"></script>
@@ -5760,8 +5760,9 @@ application semantics, serialization, framing, transport, and gateway routing
 are separate decisions. It covers both the Rust runtime control channel and the
 browser MCP path through <code>light-gateway</code>.</p>
 <ul>
-<li><strong>Status:</strong> proposed architecture; Phase 0 completed with a no-go result and
-the separately justified WebSocket-only Phase 1 extraction is complete</li>
+<li><strong>Status:</strong> proposed architecture; Phase 0 completed with a no-go result, the
+separately justified WebSocket-only Phase 1 extraction is complete, and the
+inactive shared wire-profile/conformance foundation is implemented</li>
 <li><strong>Protocol baseline tested:</strong> 2026-07-15</li>
 <li><strong>Implementation gate:</strong> WebTransport implementation remains blocked until a
 future Phase 0 rerun satisfies the browser, native-library, and current-draft
@@ -7488,6 +7489,16 @@ limits, transport-neutral controller session modules, a logical-message
 fixtures. It did not enable WebTransport or change the Phase 0 decision. The
 closure record and executable gates are in
 <code>implementation/light-controller/phase1</code>.</p>
+<p>The transport-independent shared wire-profile foundation completed on
+2026-07-15. <code>light-fabric/crates/controller-wire</code> now exclusively owns the
+version 1 profile tokens, framing, immutable archived roots, bounded validation,
+semantic limits, golden bytes, dependency-purity policy, and pinned <code>rkyv</code>
+feature policy. Both <code>portal-registry</code> and <code>controller-rs</code> compile and test
+owned conversion boundaries against the same fixtures. This completes
+implementation-plan Phase 2, not the broader design Phase 2 below: no listener,
+negotiation, binary WebSocket profile, or WebTransport behavior is enabled.
+The closure record and executable gates are in
+<code>implementation/light-controller/phase2</code>.</p>
 <h3 id="phase-1-extract-shared-session-behavior"><a class="header" href="#phase-1-extract-shared-session-behavior">Phase 1: Extract Shared Session Behavior</a></h3>
 <ul>
 <li>Refactor <code>controller-rs</code> runtime and MCP message handling into
@@ -7502,6 +7513,8 @@ adapters.</li>
 <p>Gateway route-resolver extraction remains part of the later gateway phase; it
 was not required for the controller/client shared-session boundary.</p>
 <h3 id="phase-2-runtime-profile-matrix"><a class="header" href="#phase-2-runtime-profile-matrix">Phase 2: Runtime Profile Matrix</a></h3>
+<p>The shared crate and conformance portion is complete. Every transport-enabling
+item in this design phase remains blocked by the Phase 0 no-go.</p>
 <ul>
 <li>Add the shared <code>controller-wire</code> crate and golden fixtures.</li>
 <li>Add the UDP/HTTP3 listener, enabled when any controller surface enabled set
