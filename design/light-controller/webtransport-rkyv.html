@@ -35,7 +35,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-44a6c64e.js";
+            window.path_to_searchindex_js = "../../searchindex-0cc9dd37.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-1602f04f.js"></script>
@@ -174,7 +174,2036 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="controller-transport-and-codec-profiles"><a class="header" href="#controller-transport-and-codec-profiles">Controller Transport and Codec Profiles</a></h1>
+                        <h1 id="configurable-controller-transport-and-codec-profiles"><a class="header" href="#configurable-controller-transport-and-codec-profiles">Configurable Controller Transport and Codec Profiles</a></h1>
+<h2 id="status"><a class="header" href="#status">Status</a></h2>
+<p>This document defines a layered controller communication architecture in which
+application semantics, serialization, framing, transport, and gateway routing
+are separate decisions. It covers both the Rust runtime control channel and the
+browser MCP path through <code>light-gateway</code>.</p>
+<ul>
+<li><strong>Status:</strong> proposed architecture; Phase 0 completed with a no-go result</li>
+<li><strong>Protocol baseline tested:</strong> 2026-07-15</li>
+<li><strong>Implementation gate:</strong> WebTransport implementation remains blocked until a
+future Phase 0 rerun satisfies the browser, native-library, and current-draft
+contracts</li>
+<li><strong>Controller:</strong> <code>controller-rs</code></li>
+<li><strong>Rust runtime client:</strong> <code>light-fabric/crates/portal-registry</code></li>
+<li><strong>Browser client:</strong> <code>portal-view</code></li>
+<li><strong>Gateway/BFF:</strong> <code>light-fabric/apps/light-gateway</code></li>
+<li><strong>Existing compatibility paths:</strong> MCP-style JSON-RPC over WebSocket and
+runtime JSON-RPC over WebSocket</li>
+<li><strong>Experimental transports and codecs:</strong> WebTransport and <code>rkyv</code></li>
+<li><strong>Out of scope:</strong> metrics ingestion, distributed controller state, browser
+<code>rkyv</code>, and automatic translation between different transports or codecs</li>
+</ul>
+<p>WebTransport remains disabled. WebSocket and JSON remain the defaults until a
+future feasibility run satisfies protocol compatibility, browser
+authentication, gateway routing, deployment support, and performance gates.</p>
+<h2 id="problem"><a class="header" href="#problem">Problem</a></h2>
+<p>Rust services currently connect to <code>controller-rs</code> through
+<code>/ws/microservice</code>. The channel carries JSON-RPC messages for:</p>
+<ul>
+<li><code>service/register</code> and its acknowledgement;</li>
+<li><code>service/update_metadata</code>;</li>
+<li>discovery lookup and subscriptions;</li>
+<li>controller-to-runtime commands;</li>
+<li>runtime-to-controller command responses;</li>
+<li>runtime notifications such as <code>notifications/log</code>;</li>
+<li>liveness messages.</li>
+</ul>
+<p>The browser separately connects to <code>/ctrl/mcp</code> on <code>light-gateway</code>. The gateway’s
+WebSocket router authenticates and resolves the target during the HTTP/1 upgrade,
+then Pingora tunnels the upgraded connection to <code>controller-rs</code> without parsing
+MCP messages.</p>
+<p>Both paths currently bind several independent choices together:</p>
+<ul>
+<li>MCP and runtime-control application semantics;</li>
+<li>JSON-RPC serialization;</li>
+<li>WebSocket message framing;</li>
+<li>TCP/TLS transport;</li>
+<li>gateway routing and authentication.</li>
+</ul>
+<p>That coupling makes it difficult to determine whether a measured improvement
+comes from QUIC multiplexing, a binary codec, or both. It also makes a future
+browser WebTransport path appear to require <code>rkyv</code>, although the browser should
+continue to use MCP JSON.</p>
+<p>The current runtime channel is reliable and portable, but all messages in one
+direction share one ordered WebSocket byte stream and JSON parsing. A
+high-volume runtime notification can therefore delay a command response
+traveling in the same service-to-controller direction.</p>
+<p>The commonly cited example of an inbound log blocking an outbound controller
+command is not precise. TCP is full-duplex: runtime logs travel toward the
+controller while the command request travels toward the runtime. The risk that
+must be measured is same-direction queueing, especially command responses
+sharing the runtime’s outbound path with log notifications.</p>
+<p>The design must not assume that WebTransport or <code>rkyv</code> is faster for this
+workload. Registration also includes JWT validation and persistence, and many
+command results contain arbitrary JSON. Benchmarks must vary transport and
+codec independently so the source of any improvement is measurable.</p>
+<h2 id="current-boundaries"><a class="header" href="#current-boundaries">Current Boundaries</a></h2>
+<p>The current end-to-end surfaces are:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Surface or hop</th><th>Current protocol</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td>Browser to <code>light-gateway</code> <code>/ctrl/mcp</code></td><td>MCP-style JSON-RPC over WebSocket</td><td>Browser administrative calls and notifications</td></tr>
+<tr><td><code>light-gateway</code> to <code>controller-rs</code> <code>/ctrl/mcp</code></td><td>Payload-opaque WebSocket tunnel</td><td>Route the authenticated browser session to the controller</td></tr>
+<tr><td>Runtime to <code>controller-rs</code> <code>/ws/microservice</code></td><td>JSON-RPC over WebSocket</td><td>Registration, discovery, commands, responses, and notifications</td></tr>
+<tr><td>Discovery client to <code>controller-rs</code> <code>/ws/discovery</code></td><td>JSON-RPC over WebSocket</td><td>Standalone discovery subscriptions</td></tr>
+</tbody>
+</table>
+</div>
+<p>This proposal keeps every existing endpoint and payload contract. It adds an
+experimental WebTransport binding for runtime control and defines a future MCP
+JSON binding through a WebTransport-aware gateway router. <code>/ws/discovery</code>
+remains WebSocket-only in the initial implementation.</p>
+<p>MCP remains the external command surface and JSON-RPC message contract. <code>rkyv</code>
+is a serialization codec for the private Rust runtime-control profile; it is not
+a replacement encoding for standard MCP clients.</p>
+<p>The private Rust runtime-control profile includes registration, registry and
+discovery operations carried on that controller connection, commands,
+responses, and runtime notifications. It does not change general application
+service-to-service APIs. Standalone discovery clients and non-Rust controller
+clients remain on their explicitly supported JSON profiles unless a later
+design adds another interoperable codec.</p>
+<p>The existing <code>ServiceMetadata.protocol</code> field describes the runtime’s
+advertised application protocol, such as <code>https</code>. It must not be reused to
+record the controller connection transport or wire codec.</p>
+<h2 id="layered-model"><a class="header" href="#layered-model">Layered Model</a></h2>
+<p>The implementation separates five layers:</p>
+<pre><code class="language-text">MCP handlers or runtime-control handlers
+  -&gt; logical requests, responses, notifications, and lifecycle events
+  -&gt; negotiated wire profile and codec
+  -&gt; message framing and logical channel mapping
+  -&gt; WebSocket or WebTransport session adapter
+  -&gt; optional light-gateway route resolver and transport proxy
+</code></pre>
+<p>The terms used by this document are:</p>
+<ul>
+<li><strong>Application protocol:</strong> MCP or the private runtime-control protocol.</li>
+<li><strong>Codec:</strong> JSON-RPC/JSON or the versioned <code>rkyv</code> wire schema.</li>
+<li><strong>Wire profile:</strong> the complete application message contract, codec, framing,
+validation rules, limits, and version. A profile does not select a transport.</li>
+<li><strong>Transport:</strong> WebSocket or WebTransport.</li>
+<li><strong>Router:</strong> a gateway component that authenticates the incoming session,
+selects an upstream, and proxies the selected transport.</li>
+</ul>
+<p>Transport configuration selects how a session is carried. Protocol negotiation
+selects how its bytes are interpreted. A server accepts only explicitly allowed
+profile and transport pairs; configurability does not imply support for every
+Cartesian product.</p>
+<h3 id="supported-profile-matrix"><a class="header" href="#supported-profile-matrix">Supported Profile Matrix</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Surface</th><th>Wire profile</th><th>Codec</th><th>WebSocket</th><th>WebTransport</th><th>Initial decision</th></tr>
+</thead>
+<tbody>
+<tr><td>Browser MCP</td><td><code>light-controller-mcp-json-v1</code></td><td>JSON-RPC</td><td>Existing, required</td><td>Experimental after gateway and auth work</td><td>Preserve MCP interoperability</td></tr>
+<tr><td>Runtime control</td><td><code>light-controller-runtime-json-v1</code></td><td>JSON-RPC</td><td>Existing, required</td><td>Experimental</td><td>Required to measure transport independently</td></tr>
+<tr><td>Runtime control</td><td><code>light-controller-runtime-rkyv-v1</code></td><td><code>rkyv</code></td><td>Experimental binary frames</td><td>Experimental</td><td>Rust-only optimized candidate</td></tr>
+<tr><td>Browser MCP</td><td>Any <code>rkyv</code> profile</td><td><code>rkyv</code></td><td>Not supported</td><td>Not supported</td><td>Browser binary MCP is out of scope</td></tr>
+<tr><td>Standalone discovery</td><td>Existing JSON-RPC</td><td>JSON-RPC</td><td>Existing, required</td><td>Not initially supported</td><td>No change in the first release</td></tr>
+</tbody>
+</table>
+</div>
+<p>The current WebSocket paths predate profile negotiation. Absence of a profile
+token on those paths means the existing JSON behavior. New binary behavior
+requires an explicit negotiated token and must never be inferred from the first
+payload bytes.</p>
+<h2 id="goals"><a class="header" href="#goals">Goals</a></h2>
+<ul>
+<li>Make transport and codec selection independent while preserving allowlisted
+combinations.</li>
+<li>Add a multiplexed Rust-to-Rust control transport without removing the current
+WebSocket contract.</li>
+<li>Define MCP JSON over WebTransport without requiring browser <code>rkyv</code>.</li>
+<li>Reuse gateway route resolution, discovery, authorization, and limits without
+treating the current HTTP/1 upgrade tunnel as a WebTransport implementation.</li>
+<li>Keep controller business behavior identical across transports and codecs.</li>
+<li>Isolate controller commands and their responses from asynchronous runtime
+notifications.</li>
+<li>Use a validated, explicitly versioned <code>rkyv</code> format for stable Rust wire
+types.</li>
+<li>Support rolling upgrades where old Rust clients and all Java clients continue
+to use WebSocket.</li>
+<li>Configure accepted transports per controller surface so browser MCP, Rust
+runtime control, and standalone discovery can evolve independently.</li>
+<li>Let <code>portal-view</code> discover the gateway’s current end-to-end MCP candidates at
+runtime instead of baking deployment readiness into the UI bundle.</li>
+<li>Bound memory, stream concurrency, message size, and validation work before
+accepting untrusted input.</li>
+<li>Provide explicit rollout, fallback, observability, and rollback behavior.</li>
+<li>Measure JSON over WebTransport and <code>rkyv</code> over WebSocket so codec and transport
+effects are isolated.</li>
+<li>Require measured improvement before changing any default.</li>
+</ul>
+<h2 id="non-goals"><a class="header" href="#non-goals">Non-Goals</a></h2>
+<ul>
+<li>Do not replace <code>/ctrl/mcp</code> or its JSON-RPC payload contract.</li>
+<li>Do not describe a private <code>rkyv</code> encoding as standard MCP.</li>
+<li>Do not implement browser-side <code>rkyv</code> or require a WebAssembly decoder.</li>
+<li>Do not translate WebSocket to WebTransport or JSON to <code>rkyv</code> in the first
+gateway implementation.</li>
+<li>Do not require every allowed codec to use every transport.</li>
+<li>Do not require Java or other non-Rust runtimes to implement <code>rkyv</code>.</li>
+<li>Do not send general metrics or traces to <code>controller-rs</code> in the first release.</li>
+<li>Do not claim zero allocation or zero head-of-line blocking.</li>
+<li>Do not solve multi-replica command routing in this change.</li>
+<li>Do not automatically switch an established session between transports.</li>
+<li>Do not infer WebTransport availability from the HTTP version used to load the
+page or an unrelated UI resource.</li>
+<li>Do not use unchecked <code>rkyv</code> access for network data.</li>
+<li>Do not enable WebTransport by default in production deployments.</li>
+</ul>
+<h2 id="options-considered"><a class="header" href="#options-considered">Options Considered</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Option</th><th>Advantages</th><th>Costs and risks</th><th>Decision</th></tr>
+</thead>
+<tbody>
+<tr><td>Keep WebSocket and JSON</td><td>No deployment or compatibility change</td><td>Retains one ordered stream per direction and JSON overhead</td><td>Remains the baseline and fallback</td></tr>
+<tr><td>JSON over WebTransport</td><td>Isolates transport effects and supports browser MCP without a new codec</td><td>Retains JSON parsing and requires UDP/HTTP3 deployment</td><td>Required experimental profile</td></tr>
+<tr><td>Binary WebSocket frames with <code>rkyv</code></td><td>Isolates serialization changes; works through current infrastructure</td><td>Does not provide independent streams; still Rust-specific</td><td>Required benchmark comparison</td></tr>
+<tr><td>Multiple WebSocket connections</td><td>Separates control and high-volume events using mature infrastructure</td><td>More connection lifecycle and authentication state</td><td>Viable fallback if multiplexing is the only requirement</td></tr>
+<tr><td>Raw QUIC with <code>rkyv</code></td><td>Stable QUIC RFCs; simpler for native Rust peers</td><td>No WebTransport session semantics or future browser compatibility</td><td>Required design-spike comparison</td></tr>
+<tr><td>WebTransport with <code>rkyv</code></td><td>Independent streams, datagram capability, and HTTP/3 session model</td><td>Active draft, immature implementations, UDP deployment work</td><td>Rust runtime opt-in experiment</td></tr>
+<tr><td>Protobuf over WebSocket or QUIC</td><td>Strong polyglot tooling and defined schema evolution rules</td><td>Parsing and generated-code cost; not zero-copy</td><td>Preferred alternative if polyglot use expands</td></tr>
+<tr><td>Dedicated telemetry pipeline</td><td>Keeps control-plane load isolated; uses OTLP, Prometheus, or another telemetry protocol</td><td>Separate service and operational path</td><td>Preferred for metrics and traces</td></tr>
+</tbody>
+</table>
+</div>
+<p>WebTransport is justified only if independent streams, HTTP/3 integration, or
+browser support provide value beyond raw QUIC or multiple WebSockets. The
+runtime implementation spike must compare those alternatives rather than
+treating WebTransport plus <code>rkyv</code> as one indivisible decision.</p>
+<h2 id="decision"><a class="header" href="#decision">Decision</a></h2>
+<p>Implement the layered profile model with these constraints:</p>
+<ol>
+<li>Keep <code>/ws/microservice</code> unchanged, enabled by default, and available throughout
+migration. It may be disabled for the runtime surface only after that surface’s
+client-fleet and network compatibility gates pass.</li>
+<li>Keep <code>/ctrl/mcp</code> as MCP-style JSON-RPC regardless of transport.</li>
+<li>Add <code>https://&lt;controller-authority&gt;/wt/microservice</code> over HTTP/3 and QUIC and
+support both runtime JSON and runtime <code>rkyv</code> profiles on it.</li>
+<li>Permit the runtime <code>rkyv</code> profile over WebSocket binary frames for isolation
+testing, without changing the legacy JSON default.</li>
+<li>Add browser MCP over WebTransport only after the gateway router and browser
+ticket-authentication flow pass their release gates.</li>
+<li>Negotiate one immutable wire profile before decoding non-legacy payloads.</li>
+<li>Use reliable streams for all initial WebTransport behavior; datagrams remain
+disabled.</li>
+<li>Preserve the current <code>ControllerCommand</code> correlation, timeout, response, and
+connection-ID-guarded cleanup semantics inside <code>controller-rs</code>. The bounded
+admission controls in this design intentionally replace unbounded pending-state
+admission; preserving semantics does not mean preserving the absence of those
+limits.</li>
+<li>Keep arbitrary tool arguments and results as bounded UTF-8 JSON bytes
+where the existing runtime contract is dynamic.</li>
+<li>Keep the gateway payload-opaque in the initial WebTransport implementation;
+cross-transport and cross-codec translation require a separate decision.</li>
+<li>Advance beyond experimental status only after compatibility, security,
+deployment, and benchmark gates pass.</li>
+</ol>
+<h2 id="high-level-architecture"><a class="header" href="#high-level-architecture">High-Level Architecture</a></h2>
+<pre><code class="language-text">browser MCP path
+  portal-view
+    -&gt; MCP JSON codec
+    -&gt; selected WebSocket or WebTransport adapter
+    -&gt; light-gateway matching transport router
+    -&gt; same transport and MCP JSON profile
+    -&gt; controller-rs /ctrl/mcp
+    -&gt; CommandRouter
+
+runtime control path
+  light-fabric portal-registry
+    -&gt; logical runtime-control messages
+    -&gt; selected JSON or rkyv codec
+    -&gt; selected WebSocket or WebTransport adapter
+    -&gt; controller-rs shared registration and command services
+
+controller command path
+  CommandRouter
+    -&gt; ControllerCommand channel
+    -&gt; selected live runtime session driver
+</code></pre>
+<p>The transport drivers must call the same controller service functions for:</p>
+<ul>
+<li>JWT identity checks;</li>
+<li>registration persistence;</li>
+<li>instance insertion and removal;</li>
+<li>portal and discovery notifications;</li>
+<li>metadata updates;</li>
+<li>pending-command completion and timeout handling;</li>
+<li>disconnect cleanup.</li>
+</ul>
+<p>Transport- or codec-specific code must not duplicate those business rules.</p>
+<h2 id="gateway-and-bff-routing"><a class="header" href="#gateway-and-bff-routing">Gateway and BFF Routing</a></h2>
+<p>The current <code>light-gateway</code> WebSocket router is a payload-opaque HTTP/1 upgrade
+proxy. It resolves a service from headers, query parameters, or path-prefix
+configuration, applies authorization and connection limits, selects a discovered
+upstream, and lets Pingora tunnel the upgraded connection. It does not terminate
+MCP or translate JSON-RPC messages.</p>
+<p>The WebTransport router should preserve that payload-opaque property, but it
+cannot reuse the HTTP/1 tunnel implementation. It needs an HTTP/3/QUIC listener
+and must act as a WebTransport server toward the browser and as a WebTransport
+client toward <code>controller-rs</code>.</p>
+<p>The reusable gateway boundary is a transport-neutral route resolver containing:</p>
+<ul>
+<li>path-prefix, header, and query-based service selection;</li>
+<li>discovery and direct-registry target selection;</li>
+<li>authentication and access-control decisions;</li>
+<li>connection and admission limits;</li>
+<li>routing-header cleanup, metrics, and reload behavior.</li>
+</ul>
+<p>The WebSocket and WebTransport routers use that resolver but own separate
+listener, handshake, timeout, and proxy state. The initial WebTransport router:</p>
+<ol>
+<li>accepts an authenticated WebTransport CONNECT request;</li>
+<li>selects the controller using the shared route resolver;</li>
+<li>opens an upstream WebTransport session using the same wire profile;</li>
+<li>maps the downstream MCP or runtime-control stream to its upstream peer;</li>
+<li>maps each additional reliable stream with the same direction and role;</li>
+<li>propagates backpressure, stream resets, draining, and session close reasons;</li>
+<li>rejects datagrams because version 1 does not define a datagram mapping.</li>
+</ol>
+<p>Path-based routing, BFF authentication, and profile negotiation are encrypted
+inside HTTP/3, so a generic UDP forwarder cannot replace this router. A pure
+QUIC layer-4 path is acceptable only for deployments with a fixed upstream that
+do not need BFF policy or path-based service selection.</p>
+<p>For the first implementation, transport must match across the gateway:</p>
+<pre><code class="language-text">WebSocket client -&gt; WebSocket router -&gt; WebSocket controller endpoint
+WebTransport client -&gt; WebTransport router -&gt; WebTransport controller endpoint
+</code></pre>
+<p>Supporting WebSocket-to-WebTransport, WebTransport-to-WebSocket, JSON-to-<code>rkyv</code>,
+or <code>rkyv</code>-to-JSON would turn the gateway into an application relay. That requires
+message decoding, identity and cancellation mapping, independent buffering on
+both sides, and a separate design and benchmark.</p>
+<p>The current Pingora integration has no HTTP/3 or QUIC listener. The experimental
+WebTransport service therefore runs alongside the existing Pingora TCP service
+and shares only routing, policy, configuration, and observability components.
+It must not delay or destabilize the existing HTTPS/WebSocket listener when the
+feature is disabled or fails to initialize.</p>
+<h2 id="browser-transport-capability-discovery"><a class="header" href="#browser-transport-capability-discovery">Browser Transport Capability Discovery</a></h2>
+<p>The browser cannot discover the controller transport directly. It can detect
+its local WebTransport API, but it cannot infer the selected controller, the
+gateway-to-controller transport, enterprise UDP policy, or current route
+readiness. <code>light-gateway</code> therefore exposes an authenticated HTTPS capability
+resource on the controller BFF authority. That authority is same-origin by
+default and is resolved as defined in <a href="#browser-bff-authority">Browser BFF Authority</a>:</p>
+<pre><code class="language-http">GET /ctrl/mcp/capabilities
+</code></pre>
+<p>An example response is:</p>
+<pre><code class="language-json">{
+  "revision": "gw-42:controllers-17",
+  "generatedAt": "2026-07-15T14:00:00Z",
+  "expiresAt": "2026-07-15T14:00:30Z",
+  "wireProfile": "light-controller-mcp-json-v1",
+  "policy": "preferWebTransport",
+  "candidates": [
+    {
+      "transport": "webtransport",
+      "endpoint": "/ctrl/mcp",
+      "ticketEndpoint": "/ctrl/mcp/ticket",
+      "ready": true
+    },
+    {
+      "transport": "websocket",
+      "endpoint": "/ctrl/mcp",
+      "negotiation": "legacy",
+      "ready": true
+    }
+  ],
+  "maxAgeSeconds": 30
+}
+</code></pre>
+<p><code>revision</code> is an opaque aggregate revision that changes whenever gateway policy,
+listener or router readiness, the eligible target set, or any target’s controller
+capability revision changes. <code>generatedAt</code> and <code>expiresAt</code> use UTC. The gateway
+also returns <code>ETag: "&lt;revision&gt;"</code>. Version 1 always returns a complete <code>200</code>
+representation after HTTP-cache expiry rather than a bodyless <code>304</code>, because the
+body carries an absolute expiry. Conditional revalidation requires a later
+contract for refreshing that absolute expiry without retaining a stale body.</p>
+<p>The response is gateway-derived deployment state, not a copy of browser feature
+detection or raw controller configuration. A candidate is <code>ready</code> only when:</p>
+<ul>
+<li>the corresponding gateway listener and router are enabled and healthy;</li>
+<li>authentication, ticket issuance when applicable, and the allowed wire
+profile are configured;</li>
+<li>the shared route resolver has a healthy controller target that accepts the
+same transport and profile; and</li>
+<li>a recent same-transport synthetic probe has verified the gateway-to-controller
+leg.</li>
+</ul>
+<p>Controller support is not inferred from route naming, a generic health response,
+or deployment-wide configuration. Every controller instance exposes an
+authenticated internal capability resource over its existing HTTPS listener:</p>
+<pre><code class="language-http">GET /internal/controller/capabilities
+</code></pre>
+<p>It returns <code>instanceId</code>, an opaque <code>revision</code>, generation and expiry timestamps,
+listener readiness, and the enabled transport/profile set for each of <code>mcp</code>,
+<code>runtime</code>, and <code>standaloneDiscovery</code>. It also reports draining state. The
+revision changes whenever startup configuration, listener readiness, or draining
+state changes; a process restart creates a new <code>instanceId</code>. For example:</p>
+<pre><code class="language-json">{
+  "schemaVersion": 1,
+  "instanceId": "controller-7f8c",
+  "revision": "17",
+  "generatedAt": "2026-07-15T14:00:00Z",
+  "expiresAt": "2026-07-15T14:00:15Z",
+  "draining": false,
+  "listeners": {
+    "websocket": { "ready": true },
+    "webtransport": { "ready": true }
+  },
+  "surfaces": {
+    "mcp": [
+      {
+        "transport": "websocket",
+        "wireProfiles": ["light-controller-mcp-json-v1"]
+      },
+      {
+        "transport": "webtransport",
+        "wireProfiles": ["light-controller-mcp-json-v1"]
+      }
+    ],
+    "runtime": [
+      {
+        "transport": "websocket",
+        "wireProfiles": ["light-controller-runtime-json-v1"]
+      },
+      {
+        "transport": "webtransport",
+        "wireProfiles": [
+          "light-controller-runtime-json-v1",
+          "light-controller-runtime-rkyv-v1"
+        ]
+      }
+    ],
+    "standaloneDiscovery": [
+      {
+        "transport": "websocket",
+        "wireProfiles": ["light-controller-runtime-json-v1"]
+      }
+    ]
+  }
+}
+</code></pre>
+<p>Unknown schema versions, expired responses, duplicate combinations, a transport
+whose listener is not ready, or a draining instance are ineligible for new
+sessions. The resource is available only to the gateway through the deployment’s
+approved service credential or mTLS identity; browser credentials and browser
+connection tickets are not accepted.</p>
+<p>For each candidate, the gateway intersects that instance declaration with its
+own policy and route configuration, then runs a bounded transport-native probe
+against a dedicated gateway-authenticated probe resource on the same controller
+listener. The probe requests one surface and wire profile, completes transport
+and profile negotiation, returns the controller capability revision, and closes.
+It does not register a runtime, create an MCP session, enqueue a command, or
+mutate controller state. Probe credentials, intervals, timeouts, concurrency,
+and logs are bounded and independently configurable.</p>
+<p>Because the first gateway implementation does not relay across transports, it
+must never advertise a WebSocket candidate backed only by a WebTransport
+controller endpoint, or the reverse. During a rolling controller upgrade, the
+gateway builds a candidate-specific eligible target pool from per-instance
+capability and probe results. It advertises the candidate only when that pool is
+non-empty and pins each accepted session to a target from that pool for the
+session lifetime. An instance that becomes stale, unready, or draining is removed
+from new-session selection and changes the aggregate capability revision; an
+existing session follows the draining rules rather than being silently moved to
+another target.</p>
+<p>The response uses <code>Cache-Control: private, max-age=30</code> or a shorter configured
+value and <code>Vary: Origin, Cookie</code> where those fields affect authorization or
+candidate policy. <code>portal-view</code> refreshes it after a failed candidate attempt or
+cache expiry. A normal refresh or an authenticated runtime configuration signal
+may reveal a new aggregate revision; when it does, the client discards candidates
+from the old revision. Capability discovery reduces expected failures but does
+not replace the actual handshake; a network path can change after the response
+is generated.</p>
+<p>Capability-fetch failure does not authorize a blind transport attempt. In
+<code>auto</code> mode:</p>
+<ul>
+<li><code>401</code> or <code>403</code> is an authentication or authorization failure; do not try a
+transport and wait for the login state to change;</li>
+<li>a malformed or semantically invalid response is <code>Internal</code>; reject it and do
+not infer a candidate;</li>
+<li>timeout, network failure, <code>429</code>, or <code>5xx</code> may use a still-fresh previously
+validated capability response, but otherwise no session is attempted and the
+client retries discovery with the existing jittered exponential backoff; and</li>
+<li><code>404</code> or <code>501</code> means the gateway does not implement capability discovery. The
+auto-mode UI fails closed; an explicitly forced <code>websocket</code> build override is
+the compatibility escape for an old gateway.</li>
+</ul>
+<p>Deploy the capability resource before deploying an auto-mode UI that depends on
+it. These rules prevent a transient gateway failure from silently weakening a
+<code>requireWebTransport</code> policy or guessing that legacy WebSocket is acceptable.</p>
+<h3 id="browser-bff-authority"><a class="header" href="#browser-bff-authority">Browser BFF Authority</a></h3>
+<p>All browser controller resources use one controller BFF authority and ingress
+path prefix. <code>portal-view</code> resolves it with the same shared helper for capability
+fetch, ticket issuance, WebSocket, and WebTransport:</p>
+<ol>
+<li>use the configured <code>VITE_API_BASE_URL</code>, including its path prefix, when it is
+non-empty; otherwise</li>
+<li>use <code>window.location.origin</code> and the deployment’s normal ingress prefix.</li>
+</ol>
+<p>Capability and ticket requests remain HTTPS requests with <code>credentials: include</code> and the existing CSRF rules. The WebSocket URL changes only the scheme
+to <code>ws</code> or <code>wss</code>; the WebTransport URL remains <code>https</code>. Redirects to a different
+authority are rejected for ticket issuance and WebTransport establishment.</p>
+<p>Same-origin deployment is the version 1 production recommendation. A deployment
+that intentionally uses a different API authority must explicitly provide all
+of the following before browser WebTransport is ready:</p>
+<ul>
+<li>credentialed CORS for capability and ticket HTTPS requests with an explicit
+portal Origin, never <code>*</code>;</li>
+<li>compatible secure cookie Domain and <code>SameSite</code> attributes for the authenticated
+BFF requests;</li>
+<li>the existing CSRF validation on ticket issuance;</li>
+<li>an Origin allowlist for WebSocket and WebTransport establishment; and</li>
+<li>browser and integration tests covering the exact portal and API authorities.</li>
+</ul>
+<p>If any cross-origin prerequisite is absent, capability readiness is false and
+the UI fails closed instead of constructing URLs from mixed authorities.</p>
+<p>The HTTP version used for the page navigation or an ordinary API request is not
+a selection signal. A page loaded over HTTP/2 can open a separate HTTP/3
+WebTransport session, while an HTTP/3 page load does not prove that WebTransport
+CONNECT, ticket authentication, or the gateway-to-controller QUIC leg works.
+<code>nextHopProtocol</code> may be recorded as bounded diagnostic context only.</p>
+<p>The gateway may advertise HTTP/3 for ordinary HTTPS traffic, and the browser may
+select it automatically. <code>portal-view</code> does not force the HTTP version of normal
+fetches. Only the WebTransport session requires the HTTP/3/QUIC behavior defined
+by this design through <code>requireUnreliable: true</code> and the resulting reliability
+check.</p>
+<h2 id="webtransport-protocol-maturity"><a class="header" href="#webtransport-protocol-maturity">WebTransport Protocol Maturity</a></h2>
+<p>At the time of this design update, WebTransport over HTTP/3 is still an active
+IETF Internet-Draft. Draft versions can use different HTTP/3 settings and wire
+codepoints. The selected Rust library must be verified against the exact draft
+implemented by both peers and any intermediary.</p>
+<p>Generic HTTP/3 support is not sufficient. The current WebTransport draft also
+requires extended CONNECT, WebTransport settings, HTTP/3 datagrams, QUIC
+datagrams, and stream-reset support. End-to-end interoperability must be tested
+through every supported load balancer or proxy.</p>
+<p>The required Phase 0 interoperability target is
+<code>draft-ietf-webtrans-http3-16</code>. The 2026-07-15 spike did not find a supportable
+tuple for that target: the tested Rust crates use legacy WebTransport-over-HTTP/3
+codepoints, and the tested Chrome did not implement the required CONNECT header,
+selected-protocol, and reliability API contract. Draft 16 is therefore a target,
+not a verified baseline. A future implementation must pin and record the exact
+WebTransport draft, Rust library version, browser version, and intermediary
+behavior in the release notes and compatibility matrix. A change to any of them
+requires rerunning the interoperability gate.</p>
+<h2 id="endpoint-and-wire-profile-negotiation"><a class="header" href="#endpoint-and-wire-profile-negotiation">Endpoint and Wire Profile Negotiation</a></h2>
+<p>The WebTransport resources are:</p>
+<pre><code class="language-text">https://&lt;controller-authority&gt;/wt/microservice  # runtime control
+https://&lt;gateway-authority&gt;/ctrl/mcp             # browser MCP through BFF
+</code></pre>
+<p>The corresponding controller-side MCP resource remains <code>/ctrl/mcp</code>. The path
+identifies the application surface; it does not select JSON versus <code>rkyv</code>.</p>
+<p>Clients offer one or more wire profiles such as:</p>
+<pre><code class="language-text">light-controller-mcp-json-v1
+light-controller-runtime-json-v1
+light-controller-runtime-rkyv-v1
+</code></pre>
+<p>For WebTransport, the client sends profiles through the draft’s
+<code>WT-Available-Protocols</code> header and the server confirms one with <code>WT-Protocol</code>.
+Browser JavaScript supplies this offer with <code>WebTransportOptions.protocols</code>; it
+must not attempt to set <code>WT-Available-Protocols</code> directly in
+<code>WebTransportOptions.headers</code>. After <code>ready</code> resolves, the browser verifies that
+the selected <code>transport.protocol</code> is the single expected MCP profile.</p>
+<p>For new WebSocket profiles, the client and server use
+<code>Sec-WebSocket-Protocol</code>. Existing JSON WebSocket clients that do not offer a
+wire profile retain their current behavior. The existing browser CSRF value in
+this header is authentication metadata, not a wire profile. The gateway uses
+the following deterministic rules:</p>
+<ol>
+<li>Parse all offered tokens instead of selecting the first token.</li>
+<li>Extract and validate exactly one <code>csrf.&lt;value&gt;</code> token when the browser path
+requires it.</li>
+<li>Remove the CSRF token before forwarding a negotiated profile offer upstream.</li>
+<li>Forward only recognized, endpoint-allowed wire-profile tokens.</li>
+<li>Return only the profile selected by the upstream controller for a negotiated
+session; never echo a CSRF token as the selected wire profile.</li>
+<li>Preserve the current CSRF-only behavior for legacy browser clients that do
+not offer a wire profile.</li>
+</ol>
+<p>A server rejects a new negotiated session when no common allowed profile exists
+or when the selected profile is not permitted on that endpoint and transport.
+An explicit negotiated candidate never treats an absent selected token as a
+successful negotiation. Legacy JSON is represented by an explicit client
+candidate with <code>negotiation: legacy</code>; it sends no wire-profile token and is the
+only candidate allowed to accept the existing no-profile response.</p>
+<p>The negotiated token selects the complete application wire profile, including:</p>
+<ul>
+<li>application semantics and codec;</li>
+<li>frame header layout;</li>
+<li>numeric message kinds;</li>
+<li>archived type definitions;</li>
+<li><code>rkyv</code> version and format-control features;</li>
+<li>validation and size limits;</li>
+<li>logical channel roles and error semantics.</li>
+</ul>
+<p>Transport-specific details such as WebSocket frames versus WebTransport streams
+remain the responsibility of the session adapter. A profile token must not
+encode <code>websocket</code> or <code>webtransport</code>; the same profile may be allowed on either
+transport by server policy.</p>
+<p>Supporting a new incompatible wire shape requires a new profile token. During a
+rolling upgrade, the controller should support the current and immediately
+previous wire-profile versions.</p>
+<h2 id="runtime-authentication-and-registration"><a class="header" href="#runtime-authentication-and-registration">Runtime Authentication and Registration</a></h2>
+<p>Every non-legacy negotiated runtime session carries the service JWT in its
+transport handshake:</p>
+<pre><code class="language-http">Authorization: Bearer &lt;service-jwt&gt;
+</code></pre>
+<p>For WebTransport this is the CONNECT request. For WebSocket it is the HTTP
+upgrade request. The controller performs signature, issuer, audience, expiry,
+and other token checks before accepting application messages. The accepted
+claims are retained only for the pending session and are bound to the
+registration that follows.</p>
+<p>The current WebSocket path continues to carry the JWT in
+<code>service/register.params.jwt</code>; that contract is unchanged. The runtime JSON
+profile retains this field on WebTransport so its JSON bytes and behavior remain
+comparable with the legacy path. When both handshake and registration JWTs are
+present, they must identify the same service and environment; a mismatch closes
+the session.</p>
+<p>The runtime <code>rkyv</code> profile carries no JWT in <code>ClientHelloV1</code> and therefore always
+requires handshake authentication on WebSocket and WebTransport.</p>
+<p>The negotiated registration sequence is:</p>
+<ol>
+<li>The client sends the WebSocket upgrade or WebTransport CONNECT request with
+the service JWT and offered wire profiles.</li>
+<li>The controller validates the JWT and selects an endpoint-allowed wire
+profile before completing the handshake.</li>
+<li>The controller rejects the handshake if authentication fails or no allowed
+profile can be selected; otherwise it accepts the transport session.</li>
+<li>The client opens the session-control stream within the independent
+registration deadline.</li>
+<li>The controller reads and validates <code>ClientHelloV1</code>.</li>
+<li>It matches <code>service_id</code> and environment to the authenticated JWT claims
+using the same identity rules as the WebSocket path.</li>
+<li>It validates address syntax, port, tags, and all other registration fields.
+Version 1 does not perform an active reachability probe during registration.</li>
+<li>It persists registration and inserts the live instance.</li>
+<li>It sends <code>ServerHelloV1</code> containing <code>runtime_instance_id</code> and connection
+settings.</li>
+<li>It permits command and event streams only after the acknowledgement is sent.</li>
+</ol>
+<p>An invalid JWT, identity mismatch, or invalid registration closes the session.
+The client must not fall back to WebSocket for these failures because fallback
+would mask an authentication or configuration error.</p>
+<p>Authorization headers, JWTs, and registration payloads must be redacted from
+normal logs and metrics labels.</p>
+<h2 id="browser-and-bff-authentication"><a class="header" href="#browser-and-bff-authentication">Browser and BFF Authentication</a></h2>
+<p>The current browser WebSocket path depends on behavior that does not carry over
+to WebTransport:</p>
+<ul>
+<li>the browser automatically includes the <code>accessToken</code> cookie in the WebSocket
+upgrade;</li>
+<li><code>portal-view</code> offers <code>csrf.&lt;token&gt;</code> through <code>Sec-WebSocket-Protocol</code>;</li>
+<li>the BFF validates the cookie and CSRF value and injects the authenticated
+bearer token into the upstream WebSocket handshake.</li>
+</ul>
+<p>Browser WebTransport requests use Fetch credentials mode <code>omit</code>; cookies and
+HTTP authentication are not sent automatically. The WebTransport profile token
+also has real protocol-negotiation semantics and must not be overloaded with a
+CSRF secret.</p>
+<p>The browser path therefore uses a short-lived, single-use connection ticket.
+Version 1 preserves the controller’s current Bearer-token validation contract;
+it does not introduce a second gateway identity envelope:</p>
+<ol>
+<li>An authenticated browser sends <code>POST /ctrl/mcp/ticket</code> through the existing
+HTTPS BFF path with its normal cookies and <code>X-CSRF-TOKEN</code> protection.</li>
+<li>The BFF validates or refreshes the current login exactly as it does for other
+protected HTTPS requests.</li>
+<li>The BFF creates an opaque, cryptographically random ticket bound to the
+authenticated subject, roles, client, allowed Origin, <code>/ctrl/mcp</code>, selected
+wire profile, token expiry, and a nonce.</li>
+<li>The BFF stores the ticket in a bounded replay cache together with the current
+validated or refreshed access token, its expiry, and the authenticated
+principal. The record has a configurable lifetime no greater than 60 seconds
+and is consumed atomically on first use. The access token is never placed in
+the browser-visible ticket. If the replay cache cannot prove a successful
+write with the required TTL, ticket issuance fails closed.</li>
+<li>The browser opens WebTransport and supplies
+<code>Authorization: WebTransport &lt;ticket&gt;</code> in the CONNECT request headers.</li>
+<li>The gateway validates the Origin allowlist, consumes the ticket, restores the
+authenticated principal, applies normal access control, and establishes the
+upstream WebTransport session.</li>
+<li>The gateway injects the retained access token as
+<code>Authorization: Bearer &lt;access-token&gt;</code> in the upstream controller handshake,
+exactly as the current WebSocket BFF path does. The controller independently
+validates issuer, audience, expiry, required <code>portal.r</code> scope, subject, and
+client identity. The browser ticket is never forwarded to the controller.</li>
+<li>Gateway role-based policy uses the restored principal. It must not assert
+roles to the controller until a separately reviewed controller claim-mapping
+contract exists.</li>
+</ol>
+<p>The replay cache is security-sensitive credential storage. It must restrict
+read access to the ticket consumer, encrypt or equivalently protect records at
+rest and in transit, redact all values, and delete the complete record on
+consumption or expiry. A cache implementation that cannot provide those
+properties is not eligible for browser WebTransport.</p>
+<p>Ticket consumption also fails closed when the replay cache is unavailable,
+degraded, returns an ambiguous result, or cannot perform atomic consume. It must
+not fall back to a process-local cache or accept a self-contained ticket without
+replay protection.</p>
+<p>All gateway nodes must synchronize UTC through the deployment’s approved time
+service and expose clock-synchronization health. The cache TTL is authoritative,
+and each record also carries an absolute ticket expiry and access-token expiry;
+the consumer enforces the earliest deadline. A positive expiry grace period is
+not allowed because it could extend the 60-second hard maximum. If measured
+clock error exceeds the configured readiness threshold, ticket issuance and
+consumption fail closed until synchronization is healthy.</p>
+<p>Target browser support for <code>WebTransportOptions.headers</code>, <code>protocols</code>,
+<code>requireUnreliable</code>, the selected <code>protocol</code>, and the resulting <code>reliability</code>
+value is a release gate. The browser constructs the session with the ticket
+header, <code>protocols: ["light-controller-mcp-json-v1"]</code>, and
+<code>requireUnreliable: true</code>. After connection it requires
+<code>reliability == "supports-unreliable"</code>; a reliable-only connection is not
+accepted as the HTTP/3/QUIC profile described by this document. Do not put the
+ticket in a URL query parameter as a compatibility fallback because URLs are
+commonly retained in proxy, access, and diagnostic logs. If the target browser
+cannot meet this contract, browser WebTransport remains disabled or falls back
+according to its configured mode.</p>
+<p><code>POST /ctrl/mcp/ticket</code> terminates in the authenticated HTTPS BFF handler before
+route-prefix processing. Only a WebTransport CONNECT request for <code>/ctrl/mcp</code>
+enters the WebTransport router. Method-aware tests must prove that ticket POSTs
+cannot be proxied, upgraded, or rejected by the session router.</p>
+<p>In a multi-replica gateway deployment, ticket issuance and consumption require
+a shared replay cache or a proven affinity mechanism covering both requests. A
+self-contained signed ticket without replay protection is insufficient because
+it can be reused during its validity window.</p>
+<p>The accepted WebTransport session must not outlive either the access-token
+expiry or a configurable maximum session duration. The gateway arms that
+deadline when it consumes the ticket, closes the session at the deadline, and
+requires a new ticket before reconnecting. Immediate authorization revocation
+is guaranteed only when the deployment provides a concrete revocation signal or
+introspection mechanism consumed by the gateway. Without one, version 1 claims
+expiry enforcement, not immediate revocation. Ticket values, user access
+tokens, CSRF values, and upstream authorization headers are always redacted.</p>
+<h2 id="logical-channels-and-transport-mapping"><a class="header" href="#logical-channels-and-transport-mapping">Logical Channels and Transport Mapping</a></h2>
+<p>Version 1 uses reliable delivery only. Applications operate on logical channels;
+the transport adapter decides whether those channels share a connection or use
+independent streams.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Logical channel</th><th>WebSocket mapping</th><th>WebTransport mapping</th><th>Contents</th></tr>
+</thead>
+<tbody>
+<tr><td>MCP session</td><td>One ordered WebSocket connection</td><td>One long-lived bidirectional stream</td><td>MCP JSON-RPC requests, responses, and notifications</td></tr>
+<tr><td>Runtime session control</td><td>Messages on the runtime WebSocket</td><td>One long-lived bidirectional stream</td><td>Registration, metadata, discovery, ping/pong, and session errors</td></tr>
+<tr><td>Runtime command</td><td>Messages correlated by request ID on the runtime WebSocket</td><td>One bidirectional stream per command</td><td>One command request and one command response</td></tr>
+<tr><td>Runtime events</td><td>Messages on the runtime WebSocket</td><td>One long-lived unidirectional stream</td><td>Existing asynchronous notifications, including <code>notifications/log</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>WebSocket preserves message boundaries but provides one ordered data path per
+direction. WebTransport streams are ordered byte streams and do not preserve
+application message boundaries. Their adapters must apply the framing defined by
+the negotiated wire profile.</p>
+<p>The <code>rkyv</code> over WebSocket profile isolates codec cost for measurement; it does
+not provide independent command and event streams. Avoid claiming WebTransport
+multiplexing benefits for that combination.</p>
+<h3 id="mcp-session-channel"><a class="header" href="#mcp-session-channel">MCP Session Channel</a></h3>
+<p>The browser and controller exchange the existing MCP JSON-RPC messages without
+semantic translation. WebSocket carries one JSON-RPC message per text frame.
+WebTransport carries the same messages on one long-lived bidirectional stream
+using the JSON framing below. Server notifications share that stream.</p>
+<p>The first MCP request remains <code>initialize</code> according to the current controller
+contract. A second MCP stream in the same WebTransport session is a protocol
+violation in version 1.</p>
+<h3 id="runtime-session-control-channel"><a class="header" href="#runtime-session-control-channel">Runtime Session Control Channel</a></h3>
+<p>For WebTransport, the runtime opens this stream first. Registration must be its
+first frame. The stream remains open for the session and carries low-volume
+ordered control messages. Only one runtime session-control stream is allowed.</p>
+<p>For WebSocket, these logical messages continue to share the existing runtime
+connection. Registration and acknowledgement ordering remain unchanged.</p>
+<h3 id="runtime-command-channels"><a class="header" href="#runtime-command-channels">Runtime Command Channels</a></h3>
+<p>On WebTransport, the controller opens a new bidirectional stream for each
+command. It writes one command request, closes its send direction, reads one
+command response, and then releases the stream. JSON and <code>rkyv</code> profiles use the
+same stream lifecycle with different payload framing.</p>
+<p>On WebSocket, commands and responses remain messages on the existing connection.
+The request ID is mandatory on every transport. It preserves audit correlation,
+timeout handling, and late-response detection.</p>
+<p>Command concurrency remains bounded by controller configuration and negotiated
+limits. A command that cannot obtain transport capacity before its dispatch
+deadline fails with a transport error; it must not wait indefinitely.</p>
+<h3 id="runtime-event-channel"><a class="header" href="#runtime-event-channel">Runtime Event Channel</a></h3>
+<p>On WebTransport, the runtime opens one unidirectional event stream after
+registration. It carries framed asynchronous notifications separately from
+command responses, so log traffic cannot sit in front of a command response in
+the same application stream. On WebSocket, event messages remain on the shared
+ordered connection.</p>
+<p>The event path is reliable and flow-controlled. It is not fire-and-forget. The
+runtime must use a bounded outbound event queue:</p>
+<ul>
+<li>control and lifecycle notifications are never silently dropped;</li>
+<li>log records may be dropped at the source when their queue is full;</li>
+<li>every dropped-log interval emits a counter and a sequence gap visible to the
+controller;</li>
+<li>a persistently blocked event stream is reset and the session is reconnected.</li>
+</ul>
+<p>The controller continues to translate accepted runtime notifications to the
+existing external MCP notification shape.</p>
+<h2 id="json-wire-profile-framing"><a class="header" href="#json-wire-profile-framing">JSON Wire Profile Framing</a></h2>
+<p>Existing JSON WebSocket behavior is unchanged: one UTF-8 JSON-RPC value is sent
+in each text frame and binary frames are rejected for legacy sessions.</p>
+<p>On WebTransport, each JSON message is encoded as:</p>
+<pre><code class="language-text">4-byte unsigned big-endian payload length
+exactly that many UTF-8 JSON bytes
+</code></pre>
+<p>The length excludes the four-byte prefix. The receiver rejects a value above
+the endpoint-specific message limit before allocating, reads exactly the
+declared length with a deadline, validates UTF-8, and parses exactly one JSON
+value. EOF before the complete payload is a truncated-message error. Zero-length
+messages and trailing non-whitespace bytes are invalid.</p>
+<p>This framing applies to both <code>light-controller-mcp-json-v1</code> and
+<code>light-controller-runtime-json-v1</code> over WebTransport. It is part of those wire
+profiles, not a generic property of WebTransport.</p>
+<h2 id="rkyv-binary-frame-format"><a class="header" href="#rkyv-binary-frame-format">rkyv Binary Frame Format</a></h2>
+<p>Every <code>light-controller-runtime-rkyv-v1</code> message begins with a fixed 16-byte
+header encoded without <code>rkyv</code>:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Offset</th><th>Size</th><th>Field</th><th>Encoding</th></tr>
+</thead>
+<tbody>
+<tr><td>0</td><td>4</td><td>Magic</td><td>ASCII <code>LCRK</code></td></tr>
+<tr><td>4</td><td>1</td><td>Wire-profile major</td><td><code>1</code></td></tr>
+<tr><td>5</td><td>1</td><td>Flags</td><td><code>0</code> in version 1</td></tr>
+<tr><td>6</td><td>2</td><td>Message kind</td><td>Unsigned little-endian integer</td></tr>
+<tr><td>8</td><td>4</td><td>Payload length</td><td>Unsigned little-endian integer</td></tr>
+<tr><td>12</td><td>4</td><td>Reserved</td><td>Must be zero</td></tr>
+</tbody>
+</table>
+</div>
+<p>The payload immediately follows the header and contains exactly one archived
+root object. The payload length excludes the header. WebSocket/TLS and
+WebTransport/QUIC already provide cryptographic integrity, so the application
+frame does not add a checksum.</p>
+<p>The receiver must:</p>
+<ol>
+<li>Read the complete header with a deadline.</li>
+<li>Validate magic, version, flags, message kind, and reserved bytes.</li>
+<li>Reject a length above the limit before allocating the payload buffer.</li>
+<li>Allocate an appropriately aligned buffer and read exactly the declared
+payload length.</li>
+<li>Validate the archived root with <code>bytecheck</code> through a safe <code>rkyv</code> API.</li>
+<li>Apply semantic limits such as string length, tag count, and allowed command
+names.</li>
+<li>Copy only the fields that must survive the receive buffer or cross an
+asynchronous boundary.</li>
+</ol>
+<p>On WebSocket, one binary message contains exactly one header and payload. On
+WebTransport, EOF before the complete payload is a truncated-frame error. Extra
+bytes are the start of the next frame only on long-lived control or event
+streams.</p>
+<h3 id="message-kind-registry"><a class="header" href="#message-kind-registry">Message Kind Registry</a></h3>
+<p>Version 1 reserves these message kinds:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Kind</th><th>Root type</th><th>Allowed logical channel</th></tr>
+</thead>
+<tbody>
+<tr><td>1</td><td><code>ClientHelloV1</code></td><td>Session control</td></tr>
+<tr><td>2</td><td><code>ServerHelloV1</code></td><td>Session control</td></tr>
+<tr><td>3</td><td><code>MetadataUpdateV1</code></td><td>Session control</td></tr>
+<tr><td>4</td><td><code>DiscoveryRequestV1</code></td><td>Session control</td></tr>
+<tr><td>5</td><td><code>DiscoveryResponseV1</code></td><td>Session control</td></tr>
+<tr><td>6</td><td><code>DiscoveryChangedV1</code></td><td>Session control</td></tr>
+<tr><td>7</td><td><code>PingV1</code></td><td>Session control</td></tr>
+<tr><td>8</td><td><code>PongV1</code></td><td>Session control</td></tr>
+<tr><td>9</td><td><code>SessionErrorV1</code></td><td>Session control</td></tr>
+<tr><td>10</td><td><code>ServerDrainingV1</code></td><td>Session control</td></tr>
+<tr><td>100</td><td><code>CommandRequestV1</code></td><td>Command</td></tr>
+<tr><td>101</td><td><code>CommandResponseV1</code></td><td>Command</td></tr>
+<tr><td>200</td><td><code>RuntimeNotificationV1</code></td><td>Runtime events</td></tr>
+</tbody>
+</table>
+</div>
+<p>Unknown kinds are rejected before archived access. Adding a new kind does not
+change an existing archived root type. Existing version 1 root types are
+immutable after release.</p>
+<h2 id="runtime-rkyv-v1-wire-types"><a class="header" href="#runtime-rkyv-v1-wire-types">runtime-rkyv-v1 Wire Types</a></h2>
+<p>The type names below describe shared wire types for
+<code>light-controller-runtime-rkyv-v1</code>, not the existing application structs in
+either repository. Field order is part of the archived schema and is frozen when
+that profile is released.</p>
+<h3 id="registration-types"><a class="header" href="#registration-types">Registration Types</a></h3>
+<p><code>ClientHelloV1</code> contains:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Wire type</th><th>Semantic rule</th></tr>
+</thead>
+<tbody>
+<tr><td><code>service_id</code></td><td>UTF-8 string</td><td>Non-empty; maximum 256 bytes; must match the authenticated service claim</td></tr>
+<tr><td><code>env_tag</code></td><td>Optional UTF-8 string</td><td>Maximum 128 bytes; must agree with authenticated environment claims when present</td></tr>
+<tr><td><code>service_version</code></td><td>UTF-8 string</td><td>Non-empty; maximum 128 bytes</td></tr>
+<tr><td><code>application_protocol</code></td><td>UTF-8 string</td><td>Runtime’s advertised protocol, such as <code>https</code>; maximum 32 bytes</td></tr>
+<tr><td><code>address</code></td><td>UTF-8 string</td><td>Syntactically valid IP literal or DNS hostname; maximum 253 bytes; no registration-time reachability probe</td></tr>
+<tr><td><code>port</code></td><td><code>u16</code></td><td>Must be greater than zero</td></tr>
+<tr><td><code>tags</code></td><td>Vector of <code>WireTagV1</code></td><td>Maximum 64 entries; keys sorted and unique</td></tr>
+</tbody>
+</table>
+</div>
+<p>The JWT is not present in <code>ClientHelloV1</code>; it comes from the authenticated
+WebSocket upgrade or WebTransport CONNECT request.</p>
+<p><code>ServerHelloV1</code> contains:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Wire type</th><th>Semantic rule</th></tr>
+</thead>
+<tbody>
+<tr><td><code>runtime_instance_id</code></td><td>16-byte UUID</td><td>Authoritative ID returned by registration persistence</td></tr>
+<tr><td><code>connection_id</code></td><td>16-byte UUID</td><td>Identifies this live transport session</td></tr>
+<tr><td><code>heartbeat_interval_ms</code></td><td><code>u32</code></td><td>Non-zero negotiated heartbeat interval</td></tr>
+<tr><td><code>max_control_payload_bytes</code></td><td><code>u32</code></td><td>Server limit for session-control frames</td></tr>
+<tr><td><code>max_command_streams</code></td><td><code>u32</code></td><td>Maximum concurrent controller command streams</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>WireTagV1</code> contains UTF-8 <code>key</code> and <code>value</code> strings. Each is limited to 256
+bytes. Duplicate keys are invalid.</p>
+<h3 id="metadata-and-discovery-types"><a class="header" href="#metadata-and-discovery-types">Metadata and Discovery Types</a></h3>
+<p><code>MetadataUpdateV1</code> contains optional <code>service_version</code>,
+<code>application_protocol</code>, <code>port</code>, and complete replacement <code>tags</code> fields. The
+same limits and validation rules as registration apply. <code>None</code> means no change.
+<code>Some(empty tags)</code> clears all tags; empty strings and port zero are invalid.</p>
+<p><code>DiscoveryRequestV1</code> contains:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Wire type</th><th>Semantic rule</th></tr>
+</thead>
+<tbody>
+<tr><td><code>request_id</code></td><td>UTF-8 string</td><td>Non-empty; maximum 128 bytes</td></tr>
+<tr><td><code>operation</code></td><td><code>u8</code></td><td><code>1</code> lookup, <code>2</code> subscribe, <code>3</code> unsubscribe</td></tr>
+<tr><td><code>service_id</code></td><td>UTF-8 string</td><td>Non-empty; maximum 256 bytes</td></tr>
+<tr><td><code>env_tag</code></td><td>Optional UTF-8 string</td><td>Maximum 128 bytes</td></tr>
+<tr><td><code>application_protocol</code></td><td>Optional UTF-8 string</td><td>Maximum 32 bytes</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>DiscoveryResponseV1</code> contains the request ID, an optional
+<code>DiscoverySnapshotV1</code>, and an optional <code>WireErrorV1</code>. Exactly one of snapshot
+or error must be present.</p>
+<p><code>DiscoveryChangedV1</code> contains one <code>DiscoverySnapshotV1</code>. A discovery snapshot
+contains the requested service ID, optional environment and application
+protocol filters, and a bounded vector of <code>DiscoveryNodeV1</code> values. Each node
+contains the current runtime instance ID, service identity, environment,
+version, application protocol, address, port, tags, connection timestamps, and
+connected state needed by the existing discovery contract.</p>
+<p>The initial maximum number of nodes in one snapshot is 10,000. A larger result
+is a resource-limit error rather than a partially serialized snapshot. The
+frame-size limit also applies, and the receiver enforces whichever limit is
+reached first.</p>
+<h3 id="liveness-and-error-types"><a class="header" href="#liveness-and-error-types">Liveness and Error Types</a></h3>
+<p><code>PingV1</code> and <code>PongV1</code> contain the same <code>u64</code> nonce and signed 64-bit Unix
+millisecond timestamp. A pong with an unexpected nonce does not satisfy the
+heartbeat.</p>
+<p><code>SessionErrorV1</code> and command failures use <code>WireErrorV1</code>:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Wire type</th><th>Semantic rule</th></tr>
+</thead>
+<tbody>
+<tr><td><code>code</code></td><td><code>i32</code></td><td>Stable application error code</td></tr>
+<tr><td><code>message</code></td><td>UTF-8 string</td><td>Safe operator-facing summary; maximum 1,024 bytes</td></tr>
+<tr><td><code>data_json</code></td><td>Optional byte vector</td><td>One valid JSON value within the frame-specific limit</td></tr>
+</tbody>
+</table>
+</div>
+<p>Error messages must not contain JWTs, authorization headers, or unredacted
+sensitive payloads.</p>
+<p><code>ServerDrainingV1</code> contains a signed 64-bit Unix millisecond drain deadline and
+a safe reason string limited to 1,024 bytes. A client stops issuing new control
+requests, lets active command streams finish until that deadline, and reconnects
+after the server closes the session.</p>
+<h3 id="command-and-notification-types"><a class="header" href="#command-and-notification-types">Command and Notification Types</a></h3>
+<p><code>CommandRequestV1</code> contains a request ID limited to 128 bytes, a tool name
+limited to 256 bytes, and <code>arguments_json</code>. <code>CommandResponseV1</code> contains the
+same request ID, completion timestamp, and exactly one of <code>result_json</code> or
+<code>WireErrorV1</code>.</p>
+<p><code>RuntimeNotificationV1</code> contains a method name limited to 256 bytes,
+<code>params_json</code>, and monotonically increasing <code>u64</code> sequence number for the
+current event stream. Sequence numbers restart at zero on a new registered
+session. A gap tells the controller that the runtime dropped one or more
+notifications before transmission.</p>
+<p>All <code>*_json</code> fields are UTF-8 byte vectors containing exactly one valid JSON
+value. Their content is validated only after the enclosing archive and byte
+limits pass.</p>
+<p>Version 1 deliberately uses numeric operation and message-kind fields rather
+than a shared archived envelope enum. New independent kinds can be registered
+without changing the layout of existing roots. Unknown numeric values are
+errors; they are never mapped to a default operation.</p>
+<h2 id="rkyv-wire-profile"><a class="header" href="#rkyv-wire-profile">rkyv Wire Profile</a></h2>
+<p>The shared wire crate owns the only <code>rkyv</code> dependency used for this protocol.
+Both controller and runtime consume the same published or otherwise pinned
+crate version.</p>
+<p>Version 1 fixes these format choices:</p>
+<pre><code class="language-text">rkyv major version: 0.8
+endianness: little_endian
+alignment: aligned
+relative pointer width: pointer_width_32
+validation: bytecheck enabled
+UUID integration: uuid-1 enabled
+</code></pre>
+<p>Cargo feature unification must not silently change this profile. CI checks
+<code>cargo tree -e features</code> for the controller and runtime release graphs and
+rejects conflicting endianness, alignment, or pointer-width features.</p>
+<p>Payloads are read directly into an aligned buffer. Network input always uses
+validated access such as <code>rkyv::access</code>; unchecked access and unchecked
+deserialization are prohibited.</p>
+<p>Wire types must:</p>
+<ul>
+<li>use fixed-width integers instead of <code>usize</code> or <code>isize</code>;</li>
+<li>represent UUIDs consistently through the shared crate;</li>
+<li>represent timestamps as signed 64-bit Unix milliseconds;</li>
+<li>use sorted key-value vectors instead of unordered maps when deterministic
+bytes are required;</li>
+<li>avoid recursive or attacker-controlled deeply nested structures;</li>
+<li>avoid references to application structs whose layout can change
+independently;</li>
+<li>define semantic maximums for strings, lists, tags, and JSON byte fields.</li>
+</ul>
+<p>Validation proves that bytes form a structurally valid archive. It does not
+prove that a service ID, address, port, tool name, or authorization decision is
+valid. Normal application validation remains mandatory.</p>
+<p>Archived references borrow the receive buffer. They must not be stored in
+controller state, moved into a spawned task, or held across an <code>.await</code> that can
+outlive the buffer. Values needed by persistence, event publication, or the
+existing JSON/MCP surfaces are converted into owned application types.</p>
+<p>This boundary means the design is not zero-allocation end to end. It avoids
+parsing and allocation only where handlers can consume archived values directly.</p>
+<h2 id="dynamic-json-payloads"><a class="header" href="#dynamic-json-payloads">Dynamic JSON Payloads</a></h2>
+<p>The existing command layer includes dynamic MCP arguments and results. Version
+1 preserves them as bounded UTF-8 JSON byte fields inside otherwise typed wire
+messages:</p>
+<pre><code class="language-text">CommandRequestV1
+  request_id
+  tool_name
+  arguments_json
+
+CommandResponseV1
+  request_id
+  completed_at
+  result_json or structured error
+
+RuntimeNotificationV1
+  method
+  params_json
+  sequence
+</code></pre>
+<p>The receiver validates UTF-8 and parses JSON only when the existing handler
+requires <code>serde_json::Value</code>. This preserves current command extensibility and
+makes the performance limitation explicit. A future wire-profile version may
+add typed payload kinds for measured hot paths without changing version 1.</p>
+<h2 id="schema-ownership-and-evolution"><a class="header" href="#schema-ownership-and-evolution">Schema Ownership and Evolution</a></h2>
+<p>Create a dependency-light shared crate, referred to here as
+<code>controller-wire</code>, containing:</p>
+<ul>
+<li>wire-profile identifiers and compatibility metadata;</li>
+<li>the JSON length-prefix encoder and decoder;</li>
+<li>the 16-byte <code>rkyv</code> frame header encoder and decoder;</li>
+<li>runtime protocol and message-kind constants;</li>
+<li>immutable <code>v1</code> archived root types;</li>
+<li>semantic validation helpers;</li>
+<li>golden JSON and <code>rkyv</code> encoded fixtures;</li>
+<li>compatibility tests.</li>
+</ul>
+<p>The crate must not depend on <code>controller-rs</code>, <code>portal-registry</code>, Tokio, Axum, or
+a particular WebTransport implementation.</p>
+<p>The existing duplicate registration structs in <code>controller-rs</code> and
+<code>portal-registry</code> must not become independent <code>rkyv</code> schemas. Each side converts
+between its application types and the shared wire types.</p>
+<p>Versioning rules are:</p>
+<ul>
+<li>never add, remove, reorder, or change fields in a released archived root;</li>
+<li>never add a variant to a released archived enum;</li>
+<li>add a new message kind for a new independent payload;</li>
+<li>add a new wire-profile major version for an incompatible replacement;</li>
+<li>keep golden bytes for every released root type;</li>
+<li>test old-client/new-server and new-client/old-server negotiation;</li>
+<li>keep at least the current and previous wire-profile versions during
+rolling upgrades.</li>
+</ul>
+<h2 id="transport-neutral-application-boundary"><a class="header" href="#transport-neutral-application-boundary">Transport-Neutral Application Boundary</a></h2>
+<p><code>controller-rs</code> already stores an <code>mpsc::Sender&lt;ControllerCommand&gt;</code> in each
+live instance. Preserve this boundary. Application services exchange owned
+logical messages and lifecycle events without importing Axum WebSocket,
+Tungstenite, QUIC, WebTransport, or <code>rkyv</code> types.</p>
+<p>The useful abstractions are deliberately small:</p>
+<ul>
+<li>an application session for registration, commands, responses, notifications,
+authentication state, and cleanup;</li>
+<li>a wire-profile adapter that encodes and decodes owned logical messages;</li>
+<li>a transport session that opens or accepts logical channels and moves bounded
+encoded messages;</li>
+<li>transport capabilities describing independent streams and datagrams.</li>
+</ul>
+<p>A broad application-wide <code>Connection</code> trait is not required. The application
+must not assume every transport supports independent streams, and the transport
+must not inspect MCP methods or runtime command payloads.</p>
+<p>On the Rust client, replace the WebSocket-specific outbound
+<code>mpsc::Sender&lt;tungstenite::Message&gt;</code> boundary with a logical outbound enum. The
+selected wire-profile adapter converts that enum to bounded bytes. The selected
+transport adapter then maps those bytes to WebSocket messages or WebTransport
+streams. Codec selection must not occur inside the transport driver.</p>
+<p>On the controller, refactor the current WebSocket handlers so all transports
+and codecs call shared functions for registration, inbound messages, pending
+command completion, notification publication, and disconnect cleanup.</p>
+<p>The gateway is intentionally below this application boundary. Its initial
+WebSocket and WebTransport routers forward payload bytes and do not instantiate
+the MCP or runtime codecs.</p>
+<p>All supported profile and transport adapters must produce the same observable
+application behavior for:</p>
+<ul>
+<li>registration acknowledgement;</li>
+<li><code>runtime_instance_id</code> assignment;</li>
+<li>metadata and discovery updates;</li>
+<li>command results and timeouts;</li>
+<li>notifications;</li>
+<li>liveness timestamps;</li>
+<li>disconnect events and pending-command failure.</li>
+</ul>
+<h2 id="expected-implementation-surfaces"><a class="header" href="#expected-implementation-surfaces">Expected Implementation Surfaces</a></h2>
+<p>The initial implementation is cross-repository work.</p>
+<p>In <code>controller-rs</code>, the main change surfaces are:</p>
+<ul>
+<li><code>Cargo.toml</code> for the selected HTTP/3/WebTransport, JSON framing, and wire
+dependencies;</li>
+<li><code>src/config.rs</code> for listeners, allowed profile pairs, and limits;</li>
+<li><code>src/lib.rs</code> and <code>src/tls.rs</code> for coordinated TCP and UDP listeners;</li>
+<li>an authenticated internal capability handler and transport-native probe
+resources for per-instance transport/profile readiness;</li>
+<li><code>src/routes/microservice.rs</code> to extract shared session behavior from the
+WebSocket driver;</li>
+<li><code>src/routes/mcp.rs</code> to extract shared MCP behavior for WebSocket and
+WebTransport session adapters;</li>
+<li><code>src/auth.rs</code> to separate token verification from post-CONNECT registration
+identity matching;</li>
+<li><code>src/state.rs</code>, <code>src/types.rs</code>, and <code>src/command_router.rs</code> to preserve the
+existing command channel and connection-ID cleanup rules;</li>
+<li>integration tests for profile, transport, and fallback parity.</li>
+</ul>
+<p>In <code>light-fabric</code>, the main change surfaces are:</p>
+<ul>
+<li><code>crates/portal-registry/Cargo.toml</code>;</li>
+<li><code>crates/portal-registry/src/client.rs</code> for transport-neutral logical queues
+plus independent codec and transport selection;</li>
+<li><code>crates/portal-registry/src/protocol.rs</code> for conversion to the shared wire
+crate rather than a second archived schema;</li>
+<li><code>crates/light-runtime/src/config.rs</code> and <code>runtime.rs</code> for client selection,
+URL derivation, TLS assets, and fallback settings;</li>
+<li><code>frameworks/light-pingora/src/websocket.rs</code> to extract reusable route
+resolution without changing existing WebSocket behavior;</li>
+<li>a WebTransport router module and UDP/HTTP3 service with transport-specific
+limits and stream relay;</li>
+<li><code>apps/light-gateway/src/main.rs</code> for coordinated TCP and UDP startup,
+readiness, reload, and shutdown;</li>
+<li>BFF ticket issuance, bounded replay-cache storage, Origin validation, and
+restoration of the authenticated principal;</li>
+<li>runtime handlers and tests for command, discovery, notification, heartbeat,
+reconnect, and draining parity.</li>
+</ul>
+<p>In <code>portal-view</code>, the main change surfaces are:</p>
+<ul>
+<li>the controller context for transport preference and serial fallback;</li>
+<li>an authenticated capability client for <code>/ctrl/mcp/capabilities</code>, with the
+optional <code>VITE_CONTROLLER_TRANSPORT</code> override;</li>
+<li>one controller-BFF authority resolver shared by capability, ticket,
+WebSocket, and WebTransport URLs;</li>
+<li>an MCP session interface shared by WebSocket and WebTransport clients;</li>
+<li>the HTTPS ticket request and WebTransport CONNECT header;</li>
+<li>WebTransport JSON framing and notification handling;</li>
+<li>browser capability, authentication, reconnect, and cleanup tests.</li>
+</ul>
+<p>Deployment repositories must add UDP exposure for each enabled WebTransport
+listener and router. <code>light-4j</code> requires compatibility tests but no <code>rkyv</code> or
+WebTransport implementation for the initial release.</p>
+<h2 id="initial-limits"><a class="header" href="#initial-limits">Initial Limits</a></h2>
+<p>All limits are configurable, but the server must start with finite defaults.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Limit</th><th>Initial default</th></tr>
+</thead>
+<tbody>
+<tr><td>Registration/control frame payload</td><td>1 MiB</td></tr>
+<tr><td>Command request payload</td><td>1 MiB</td></tr>
+<tr><td>Command response payload</td><td>16 MiB</td></tr>
+<tr><td>Runtime notification payload</td><td>1 MiB</td></tr>
+<tr><td>MCP JSON message</td><td>16 MiB, explicitly enforced on both transports</td></tr>
+<tr><td>Queued outbound commands per runtime session</td><td>64</td></tr>
+<tr><td>In-flight commands per runtime session</td><td>64</td></tr>
+<tr><td>In-flight commands across the controller</td><td>4096</td></tr>
+<tr><td>Concurrent command streams per WebTransport runtime session</td><td>64</td></tr>
+<tr><td>Active WebTransport runtime sessions</td><td>1000</td></tr>
+<tr><td>Session-control streams</td><td>1</td></tr>
+<tr><td>Runtime event streams</td><td>1</td></tr>
+<tr><td>MCP streams per WebTransport session</td><td>1</td></tr>
+<tr><td>Registration deadline</td><td>5 seconds, controlled independently from command timeouts</td></tr>
+<tr><td>Heartbeat interval</td><td>30 seconds</td></tr>
+<tr><td>Missed heartbeat allowance</td><td>1 interval</td></tr>
+<tr><td>Browser connection-ticket lifetime</td><td>30 seconds; hard maximum 60 seconds</td></tr>
+<tr><td>Browser connection-ticket uses</td><td>1, consumed atomically</td></tr>
+<tr><td>Gateway ticket clock-skew readiness threshold</td><td>2 seconds; no expiry grace</td></tr>
+<tr><td>Maximum validation depth</td><td>64 for any type that can contain nested data</td></tr>
+<tr><td>WebTransport datagrams</td><td>Disabled</td></tr>
+</tbody>
+</table>
+</div>
+<p>Additional per-IP, per-user, per-Origin, and per-service session and ticket
+limits must be set from load-test results before internet-facing deployment. A
+length or count limit is checked before allocation or iteration wherever
+possible.</p>
+<p>The command queue capacity, in-flight-command limit, and concurrent-stream limit
+are separate controls. The existing <code>COMMAND_CHANNEL_CAPACITY</code> describes a
+bounded queue; it must not be reused as proof that pending commands or open
+streams are bounded. Admission reserves an in-flight slot before inserting a
+pending response entry or opening a command stream. When either the per-session
+or global limit is reached, dispatch fails immediately with <code>Resource limit</code>
+and does not enqueue or insert pending state.</p>
+<p>Both WebSocket and WebTransport MCP handlers explicitly enforce the 16 MiB MCP
+application-message limit. The implementation configures the WebSocket
+frame/message limit rather than relying on a framework default, and the
+WebTransport length prefix is rejected before allocation when it exceeds the
+same limit.</p>
+<h2 id="liveness-errors-and-cleanup"><a class="header" href="#liveness-errors-and-cleanup">Liveness, Errors, and Cleanup</a></h2>
+<p>Transport-level TCP or QUIC activity is not sufficient to prove that the
+application loop is healthy. The runtime sends the profile-specific ping message
+on the session-control channel and expects its matching pong within the
+heartbeat deadline. For <code>rkyv</code> these are <code>PingV1</code> and <code>PongV1</code>; the JSON profile
+uses the existing JSON-RPC liveness messages. Any valid application message also
+updates the instance’s last-seen time.</p>
+<p>Browser MCP sessions retain the existing MCP <code>ping</code> behavior and are also
+subject to the gateway’s idle and maximum-connection-duration limits.</p>
+<p>Errors are classified as:</p>
+<ul>
+<li><strong>Unavailable:</strong> UDP blocked, timeout, no route, or listener unavailable;</li>
+<li><strong>Unsupported:</strong> the transport, wire profile, or allowed profile/transport
+pair is not supported;</li>
+<li><strong>Establishment failed:</strong> the browser reported an opaque WebTransport failure
+before the session became ready and did not expose a more specific cause;</li>
+<li><strong>Unauthorized:</strong> JWT is missing, invalid, or expired;</li>
+<li><strong>Invalid registration:</strong> authenticated claims and registration disagree;</li>
+<li><strong>Protocol violation:</strong> invalid frame, logical channel, ordering, or message
+kind;</li>
+<li><strong>Resource limit:</strong> frame, queue, session, or stream limit exceeded;</li>
+<li><strong>Internal:</strong> persistence or controller failure.</li>
+</ul>
+<p>A malformed WebTransport command stream is reset without immediately killing a
+healthy session when isolation is safe. Authentication failures, invalid
+registration, duplicate required channels, repeated malformed frames, or
+session-wide resource abuse close the entire session.</p>
+<p>The browser error surface cannot reliably map every failed WebTransport CONNECT
+to an HTTP status or server-side category. <code>responseHeaders</code> are available only
+after the session is established, and a pre-establishment <code>ready</code> rejection may
+deliberately hide whether the endpoint was unreachable or unwilling to accept
+the session. Browser fallback therefore uses only client-observable facts:</p>
+<ul>
+<li>capability-fetch and ticket-issuance HTTP responses retain their explicit
+<code>Unauthorized</code>, <code>Unsupported</code>, <code>Resource limit</code>, or <code>Internal</code> categories;</li>
+<li>a synchronous absence of the required constructor or constructor option is
+<code>Unsupported</code>;</li>
+<li>a rejection before <code>ready</code> resolves, after successful capability and ticket
+requests, is <code>Establishment failed</code>; the browser must not relabel it as
+<code>Unauthorized</code>, <code>Unavailable</code>, or <code>Internal</code>;</li>
+<li><code>preferWebTransport</code> may serially fall back to an advertised WebSocket
+candidate for <code>Establishment failed</code>, while <code>requireWebTransport</code> never does;
+and</li>
+<li>after <code>ready</code> resolves, profile negotiation and application errors are
+structured and follow the no-fallback rules.</li>
+</ul>
+<p>The gateway and controller retain the authoritative server-side cause in
+bounded telemetry even when the browser sees only <code>Establishment failed</code>. Both
+transports enforce the same authentication and authorization policy, so browser
+fallback is not an authorization bypass. Operators who cannot accept an opaque
+pre-establishment downgrade must select <code>requireWebTransport</code>.</p>
+<p>Disconnect cleanup must remain connection-ID guarded so a late task from an old
+transport cannot remove a newly registered replacement connection.</p>
+<h2 id="transport-and-profile-selection"><a class="header" href="#transport-and-profile-selection">Transport and Profile Selection</a></h2>
+<p>Transport and codec remain independent, but fallback ordering must be
+unambiguous. Clients therefore use an ordered list of explicit candidate pairs:</p>
+<pre><code class="language-yaml">portalRegistry:
+  portalUrl: https://controller:8438
+  controlCandidates:
+    - transport: webtransport
+      wireProfile: light-controller-runtime-rkyv-v1
+      negotiation: required
+    - transport: websocket
+      wireProfile: light-controller-runtime-rkyv-v1
+      negotiation: required
+    - transport: websocket
+      wireProfile: light-controller-runtime-json-v1
+      negotiation: legacy
+</code></pre>
+<p>The production default contains only the legacy-compatible pair:</p>
+<pre><code class="language-yaml">controlCandidates:
+  - transport: websocket
+    wireProfile: light-controller-runtime-json-v1
+    negotiation: legacy
+</code></pre>
+<p><code>negotiation: required</code> sends the profile offer and requires the peer to select
+that profile. <code>negotiation: legacy</code> is valid only for an existing JSON
+WebSocket contract; it sends no wire-profile token and accepts the existing
+no-profile handshake. This makes new-client-to-old-controller compatibility
+explicit without allowing an absent selection to downgrade a binary or
+WebTransport candidate.</p>
+<p>Convenience modes such as <code>websocket</code>, <code>preferWebTransport</code>, and
+<code>requireWebTransport</code> may be retained, but configuration loading must expand
+them into and expose the ordered candidate pairs. The same rule applies to a
+<code>preferRkyv</code> convenience setting. Operators must be able to see the effective
+order and must not depend on an undocumented Cartesian-product ordering.</p>
+<p>The existing <code>portalUrl</code> remains the base controller URL, including any ingress
+path prefix. The client derives <code>/wt/microservice</code> and <code>/ws/microservice</code> without
+discarding that prefix.</p>
+<p><code>portal-view</code> has one fixed wire profile,
+<code>light-controller-mcp-json-v1</code>. Its default local mode is <code>auto</code>: fetch
+<code>/ctrl/mcp/capabilities</code>, intersect the ready candidates with browser support,
+and follow the gateway policy. The gateway policies are:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Gateway policy</th><th>Behavior</th></tr>
+</thead>
+<tbody>
+<tr><td><code>websocket</code></td><td>Advertise and use the existing legacy WebSocket path; initial production default</td></tr>
+<tr><td><code>preferWebTransport</code></td><td>Try an advertised WebTransport candidate first and then the advertised legacy WebSocket candidate for an allowed fallback error</td></tr>
+<tr><td><code>requireWebTransport</code></td><td>Advertise WebTransport as required and fail the controller connection when it is unavailable</td></tr>
+</tbody>
+</table>
+</div>
+<p>The optional build-time override
+<code>VITE_CONTROLLER_TRANSPORT=auto|websocket|webtransport</code> is intended for local
+development, emergency compatibility, and controlled tests. <code>auto</code> is the
+default. <code>websocket</code> forces the legacy WebSocket candidate;
+<code>webtransport</code> requires WebTransport and does not silently fall back. The build
+variable is not the source of deployment readiness: the same UI bundle should
+work when gateway routes or controller transport sets change without a rebuild.
+A future runtime-injected UI configuration may provide the same override without
+changing the capability contract.</p>
+<p>In <code>auto</code> mode, <code>portal-view</code> performs these steps after authentication and when
+the first controller consumer requests a connection:</p>
+<ol>
+<li>Fetch the authenticated capability resource. If there is no valid response
+or still-fresh cached response, apply the capability-fetch failure rules,
+schedule jittered backoff, and return without attempting either transport.</li>
+<li>Check for the required local WebTransport constructor and option support.</li>
+<li>If policy and candidates permit it, request a ticket and attempt
+WebTransport with a bounded connection timeout.</li>
+<li>Require <code>light-controller-mcp-json-v1</code> as the selected protocol and
+<code>supports-unreliable</code> as the reliability mode before MCP initialization.</li>
+<li>Fall back to the advertised legacy WebSocket candidate only for observable
+<code>Unavailable</code> or <code>Unsupported</code> failures, or for the explicitly opaque
+<code>Establishment failed</code> category under <code>preferWebTransport</code>.</li>
+<li>Do not fall back for authentication, authorization, protocol, resource-limit,
+or internal errors.</li>
+</ol>
+<p>The actual attempt, not user-agent sniffing, page <code>nextHopProtocol</code>, or a cached
+previous success, determines whether the current enterprise network supports
+the WebTransport path.</p>
+<p>The gateway initially uses <code>matchIngress</code> upstream selection: WebSocket ingress
+uses a WebSocket upstream and WebTransport ingress uses a WebTransport upstream.
+No automatic cross-transport relay is allowed.</p>
+<p>Fallback rules are:</p>
+<ul>
+<li>attempts are serial, never parallel;</li>
+<li>fallback is allowed only before runtime registration acknowledgement or MCP
+initialization succeeds;</li>
+<li>browser <code>preferWebTransport</code> may fall back for an opaque pre-<code>ready</code>
+<code>Establishment failed</code>; <code>requireWebTransport</code> may not;</li>
+<li>do not fall back for <code>Unauthorized</code>, invalid registration, protocol
+violation, resource-limit, or internal errors;</li>
+<li>browser ticket authentication or Origin failure is <code>Unauthorized</code>, not an
+indication that WebTransport is unsupported;</li>
+<li>log and count the normalized fallback reason without logging secrets;</li>
+<li>after an established session disconnects, retry its selected transport first
+with the existing jittered exponential backoff;</li>
+<li>do not keep two live registrations for the same client attempt;</li>
+<li>never try a transport/profile pair that is absent from the configured
+candidate list;</li>
+<li><code>requireWebTransport</code> and required-profile policies prevent a network attacker
+or deployment error from silently forcing a downgrade.</li>
+</ul>
+<p>Java <code>light-4j</code> clients do not receive the new setting and continue to use
+WebSocket.</p>
+<h2 id="controller-configuration"><a class="header" href="#controller-configuration">Controller Configuration</a></h2>
+<p>Proposed server settings are:</p>
+<pre><code class="language-text">CONTROLLER_MCP_TRANSPORTS=websocket
+CONTROLLER_RUNTIME_TRANSPORTS=websocket
+CONTROLLER_STANDALONE_DISCOVERY_TRANSPORTS=websocket
+CONTROLLER_WEBTRANSPORT_ADDR=&lt;CONTROLLER_ADDR&gt;
+CONTROLLER_WEBTRANSPORT_MAX_SESSIONS=1000
+CONTROLLER_WEBTRANSPORT_MAX_COMMAND_STREAMS=64
+CONTROLLER_COMMAND_QUEUE_CAPACITY=64
+CONTROLLER_MAX_IN_FLIGHT_COMMANDS_PER_SESSION=64
+CONTROLLER_MAX_IN_FLIGHT_COMMANDS_GLOBAL=4096
+CONTROLLER_REGISTRATION_TIMEOUT_MS=5000
+CONTROLLER_MCP_MAX_MESSAGE_BYTES=16777216
+CONTROLLER_WEBTRANSPORT_RUNTIME_PROFILES=light-controller-runtime-json-v1,light-controller-runtime-rkyv-v1
+CONTROLLER_WEBTRANSPORT_MCP_PROFILES=light-controller-mcp-json-v1
+CONTROLLER_WEBSOCKET_BINARY_PROFILES=
+</code></pre>
+<p>The three transport settings are comma-separated enabled sets; server-side order
+has no preference semantics, duplicate values are invalid, and diagnostics emit
+their normalized effective values. Runtime registry and discovery messages use
+<code>CONTROLLER_RUNTIME_TRANSPORTS</code>;
+<code>CONTROLLER_STANDALONE_DISCOVERY_TRANSPORTS</code> controls only <code>/ws/discovery</code> and
+any future binding of that standalone surface. These settings apply only to
+persistent controller communication surfaces; disabling WebSocket for one of
+them does not disable the controller’s normal HTTPS health or administrative
+endpoints. Initial production settings contain only <code>websocket</code>. A dual
+migration configuration can use:</p>
+<pre><code class="language-text">CONTROLLER_MCP_TRANSPORTS=websocket,webtransport
+CONTROLLER_RUNTIME_TRANSPORTS=webtransport,websocket
+CONTROLLER_STANDALONE_DISCOVERY_TRANSPORTS=websocket
+</code></pre>
+<p>This permits the browser to fall back on enterprise networks while Rust runtime
+clients prefer WebTransport. A surface may be configured as WebTransport-only
+after every client and network path for that surface is proven. In particular,
+<code>CONTROLLER_MCP_TRANSPORTS=webtransport</code> removes browser WebSocket fallback
+under the initial same-transport gateway design. Java and other clients that do
+not implement WebTransport require a WebSocket-enabled surface.</p>
+<p><code>CONTROLLER_WEBTRANSPORT_ADDR</code> is a UDP socket address. It may use the same
+numeric host and port as the existing TCP listener because TCP and UDP have
+separate port spaces.</p>
+<p>In version 1, controller listener addresses, enabled transport sets, and allowed
+profile sets are startup-only. Changing them requires a controller restart and
+produces a new controller capability revision. Client preference remains owned
+by the ordered <code>controlCandidates</code> list; browser preference remains owned by
+gateway <code>mcpTransportPolicy</code>. Server enabled sets do not create a third
+preference source.</p>
+<p>The WebTransport listener reuses the configured controller certificate and
+private key but creates a QUIC-compatible TLS 1.3 configuration with HTTP/3
+ALPN. Adding <code>h3</code> to the existing Axum TCP TLS configuration is not sufficient.</p>
+<p>The WebTransport listener is enabled when any surface enabled set contains
+<code>webtransport</code>. Startup is fail-fast when that listener, its TLS identity, or
+required protocol extensions cannot be initialized. When no surface enables
+WebTransport, failure to initialize experimental WebTransport code must not
+affect the existing HTTPS/WebSocket listener.</p>
+<p>Allowed-profile lists are deny-by-default. An empty MCP list disables direct
+MCP WebTransport on the controller even when the runtime WebTransport listener
+is enabled. <code>CONTROLLER_WEBSOCKET_BINARY_PROFILES</code> remains empty in production
+until <code>rkyv</code> over WebSocket testing is explicitly approved.</p>
+<h2 id="gateway-configuration"><a class="header" href="#gateway-configuration">Gateway Configuration</a></h2>
+<p>Add a <code>webtransport-router.yml</code> module with route-resolution fields compatible
+with <code>websocket-router.yml</code> and WebTransport-specific session and stream limits.
+For example:</p>
+<pre><code class="language-yaml">defaultProtocol: https
+defaultEnvTag: dev
+pathPrefixService:
+  /ctrl/mcp:
+    serviceId: com.networknt.controller-1.0.0
+    protocol: https
+    envTag: dev
+allowedProfiles:
+  /ctrl/mcp:
+    - light-controller-mcp-json-v1
+mcpTransportPolicy: websocket
+capabilityMaxAgeSeconds: 30
+controllerCapabilityPath: /internal/controller/capabilities
+controllerCapabilityStaleMs: 15000
+controllerProbeIntervalMs: 5000
+controllerProbeTimeoutMs: 2000
+maxActiveSessions: 1000
+maxStreamsPerSession: 1
+ticketTtlMs: 30000
+ticketClockSkewReadyMs: 2000
+allowedOrigins:
+  - https://portal.example.com
+</code></pre>
+<p><code>mcpTransportPolicy</code> and <code>capabilityMaxAgeSeconds</code> are shared BFF policy
+settings even if configuration composition presents them beside the
+WebTransport router. They are not owned by only one router. The WebSocket and
+WebTransport routers publish bounded readiness state to one capability
+aggregator, which combines it with route and controller health.</p>
+<p>The configuration shape is illustrative until implementation review, but these
+contracts are required:</p>
+<ul>
+<li><code>POST /ctrl/mcp/ticket</code> is handled by the HTTPS BFF before this route table,
+while WebTransport CONNECT for <code>/ctrl/mcp</code> enters this router;</li>
+<li><code>GET /ctrl/mcp/capabilities</code> is handled by the authenticated BFF and reports
+only end-to-end candidates supported by the configured policy, healthy
+listeners, route resolver, and controller targets;</li>
+<li>controller capability responses and transport-native probe results must both
+be current within their configured stale thresholds before a target is
+eligible;</li>
+<li>route resolution code is shared with the WebSocket router rather than copied;</li>
+<li>activation follows the gateway handler/module model rather than an unrelated
+second enable flag;</li>
+<li>WebTransport-specific limits and allowed profiles are explicit;</li>
+<li>an empty or absent Origin allowlist rejects browser WebTransport;</li>
+<li>replay-cache unavailability, ambiguous atomic-consume results, or clock error
+beyond <code>ticketClockSkewReadyMs</code> makes ticket readiness false and fails ticket
+issuance and consumption closed;</li>
+<li>invalid startup config fails startup, while an invalid reload retains the
+last valid runtime;</li>
+<li>WebSocket and WebTransport route tables may differ, but drift is visible in
+diagnostics and configuration tests.</li>
+</ul>
+<p>Gateway route, policy, limit, and capability configuration is reloadable. A
+valid reload applies to new sessions and immediately removes disabled or unready
+candidates from capability responses, producing a new aggregate revision.
+Existing sessions remain pinned and continue until normal close, token or
+maximum-duration expiry, target drain, or an explicit security revocation. A
+routine policy reload does not reinterpret or migrate an established session.
+When a route or listener must be removed, the gateway marks it draining, stops
+new admission, waits for the configured drain deadline, and then closes any
+remaining sessions with a categorized reason. An invalid reload keeps the last
+valid configuration and revision.</p>
+<h2 id="deployment-requirements"><a class="header" href="#deployment-requirements">Deployment Requirements</a></h2>
+<p>Every supported controller deployment must explicitly expose every transport
+enabled by its per-surface sets. A dual configuration exposes:</p>
+<pre><code class="language-yaml">ports:
+  - "8438:8438/tcp"
+  - "8438:8438/udp"
+</code></pre>
+<p>Kubernetes Services, firewall rules, security groups, ingress or Gateway API
+resources, and load balancers must also permit UDP on the controller port.
+The TCP listener remains available for normal HTTPS health and administrative
+traffic even when all persistent controller surfaces are WebTransport-only.</p>
+<p>A browser deployment additionally exposes the gateway’s public HTTPS port over
+both TCP and UDP, normally <code>443/tcp</code> and <code>443/udp</code>. The gateway-to-controller
+network path must separately permit QUIC to the controller UDP port. Proving the
+browser-to-gateway leg does not prove the gateway-to-controller leg.</p>
+<p>An AWS Application Load Balancer is not the assumed WebTransport path. Use a
+QUIC-aware Network Load Balancer or another proven end-to-end topology. Generic
+HTTP/3 termination in Nginx or HAProxy is acceptable only after an integration
+test proves the required WebTransport draft, extended CONNECT, datagrams, stream
+resets, connection IDs, and draining behavior.</p>
+<p>Existing HTTPS health endpoints prove TCP listeners only. Add WebTransport
+readiness signals or synthetic probes for both the gateway and controller so
+operators can distinguish:</p>
+<ul>
+<li>controller healthy, WebTransport disabled;</li>
+<li>controller healthy, WebTransport ready;</li>
+<li>controller healthy, WebTransport failed;</li>
+<li>gateway healthy, WebTransport router disabled;</li>
+<li>gateway healthy, browser ticket and upstream WebTransport route ready;</li>
+<li>gateway healthy, one WebTransport leg failed;</li>
+<li>complete controller failure.</li>
+</ul>
+<h2 id="multi-replica-constraint"><a class="header" href="#multi-replica-constraint">Multi-Replica Constraint</a></h2>
+<p>Current live instances, command senders, and pending requests are held in one
+<code>controller-rs</code> process. PostgreSQL records audit and projection data; it is not
+a live command router.</p>
+<p>Until a separate distributed-session design is implemented:</p>
+<ul>
+<li>run one active controller replica for command routing; or</li>
+<li>provide an external routing mechanism that can direct every command to the
+process owning the target runtime session.</li>
+</ul>
+<p>Load-balancer affinity for a QUIC connection keeps that connection on one
+controller pod, but it does not make an MCP request arriving at another pod able
+to use the session. QUIC connection migration also does not migrate application
+state between controller pods.</p>
+<p>This proposal must not be presented as enabling active-active controller
+replicas.</p>
+<h2 id="graceful-draining"><a class="header" href="#graceful-draining">Graceful Draining</a></h2>
+<p>Gateway or controller shutdown follows this order:</p>
+<ol>
+<li>Mark the affected WebTransport readiness false.</li>
+<li>Stop issuing browser tickets and accepting new WebTransport sessions.</li>
+<li>Stop opening new upstream gateway sessions and new runtime command channels.</li>
+<li>Send the profile-specific runtime draining message; for <code>rkyv</code> this is
+<code>ServerDrainingV1</code>.</li>
+<li>Allow in-flight MCP requests and runtime commands to complete for a bounded
+grace period.</li>
+<li>Fail remaining pending work with a transport error.</li>
+<li>Close upstream and downstream WebTransport sessions with explicit reasons,
+then close WebSocket sessions under the existing policy.</li>
+<li>Let clients reconnect with jittered backoff and obtain a new browser ticket
+where required.</li>
+</ol>
+<p>Connection draining is not transparent failover. A reconnected runtime must
+perform registration again and receive the authoritative connection ID.</p>
+<h2 id="security-requirements"><a class="header" href="#security-requirements">Security Requirements</a></h2>
+<ul>
+<li>Use TLS 1.3 and normal certificate and hostname verification.</li>
+<li>Apply the existing JWT issuer, audience, expiry, service identity, and
+environment checks.</li>
+<li>Require a non-empty Origin allowlist for browser WebTransport and compare the
+complete normalized origin, not a suffix or substring.</li>
+<li>Authenticate the public browser capability resource and expose only public
+endpoints, bounded policy names, profile tokens, and readiness; do not expose
+upstream controller addresses, instance IDs, or probe details.</li>
+<li>Authenticate the internal controller capability and probe resources with a
+dedicated least-privilege gateway service identity or mTLS identity, restrict
+them to the gateway network path, reject browser tickets and user credentials,
+rate-limit them, and redact probe credentials. The internal <code>instanceId</code> and
+revision must never be copied into the public capability response.</li>
+<li>Protect ticket issuance with the existing cookie authentication and CSRF
+checks; bind tickets to one route, origin, principal, profile, expiry, and use.</li>
+<li>Consume tickets atomically from a bounded replay cache and never accept them
+from URL query parameters.</li>
+<li>Fail ticket issuance and consumption closed when the replay cache is
+unavailable, degraded, or cannot prove atomic single-use behavior; never use
+a local-cache or unprotected signed-ticket fallback.</li>
+<li>Require synchronized gateway clocks, enforce the earliest cache, ticket, and
+access-token deadline, and do not extend the ticket hard maximum with clock
+tolerance.</li>
+<li>Treat replay-cache records as credential storage when they retain an upstream
+access token: restrict access, protect data at rest and in transit, and delete
+the complete record on consumption or expiry.</li>
+<li>Do not assume browser WebTransport carries cookies or HTTP authentication.</li>
+<li>Require the gateway to inject the retained Bearer token upstream and the
+controller to validate it independently; restored gateway roles are not
+controller claims.</li>
+<li>Enforce access-token expiry and maximum session duration with a gateway timer;
+claim immediate revocation only when a concrete signal or introspection
+mechanism is configured and tested.</li>
+<li>Authenticate before accepting application streams or allocating large
+application buffers beyond the strict handshake allowance.</li>
+<li>Enable QUIC address validation or Retry for untrusted network exposure when
+supported by the selected implementation.</li>
+<li>Limit unauthenticated connections, authenticated sessions, streams, frame
+sizes, queue sizes, tickets, and bytes per time window.</li>
+<li>Validate JSON length, UTF-8, and one-value framing before dispatch.</li>
+<li>Validate every <code>rkyv</code> archived root with <code>bytecheck</code> and then apply semantic
+validation.</li>
+<li>Never invoke <code>rkyv</code> unchecked access on network bytes.</li>
+<li>Reject endpoint, transport, and wire-profile combinations that are not
+explicitly allowlisted.</li>
+<li>Treat downgrade from a required transport or profile as an error, not an
+automatic fallback.</li>
+<li>Redact tickets, JWTs, cookies, CSRF values, authorization headers, and
+sensitive command payloads.</li>
+<li>Treat unknown wire-profile versions and message kinds as errors, not as a
+reason to guess a Rust type.</li>
+<li>Fuzz JSON framing, binary frame parsing, and archived validation with
+arbitrary bytes.</li>
+<li>Close sessions that repeatedly violate limits instead of continuing to
+allocate and log indefinitely.</li>
+</ul>
+<h2 id="backpressure-and-fairness"><a class="header" href="#backpressure-and-fairness">Backpressure and Fairness</a></h2>
+<p>Independent QUIC streams remove retransmission ordering between streams, but
+they share connection congestion control and implementation scheduling.
+WebTransport does not automatically make a command high priority.</p>
+<p>The implementation must:</p>
+<ul>
+<li>reserve bounded capacity for command streams;</li>
+<li>prevent the event reader from monopolizing the controller task executor;</li>
+<li>use bounded browser, gateway, controller, and runtime queues;</li>
+<li>apply backpressure across both legs of a proxied WebTransport stream rather
+than buffering an unbounded slow side;</li>
+<li>cap streams waiting for an upstream mapping and fail closed when the upstream
+session cannot accept more;</li>
+<li>expose queue saturation and stream-acquisition latency;</li>
+<li>avoid spawning an unbounded task for every incoming stream;</li>
+<li>time out stalled reads and writes;</li>
+<li>test fairness under log load and packet loss.</li>
+</ul>
+<p>If the selected library exposes stream scheduling, the policy may prefer command
+streams over runtime events. Correctness must not depend on nonstandard priority
+behavior.</p>
+<h2 id="datagrams-and-telemetry"><a class="header" href="#datagrams-and-telemetry">Datagrams and Telemetry</a></h2>
+<p>Version 1 does not use WebTransport datagrams.</p>
+<p>QUIC datagrams are unreliable and unordered. They have no explicit flow control,
+cannot be fragmented across QUIC packets, and may be delayed or dropped by the
+sender or receiver under congestion. Their use requires an application contract
+for maximum size, batching, sequence numbers, timestamps, loss accounting, and
+overload behavior.</p>
+<p>Metrics and traces already have dedicated ecosystem protocols. Sending them to
+<code>controller-rs</code> would expand the controller into a telemetry ingestion service
+and could couple telemetry load to command availability. Any future datagram
+use requires a separate design comparing at least OTLP, Prometheus-compatible
+delivery, and a dedicated collector.</p>
+<p>If datagram metrics are ever approved, cumulative snapshots are preferred over
+loss-sensitive deltas, with periodic reliable checkpoints.</p>
+<h2 id="observability"><a class="header" href="#observability">Observability</a></h2>
+<p>Add metrics with bounded labels for:</p>
+<ul>
+<li>active sessions by component, hop, transport, and negotiated wire profile;</li>
+<li>connection attempts, accepted sessions, and categorized failures;</li>
+<li>fallback count and reason;</li>
+<li>capability responses and refreshes by bounded policy and candidate set, plus
+candidate attempts rejected because readiness changed before handshake;</li>
+<li>capability-fetch failures and discovery backoff by bounded error category;</li>
+<li>registration and authentication latency;</li>
+<li>browser ticket issuance, consumption, expiry, replay rejection, and
+Origin rejection without ticket or Origin values as labels;</li>
+<li>replay-cache health, atomic-consume failures, and gateway clock-synchronization
+readiness without cache keys or ticket values as labels;</li>
+<li>current in-flight commands by session and globally, plus rejections by queue,
+in-flight, stream, and session limit;</li>
+<li>gateway downstream-to-upstream session and stream mapping failures;</li>
+<li>command stream acquisition, command latency, timeout, and reset count;</li>
+<li>JSON and <code>rkyv</code> frame validation, semantic validation, and size-limit
+failures;</li>
+<li>active and blocked streams;</li>
+<li>event queue depth and dropped log records;</li>
+<li>bytes sent and received by logical channel and gateway hop;</li>
+<li>QUIC RTT, loss, and migration when exposed by the library;</li>
+<li>drain duration and forced session closes.</li>
+</ul>
+<p>Structured logs should include connection ID, runtime instance ID after
+registration, gateway hop, transport, wire profile, logical channel, and
+normalized error category. Do not use ticket IDs, service JWTs, user tokens,
+full payloads, Origin values, or unbounded peer values as metric labels.</p>
+<p>The runtime instance’s application <code>protocol</code> metadata remains unchanged.
+Expose the controller transport through diagnostics or a separate optional
+<code>controlTransport</code> field only after checking event, database, and UI consumers.</p>
+<h2 id="rollout-plan"><a class="header" href="#rollout-plan">Rollout Plan</a></h2>
+<h3 id="phase-0-feasibility-and-baseline-gate"><a class="header" href="#phase-0-feasibility-and-baseline-gate">Phase 0: Feasibility and Baseline Gate</a></h3>
+<ul>
+<li>Measure allocations, CPU, memory, throughput, and command latency on the
+existing WebSocket path.</li>
+<li>Include idle connections, registration storms, command traffic, and concurrent
+log notifications.</li>
+<li>Record payload sizes and identify how much time is actually spent in JSON.</li>
+<li>Pin one Rust WebTransport implementation and prove controller and Rust-client
+interoperability against the exact supported draft.</li>
+<li>Prove payload-opaque, same-transport WebTransport stream relay across both
+gateway legs, including reset, backpressure, close, and draining.</li>
+<li>Prove that the gateway capability resource reflects end-to-end route and
+per-instance controller readiness, revisions, candidate-specific target pools,
+and transport-native probes, and never treats a page’s HTTP version as
+availability.</li>
+<li>Prove browser ticket issuance, atomic consumption, protected credential
+storage, upstream Bearer injection, Origin enforcement, profile selection,
+<code>requireUnreliable</code>, and expiry-driven session close in every target browser.</li>
+<li>Prove the target browser’s observable failure behavior: explicit capability
+and ticket HTTP failures retain their categories, pre-<code>ready</code> WebTransport
+rejection becomes <code>Establishment failed</code>, preference mode may fall back, and
+required mode may not.</li>
+<li>Prove the shared controller-BFF authority resolver in the supported
+same-origin deployment and in every explicitly supported cross-origin
+deployment.</li>
+<li>Prove the required UDP, HTTP/3, certificate, and WebTransport behavior through
+each supported development and production load-balancer topology.</li>
+<li>Select the shared replay cache and prove atomic fail-closed behavior,
+synchronized-clock readiness, and hard-expiry enforcement; decide the owner
+and release process for <code>controller-wire</code> and the benchmark workload.</li>
+</ul>
+<p>Phase 0 is an approval gate. Phase 1 must not begin until these artifacts are
+reviewed, the pinned compatibility tuple is recorded, and no unresolved item
+requires changing the authentication trust model, gateway topology, or wire
+profile boundaries. A failed spike keeps WebTransport disabled and redirects
+evaluation to binary WebSocket or raw QUIC without first performing the shared
+session refactor.</p>
+<p>The 2026-07-15 Phase 0 implementation produced that failed-spike result. Native
+direct and same-transport relay mechanics, current certificate reuse, bounded
+reconnect, and Redis atomic consume passed. Chrome 150 did not send the supplied
+Authorization header. The server observed the supplied profile offer, and
+stream echo/reset/close passed, but Chrome did not expose the selected protocol,
+response headers, or required reliability result. The pinned <code>wtransport 0.7.1</code>
+native client also discarded response headers, and its protocol generation did
+not implement draft 16. Production WebTransport remains disabled and Phase 1 is
+not approved on a WebTransport justification. The executable evidence and
+closure decision are in <code>implementation/light-controller/phase0</code>.</p>
+<h3 id="phase-1-extract-shared-session-behavior"><a class="header" href="#phase-1-extract-shared-session-behavior">Phase 1: Extract Shared Session Behavior</a></h3>
+<ul>
+<li>Refactor <code>controller-rs</code> runtime and MCP message handling into
+transport- and codec-neutral service functions.</li>
+<li>Replace the Rust client’s tungstenite-specific outbound channel with logical
+messages.</li>
+<li>Separate wire-profile adapters from WebSocket and WebTransport session
+adapters.</li>
+<li>Extract the gateway’s route resolver without changing its WebSocket tunnel.</li>
+<li>Keep behavior and wire output unchanged.</li>
+<li>Run the complete existing WebSocket test suite.</li>
+</ul>
+<h3 id="phase-2-runtime-profile-matrix"><a class="header" href="#phase-2-runtime-profile-matrix">Phase 2: Runtime Profile Matrix</a></h3>
+<ul>
+<li>Add the shared <code>controller-wire</code> crate and golden fixtures.</li>
+<li>Add the UDP/HTTP3 listener, enabled when any controller surface enabled set
+contains <code>webtransport</code>.</li>
+<li>Implement runtime JSON over WebTransport first.</li>
+<li>Implement runtime <code>rkyv</code> over WebSocket binary frames and WebTransport.</li>
+<li>Verify that JSON and <code>rkyv</code> use the same logical WebTransport channel model.</li>
+<li>Add ordered transport/profile candidates to the Rust client.</li>
+<li>Keep all production configurations in <code>websocket</code> mode.</li>
+</ul>
+<h3 id="phase-3-browser-mcp-and-gateway-router"><a class="header" href="#phase-3-browser-mcp-and-gateway-router">Phase 3: Browser MCP and Gateway Router</a></h3>
+<ul>
+<li>Add the gateway UDP/HTTP3 service and payload-opaque WebTransport router.</li>
+<li>Add the authenticated MCP capability resource and short-lived readiness
+synthesis across both gateway legs.</li>
+<li>Add ticket issuance, shared replay-cache behavior, Origin enforcement, and
+authenticated-principal restoration.</li>
+<li>Add MCP JSON framing and WebTransport support to <code>portal-view</code> and
+<code>controller-rs</code>.</li>
+<li>Add <code>portal-view</code> auto-selection and its build-time force override without
+changing MCP/JSON-RPC 2.0 application semantics.</li>
+<li>Require WebTransport header and protocol-negotiation support in every target
+browser.</li>
+<li>Keep browser production configuration in <code>websocket</code> mode.</li>
+</ul>
+<h3 id="phase-4-controlled-opt-in"><a class="header" href="#phase-4-controlled-opt-in">Phase 4: Controlled Opt-In</a></h3>
+<ul>
+<li>Enable approved candidate pairs for selected Rust services in a deployment
+with verified UDP routing.</li>
+<li>Enable <code>preferWebTransport</code> for a small browser cohort only after both gateway
+legs and ticket authentication are proven.</li>
+<li>Observe fallback, ticket, validation, queue, memory, and command-latency
+metrics by profile and hop.</li>
+<li>Exercise rolling upgrades, draining, UDP blocking, and rollback.</li>
+</ul>
+<h3 id="phase-5-default-decision"><a class="header" href="#phase-5-default-decision">Phase 5: Default Decision</a></h3>
+<p>Make no default change unless:</p>
+<ul>
+<li>behavior parity and compatibility tests pass;</li>
+<li>fuzzing finds no panic or unsafe-access path;</li>
+<li>supported deployment topologies pass end-to-end tests;</li>
+<li>target browsers support the required WebTransport headers, protocols,
+<code>requireUnreliable</code>, selected-protocol, and reliability checks;</li>
+<li>ticket replay and multi-replica gateway tests pass;</li>
+<li>the measured benefit is material for the target workload;</li>
+<li>per-session memory and operational complexity are acceptable;</li>
+<li>rollback to WebSocket has been exercised.</li>
+</ul>
+<p>If these gates fail, retain WebSocket or choose the simpler binary-WebSocket or
+raw-QUIC alternative.</p>
+<h2 id="verification-plan"><a class="header" href="#verification-plan">Verification Plan</a></h2>
+<h3 id="protocol-and-unit-tests"><a class="header" href="#protocol-and-unit-tests">Protocol and Unit Tests</a></h3>
+<ul>
+<li>Allowed and rejected endpoint/transport/profile combinations.</li>
+<li>Per-surface transport enabled sets enable only the configured MCP, runtime, and
+standalone-discovery endpoints and derive WebTransport listener activation
+correctly.</li>
+<li>Legacy WebSocket clients without a profile retain existing JSON behavior.</li>
+<li>WebSocket and WebTransport profile negotiation select the same wire contract.</li>
+<li>WebSocket token permutations prove that <code>csrf.*</code> is consumed only as
+authentication metadata, is never selected as a negotiated wire profile, and
+does not depend on client token ordering.</li>
+<li>Required negotiation rejects an absent selected token; only an explicit
+<code>negotiation: legacy</code> JSON WebSocket candidate accepts the no-profile path.</li>
+<li>Ordered candidate expansion and downgrade-policy tests.</li>
+<li>Capability-response construction includes only policy-allowed, healthy,
+same-transport end-to-end candidates and applies revision, ETag, generation,
+expiry, private-cache, and <code>Vary</code> rules.</li>
+<li>Internal controller capabilities reject unauthorized callers, validate schema
+and expiry, change revision for readiness and draining changes, and describe
+only enabled transport/profile pairs.</li>
+<li>Transport-native probes authenticate, negotiate the requested surface and
+profile, return the matching controller revision, obey bounds, and never
+mutate registration, MCP, command, or discovery state.</li>
+<li>Capability-fetch <code>401</code>/<code>403</code>, <code>404</code>/<code>501</code>, <code>429</code>, timeout, malformed response,
+and <code>5xx</code> cases follow the specified no-guessing and backoff behavior.</li>
+<li><code>portal-view</code> <code>auto</code>, forced-WebSocket, and required-WebTransport overrides
+produce the expected ordered attempts without changing the wire profile.</li>
+<li>The controller-BFF authority resolver preserves configured ingress prefixes,
+uses one authority for all four browser controller operations, rejects
+cross-authority redirects, and fails closed when cross-origin prerequisites
+are absent.</li>
+<li>Server enabled-set permutations produce the same result regardless of input
+order; duplicate or unknown transports are rejected. Client candidate order
+remains observable and authoritative.</li>
+<li>JSON length-prefix round trips, partial prefixes, invalid UTF-8, oversized
+lengths, empty payloads, trailing bytes, and multiple values.</li>
+<li>Golden bytes for every version 1 root type.</li>
+<li>Header round trips and rejection of invalid magic, flags, lengths, kinds, and
+reserved bytes.</li>
+<li>Cross-target fixture reads for all supported release targets.</li>
+<li>Schema compatibility checks using old committed fixtures.</li>
+<li>Semantic limits for strings, tags, lists, JSON, and timestamps.</li>
+<li>No unchecked <code>rkyv</code> access in production modules.</li>
+<li>Fuzz arbitrary headers and payloads without panic, excessive allocation, or
+unbounded validation work.</li>
+</ul>
+<h3 id="integration-tests"><a class="header" href="#integration-tests">Integration Tests</a></h3>
+<ul>
+<li>WebSocket registration and commands remain unchanged.</li>
+<li>Runtime JSON over WebTransport registration, metadata, discovery, commands,
+responses, notifications, heartbeat, and cleanup match JSON over WebSocket.</li>
+<li>Runtime <code>rkyv</code> over WebSocket and WebTransport produces the same application
+behavior as runtime JSON.</li>
+<li>Browser MCP JSON requests, responses, notifications, cancellation, reconnect,
+and close behavior match across WebSocket and WebTransport.</li>
+<li>Capability refresh, stale readiness, controller rolling upgrades, and a route
+becoming unavailable between discovery and handshake produce categorized
+retry or fallback behavior.</li>
+<li>Mixed controller revisions create candidate-specific target pools; sessions
+are pinned to eligible targets, draining or stale targets receive no new
+sessions, and aggregate revision changes invalidate old candidates.</li>
+<li>The gateway WebTransport router maps reliable streams, reset, backpressure,
+draining, and close without parsing MCP JSON.</li>
+<li>Cross-transport and cross-codec gateway routes are rejected.</li>
+<li>Ticket expiry, replay, wrong route, wrong Origin, wrong profile, token expiry,
+and concurrent consumption are rejected.</li>
+<li>Replay-cache write failure, outage, degradation, ambiguous consume, and loss
+of atomicity fail ticket issuance or consumption closed without a local
+fallback.</li>
+<li>Gateway clock error below, at, and above the readiness threshold never extends
+the ticket hard maximum and enforces the earliest applicable deadline.</li>
+<li>Multi-replica ticket issuance and consumption uses the configured shared cache
+or proven affinity behavior.</li>
+<li>Ticket consumption injects the retained Bearer token upstream, the controller
+independently validates it, credential cache records are deleted, and the
+session closes no later than token expiry or maximum duration.</li>
+<li>Browser WebTransport rejects a wrong selected profile and a reliable-only
+session; <code>requireUnreliable</code> and the target-browser API contract are tested.</li>
+<li>Controller restart and client reconnect.</li>
+<li>Registration timeout and partial frames.</li>
+<li>Invalid, expired, wrong-audience, wrong-service, and wrong-environment JWTs.</li>
+<li>Oversized frames, too many streams, stalled readers, and blocked writers.</li>
+<li>Queue, per-session in-flight, global in-flight, stream, and session limits are
+exercised independently, including admission races and cleanup after timeout.</li>
+<li>Command timeout, late response, stream reset, and session close races.</li>
+<li>Serial candidate fallback when UDP is blocked or a profile is unsupported.</li>
+<li>An opaque browser pre-<code>ready</code> rejection falls back only in
+<code>preferWebTransport</code>; <code>requireWebTransport</code> fails without a WebSocket attempt.</li>
+<li>Explicit capability or ticket authentication, authorization, resource, and
+internal failures never enter the opaque-establishment fallback path.</li>
+<li>HTTP/2 page plus successful WebTransport, and HTTP/3 page plus failed
+WebTransport CONNECT or upstream QUIC, prove that page <code>nextHopProtocol</code> does
+not select the controller transport.</li>
+<li>No fallback for observable authentication, registration, protocol, resource,
+or internal failures before establishment, or for their structured forms
+after establishment.</li>
+<li>Old Rust client to new controller, new Rust client to old controller, and Java
+client to new controller.</li>
+<li>Controller drain with in-flight commands.</li>
+<li>Gateway policy reload affects new admission and capability revision without
+reinterpreting established sessions; listener removal drains and closes at
+the configured deadline; invalid reload retains the last valid revision.</li>
+</ul>
+<h3 id="deployment-tests"><a class="header" href="#deployment-tests">Deployment Tests</a></h3>
+<ul>
+<li>Direct TCP and UDP access on the same numeric port.</li>
+<li>Docker Compose with explicit TCP and UDP mappings.</li>
+<li>Every supported Kubernetes and load-balancer topology.</li>
+<li>Browser-to-gateway and gateway-to-controller QUIC tested independently and
+together.</li>
+<li>Enterprise-network profiles that block UDP or WebTransport CONNECT fall back
+to an advertised WebSocket candidate without requiring a UI rebuild.</li>
+<li>Target browser matrix for CONNECT headers, profile negotiation, certificate
+validation, stream behavior, and network fallback.</li>
+<li>QUIC connection-ID routing and migration where claimed.</li>
+<li>TCP health remains available when experimental WebTransport is disabled.</li>
+<li>Synthetic probes distinguish gateway ingress, gateway upstream, and
+controller UDP or HTTP/3 failure.</li>
+</ul>
+<h3 id="benchmark-profiles"><a class="header" href="#benchmark-profiles">Benchmark Profiles</a></h3>
+<p>Compare at least:</p>
+<ol>
+<li>runtime JSON-RPC over the legacy single-channel WebSocket;</li>
+<li>runtime JSON-RPC over WebTransport using one ordered bidirectional stream;</li>
+<li>runtime JSON-RPC over WebTransport using the proposed multiplexed topology;</li>
+<li>runtime <code>rkyv</code> over one binary WebSocket channel;</li>
+<li>runtime <code>rkyv</code> over WebTransport using one ordered bidirectional stream;</li>
+<li>runtime <code>rkyv</code> over WebTransport using the proposed multiplexed topology;</li>
+<li>runtime <code>rkyv</code> over raw QUIC with the closest equivalent single-stream and
+multiplexed topologies;</li>
+<li>browser MCP JSON over WebSocket through <code>light-gateway</code>;</li>
+<li>browser MCP JSON over WebTransport through <code>light-gateway</code>.</li>
+</ol>
+<p>Treat codec, transport, framing, and stream topology as separate benchmark
+variables:</p>
+<ul>
+<li>JSON versus <code>rkyv</code> on the same transport and topology measures codec cost.</li>
+<li>Single-stream versus multiplexed WebTransport with the same codec measures
+topology and head-of-line effects.</li>
+<li>Single-channel WebSocket versus single-stream WebTransport is the closest
+transport comparison, but native framing still differs and must be reported;
+it must not be described as a pure transport-only measurement.</li>
+<li>Legacy WebSocket versus multiplexed WebTransport measures the complete
+proposed operational change, not one isolated variable.</li>
+</ul>
+<p>All paired cases use identical logical messages, concurrency, payload mixes,
+warmup, and connection counts. Results report the selected wire profile,
+transport, topology, WebTransport draft/library tuple, and browser reliability
+mode so a reliable-only implementation cannot be mislabeled as the QUIC case.</p>
+<p>Run profiles for:</p>
+<ul>
+<li>many idle registered sessions;</li>
+<li>registration bursts;</li>
+<li>small commands and responses;</li>
+<li>large dynamic JSON results;</li>
+<li>command responses concurrent with runtime log notifications;</li>
+<li>packet loss, reordering, and constrained bandwidth.</li>
+</ul>
+<p>Record CPU and memory separately for browser, gateway, controller, and runtime,
+plus allocations, bytes on the wire for each hop, registration rate, ticket
+latency, command p50/p95/p99 latency, event drops, and reconnect time. Publish
+the hardware, message mix, connection count, browser version, and network
+conditions with results.</p>
+<h2 id="risks-and-mitigations"><a class="header" href="#risks-and-mitigations">Risks and Mitigations</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Risk</th><th>Mitigation</th></tr>
+</thead>
+<tbody>
+<tr><td>WebTransport draft or library changes</td><td>Pin and publish compatibility; keep feature experimental and WebSocket available</td></tr>
+<tr><td>UDP blocked in customer networks</td><td>Explicit client modes, serial preference-mode fallback for opaque pre-establishment failure, synthetic readiness, and no fallback in required mode</td></tr>
+<tr><td>Browser WebTransport omits cookies</td><td>Use CSRF-protected HTTPS ticket issuance and an authenticated CONNECT header</td></tr>
+<tr><td>Target browser lacks CONNECT header support</td><td>Keep browser WebTransport disabled; do not use query-string tickets</td></tr>
+<tr><td>Browser establishes reliable-only WebTransport instead of HTTP/3/QUIC</td><td>Set <code>requireUnreliable</code>, verify <code>reliability</code>, and reject or fall back before MCP initialization</td></tr>
+<tr><td>Ticket theft or replay</td><td>Short lifetime, route/origin/profile binding, atomic one-use replay cache, redacted logs</td></tr>
+<tr><td>Ticket cache exposes retained access tokens</td><td>Restrict and protect cache records, redact values, consume atomically, and delete the complete record on use or expiry</td></tr>
+<tr><td>Replay cache is unavailable or returns ambiguous state</td><td>Fail ticket issuance and consumption closed; never degrade to a local cache or replayable ticket</td></tr>
+<tr><td>Gateway clock skew changes ticket validity</td><td>Require clock-synchronization readiness, enforce cache and absolute expiry, and allow no positive grace beyond the hard maximum</td></tr>
+<tr><td>Gateway principal and controller identity diverge</td><td>Inject the retained Bearer token upstream and require independent controller validation; do not invent role claims</td></tr>
+<tr><td>Gateway QUIC service destabilizes TCP proxy</td><td>Separate listener/runtime, independent readiness, resource limits, failure isolation</td></tr>
+<tr><td>One gateway WebTransport leg is healthy and the other fails</td><td>Per-leg probes, categorized metrics, and no session acceptance until upstream establishment succeeds</td></tr>
+<tr><td>Capability response is stale or overstates end-to-end readiness</td><td>Short private cache lifetime, same-transport synthetic probes, refresh after failure, and actual handshake as authority</td></tr>
+<tr><td>Browser hides the specific WebTransport establishment cause</td><td>Preserve explicit capability and ticket HTTP errors; use <code>Establishment failed</code> for opaque pre-<code>ready</code> rejection, retain the detailed cause in server telemetry, and require WebTransport where downgrade is unacceptable</td></tr>
+<tr><td>Capability request itself fails</td><td>Use only a still-fresh validated response; otherwise attempt no transport and retry discovery with jittered backoff</td></tr>
+<tr><td>Page HTTP version is mistaken for controller reachability</td><td>Never select from <code>nextHopProtocol</code>; use gateway candidates, browser feature detection, and the real session attempt</td></tr>
+<tr><td>WebTransport-only MCP removes enterprise fallback</td><td>Use dual per-surface transport enabled sets until UDP and WebTransport CONNECT are proven for the complete client fleet</td></tr>
+<tr><td>Wire-profile or transport downgrade</td><td>Ordered explicit client candidates, unordered server enabled sets, required-mode policy, reject unlisted pairs</td></tr>
+<tr><td><code>rkyv</code> schema drift</td><td>Shared wire crate, immutable roots, protocol negotiation, golden fixtures</td></tr>
+<tr><td>Malformed archive or resource exhaustion</td><td>Safe validation, preallocation limits, semantic bounds, fuzzing, session quotas</td></tr>
+<tr><td>No meaningful performance gain</td><td>Benchmark against simpler alternatives before changing defaults</td></tr>
+<tr><td>Dynamic JSON still dominates</td><td>Measure it; add typed payloads only in a new version for proven hot paths</td></tr>
+<tr><td>Event traffic affects commands</td><td>Separate event and command streams, bounded queues, fairness tests</td></tr>
+<tr><td>Multi-replica request reaches wrong pod</td><td>Keep single active replica or design a distributed session router separately</td></tr>
+<tr><td>Load balancer supports HTTP/3 but not WebTransport</td><td>Require end-to-end draft-specific integration tests</td></tr>
+<tr><td>WebSocket and WebTransport route config drifts</td><td>Shared resolver, diagnostics, and configuration parity tests</td></tr>
+<tr><td>CSRF token is selected as a WebSocket wire profile</td><td>Parse tokens by role, strip CSRF before upstream negotiation, and never use first-token selection</td></tr>
+<tr><td>Fallback creates duplicate registrations</td><td>Serial attempts, registration acknowledgement boundary, connection-ID-guarded cleanup</td></tr>
+<tr><td>Operational complexity exceeds benefit</td><td>Preserve WebSocket default and define a complete rollback path</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="phase-0-decisions-and-reopen-questions"><a class="header" href="#phase-0-decisions-and-reopen-questions">Phase 0 Decisions and Reopen Questions</a></h2>
+<p>The failed feasibility run locks the following decisions without authorizing
+production implementation:</p>
+<ul>
+<li>WebTransport remains disabled and WebSocket/JSON remains the production path.</li>
+<li>Planned gateway replacement uses drain when possible and bounded client
+reconnect after interruption. There is no zero-downtime QUIC preservation
+claim.</li>
+<li>The replay-store candidate is a shared Redis-compatible service using
+hash-only keys, protected values, hard TTL, <code>SET NX PX</code>, atomic <code>GETDEL</code>, TLS,
+ACLs, and fail-closed outage behavior. There is no local production fallback.</li>
+<li>Internal capability and probe resources use a dedicated gateway mTLS identity.</li>
+<li><code>controller-wire</code> remains a dependency-light, independently versioned crate
+owned by <code>light-fabric</code> and consumed by <code>controller-rs</code>.</li>
+<li>WebSocket and WebTransport route files remain separate initially with a shared
+resolver and enforced parity diagnostics.</li>
+<li>The nine-case benchmark manifest and required workload/metric set are locked
+by the Phase 0 evidence package.</li>
+</ul>
+<p>Reopen WebTransport feasibility only when a candidate Rust stack implements the
+selected current draft and exposes request/response negotiation in both roles,
+and a target shipping browser passes CONNECT headers, profile negotiation,
+<code>requireUnreliable</code>, reliability, reset, close, and stream tests end to end.
+Deployment environments, enterprise UDP/CONNECT behavior, production load
+targets, and any distributed controller session router remain later questions
+because the mandatory local tuple failed first.</p>
+<h2 id="references"><a class="header" href="#references">References</a></h2>
+<ul>
+<li><a href="https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/">WebTransport over HTTP/3, current IETF draft</a></li>
+<li><a href="https://www.w3.org/TR/webtransport/">W3C WebTransport API</a></li>
+<li><a href="https://www.rfc-editor.org/rfc/rfc9000.html">QUIC transport, RFC 9000</a></li>
+<li><a href="https://www.rfc-editor.org/rfc/rfc9221.html">QUIC datagrams, RFC 9221</a></li>
+<li><a href="https://docs.rs/rkyv/latest/rkyv/"><code>rkyv</code> documentation</a></li>
+<li><a href="https://rkyv.org/format.html"><code>rkyv</code> format documentation</a></li>
+<li><a href="https://protobuf.dev/overview/">Protocol Buffers overview</a></li>
+<li><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-listeners.html">AWS Application Load Balancer listeners</a></li>
+<li><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-listeners.html">AWS Network Load Balancer listeners</a></li>
+</ul>
 
                     </main>
 
