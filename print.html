@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-de903df3.js";
+            window.path_to_searchindex_js = "searchindex-bd96782b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-1602f04f.js"></script>
+        <script src="toc-31891dbc.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -30310,9 +30310,16 @@ GenAI agent profile as one logical asset instead of two separate identities.</p>
 <p>Use config help pages to understand runtime configuration properties managed through portal-view and the config server.</p>
 <p>Common config areas:</p>
 <ul>
+<li>access control</li>
+<li>WebSocket routing and connection controls</li>
 <li>logging filter</li>
 <li>handler chains and paths</li>
 </ul>
+<p>See <a href="#websocket-router-configuration">WebSocket Router Configuration</a> for the
+properties loaded from <code>light-gateway/config/websocket-router.yml</code>.</p>
+<p>See <a href="#mcp-router-configuration">MCP Router Configuration</a> for the MCP endpoint,
+protocol profile, schema budget, resource limit, cache, and tool properties
+loaded from <code>light-gateway/config/mcp-router.yml</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="access-control"><a class="header" href="#access-control">Access Control</a></h1>
 <p>The Access Control configuration defines the global policies for request authorization and response filtering in the gateway. The configuration resides in <code>access-control.yml</code> and is managed through the portal-view interface and config server.</p>
@@ -30730,6 +30737,857 @@ logging.filter: info,light_pingora::security=debug,reqwest=warn,hyper_util=warn,
 <li><code>/*</code> matches any path for the configured method</li>
 </ul>
 <p>For sidecar API proxy routes, point the matching API methods to the API proxy chain.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="websocket-router-configuration"><a class="header" href="#websocket-router-configuration">WebSocket Router Configuration</a></h1>
+<p>The WebSocket router selects an upstream service for an HTTP/1.1 WebSocket
+upgrade and lets <code>light-gateway</code> proxy the upgraded byte stream. Its settings
+reside in <code>websocket-router.yml</code> and can be supplied through portal-view and
+config server properties named <code>websocket-router.&lt;property&gt;</code>.</p>
+<p>The router is active only when the selected <code>handler.yml</code> chain contains the
+<code>websocket</code> handler. There is intentionally no <code>enabled</code> property in the Rust
+configuration. <code>websocket-router.yaml</code> is accepted as a compatibility fallback,
+but <code>websocket-router.yml</code> is preferred.</p>
+<h2 id="properties"><a class="header" href="#properties">Properties</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Property</th><th style="text-align: left">Type</th><th style="text-align: left">Default</th><th style="text-align: left">Description</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><strong><a href="#websocket-router-defaultprotocol">defaultProtocol</a></strong></td><td style="text-align: left">String</td><td style="text-align: left"><code>http</code></td><td style="text-align: left">Default discovery protocol for targets that do not specify one.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#websocket-router-defaultenvtag">defaultEnvTag</a></strong></td><td style="text-align: left">String or null</td><td style="text-align: left">unset</td><td style="text-align: left">Default discovery environment tag.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#websocket-router-pathprefixservice">pathPrefixService</a></strong></td><td style="text-align: left">Object</td><td style="text-align: left"><code>{}</code></td><td style="text-align: left">Maps request-path prefixes to service discovery targets.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#websocket-router-originallowlist">originAllowlist</a></strong></td><td style="text-align: left">Object</td><td style="text-align: left"><code>{}</code></td><td style="text-align: left">Lists browser origins allowed to open protected WebSocket paths.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#websocket-router-applicationprotocols">applicationProtocols</a></strong></td><td style="text-align: left">Object</td><td style="text-align: left"><code>{}</code></td><td style="text-align: left">Lists application WebSocket subprotocols allowed for protected paths.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#websocket-router-preserveroutingheaders">preserveRoutingHeaders</a></strong></td><td style="text-align: left">Boolean</td><td style="text-align: left"><code>false</code></td><td style="text-align: left">Preserves service-id routing headers when forwarding upstream.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#websocket-router-idletimeoutms">idleTimeoutMs</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>3600000</code></td><td style="text-align: left">Closes tunnels that have no traffic in either direction for this duration.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#websocket-router-maxconnectiondurationms">maxConnectionDurationMs</a></strong></td><td style="text-align: left">Integer or null</td><td style="text-align: left">disabled</td><td style="text-align: left">Caps the total lifetime of each WebSocket tunnel.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#websocket-router-maxactiveconnections">maxActiveConnections</a></strong></td><td style="text-align: left">Integer or null</td><td style="text-align: left">disabled</td><td style="text-align: left">Caps active WebSocket connections in one gateway process.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#websocket-router-maxupgraderequestspersecond">maxUpgradeRequestsPerSecond</a></strong></td><td style="text-align: left">Integer or null</td><td style="text-align: left">disabled</td><td style="text-align: left">Caps WebSocket upgrade attempts per second in one gateway process.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="complete-example"><a class="header" href="#complete-example">Complete example</a></h2>
+<pre><code class="language-yaml">defaultProtocol: https
+defaultEnvTag: dev
+pathPrefixService:
+  /ctrl/mcp:
+    serviceId: com.networknt.controller-1.0.0
+    protocol: https
+    envTag: dev
+originAllowlist:
+  /ctrl/mcp:
+    - https://local.localhost
+    - https://localhost:3000
+applicationProtocols:
+  /ctrl/mcp: []
+preserveRoutingHeaders: false
+idleTimeoutMs: 3600000
+maxConnectionDurationMs: 900000
+maxActiveConnections: 1024
+maxUpgradeRequestsPerSecond: 128
+</code></pre>
+<p>Configuration is validated at startup and reload. An invalid protocol, origin,
+path target, or application subprotocol rejects the candidate configuration.
+On a failed reload, the last valid runtime remains active. A successful reload
+preserves the process-level connection and rate-limit counters, and does not
+terminate tunnels that are already upgraded.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="websocket-router-defaultprotocol"><a class="header" href="#websocket-router-defaultprotocol">WebSocket Router: defaultProtocol</a></h1>
+<p><code>defaultProtocol</code> is the discovery protocol used when a selected
+<code>pathPrefixService</code> entry does not define its own <code>protocol</code>.</p>
+<ul>
+<li><strong>Type:</strong> String</li>
+<li><strong>Default:</strong> <code>http</code></li>
+<li><strong>Allowed values:</strong> <code>http</code>, <code>https</code></li>
+</ul>
+<p>The value is trimmed and converted to lowercase during configuration loading.
+Any other value, including <code>ws</code>, <code>wss</code>, or <code>ftp</code>, rejects the configuration.
+Use <code>http</code> for a non-TLS upstream and <code>https</code> for a TLS upstream; the gateway
+still performs the WebSocket upgrade after connecting with that HTTP protocol.</p>
+<pre><code class="language-yaml">defaultProtocol: https
+pathPrefixService:
+  /events: com.networknt.events-1.0.0
+</code></pre>
+<p>The <code>protocol</code> field on a path target overrides this default. A non-blank
+<code>protocol</code> query parameter on the request overrides both and is subject to the
+same <code>http</code>/<code>https</code> validation.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="websocket-router-defaultenvtag"><a class="header" href="#websocket-router-defaultenvtag">WebSocket Router: defaultEnvTag</a></h1>
+<p><code>defaultEnvTag</code> supplies the service-discovery environment tag when a selected
+<code>pathPrefixService</code> target does not define <code>envTag</code>.</p>
+<ul>
+<li><strong>Type:</strong> String or null</li>
+<li><strong>Default:</strong> unset</li>
+</ul>
+<p>Blank values are normalized to unset. A target-level <code>envTag</code> overrides the
+default, and a non-blank <code>env_tag</code> or <code>envTag</code> query parameter overrides both.
+The resolved value is passed to registry discovery together with the service id
+and protocol.</p>
+<pre><code class="language-yaml">defaultEnvTag: dev
+pathPrefixService:
+  /chat: com.networknt.chat-1.0.0
+  /events:
+    serviceId: com.networknt.events-1.0.0
+    envTag: sit
+</code></pre>
+<p>In this example, <code>/chat</code> discovers the <code>dev</code> instance while <code>/events</code> discovers
+the <code>sit</code> instance.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="websocket-router-pathprefixservice"><a class="header" href="#websocket-router-pathprefixservice">WebSocket Router: pathPrefixService</a></h1>
+<p><code>pathPrefixService</code> maps request paths to service-discovery targets.</p>
+<ul>
+<li><strong>Type:</strong> Map of path prefix to service id or target object</li>
+<li><strong>Default:</strong> <code>{}</code></li>
+</ul>
+<pre><code class="language-yaml">pathPrefixService:
+  /chat: com.networknt.chat-1.0.0
+  /ctrl/mcp:
+    serviceId: com.networknt.controller-1.0.0
+    protocol: https
+    envTag: dev
+</code></pre>
+<p>A target object supports:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Field</th><th style="text-align: left">Required</th><th style="text-align: left">Behavior</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>serviceId</code></td><td style="text-align: left">Yes</td><td style="text-align: left">Non-blank service identifier used for discovery. <code>service_id</code> is also accepted.</td></tr>
+<tr><td style="text-align: left"><code>protocol</code></td><td style="text-align: left">No</td><td style="text-align: left"><code>http</code> or <code>https</code>; inherits <code>defaultProtocol</code> when omitted.</td></tr>
+<tr><td style="text-align: left"><code>envTag</code></td><td style="text-align: left">No</td><td style="text-align: left">Discovery environment; inherits <code>defaultEnvTag</code> when omitted. <code>env_tag</code> is also accepted.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Prefixes are trimmed, given a leading <code>/</code> when missing, and have trailing <code>/</code>
+characters removed. Matching respects path-segment boundaries, so <code>/chat</code>
+matches <code>/chat</code> and <code>/chat/room</code>, but not <code>/chatty</code>. When several prefixes
+match, the longest prefix wins. <code>/</code> acts as a catch-all.</p>
+<p>Target selection precedence is:</p>
+<ol>
+<li>First non-blank <code>Service-Id</code>, <code>service_id</code>, or <code>serviceId</code> request header.</li>
+<li>First non-blank <code>service_id</code> or <code>serviceId</code> query parameter.</li>
+<li>Longest <code>pathPrefixService</code> match.</li>
+</ol>
+<p>Routing query parameters (<code>protocol</code>, service-id variants, environment-tag
+variants, and <code>csrf</code>) are removed before the upstream request is sent. The
+configuration also accepts a JSON/YAML map string for config-server injection
+and the legacy <code>prefix=serviceId&amp;prefix=serviceId</code> string, but the object form
+is recommended because it can express protocol and environment explicitly.</p>
+<p>If no header, query value, or prefix provides a target, the gateway rejects the
+upgrade with HTTP <code>403</code>. Discovery failure or no usable endpoint returns <code>502</code>.
+For <code>/ctrl/mcp</code>, configure the separate <code>/ctrl/mcp@connect</code> access-control rule
+as well as this route.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="websocket-router-originallowlist"><a class="header" href="#websocket-router-originallowlist">WebSocket Router: originAllowlist</a></h1>
+<p><code>originAllowlist</code> controls which browser origins may establish protected
+WebSocket connections. It is a WebSocket handshake control and is separate from
+<code>cors.allowedOrigins</code>.</p>
+<ul>
+<li><strong>Type:</strong> Map of path to an array of origins</li>
+<li><strong>Default:</strong> <code>{}</code> (deny for paths that require an origin allowlist)</li>
+</ul>
+<pre><code class="language-yaml">originAllowlist:
+  /ctrl/mcp:
+    - https://local.localhost
+    - http://localhost:3000
+    - https://localhost:3000
+</code></pre>
+<p>The current browser control-plane handshake performs an exact lookup for
+<code>/ctrl/mcp</code>. The map must therefore contain that exact normalized path and a
+non-empty list. Missing <code>Origin</code>, a missing/empty list, or an unlisted origin
+returns HTTP <code>403</code> before CSRF, access-control, or upstream discovery checks.</p>
+<p>Each entry must be an absolute <code>http</code> or <code>https</code> origin containing only scheme,
+host, and optional port. Paths, queries, fragments, credentials, <code>null</code>, and
+wildcards are rejected. Comparison uses the normalized origin and remains
+scheme- and port-sensitive; for example, <code>http://localhost:3000</code> does not allow
+<code>https://localhost:3000</code>.</p>
+<p>When the property is entered as one config-server value, use a JSON object:</p>
+<pre><code class="language-json">{"/ctrl/mcp":["https://local.localhost","https://localhost:3000"]}
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="websocket-router-applicationprotocols"><a class="header" href="#websocket-router-applicationprotocols">WebSocket Router: applicationProtocols</a></h1>
+<p><code>applicationProtocols</code> lists optional WebSocket application subprotocols that
+clients may offer for a protected path.</p>
+<ul>
+<li><strong>Type:</strong> Map of path to an array of strings</li>
+<li><strong>Default:</strong> <code>{}</code></li>
+</ul>
+<pre><code class="language-yaml">applicationProtocols:
+  /ctrl/mcp:
+    - mcp.v1
+</code></pre>
+<p>For <code>/ctrl/mcp</code>, the browser must always offer the gateway-generated CSRF
+subprotocol (<code>csrf.&lt;token&gt;</code>). That CSRF value is validated separately and must
+not be configured here. An empty list means that only the required CSRF
+subprotocol is accepted.</p>
+<p>Configured values must be valid HTTP token strings, must not start with
+<code>csrf.</code>, and are de-duplicated at load time. If the client offers any non-CSRF
+protocol that is not in the path’s list, the gateway rejects the handshake with
+HTTP <code>400</code> instead of silently ignoring it.</p>
+<p>Only allowed application protocols are forwarded upstream; the CSRF protocol
+is consumed by the gateway. If the upstream selects a protocol that was not
+offered and allowed, the gateway treats the upstream handshake as invalid and
+returns <code>502</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="websocket-router-preserveroutingheaders"><a class="header" href="#websocket-router-preserveroutingheaders">WebSocket Router: preserveRoutingHeaders</a></h1>
+<p><code>preserveRoutingHeaders</code> controls whether service-id routing headers are sent to
+the upstream service after the gateway has selected a target.</p>
+<ul>
+<li><strong>Type:</strong> Boolean</li>
+<li><strong>Default:</strong> <code>false</code></li>
+</ul>
+<p>When <code>false</code>, the gateway removes these headers from the upstream request:</p>
+<ul>
+<li><code>Service-Id</code></li>
+<li><code>service_id</code></li>
+<li><code>serviceId</code></li>
+</ul>
+<pre><code class="language-yaml">preserveRoutingHeaders: false
+</code></pre>
+<p>Keep the default unless the upstream application explicitly consumes one of
+these headers. Setting the property to <code>true</code> exposes client-supplied routing
+metadata to that application. It does not preserve browser credentials for the
+control-plane route: <code>/ctrl/mcp</code> applies an additional credential-sanitization
+step and installs only the trusted authorization created by the gateway.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="websocket-router-idletimeoutms"><a class="header" href="#websocket-router-idletimeoutms">WebSocket Router: idleTimeoutMs</a></h1>
+<p><code>idleTimeoutMs</code> is the maximum time a WebSocket tunnel may have no payload
+traffic in either direction.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer, in milliseconds</li>
+<li><strong>Default:</strong> <code>3600000</code> (one hour)</li>
+<li><strong>Disabled by:</strong> blank, null, or <code>0</code></li>
+</ul>
+<pre><code class="language-yaml">idleTimeoutMs: 300000
+</code></pre>
+<p>The activity timestamp starts when the upstream connection is established and
+is refreshed by non-empty traffic from either client or upstream. When the
+elapsed idle time exceeds the limit, the gateway terminates the tunnel with a
+timeout error.</p>
+<p>This property also helps determine the underlying tunnel I/O timeout. When
+<code>maxConnectionDurationMs</code> is configured too, the gateway uses the smaller of
+the two values for I/O timeout scheduling, while enforcing both semantics
+independently.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="websocket-router-maxconnectiondurationms"><a class="header" href="#websocket-router-maxconnectiondurationms">WebSocket Router: maxConnectionDurationMs</a></h1>
+<p><code>maxConnectionDurationMs</code> limits the total lifetime of a WebSocket tunnel,
+regardless of activity.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer, in milliseconds</li>
+<li><strong>Default:</strong> disabled</li>
+<li><strong>Disabled by:</strong> blank, null, or <code>0</code></li>
+</ul>
+<pre><code class="language-yaml">maxConnectionDurationMs: 900000
+</code></pre>
+<p>The timer starts when the upstream connection is established. Once the limit is
+exceeded, the gateway terminates the tunnel with a timeout error even if data is
+still flowing. This is useful for forcing periodic reauthentication and limiting
+the lifetime of credentials captured during the original upgrade.</p>
+<p>For authenticated connections, choose a value no longer than the intended
+authorization lifetime. Existing tunnels retain the limits selected when they
+were upgraded; a configuration reload does not disconnect them immediately.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="websocket-router-maxactiveconnections"><a class="header" href="#websocket-router-maxactiveconnections">WebSocket Router: maxActiveConnections</a></h1>
+<p><code>maxActiveConnections</code> caps the number of active WebSocket connections held by
+one <code>light-gateway</code> process.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer</li>
+<li><strong>Default:</strong> disabled</li>
+<li><strong>Disabled by:</strong> blank, null, or <code>0</code></li>
+</ul>
+<pre><code class="language-yaml">maxActiveConnections: 1024
+</code></pre>
+<p>The limit is process-wide across routes handled by this WebSocket router; it is
+not per path, user, client IP, or gateway cluster. Each gateway replica keeps
+its own counter. A permit is acquired after routing, authorization, rate-limit,
+and upstream target selection, and is released when that request context ends.</p>
+<p>When the process is at the limit, a new upgrade is rejected with HTTP <code>503</code>.
+Use <code>maxUpgradeRequestsPerSecond</code> as the complementary control for bursts of
+upgrade attempts that may fail before becoming active connections.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="websocket-router-maxupgraderequestspersecond"><a class="header" href="#websocket-router-maxupgraderequestspersecond">WebSocket Router: maxUpgradeRequestsPerSecond</a></h1>
+<p><code>maxUpgradeRequestsPerSecond</code> limits accepted WebSocket upgrade attempts before
+the gateway selects and connects to an upstream target.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer</li>
+<li><strong>Default:</strong> disabled</li>
+<li><strong>Disabled by:</strong> blank, null, or <code>0</code></li>
+</ul>
+<pre><code class="language-yaml">maxUpgradeRequestsPerSecond: 128
+</code></pre>
+<p>The implementation uses a fixed one-second counter shared by the WebSocket
+router runtime in one gateway process. It is not per path, user, client IP, or
+cluster, and each gateway replica enforces its own limit. The counter state is
+preserved across successful configuration reloads.</p>
+<p>When the limit has already been reached for the current second, the gateway
+rejects the request with HTTP <code>429</code>. Requests rejected earlier by handshake or
+access-control validation do not consume this counter because those checks run
+first.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-configuration"><a class="header" href="#mcp-router-configuration">MCP Router Configuration</a></h1>
+<p>The MCP router exposes configured HTTP and MCP backend operations as an MCP
+tool facade. Its settings reside in <code>mcp-router.yml</code> and are supplied through
+portal-view/config server properties named <code>mcp-router.&lt;property&gt;</code>.</p>
+<p>The selected <code>handler.yml</code> chain must contain the <code>mcp</code> handler. The top-level
+<code>enabled</code> property must also be <code>true</code>; either control can disable the router.
+<code>mcp-router.yaml</code> is accepted as a compatibility fallback, but
+<code>mcp-router.yml</code> is preferred.</p>
+<h2 id="core-properties"><a class="header" href="#core-properties">Core properties</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Property</th><th style="text-align: left">Type</th><th style="text-align: left">Default</th><th style="text-align: left">Description</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-enabled">enabled</a></strong></td><td style="text-align: left">Boolean</td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Enables the router; the same page explains both protocol-profile flags.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-path">path</a></strong></td><td style="text-align: left">String</td><td style="text-align: left"><code>/mcp</code></td><td style="text-align: left">Exact HTTP path handled by the MCP router.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-maxsessions">maxSessions</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>10000</code></td><td style="text-align: left">Process-wide legacy frontend session limit.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-maxsessionsperclient">maxSessionsPerClient</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>100</code></td><td style="text-align: left">Legacy session limit for one authenticated or anonymous binding.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-maxrequestbodybytes">maxRequestBodyBytes</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>1048576</code></td><td style="text-align: left">Maximum MCP request body size.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-maxresponsebodybytes">maxResponseBodyBytes</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>4194304</code></td><td style="text-align: left">Maximum buffered MCP/backend response size.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-maxjsondepth">maxJsonDepth</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>128</code></td><td style="text-align: left">Maximum nesting depth of an MCP JSON-RPC request.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-originallowlist">originAllowlist</a></strong></td><td style="text-align: left">Array</td><td style="text-align: left"><code>[]</code></td><td style="text-align: left">Exact browser origins allowed to call the MCP endpoint.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-tools">tools</a></strong></td><td style="text-align: left">Array</td><td style="text-align: left"><code>[]</code></td><td style="text-align: left">Tool catalog, target, schema, credential, and runtime metadata.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="schema-properties"><a class="header" href="#schema-properties">Schema properties</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Property</th><th style="text-align: left">Type</th><th style="text-align: left">Default</th><th style="text-align: left">Description</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-schemadefaultdialect">schema.defaultDialect</a></strong></td><td style="text-align: left">String</td><td style="text-align: left">Draft 2020-12 URI</td><td style="text-align: left">Required JSON Schema dialect.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-schemaallowexternalrefs">schema.allowExternalRefs</a></strong></td><td style="text-align: left">Boolean</td><td style="text-align: left"><code>false</code></td><td style="text-align: left">Controls external <code>$ref</code>; currently must remain false.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-schemamaxschemabytes">schema.maxSchemaBytes</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>1048576</code></td><td style="text-align: left">Maximum serialized size of each input/output schema.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-schemamaxdepth">schema.maxDepth</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>64</code></td><td style="text-align: left">Maximum schema-document nesting depth.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-schemamaxsubschemas">schema.maxSubschemas</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>4096</code></td><td style="text-align: left">Maximum object/subschema count per schema.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-schemamaxconcurrentvalidations">schema.maxConcurrentValidations</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>32</code></td><td style="text-align: left">Process-wide schema validation admission capacity.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-schemavalidationwatchdogms">schema.validationWatchdogMs</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>50</code></td><td style="text-align: left">Observational warning threshold for validation work.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="protocol-properties"><a class="header" href="#protocol-properties">Protocol properties</a></h2>
+<p><code>protocols.legacy</code> and <code>protocols.stateless</code> share the <a href="#mcp-router-enabled">enabled</a>
+and <a href="#mcp-router-protocol-versions">versions</a> pages because portal-view property links use the
+final property-name segment.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Property</th><th style="text-align: left">Type</th><th style="text-align: left">Default</th><th style="text-align: left">Description</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-enabled">protocols.legacy.enabled</a></strong></td><td style="text-align: left">Boolean</td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Keeps the session-oriented profile available.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-protocol-versions">protocols.legacy.versions</a></strong></td><td style="text-align: left">Array</td><td style="text-align: left">Four supported versions</td><td style="text-align: left">Accepted legacy protocol versions.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-enabled">protocols.stateless.enabled</a></strong></td><td style="text-align: left">Boolean</td><td style="text-align: left"><code>true</code> in the shipped template</td><td style="text-align: left">Enables the <code>2026-07-28</code> stateless profile.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-protocol-versions">protocols.stateless.versions</a></strong></td><td style="text-align: left">Array</td><td style="text-align: left"><code>[2026-07-28]</code></td><td style="text-align: left">Accepted stateless protocol versions.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-protocolsstatelessdiscoverttlms">protocols.stateless.discoverTtlMs</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>30000</code></td><td style="text-align: left"><code>server/discover</code> cache lifetime.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-protocolsstatelessdiscovercachescope">protocols.stateless.discoverCacheScope</a></strong></td><td style="text-align: left">String</td><td style="text-align: left"><code>private</code></td><td style="text-align: left">Identity-aware discovery cache scope.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-protocolsstatelesstoolslistttlms">protocols.stateless.toolsListTtlMs</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>30000</code></td><td style="text-align: left"><code>tools/list</code> cache lifetime.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-protocolsstatelesstoolslistcachescope">protocols.stateless.toolsListCacheScope</a></strong></td><td style="text-align: left">String</td><td style="text-align: left"><code>private</code></td><td style="text-align: left">Identity-aware tool-list cache scope.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-protocolsstatelessmaxdiscovercacheentries">protocols.stateless.maxDiscoverCacheEntries</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>1024</code></td><td style="text-align: left">Process-local discovery cache capacity.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-protocolsstatelessmaxtoolslistcacheentries">protocols.stateless.maxToolsListCacheEntries</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>4096</code></td><td style="text-align: left">Process-local tool-list cache capacity.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-protocolsstatelessmaxtoolslistitems">protocols.stateless.maxToolsListItems</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>1024</code></td><td style="text-align: left">Maximum visible tools in one result.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-protocolsstatelessmaxconcurrentrequests">protocols.stateless.maxConcurrentRequests</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>1024</code></td><td style="text-align: left">Process-wide stateless request capacity.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-protocolsstatelessmaxconcurrentrequestsperprincipal">protocols.stateless.maxConcurrentRequestsPerPrincipal</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>32</code></td><td style="text-align: left">Concurrent stateless requests per principal.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-protocolsstatelessmaxconcurrentbackendcallspertarget">protocols.stateless.maxConcurrentBackendCallsPerTarget</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>32</code></td><td style="text-align: left">Concurrent stateless backend calls per target.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-protocolsstatelessmaxsubscriptions">protocols.stateless.maxSubscriptions</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>10000</code></td><td style="text-align: left">Process-wide stateless subscription limit.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-protocolsstatelessmaxsubscriptionsperprincipal">protocols.stateless.maxSubscriptionsPerPrincipal</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>4</code></td><td style="text-align: left">Subscription limit per principal.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-protocolsstatelessmaxsubscriptiondurationms">protocols.stateless.maxSubscriptionDurationMs</a></strong></td><td style="text-align: left">Integer</td><td style="text-align: left"><code>900000</code></td><td style="text-align: left">Maximum subscription lifetime.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#mcp-router-protocolsstatelessstatelesstolegacybridge">protocols.stateless.statelessToLegacyBridge</a></strong></td><td style="text-align: left">String</td><td style="text-align: left"><code>reject</code></td><td style="text-align: left">Rejects stateless calls to legacy MCP backends.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Every numeric limit must be greater than zero. Configuration is validated at
+startup and reload; invalid profiles, schemas, origins, limits, or tool targets
+reject the candidate runtime. A successful reload compatibility-filters legacy
+sessions, invalidates revision-bound caches, and closes superseded stateless
+subscriptions, publishing <code>tools/list_changed</code> when the tool catalog or policy
+changed.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-enabled"><a class="header" href="#mcp-router-enabled">MCP Router: enabled</a></h1>
+<p>Three <code>enabled</code> properties control different layers:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Full property</th><th style="text-align: left">Shipped default</th><th style="text-align: left">Behavior</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>mcp-router.enabled</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Builds and registers the MCP runtime. When false, the <code>mcp</code> handler does not match requests.</td></tr>
+<tr><td style="text-align: left"><code>mcp-router.protocols.legacy.enabled</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Enables session-oriented MCP. It must remain true in the current dual-profile release.</td></tr>
+<tr><td style="text-align: left"><code>mcp-router.protocols.stateless.enabled</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Enables the <code>2026-07-28</code> sessionless profile.</td></tr>
+</tbody>
+</table>
+</div>
+<pre><code class="language-yaml">enabled: true
+protocols:
+  legacy:
+    enabled: true
+  stateless:
+    enabled: true
+</code></pre>
+<p>The <code>mcp</code> handler must also appear in the applicable <code>handler.yml</code> chain. A
+false top-level flag or an inactive handler disables routing. Setting legacy to
+false rejects configuration. If stateless is enabled, its <code>versions</code> list must
+be non-empty. Although the Rust struct’s bare fallback leaves stateless off,
+the shipped <code>light-gateway</code> template explicitly defaults it to true.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-path"><a class="header" href="#mcp-router-path">MCP Router: path</a></h1>
+<p><code>path</code> is the exact HTTP path owned by the MCP router.</p>
+<ul>
+<li><strong>Type:</strong> String beginning with <code>/</code></li>
+<li><strong>Default:</strong> <code>/mcp</code></li>
+</ul>
+<pre><code class="language-yaml">path: /mcp
+</code></pre>
+<p>Query strings are ignored during path matching, so <code>/mcp?sessionId=...</code> matches
+<code>/mcp</code>. Child paths such as <code>/mcp/tools</code> do not match. <code>handler.yml</code> must route
+the required methods on the same path to the <code>mcp</code> handler. A value without a
+leading slash rejects configuration.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-maxsessions"><a class="header" href="#mcp-router-maxsessions">MCP Router: maxSessions</a></h1>
+<p><code>maxSessions</code> caps legacy frontend sessions stored by one gateway process.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer</li>
+<li><strong>Default:</strong> <code>10000</code></li>
+</ul>
+<p>Before rejecting a new initialize request, the router purges expired sessions.
+Legacy sessions expire after 30 minutes of inactivity and the normal purge
+interval is one minute. If the store remains full, initialization returns HTTP
+<code>503</code> with an MCP resource-limit error. Stateless requests do not consume this
+session store. Each gateway replica enforces its own limit.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-maxsessionsperclient"><a class="header" href="#mcp-router-maxsessionsperclient">MCP Router: maxSessionsPerClient</a></h1>
+<p><code>maxSessionsPerClient</code> caps legacy sessions for one trusted client binding.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer</li>
+<li><strong>Default:</strong> <code>100</code></li>
+</ul>
+<p>Authenticated requests bind capacity to the authenticated principal. Anonymous
+requests require a trusted connection binding, which is hashed before use.
+Expired sessions are purged before the router rejects a new one. If the client
+is still at the limit, initialization returns HTTP <code>429</code>. The counter is local
+to each gateway process and does not affect stateless requests.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-maxrequestbodybytes"><a class="header" href="#mcp-router-maxrequestbodybytes">MCP Router: maxRequestBodyBytes</a></h1>
+<p><code>maxRequestBodyBytes</code> limits the complete MCP HTTP request body.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer, in bytes</li>
+<li><strong>Default:</strong> <code>1048576</code> (1 MiB)</li>
+</ul>
+<p>The gateway reads the request through a bounded buffer before JSON parsing. A
+larger body is rejected with HTTP <code>413</code> and JSON-RPC code <code>-32600</code>. Compressed
+request bodies are rejected by the gateway’s MCP path, so this budget applies
+to the bytes actually received as the JSON request body.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-maxresponsebodybytes"><a class="header" href="#mcp-router-maxresponsebodybytes">MCP Router: maxResponseBodyBytes</a></h1>
+<p><code>maxResponseBodyBytes</code> bounds MCP responses and buffered downstream responses.</p>
+<ul>
+<li><strong>Type:</strong> Integer of at least <code>2048</code>, in bytes</li>
+<li><strong>Default:</strong> <code>4194304</code> (4 MiB)</li>
+</ul>
+<p>The router checks known <code>Content-Length</code>, enforces the limit while buffering,
+and bounds serialized JSON-RPC results such as <code>tools/list</code>. Oversized backend
+or catalog results fail safely instead of allocating without limit. Values
+below 2048 reject configuration because the gateway reserves enough space for
+bounded protocol error responses.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-maxjsondepth"><a class="header" href="#mcp-router-maxjsondepth">MCP Router: maxJsonDepth</a></h1>
+<p><code>maxJsonDepth</code> limits nesting in the parsed JSON-RPC request value.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer</li>
+<li><strong>Default:</strong> <code>128</code></li>
+</ul>
+<p>Arrays, objects, and scalar leaves each contribute to the recursive depth. A
+request exceeding the limit returns HTTP <code>400</code> and JSON-RPC code <code>-32600</code>.
+This protects runtime request parsing; schema-document complexity is governed
+separately by <code>schema.maxDepth</code> and <code>schema.maxSubschemas</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-originallowlist"><a class="header" href="#mcp-router-originallowlist">MCP Router: originAllowlist</a></h1>
+<p><code>originAllowlist</code> lists exact browser origins allowed to call the MCP endpoint.
+It is independent of <code>cors.allowedOrigins</code>.</p>
+<ul>
+<li><strong>Type:</strong> Array of strings</li>
+<li><strong>Default:</strong> <code>[]</code></li>
+</ul>
+<pre><code class="language-yaml">originAllowlist:
+  - https://local.localhost
+  - https://localhost:3000
+</code></pre>
+<p>Each entry must be an absolute <code>http</code> or <code>https</code> origin containing only scheme,
+host, and optional port. Credentials, path, query, fragment, suffix rules, and
+wildcards are rejected. Host names are normalized to lowercase; matching
+remains scheme- and port-sensitive.</p>
+<p>Requests with exactly one <code>Origin</code> header must match the list. Missing/empty
+allowlists, malformed origins, multiple Origin headers, and unlisted origins
+return HTTP <code>403</code> before payload parsing. Non-browser clients that omit Origin
+are allowed to continue through normal authentication and authorization.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-schemadefaultdialect"><a class="header" href="#mcp-router-schemadefaultdialect">MCP Router: schema.defaultDialect</a></h1>
+<p><code>schema.defaultDialect</code> selects the JSON Schema dialect used to compile tool
+input and output schemas.</p>
+<ul>
+<li><strong>Type:</strong> String</li>
+<li><strong>Default and only supported value:</strong> <code>https://json-schema.org/draft/2020-12/schema</code></li>
+</ul>
+<p>A tool schema may omit <code>$schema</code> and inherit this dialect. If <code>$schema</code> is
+present, it must equal the configured dialect exactly. Any other configured or
+per-tool dialect rejects the router configuration during startup or reload.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-schemaallowexternalrefs"><a class="header" href="#mcp-router-schemaallowexternalrefs">MCP Router: schema.allowExternalRefs</a></h1>
+<p><code>schema.allowExternalRefs</code> controls whether tool schemas may resolve <code>$ref</code> or
+<code>$dynamicRef</code> outside the schema document.</p>
+<ul>
+<li><strong>Type:</strong> Boolean</li>
+<li><strong>Default and required value:</strong> <code>false</code></li>
+</ul>
+<p>The current runtime has no approved external resolver policy, so setting this
+property to true rejects configuration. Local references beginning with <code>#</code>
+remain available. Any external reference found during schema preflight is
+rejected even when it is nested inside another schema keyword.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-schemamaxschemabytes"><a class="header" href="#mcp-router-schemamaxschemabytes">MCP Router: schema.maxSchemaBytes</a></h1>
+<p><code>schema.maxSchemaBytes</code> limits the serialized size of each configured input or
+output schema.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer, in bytes</li>
+<li><strong>Default:</strong> <code>1048576</code> (1 MiB)</li>
+</ul>
+<p>The gateway serializes and preflights each schema independently while building
+the tool catalog. Exceeding the limit rejects configuration before traffic is
+accepted. This is a schema-compilation budget, not the tool-call request or
+response budget.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-schemamaxdepth"><a class="header" href="#mcp-router-schemamaxdepth">MCP Router: schema.maxDepth</a></h1>
+<p><code>schema.maxDepth</code> limits nesting within each tool schema document.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer</li>
+<li><strong>Default:</strong> <code>64</code></li>
+</ul>
+<p>The preflight traversal counts nested objects and arrays throughout the schema,
+including definitions and keyword values. A schema whose traversal depth
+exceeds the limit rejects configuration. Use <code>maxJsonDepth</code> for JSON-RPC
+request values; the two limits protect different data structures.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-schemamaxsubschemas"><a class="header" href="#mcp-router-schemamaxsubschemas">MCP Router: schema.maxSubschemas</a></h1>
+<p><code>schema.maxSubschemas</code> limits the number of object nodes examined in one tool
+schema.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer</li>
+<li><strong>Default:</strong> <code>4096</code></li>
+</ul>
+<p>Every object encountered by schema preflight contributes to the count,
+including nested property schemas and definitions. Exceeding the budget rejects
+configuration before validator compilation. This prevents broad schemas from
+consuming unbounded startup CPU and memory even when their nesting depth is
+acceptable.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-schemamaxconcurrentvalidations"><a class="header" href="#mcp-router-schemamaxconcurrentvalidations">MCP Router: schema.maxConcurrentValidations</a></h1>
+<p><code>schema.maxConcurrentValidations</code> controls process-wide admission to input and
+output schema validation work.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer</li>
+<li><strong>Default:</strong> <code>32</code></li>
+</ul>
+<p>The runtime creates at most this many validation workers, capped further by
+available CPU parallelism, and uses the same value as the bounded work queue
+and admission semaphore. When capacity is exhausted, the tool call fails safely
+with an MCP error result instead of waiting in an unbounded queue. Each gateway
+replica maintains its own pool.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-schemavalidationwatchdogms"><a class="header" href="#mcp-router-schemavalidationwatchdogms">MCP Router: schema.validationWatchdogMs</a></h1>
+<p><code>schema.validationWatchdogMs</code> is an observational threshold for a schema
+validation job.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer, in milliseconds</li>
+<li><strong>Default:</strong> <code>50</code></li>
+<li><strong>Alias accepted by the Rust loader:</strong> <code>validationTimeoutMs</code></li>
+</ul>
+<p>When validation takes longer, the worker logs a warning with elapsed and
+configured milliseconds. It does not interrupt or cancel the validator; the
+name “watchdog” is intentional. Use <code>maxConcurrentValidations</code> to bound
+admission and concurrency.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-protocol-versions"><a class="header" href="#mcp-router-protocol-versions">MCP Router: protocol versions</a></h1>
+<p>The final property name <code>versions</code> is used by both protocol profiles.</p>
+<h2 id="protocolslegacyversions"><a class="header" href="#protocolslegacyversions">protocols.legacy.versions</a></h2>
+<ul>
+<li><strong>Default:</strong> <code>[2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05]</code></li>
+<li>The list must be non-empty and contain no duplicates.</li>
+<li>Only those four versions are supported by the legacy adapter.</li>
+</ul>
+<h2 id="protocolsstatelessversions"><a class="header" href="#protocolsstatelessversions">protocols.stateless.versions</a></h2>
+<ul>
+<li><strong>Shipped default:</strong> <code>[2026-07-28]</code></li>
+<li>When stateless is enabled, the list must be non-empty.</li>
+<li>The current stateless adapter accepts only <code>2026-07-28</code>, without duplicates.</li>
+</ul>
+<pre><code class="language-yaml">protocols:
+  legacy:
+    versions: [2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05]
+  stateless:
+    versions: [2026-07-28]
+</code></pre>
+<p>The stateless classifier requires the request header version and the
+<code>params._meta["io.modelcontextprotocol/protocolVersion"]</code> value to agree.
+Unsupported, duplicated, or cross-profile versions reject configuration or the
+request, depending on where the mismatch is found.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-protocolsstatelessdiscoverttlms"><a class="header" href="#mcp-router-protocolsstatelessdiscoverttlms">MCP Router: protocols.stateless.discoverTtlMs</a></h1>
+<p><code>discoverTtlMs</code> is the lifetime of a cached stateless <code>server/discover</code> result.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer, in milliseconds</li>
+<li><strong>Default:</strong> <code>30000</code></li>
+</ul>
+<p>The same value is returned to clients as the result’s <code>ttlMs</code>. Cache keys
+include protocol version, principal fingerprint, forwarded cache-vary headers,
+configuration revision, and policy revision. Entries are process-local and are
+recomputed after expiration or revision change.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-protocolsstatelessdiscovercachescope"><a class="header" href="#mcp-router-protocolsstatelessdiscovercachescope">MCP Router: protocols.stateless.discoverCacheScope</a></h1>
+<p><code>discoverCacheScope</code> declares the privacy scope of stateless
+<code>server/discover</code> results.</p>
+<ul>
+<li><strong>Type:</strong> String</li>
+<li><strong>Default and only supported value:</strong> <code>private</code></li>
+</ul>
+<p>The result is cached with identity-, header-, configuration-, and
+policy-sensitive keys and reports <code>cacheScope: private</code> to the client. Public
+or shared caching is rejected because authentication, delegation, and policy
+can affect what a caller is permitted to discover.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-protocolsstatelesstoolslistttlms"><a class="header" href="#mcp-router-protocolsstatelesstoolslistttlms">MCP Router: protocols.stateless.toolsListTtlMs</a></h1>
+<p><code>toolsListTtlMs</code> is the lifetime of a cached authorization-filtered stateless
+<code>tools/list</code> result.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer, in milliseconds</li>
+<li><strong>Default:</strong> <code>30000</code></li>
+</ul>
+<p>The result reports the same value as <code>ttlMs</code>. Cache keys bind the entry to the
+principal, policy/config revisions, protocol version, and relevant forwarded
+headers. A tool catalog or policy reload changes the revision and causes a new
+result to be produced.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-protocolsstatelesstoolslistcachescope"><a class="header" href="#mcp-router-protocolsstatelesstoolslistcachescope">MCP Router: protocols.stateless.toolsListCacheScope</a></h1>
+<p><code>toolsListCacheScope</code> declares the privacy scope of cached stateless
+<code>tools/list</code> responses.</p>
+<ul>
+<li><strong>Type:</strong> String</li>
+<li><strong>Default and only supported value:</strong> <code>private</code></li>
+</ul>
+<p>Tool visibility is authorization-sensitive, so cache entries are keyed by
+principal fingerprint, policy/config revisions, protocol version, and relevant
+headers. The gateway reports <code>cacheScope: private</code>; configuring another value
+rejects the stateless profile.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-protocolsstatelessmaxdiscovercacheentries"><a class="header" href="#mcp-router-protocolsstatelessmaxdiscovercacheentries">MCP Router: protocols.stateless.maxDiscoverCacheEntries</a></h1>
+<p><code>maxDiscoverCacheEntries</code> caps cached stateless <code>server/discover</code> results in one
+gateway process.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer</li>
+<li><strong>Default:</strong> <code>1024</code></li>
+</ul>
+<p>The cache removes expired records on lookup and evicts the least recently
+touched key when insertion exceeds capacity. Entries are not shared across
+gateway replicas. Because keys are principal- and revision-sensitive, size this
+limit for the expected active identity and policy cardinality.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-protocolsstatelessmaxtoolslistcacheentries"><a class="header" href="#mcp-router-protocolsstatelessmaxtoolslistcacheentries">MCP Router: protocols.stateless.maxToolsListCacheEntries</a></h1>
+<p><code>maxToolsListCacheEntries</code> caps cached stateless <code>tools/list</code> results in one
+gateway process.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer</li>
+<li><strong>Default:</strong> <code>4096</code></li>
+</ul>
+<p>The cache is process-local, TTL-bound, and evicts the least recently touched
+key when capacity is exceeded. Entries vary by principal, protocol, relevant
+headers, configuration revision, and policy revision, so this limit may need to
+be larger than the discovery cache in multi-tenant deployments.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-protocolsstatelessmaxtoolslistitems"><a class="header" href="#mcp-router-protocolsstatelessmaxtoolslistitems">MCP Router: protocols.stateless.maxToolsListItems</a></h1>
+<p><code>maxToolsListItems</code> caps the number of authorization-visible tools returned by
+one stateless <code>tools/list</code> operation.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer</li>
+<li><strong>Default:</strong> <code>1024</code></li>
+</ul>
+<p>The router evaluates visibility first and then applies this limit. If the
+visible catalog is larger, it returns a bounded catalog-limit error instead of
+pagination; non-empty pagination cursors are not currently supported. The
+serialized result must also fit <code>maxResponseBodyBytes</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-protocolsstatelessmaxconcurrentrequests"><a class="header" href="#mcp-router-protocolsstatelessmaxconcurrentrequests">MCP Router: protocols.stateless.maxConcurrentRequests</a></h1>
+<p><code>maxConcurrentRequests</code> caps in-flight stateless MCP requests in one gateway
+process.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer</li>
+<li><strong>Default:</strong> <code>1024</code></li>
+</ul>
+<p>Admission is fail-fast and uses an owned semaphore, so completion,
+cancellation, or panic releases capacity automatically. When no global permit
+is available, the request returns HTTP <code>429</code> with an MCP resource-limit error.
+Legacy session requests use separate controls.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-protocolsstatelessmaxconcurrentrequestsperprincipal"><a class="header" href="#mcp-router-protocolsstatelessmaxconcurrentrequestsperprincipal">MCP Router: protocols.stateless.maxConcurrentRequestsPerPrincipal</a></h1>
+<p><code>maxConcurrentRequestsPerPrincipal</code> caps in-flight stateless requests for one
+authenticated or trusted anonymous binding.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer</li>
+<li><strong>Default:</strong> <code>32</code></li>
+</ul>
+<p>The per-principal permit is acquired together with the global request permit.
+If either limit is exhausted, the gateway returns HTTP <code>429</code>. Counters are
+process-local and disappear when no active permit retains that principal’s
+semaphore.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-protocolsstatelessmaxconcurrentbackendcallspertarget"><a class="header" href="#mcp-router-protocolsstatelessmaxconcurrentbackendcallspertarget">MCP Router: protocols.stateless.maxConcurrentBackendCallsPerTarget</a></h1>
+<p><code>maxConcurrentBackendCallsPerTarget</code> caps concurrent calls to one normalized
+backend target.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer</li>
+<li><strong>Default:</strong> <code>32</code></li>
+</ul>
+<p>The limit applies to stateless frontend calls and calls to stateless MCP
+backends. Different targets have independent semaphores. Capacity is fail-fast
+and process-local; an exhausted target produces a tool execution error stating
+that the backend exceeds a gateway resource limit.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-protocolsstatelessmaxsubscriptions"><a class="header" href="#mcp-router-protocolsstatelessmaxsubscriptions">MCP Router: protocols.stateless.maxSubscriptions</a></h1>
+<p><code>maxSubscriptions</code> caps active stateless <code>subscriptions/listen</code> streams in one
+gateway process.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer</li>
+<li><strong>Default:</strong> <code>10000</code></li>
+</ul>
+<p>The subscription hub holds bounded channels and removes a subscription when
+the stream ends or its lease is dropped. If the global or per-principal limit
+is reached, registration returns HTTP <code>429</code>. Gateway replicas do not share
+subscription counters.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-protocolsstatelessmaxsubscriptionsperprincipal"><a class="header" href="#mcp-router-protocolsstatelessmaxsubscriptionsperprincipal">MCP Router: protocols.stateless.maxSubscriptionsPerPrincipal</a></h1>
+<p><code>maxSubscriptionsPerPrincipal</code> caps active stateless subscriptions for one
+authenticated or trusted anonymous binding.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer</li>
+<li><strong>Default:</strong> <code>4</code></li>
+</ul>
+<p>The limit is checked with the process-wide <code>maxSubscriptions</code> limit when a
+<code>subscriptions/listen</code> request registers. Exceeding either returns HTTP <code>429</code>.
+Counts are released when the stream closes, expires, is cancelled, or is
+superseded by a runtime reload.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-protocolsstatelessmaxsubscriptiondurationms"><a class="header" href="#mcp-router-protocolsstatelessmaxsubscriptiondurationms">MCP Router: protocols.stateless.maxSubscriptionDurationMs</a></h1>
+<p><code>maxSubscriptionDurationMs</code> caps a stateless subscription stream’s lifetime.</p>
+<ul>
+<li><strong>Type:</strong> Positive integer, in milliseconds</li>
+<li><strong>Default:</strong> <code>900000</code> (15 minutes)</li>
+</ul>
+<p>The actual deadline is the earlier of this configured duration and the
+authenticated credential’s <code>exp</code> time. Expired credentials reject registration
+with HTTP <code>401</code>. The stream emits keep-alive comments every 15 seconds and a
+terminal completion frame at its deadline.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-protocolsstatelessstatelesstolegacybridge"><a class="header" href="#mcp-router-protocolsstatelessstatelesstolegacybridge">MCP Router: protocols.stateless.statelessToLegacyBridge</a></h1>
+<p><code>statelessToLegacyBridge</code> controls whether a stateless frontend request may be
+adapted to a session-oriented legacy MCP backend.</p>
+<ul>
+<li><strong>Type:</strong> String</li>
+<li><strong>Default and only supported value:</strong> <code>reject</code></li>
+</ul>
+<p>The current release deliberately fails closed: a stateless call to a tool whose
+backend profile is legacy returns an MCP tool error instead of creating or
+reusing hidden backend session state. Other values reject configuration. Use a
+tool with <code>backendMcpProtocol: stateless</code> and explicit credential settings for
+a stateless-to-stateless path.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-router-tools"><a class="header" href="#mcp-router-tools">MCP Router: tools</a></h1>
+<p><code>tools</code> is the catalog exposed by <code>tools/list</code> and executed by <code>tools/call</code>.</p>
+<ul>
+<li><strong>Type:</strong> Array of tool objects</li>
+<li><strong>Default:</strong> <code>[]</code></li>
+</ul>
+<pre><code class="language-yaml">tools:
+  - name: weather.get
+    endpointName: get_weather
+    description: Get weather information
+    apiType: http
+    serviceId: com.networknt.weather-1.0.0
+    protocol: https
+    envTag: dev
+    path: /weather/{city}
+    method: GET
+    endpoint: /weather/{city}@get
+    inputSchema:
+      type: object
+      required: [city]
+      properties:
+        city:
+          type: string
+    outputSchema:
+      type: object
+    toolMetadata:
+      routing:
+        parameters:
+          city: path
+      safety:
+        idempotent: true
+</code></pre>
+<h2 id="tool-fields"><a class="header" href="#tool-fields">Tool fields</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Field</th><th style="text-align: left">Default</th><th style="text-align: left">Behavior</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>name</code></td><td style="text-align: left">required</td><td style="text-align: left">Unique gateway-facing tool name. When stateless is enabled, it must be 1-128 ASCII letters, digits, <code>.</code>, <code>-</code>, or <code>_</code>.</td></tr>
+<tr><td style="text-align: left"><code>endpointName</code></td><td style="text-align: left"><code>name</code></td><td style="text-align: left">Real backend MCP operation name when it differs from the gateway-facing name.</td></tr>
+<tr><td style="text-align: left"><code>description</code></td><td style="text-align: left">empty</td><td style="text-align: left">Description returned by <code>tools/list</code>.</td></tr>
+<tr><td style="text-align: left"><code>apiType</code></td><td style="text-align: left"><code>http</code></td><td style="text-align: left"><code>http</code> (also accepts <code>rest</code>/<code>openapi</code>) or <code>mcp</code>.</td></tr>
+<tr><td style="text-align: left"><code>protocol</code></td><td style="text-align: left">target-dependent</td><td style="text-align: left">Discovery protocol used with <code>serviceId</code>.</td></tr>
+<tr><td style="text-align: left"><code>serviceId</code></td><td style="text-align: left">unset</td><td style="text-align: left">Registry target. Either non-blank <code>serviceId</code> or <code>targetHost</code> is required.</td></tr>
+<tr><td style="text-align: left"><code>envTag</code></td><td style="text-align: left">unset</td><td style="text-align: left">Optional registry environment tag.</td></tr>
+<tr><td style="text-align: left"><code>targetHost</code></td><td style="text-align: left">unset</td><td style="text-align: left">Absolute direct target base URL. Private/loopback/link-local/metadata targets are blocked unless explicitly approved in runtime metadata.</td></tr>
+<tr><td style="text-align: left"><code>path</code></td><td style="text-align: left">required</td><td style="text-align: left">Backend path beginning with <code>/</code>; OpenAPI placeholders must have matching routing metadata.</td></tr>
+<tr><td style="text-align: left"><code>method</code></td><td style="text-align: left"><code>GET</code></td><td style="text-align: left"><code>GET</code>, <code>POST</code>, <code>PUT</code>, <code>PATCH</code>, <code>DELETE</code>, <code>HEAD</code>, <code>OPTIONS</code>, or <code>CALL</code>. <code>CALL</code> resolves to POST when an input schema was explicitly configured, otherwise GET.</td></tr>
+<tr><td style="text-align: left"><code>endpoint</code></td><td style="text-align: left"><code>&lt;path&gt;@&lt;method&gt;</code></td><td style="text-align: left">Access-control endpoint identifier.</td></tr>
+<tr><td style="text-align: left"><code>backendMcpProtocol</code></td><td style="text-align: left">legacy for MCP tools</td><td style="text-align: left"><code>legacy</code> or <code>stateless</code>; stateless must be selected explicitly.</td></tr>
+<tr><td style="text-align: left"><code>sessionIndependent</code></td><td style="text-align: left"><code>false</code></td><td style="text-align: left">MCP-backend declaration; invalid on an HTTP tool. It does not by itself convert a legacy backend into stateless.</td></tr>
+<tr><td style="text-align: left"><code>backendCredentialMode</code></td><td style="text-align: left">compatibility-dependent</td><td style="text-align: left"><code>caller</code>, <code>exchange</code>, <code>service</code>, <code>anonymous</code>, or legacy-only <code>caller-compat</code>. Stateless backends require an explicit mode.</td></tr>
+<tr><td style="text-align: left"><code>backendResource</code></td><td style="text-align: left">unset</td><td style="text-align: left">OAuth resource/audience. Required for <code>caller</code> and <code>exchange</code>.</td></tr>
+<tr><td style="text-align: left"><code>inputSchema</code></td><td style="text-align: left"><code>{type: object}</code></td><td style="text-align: left">Draft 2020-12 object-root schema used to validate arguments.</td></tr>
+<tr><td style="text-align: left"><code>outputSchema</code></td><td style="text-align: left">unset</td><td style="text-align: left">Optional schema used to validate structured tool output.</td></tr>
+<tr><td style="text-align: left"><code>toolMetadata</code></td><td style="text-align: left"><code>{}</code></td><td style="text-align: left">Routing, safety, lifecycle, and runtime controls.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Tool names and backend contracts must be unique and internally consistent.
+Tools resolving to the same backend identity must agree on backend profile,
+credential mode, and resource. HTTP tools cannot configure MCP backend-profile
+fields.</p>
+<h2 id="important-toolmetadata-controls"><a class="header" href="#important-toolmetadata-controls">Important toolMetadata controls</a></h2>
+<ul>
+<li><code>routing.parameters.&lt;name&gt;</code> maps an input property to <code>path</code>, <code>query</code>,
+<code>header</code>, <code>cookie</code>, or <code>body</code>. Every <code>{placeholder}</code> in <code>path</code> requires the
+same parameter to be mapped to <code>path</code>.</li>
+<li><code>routing.endpointId</code> or top-level <code>endpointId</code> supplies runtime endpoint
+identity metadata.</li>
+<li><code>runtime.allowPrivateTargetHost: true</code> opts an approved internal direct target
+out of public-address SSRF blocking. Do not enable it for untrusted values.</li>
+<li><code>runtime.retry.enabled</code>, <code>maxAttempts</code>, retry status/events, and backoff
+configure bounded retries. Retries require <code>safety.idempotent: true</code>; a
+destructive tool also needs an idempotency-key argument.</li>
+<li><code>safety.idempotent</code>, <code>safety.destructive</code>, and schema <code>x-mask</code> annotations
+affect retry and argument masking behavior.</li>
+<li><code>lifecycle</code> carries published lifecycle metadata consumed by the runtime
+catalog.</li>
+</ul>
+<p>An input-schema property may use <code>x-mcp-header</code> to require its canonical value
+in a stateless transport header. Header names must be safe HTTP tokens, cannot
+be gateway-owned or sensitive, and may annotate only bounded string, boolean,
+or safe-range integer properties.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="portal-view-concepts"><a class="header" href="#portal-view-concepts">Portal View Concepts</a></h1>
 <p>This section contains reusable explanations for portal concepts referenced by
