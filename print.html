@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-bd96782b.js";
+            window.path_to_searchindex_js = "searchindex-be5b99d7.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-31891dbc.js"></script>
+        <script src="toc-80269ba0.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -29067,6 +29067,7 @@ records are visible, and which common actions are available.</p>
 <li><a href="#service-endpoint">Service Endpoint</a></li>
 <li><a href="#workflow-catalog">Workflow Catalog</a></li>
 <li><a href="#schema-catalog">Schema Catalog</a></li>
+<li><a href="#llm-model-control-plane">LLM Model Control Plane</a></li>
 <li><a href="#skill-workspace">Skill Workspace</a></li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
@@ -29371,6 +29372,207 @@ current host, and draft or retired schemas that you own or can administer.</p>
 <li>create a new schema version when you have permission</li>
 <li>edit draft metadata and taxonomy when you own or administer the schema</li>
 <li>open Schema Admin for table-based management</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="llm-model-control-plane"><a class="header" href="#llm-model-control-plane">LLM Model Control Plane</a></h1>
+<p>Use the LLM Model Control Plane to define the models a host can use, connect
+them to provider accounts and deployments, expose governed aliases, apply
+policy and pricing, and publish an immutable configuration to the gateway.</p>
+<p>The model inventory is available under <strong>Marketplace &gt; LLM Model Catalog</strong>.
+The operational tabs are under <strong>Administration &gt; GenAI Admin &gt; LLM Models</strong>.</p>
+<h2 id="before-you-start"><a class="header" href="#before-you-start">Before You Start</a></h2>
+<ul>
+<li>Select the host that owns the LLM configuration. Every record is host scoped.</li>
+<li>Use an account with the role permissions and rules for the LLM query and
+command endpoints.</li>
+<li>Create dependent records in this order: Catalog, Registration, Account,
+Deployment, Credential, Alias, Route, Pricing, Policy, Binding, Publication.</li>
+<li>Keep the <code>aggregateVersion</code> returned by a query. Update and delete commands
+require it for optimistic concurrency.</li>
+</ul>
+<h2 id="using-the-json-draft-editor"><a class="header" href="#using-the-json-draft-editor">Using The JSON Draft Editor</a></h2>
+<p>Every resource page has a <strong>Create draft</strong> button. It opens a JSON editor with:</p>
+<pre><code class="language-json">{
+  "hostId": "selected-host-id",
+  "active": true
+}
+</code></pre>
+<p>Add the fields required for the selected resource and choose <strong>Save</strong>. The
+server creates the resource id when it is omitted. Use valid JSON types: do not
+put numbers, booleans, arrays, or objects in quotes unless the field is a
+string.</p>
+<p>The edit action loads the current sanitized record into the same editor. Keep
+its id, <code>hostId</code>, and <code>aggregateVersion</code>, change the intended fields, and save.
+The delete action sends the selected id, <code>hostId</code>, and <code>aggregateVersion</code> after
+confirmation.</p>
+<p>The editor sends the versioned Portal command contract. Do not paste an API
+key, bearer token, password, or other secret value into any draft.</p>
+<h2 id="llm-model-catalog"><a class="header" href="#llm-model-catalog">LLM Model Catalog</a></h2>
+<p>Open <strong>Marketplace &gt; LLM Model Catalog</strong> to define provider model inventory.
+A catalog record describes a physical model independently of an environment,
+account, credential, or deployment.</p>
+<p>Required create fields:</p>
+<ul>
+<li><code>providerType</code></li>
+<li><code>physicalModelId</code></li>
+<li><code>modelFamily</code></li>
+<li><code>contextTokenLimit</code></li>
+<li><code>outputTokenLimit</code></li>
+</ul>
+<p>Optional fields include <code>modelVersion</code>, <code>modalities</code>, <code>operations</code>,
+<code>declaredCapabilities</code>, and <code>lifecycleStatus</code>.</p>
+<p>Create a catalog entry before creating a Registration that refers to its
+<code>modelCatalogId</code>.</p>
+<h2 id="registrations-tab"><a class="header" href="#registrations-tab">Registrations Tab</a></h2>
+<p>Use Registrations to approve a catalog model for an environment, one or more
+regions, data classifications, and capability restrictions.</p>
+<p>Required create fields are <code>modelCatalogId</code> and <code>environment</code>. Use the
+<code>regions</code>, <code>dataClassifications</code>, and <code>capabilityRestrictions</code> fields to narrow
+where and how the registered model may be used.</p>
+<h2 id="accounts-tab"><a class="header" href="#accounts-tab">Accounts Tab</a></h2>
+<p>Use Accounts for provider billing and quota ownership. An account is metadata;
+it does not contain a provider secret.</p>
+<p>Required create fields are <code>accountName</code>, <code>providerType</code>, <code>billingPrincipal</code>,
+and <code>quotaGroupId</code>. <code>capacityMetadata</code> can hold provider-specific capacity
+information that is safe to store in Portal.</p>
+<h2 id="deployments-tab"><a class="header" href="#deployments-tab">Deployments Tab</a></h2>
+<p>Use Deployments to connect a Registration and Account to a provider endpoint.</p>
+<p>Required create fields are:</p>
+<ul>
+<li><code>modelRegistrationId</code></li>
+<li><code>providerAccountId</code></li>
+<li><code>deploymentName</code></li>
+<li><code>providerType</code></li>
+<li><code>physicalModelId</code></li>
+<li><code>baseUrl</code></li>
+<li><code>quotaGroupId</code></li>
+</ul>
+<p><code>baseUrl</code> must use HTTPS. After saving, use <strong>Validate</strong> for deployment
+validation and <strong>Conformance</strong> to run the provider conformance workflow. A
+deployment in <code>PASS</code> state must carry the complete, matching, unexpired
+<code>conformanceResult</code> and digest evidence.</p>
+<h2 id="credentials-tab"><a class="header" href="#credentials-tab">Credentials Tab</a></h2>
+<p>Use Credentials to associate a versioned external secret reference with a
+deployment. Portal does not accept or display raw provider credentials.</p>
+<p>Required create fields are <code>providerDeploymentId</code>, <code>credentialVersion</code>,
+<code>secretReference</code>, and <code>effectiveTs</code>. <code>secretReference</code> must be an external URI,
+for example a supported vault URI. <code>expiresTs</code> is optional.</p>
+<p>Never enter the secret value itself. Fields resembling API keys, passwords,
+authorization headers, or tokens are rejected.</p>
+<h2 id="aliases-tab"><a class="header" href="#aliases-tab">Aliases Tab</a></h2>
+<p>Use Aliases to define the stable model name consumed by applications and
+agents. An alias can constrain operations, capabilities, token and request
+limits, data classification, logging, and PII behavior.</p>
+<p>Required create fields are <code>environment</code> and <code>aliasName</code>.</p>
+<ul>
+<li><code>PUBLIC</code> aliases cannot set <code>boundAgentDefId</code>.</li>
+<li><code>INTERNAL_LEGACY</code> aliases require a UUID <code>boundAgentDefId</code>.</li>
+<li><code>replacementAliasId</code> can direct migration from a retiring alias.</li>
+</ul>
+<p>Use <strong>Preview routes</strong> to inspect which deployments are eligible and why. The
+preview excludes credential references and provider error material.</p>
+<h2 id="routes-tab"><a class="header" href="#routes-tab">Routes Tab</a></h2>
+<p>Use Routes to connect an Alias to an eligible Deployment and establish routing
+priority and fallback behavior.</p>
+<p>Required create fields are <code>publicAliasId</code>, <code>providerDeploymentId</code>, and
+<code>routePriority</code>. The current MVP requires <code>routeWeight</code> to be <code>1</code> and
+<code>canaryPercent</code> to be <code>0</code>. Use <code>fallbackEnabled</code> and <code>residencyConditions</code> for
+the supported fallback and residency controls.</p>
+<h2 id="pricing-tab"><a class="header" href="#pricing-tab">Pricing Tab</a></h2>
+<p>Use Pricing to record an effective, versioned price for a Deployment. Monetary
+values are integer micros per million tokens.</p>
+<p>Required create fields are <code>providerDeploymentId</code>, <code>pricingVersion</code>,
+<code>inputMicrosPerMillion</code>, <code>outputMicrosPerMillion</code>, <code>effectiveTs</code>, <code>source</code>, and
+<code>approvedBy</code>. Optional fields include <code>cachedInputMicrosPerMillion</code> and
+<code>expiresTs</code>.</p>
+<h2 id="policies-tab"><a class="header" href="#policies-tab">Policies Tab</a></h2>
+<p>Use Policies to group access, budget, content, cache, PII, and native extension
+controls under a reusable policy name.</p>
+<p><code>policyName</code> is required. Add the applicable policy objects:
+<code>accessPolicy</code>, <code>budgetPolicy</code>, <code>contentPolicy</code>, <code>cachePolicy</code>, <code>piiPolicy</code>, and
+<code>nativeExtensionPolicy</code>.</p>
+<h2 id="bindings-tab"><a class="header" href="#bindings-tab">Bindings Tab</a></h2>
+<p>Use Bindings to assign a Policy to a subject and optionally scope it to an
+Alias or mark it as the agent default.</p>
+<p>Required create fields are <code>modelPolicyId</code>, <code>subjectType</code>, and <code>subjectId</code>.
+Optional fields are <code>publicAliasId</code> and <code>agentDefault</code>.</p>
+<h2 id="publication-tab"><a class="header" href="#publication-tab">Publication Tab</a></h2>
+<p>Use Publication to append a complete, immutable configuration version for one
+gateway environment.</p>
+<ol>
+<li>Enter the target <code>Environment</code>.</li>
+<li>Edit the Publication JSON.</li>
+<li>Resolve every validation and gateway compatibility warning.</li>
+<li>Review the version, resource count, requested features, and compiler
+acknowledgement.</li>
+<li>Choose <strong>Validate and publish</strong> and confirm the operation.</li>
+</ol>
+<p>A publication requires <code>environment</code>, <code>publicationVersion</code>, a semantic
+<code>minimumGatewayVersion</code>, a full <code>manifest</code>, and at least one full-root resource.
+Supported resource types are <code>llm-deployment</code>, <code>llm-route</code>, <code>llm-policy</code>, and
+<code>llm-pricing</code>. Each resource needs an id, version, sequence, schema version, and
+complete payload.</p>
+<p>Rollback is append-only. To enable <strong>Append rollback</strong>, provide
+<code>rollbackOfPublicationId</code> and a complete replacement publication. Rollback
+creates a new history entry; it does not modify an earlier publication.</p>
+<h2 id="endpoint-authorization-and-403-responses"><a class="header" href="#endpoint-authorization-and-403-responses">Endpoint Authorization And 403 Responses</a></h2>
+<p>The browser uses two HTTP transport paths, but access control is registered
+against each versioned service endpoint:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Operation</th><th>HTTP path</th><th>Endpoint identity</th><th>Scope</th></tr>
+</thead>
+<tbody>
+<tr><td>List and preview</td><td><code>/portal/query</code></td><td><code>lightapi.net/genai/&lt;queryAction&gt;/0.1.0</code></td><td><code>portal.r</code></td></tr>
+<tr><td>Create, update, delete, validate, conformance, publish, rollback</td><td><code>/portal/command</code></td><td><code>lightapi.net/genai/&lt;commandAction&gt;/0.1.0</code></td><td><code>portal.w</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Register and authorize these actions for the interactive page:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Page or tab</th><th>Query action</th><th>Command actions</th></tr>
+</thead>
+<tbody>
+<tr><td>Catalog</td><td><code>getLlmModelCatalog</code></td><td><code>createLlmModelCatalog</code>, <code>updateLlmModelCatalog</code>, <code>deleteLlmModelCatalog</code></td></tr>
+<tr><td>Registrations</td><td><code>getLlmModelRegistration</code></td><td><code>createLlmModelRegistration</code>, <code>updateLlmModelRegistration</code>, <code>deleteLlmModelRegistration</code></td></tr>
+<tr><td>Accounts</td><td><code>getLlmProviderAccount</code></td><td><code>createLlmProviderAccount</code>, <code>updateLlmProviderAccount</code>, <code>deleteLlmProviderAccount</code></td></tr>
+<tr><td>Deployments</td><td><code>getLlmProviderDeployment</code></td><td><code>createLlmProviderDeployment</code>, <code>updateLlmProviderDeployment</code>, <code>deleteLlmProviderDeployment</code>, <code>validateLlmProviderDeployment</code>, <code>runLlmProviderConformance</code></td></tr>
+<tr><td>Credentials</td><td><code>getLlmProviderCredential</code></td><td><code>createLlmProviderCredential</code>, <code>updateLlmProviderCredential</code>, <code>deleteLlmProviderCredential</code></td></tr>
+<tr><td>Aliases</td><td><code>getLlmPublicAlias</code>, <code>previewLlmAliasRoutes</code></td><td><code>createLlmPublicAlias</code>, <code>updateLlmPublicAlias</code>, <code>deleteLlmPublicAlias</code></td></tr>
+<tr><td>Routes</td><td><code>getLlmAliasRoute</code></td><td><code>createLlmAliasRoute</code>, <code>updateLlmAliasRoute</code>, <code>deleteLlmAliasRoute</code></td></tr>
+<tr><td>Pricing</td><td><code>getLlmPricingVersion</code></td><td><code>createLlmPricingVersion</code>, <code>updateLlmPricingVersion</code>, <code>deleteLlmPricingVersion</code></td></tr>
+<tr><td>Policies</td><td><code>getLlmModelPolicy</code></td><td><code>createLlmModelPolicy</code>, <code>updateLlmModelPolicy</code>, <code>deleteLlmModelPolicy</code></td></tr>
+<tr><td>Bindings</td><td><code>getLlmModelPolicyBinding</code></td><td><code>createLlmModelPolicyBinding</code>, <code>updateLlmModelPolicyBinding</code>, <code>deleteLlmModelPolicyBinding</code></td></tr>
+<tr><td>Publication</td><td><code>getLlmGatewayPublication</code></td><td><code>publishLlmGatewayConfiguration</code>, <code>rollbackLlmGatewayConfiguration</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>For every endpoint, confirm that the API endpoint record, endpoint scope, rule
+association, and role permission are active for the selected host. A user who
+can list records may still receive <code>403</code> on Save because query and command
+actions have separate endpoint permissions.</p>
+<p>If authorization is correct but an update still fails, check that <code>hostId</code>
+matches the authenticated host and that the JSON contains the current
+<code>aggregateVersion</code>. Those contract errors are distinct from a missing endpoint,
+role, rule, or scope.</p>
+<h2 id="common-errors"><a class="header" href="#common-errors">Common Errors</a></h2>
+<ul>
+<li><strong>Select a host</strong>: choose the owning host before opening the catalog or admin
+page.</li>
+<li><strong>403 on Save or Delete</strong>: authorize the exact command action, not only its
+corresponding query action.</li>
+<li><strong>JSON parse error</strong>: remove comments and trailing commas and use valid JSON.</li>
+<li><strong>Update conflict</strong>: reload the tab and retry with the latest
+<code>aggregateVersion</code>.</li>
+<li><strong>Referenced record not found</strong>: create the dependency first and verify that
+it belongs to the same host.</li>
+<li><strong>Invalid lifecycle transition</strong>: reload the current state and choose a
+forward transition; terminal states cannot return to draft.</li>
+<li><strong>Publication button disabled</strong>: fix the displayed candidate validation or
+gateway compatibility warnings first.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="skill-workspace"><a class="header" href="#skill-workspace">Skill Workspace</a></h1>
