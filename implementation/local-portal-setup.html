@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-be5b99d7.js";
+            window.path_to_searchindex_js = "../searchindex-e02e31e7.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-80269ba0.js"></script>
@@ -175,42 +175,37 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="local-portal-setup"><a class="header" href="#local-portal-setup">Local Portal Setup</a></h1>
-<p>This guide starts the local Light Portal runtime from two sibling repositories:</p>
+<p>This guide starts the local Light Portal runtime from one repository:</p>
 <pre><code class="language-text">~/lightapi/portal-config-loc
-~/lightapi/service-asset
 </code></pre>
-<p><code>portal-config-loc</code> contains the local Compose stacks and startup script.
-<code>service-asset</code> contains the checked-in service jars, UI assets, released image
-tags, and the event snapshot used to initialize a new local database.</p>
+<p><code>portal-config-loc</code> contains the local Compose stacks and startup script. The
+script downloads released service jars, UI assets, image tags, and the baseline
+event snapshot from <code>https://cdn.networknt.com</code>.</p>
 <h2 id="quick-start"><a class="header" href="#quick-start">Quick Start</a></h2>
-<p>Clone or update both repositories under <code>~/lightapi</code>:</p>
+<p>Clone or update the repository under <code>~/lightapi</code>:</p>
 <pre><code class="language-bash">cd ~
 mkdir -p lightapi
 cd lightapi
 git clone git@github.com:lightapi/portal-config-loc.git
-git clone git@github.com:lightapi/service-asset.git
 </code></pre>
 <p>If they are already cloned:</p>
 <pre><code class="language-bash">cd ~/lightapi/portal-config-loc
 git pull --rebase
-cd ~/lightapi/service-asset
-git pull --rebase
 </code></pre>
 <h2 id="optional-use-your-own-events"><a class="header" href="#optional-use-your-own-events">Optional: Use Your Own Events</a></h2>
-<p>The importer always reads this exact file:</p>
-<pre><code class="language-text">~/lightapi/service-asset/events.json
+<p>The importer reads the cached CDN event file:</p>
+<pre><code class="language-text">~/lightapi/.release-state/assets/events.json
 </code></pre>
-<p>To initialize a new local database with your own snapshot, replace
-<code>~/lightapi/service-asset/events.json</code> before running <code>deploy-local.sh</code> for the
-first time:</p>
-<pre><code class="language-bash">cp /path/to/your/events.json ~/lightapi/service-asset/events.json
+<p>To initialize a new local database with your own snapshot, set
+<code>RELEASE_ASSET_CACHE_DIR</code> and replace its <code>events.json</code> before running
+<code>deploy-local.sh</code> for the first time:</p>
+<pre><code class="language-bash">mkdir -p ~/lightapi/.release-state/assets
+cp /path/to/your/events.json ~/lightapi/.release-state/assets/events.json
 </code></pre>
-<p>Do not use a different filename. <code>deploy-local.sh</code> rejects <code>EVENT_IMPORT_FILE</code>
-so every import path uses only <code>service-asset/events.json</code>. After the script has
-started and imported events into Postgres, replacing the file will not change
-the existing database. To reinitialize from a different file, remove the
-Postgres named volume, replace <code>service-asset/events.json</code>, and then start the
-script again with <code>IMPORT_EVENTS=auto</code>.</p>
+<p>Do not use a different filename. After the script has imported events into
+Postgres, replacing the file will not change the existing database. To
+reinitialize from a different file, remove the Postgres named volume, replace
+the cached <code>events.json</code>, and start the script again with <code>IMPORT_EVENTS=auto</code>.</p>
 <p>For Podman:</p>
 <pre><code class="language-bash">cd ~/lightapi/portal-config-loc/all-in-lt
 podman compose -f docker-compose.yml -f docker-compose-rust.yml down -v
@@ -241,24 +236,23 @@ RUST_LOG=info \
 <p>If the selected configuration uses hostnames such as <code>dev.lightapi.net</code>, add
 them to the local hosts file and point them to <code>127.0.0.1</code>.</p>
 <h2 id="what-the-script-does"><a class="header" href="#what-the-script-does">What The Script Does</a></h2>
-<p><code>deploy-local.sh</code> copies assets from the sibling <code>service-asset</code> repository into
-the selected <code>portal-config-loc</code> stack only when the target directories are
-missing or empty. It does not overwrite populated asset directories during a
-normal run.</p>
+<p><code>deploy-local.sh</code> downloads asset archives from the CDN into
+<code>.release-state/assets</code> and extracts them into the selected stack only when the
+target directories are missing or empty. It does not overwrite populated asset
+directories during a normal run.</p>
 <p>For the <code>lt rust</code> stack, the script starts <code>all-in-lt</code> with the Rust compose
-override. It also passes <code>service-asset/docker-images.env</code> to Compose when that
-file is present, so the stack can use the released image tags generated by the
-asset release process.</p>
+override. It also downloads <code>docker-images.env</code> and passes it to Compose so the
+stack can use the published release image tags.</p>
 <p>When <code>IMPORT_EVENTS=auto</code> is set, the script waits for Postgres, checks
-<code>event_store_t</code>, and imports <code>service-asset/events.json</code> only if the event
+<code>event_store_t</code>, and imports the cached CDN <code>events.json</code> only if the event
 store is empty. This is intended for a brand new environment or after removing
 the Postgres named volume. Leave <code>IMPORT_EVENTS</code> unset for normal restarts.</p>
 <p>Automatic event import uses the event-importer container image by default:</p>
 <pre><code class="language-bash">CONTAINER_CMD=podman
 EVENT_IMPORTER_IMAGE=networknt/event-importer:latest
 </code></pre>
-<p>Use <code>EVENT_IMPORT_RUNNER=local</code> only when you intentionally want to run the
-host-side importer scripts from <code>service-asset</code>.</p>
+<p>Use <code>EVENT_IMPORT_RUNNER=local</code> only when you intentionally provide a local
+event-importer build.</p>
 <p>Postgres uses a Compose named volume called <code>postgres-data</code> instead of the
 host bind directory <code>postgres-db/data</code>. This avoids rootless Podman permission
 and SELinux label issues on Fedora Silverblue. To reset Postgres for a selected
@@ -366,7 +360,6 @@ RUST_LOG=info \
 <p>Use WSL2 Ubuntu for the local development shell. Clone the repositories under
 the WSL home directory, not under a Windows drive mount:</p>
 <pre><code class="language-text">~/lightapi/portal-config-loc
-~/lightapi/service-asset
 </code></pre>
 <p>With Docker Desktop, enable WSL integration for the Ubuntu distribution and run
 the script inside the WSL shell:</p>

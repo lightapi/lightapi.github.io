@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-be5b99d7.js";
+            window.path_to_searchindex_js = "../searchindex-e02e31e7.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-80269ba0.js"></script>
@@ -192,7 +192,9 @@
 <li>fixed R2 archive names for <code>hybrid-command</code>, <code>hybrid-query</code>, <code>lightapi</code>, and <code>signin</code> assets.</li>
 <li><code>README.md</code>, the short public usage guide.</li>
 </ul>
-<p>The repo should not require the user to clone <code>portal-config-loc</code>, <code>service-asset</code>, <code>portal-view</code>, <code>login-view</code>, or any service source repository. Those repos remain build and release inputs. <code>light-portal-install</code> consumes released images and released asset bundles.</p>
+<p>The repo should not require the user to clone <code>portal-config-loc</code>, <code>portal-view</code>,
+<code>login-view</code>, or any service source repository. <code>light-portal-install</code> consumes
+released images and released asset bundles.</p>
 <h2 id="runtime-shape"><a class="header" href="#runtime-shape">Runtime Shape</a></h2>
 <p>The first version should be a Rust-only <code>all-in-lt</code> stack:</p>
 <ul>
@@ -284,8 +286,12 @@ install.sh uninstall
 </code></pre>
 <p><code>uninstall</code> should ask for confirmation before deleting volumes or <code>$HOME/.light-portal</code>.</p>
 <h2 id="static-asset-distribution"><a class="header" href="#static-asset-distribution">Static Asset Distribution</a></h2>
-<p>The current <code>service-asset</code> GitHub repository is useful as a build artifact repository for developers, but it is not ideal as the long-term public CDN for local installers. Released static content and install scripts should move to Cloudflare R2 as the long-term artifact channel, with fixed archive objects, checksums, and rollback.</p>
-<p><code>update-asset.sh --upload-r2</code> currently uploads refreshed service assets to bucket <code>lightapi</code>. Directory assets are compressed before upload. The default object paths are:</p>
+<p>The former build-artifact repository has been retired. Released static content
+and install scripts use Cloudflare R2 as the artifact channel, with fixed
+archive objects, checksums, and rollback.</p>
+<p><code>update-asset.sh --upload-r2</code> stages refreshed release assets under
+<code>.release-state/assets</code> and uploads them to bucket <code>lightapi</code>. Directory assets
+are compressed before upload. The default object paths are:</p>
 <pre><code class="language-text">hybrid-command.zip
 hybrid-query.zip
 lightapi.zip
@@ -299,7 +305,9 @@ docker-images.env
 </code></pre>
 <p><code>daily-release.sh</code> is the top-level release entrypoint. It calls <code>update-asset.sh --upload-r2</code> first, then runs the dev copy steps, then calls <code>release-docker-images.sh --upload-r2</code>.</p>
 <p>The install repo should treat R2 as an artifact origin, not as the source of truth. Source of truth remains the service and UI repos plus the release pipeline. The release pipeline publishes immutable versioned objects to R2.</p>
-<p>Once the static bundles, scripts, generated manifests, and release asset publishing are fully moved to R2, the <code>service-asset</code> repository can be removed. During migration, it can remain as a staging or compatibility source until the install pipeline no longer depends on it.</p>
+<p>The static bundles, scripts, generated manifests, and release asset publishing
+are now fully served through R2; release generation uses only transient local
+staging under <code>.release-state/assets</code>.</p>
 <p>Current object layout:</p>
 <pre><code class="language-text">hybrid-command.zip
 hybrid-query.zip
@@ -353,12 +361,12 @@ light-portal/releases/
 <li>Use the local OAuth authorization code flow with <code>login-view</code>, matching <code>portal-config-loc/all-in-lt</code> and <code>portal-config-dev</code>.</li>
 <li>Use the existing long-lived local demo tokens in the first version to keep the installer simple.</li>
 <li>Move static content, install scripts, generated manifests, and release bundles to Cloudflare R2 for long-term flexibility.</li>
-<li>Remove the <code>service-asset</code> repository after the R2-based release pipeline fully replaces it.</li>
+<li>Keep release generation and deployment independent of artifact repositories.</li>
 <li>Keep Docker Compose as the only container runtime dependency; use <code>curl</code> for R2 downloads, not AWS CLI.</li>
 <li>Use fixed archive names for the current R2 object set until the release pipeline publishes a richer manifest automatically.</li>
 </ul>
 <h2 id="decision"><a class="header" href="#decision">Decision</a></h2>
-<p>Create <code>light-portal-install</code> as the public local install repo with Docker Compose as the only container runtime dependency. Use the Rust <code>all-in-lt</code> service topology, including <code>light-agent</code> and the demo APIs, but package it as checked-in runtime config plus R2-downloaded service jars, SPA assets, <code>events.json</code>, and <code>docker-images.env</code>. Keep the local OAuth authorization code flow through <code>login-view</code> and use existing long-lived local demo tokens for the first version. Move static install artifacts from GitHub repo distribution to Cloudflare R2 behind a custom domain, download the fixed asset archives with <code>curl</code>, extract them with <code>unzip</code>, and remove <code>service-asset</code> after the R2 pipeline fully replaces it.</p>
+<p>Create <code>light-portal-install</code> as the public local install repo with Docker Compose as the only container runtime dependency. Use the Rust <code>all-in-lt</code> service topology, including <code>light-agent</code> and the demo APIs, but package it as checked-in runtime config plus R2-downloaded service jars, SPA assets, <code>events.json</code>, and <code>docker-images.env</code>. Keep the local OAuth authorization code flow through <code>login-view</code> and use existing long-lived local demo tokens for the first version. Publish static install artifacts to Cloudflare R2 behind a custom domain, download the fixed asset archives with <code>curl</code>, and extract them with <code>unzip</code>.</p>
 
                     </main>
 
