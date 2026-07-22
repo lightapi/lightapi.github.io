@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-d1668cf8.js";
+            window.path_to_searchindex_js = "searchindex-ae019a7b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-80269ba0.js"></script>
+        <script src="toc-a69c66aa.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -29076,6 +29076,7 @@ records are visible, and which common actions are available.</p>
 <li><a href="#workflow-catalog">Workflow Catalog</a></li>
 <li><a href="#schema-catalog">Schema Catalog</a></li>
 <li><a href="#llm-model-control-plane">LLM Model Control Plane</a></li>
+<li><a href="#create-llm-model">Create LLM Model</a></li>
 <li><a href="#skill-workspace">Skill Workspace</a></li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
@@ -29587,6 +29588,84 @@ it belongs to the same host.</li>
 forward transition; terminal states cannot return to draft.</li>
 <li><strong>Publication button disabled</strong>: fix the displayed candidate validation or
 gateway compatibility warnings first.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="create-llm-model"><a class="header" href="#create-llm-model">Create LLM Model</a></h1>
+<p>Use the <strong>Create LLM Model</strong> form to add a physical provider model to the LLM
+Model Catalog for the selected host. Open it from <strong>Marketplace &gt; LLM Model
+Catalog</strong> and choose <strong>Create</strong>.</p>
+<p>This guide applies only to <code>/app/form/createLlmModel</code>. For registrations,
+deployments, aliases, policies, and publication, see the
+<a href="#llm-model-control-plane">LLM Model Control Plane</a> guide.</p>
+<h2 id="required-fields"><a class="header" href="#required-fields">Required Fields</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td>Host Id</td><td>The selected host. The form supplies this read-only value.</td></tr>
+<tr><td>Provider Type</td><td>Provider identifier, such as <code>openai</code>.</td></tr>
+<tr><td>Physical Model Id</td><td>The model identifier recognized by the provider.</td></tr>
+<tr><td>Model Family</td><td>The provider’s model family or product family.</td></tr>
+<tr><td>Context Token Limit</td><td>Maximum context size. Enter an integer greater than zero.</td></tr>
+<tr><td>Output Token Limit</td><td>Maximum generated output size. Enter an integer greater than zero.</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>Model Version</code> is optional. <code>Lifecycle Status</code> defaults to <code>DRAFT</code>, and
+<code>Active</code> defaults to enabled.</p>
+<h2 id="structured-fields"><a class="header" href="#structured-fields">Structured Fields</a></h2>
+<p><code>Modalities</code>, <code>Operations</code>, and <code>Declared Capabilities</code> are stored as typed
+arrays or objects. Do not enter JSON or YAML as a quoted string.</p>
+<h3 id="modalities-and-operations"><a class="header" href="#modalities-and-operations">Modalities and Operations</a></h3>
+<p>These fields open on the <strong>Form</strong> tab. Add one string per array item. You can
+also use the <strong>JSON</strong> or <strong>YAML</strong> tab, for example:</p>
+<pre><code class="language-json">["text", "image"]
+</code></pre>
+<pre><code class="language-yaml">- chat_completions
+- embeddings
+</code></pre>
+<h3 id="declared-capabilities"><a class="header" href="#declared-capabilities">Declared Capabilities</a></h3>
+<p>This open-ended object starts on the <strong>JSON</strong> tab. The Form tab is unavailable
+because the current schema does not prescribe capability property names. Enter
+an object whose keys and values describe the provider model, for example:</p>
+<pre><code class="language-json">{
+  "streaming": true,
+  "tools": true
+}
+</code></pre>
+<p>The equivalent YAML is:</p>
+<pre><code class="language-yaml">streaming: true
+tools: true
+</code></pre>
+<p>After changing JSON or YAML, choose <strong>Apply</strong>. Apply parses the draft, checks
+its root type and schema constraints, and updates the form model only when it
+is valid. Choose <strong>Reset</strong> to discard the draft and restore the last valid
+value. The Create action remains blocked while a structured draft is invalid
+or has not been applied.</p>
+<h2 id="categories-and-tags-1"><a class="header" href="#categories-and-tags-1">Categories and Tags</a></h2>
+<p>Categories and tags are optional. The selectors show active global and
+host-specific taxonomy values registered for the <code>llm_model</code> entity type. A
+taxonomy value belonging to another host or entity type cannot be assigned.</p>
+<h2 id="create-the-record"><a class="header" href="#create-the-record">Create the Record</a></h2>
+<p>Review the values and choose <strong>Create LLM Model</strong>. The form sends the
+<code>createLlmModel</code> command and preserves <code>modalities</code> and <code>operations</code> as arrays
+and <code>declaredCapabilities</code> as an object. After a successful command, the
+browser returns to <strong>Marketplace &gt; LLM Model Catalog</strong>.</p>
+<h2 id="common-problems"><a class="header" href="#common-problems">Common Problems</a></h2>
+<ul>
+<li><strong>Create is blocked after editing JSON or YAML</strong>: choose <strong>Apply</strong> to commit
+the draft, or <strong>Reset</strong> to discard it.</li>
+<li><strong>JSON or YAML error</strong>: correct the highlighted syntax and choose <strong>Apply</strong>
+again. The last valid value remains unchanged.</li>
+<li><strong>Required-field validation</strong>: provide every required field and use positive
+integers for both token limits.</li>
+<li><strong>No categories or tags are available</strong>: confirm that the taxonomy values
+are active and registered for <code>llm_model</code> on the selected host.</li>
+<li><strong>403 on Create</strong>: confirm access to the
+<code>lightapi.net/genai/createLlmModel/0.1.0</code> command endpoint with the required
+write scope and role permission.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="skill-workspace"><a class="header" href="#skill-workspace">Skill Workspace</a></h1>
