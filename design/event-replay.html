@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-f9fa5524.js";
+            window.path_to_searchindex_js = "../searchindex-76dc996a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-a69c66aa.js"></script>
@@ -584,10 +584,9 @@ candidate APIs read canonical failure tables only.</p>
 <p>Application-level encryption is not required for replay correctness and is not
 mandatory in the early-development design.</p>
 <p>Canonical and repaired payloads are stored as immutable bytes (<code>BYTEA</code> for the
-plain database representation, or ciphertext/object bytes for optional secure
-representations). The SHA-256 digest is computed over exactly those stored
-bytes. Replay verifies and parses those same bytes; it never recomputes a digest
-from a JSONB value or re-serialized object.</p>
+plain database representation). The SHA-256 content digest is computed over
+exactly those stored canonical bytes. Replay verifies and parses those same
+bytes; it never recomputes a digest from a JSONB value or re-serialized object.</p>
 <p><code>event_store_t</code> and <code>outbox_message_t</code> currently store JSONB, which normalizes
 representation and is not a stable raw-byte archive. A canonical failure may
 therefore reference those rows for identity and audit, but not as the sole
@@ -603,7 +602,10 @@ creation likewise materializes and stores corrected canonical bytes once.</p>
 execution;</li>
 <li>the UI, list APIs, logs, metrics, and audit records never expose the payload,
 Kafka key, headers, or event JSON;</li>
-<li>database permissions restrict direct access;</li>
+<li>the baseline schema revokes payload-column access from <code>PUBLIC</code>; production
+deployments use dedicated non-owner projection/replay roles with explicit
+column-scoped grants because owners and explicit table grants bypass that
+baseline;</li>
 <li>normal database and volume encryption at rest protect the development
 deployment.</li>
 </ul>
@@ -611,7 +613,10 @@ deployment.</li>
 when retention, PII, regulatory, or storage requirements justify it. Enabling
 that option must not change planning, fingerprints, ordering, or projection
 behavior, and its key configuration must not be required for ordinary
-development startup.</p>
+development startup. A secure representation must retain the stable digest of
+the canonical plaintext bytes separately from any digest of randomized
+ciphertext or object-storage bytes; ciphertext digests are storage-integrity
+evidence and must never define the corrected transaction fingerprint.</p>
 <h2 id="repair-model"><a class="header" href="#repair-model">Repair Model</a></h2>
 <p>Repair is an append-only amendment to a canonical failed transaction. It is
 not an update to <code>event_store_t</code>, <code>outbox_message_t</code>, a Kafka record, or the
@@ -921,8 +926,9 @@ a replay plan does not implicitly approve a repair.</li>
 caller-controlled envelope, tenant, identity, or ordering metadata.</li>
 <li>Payloads, keys, headers, event JSON, and direct storage locations never
 appear in API lists, browser state, logs, metrics, or audit details.</li>
-<li>Database permissions restrict canonical payload access to the projection and
-replay services.</li>
+<li>Dedicated non-owner database roles and column-scoped grants restrict canonical
+payload access to the projection and replay services; revoking <code>PUBLIC</code> alone
+is only the schema baseline.</li>
 <li>Application-level encryption is an optional production hardening control,
 not a prerequisite for development replay.</li>
 </ul>
