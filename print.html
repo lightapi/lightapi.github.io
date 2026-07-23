@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-76dc996a.js";
+            window.path_to_searchindex_js = "searchindex-87248d07.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-a69c66aa.js"></script>
@@ -25823,6 +25823,21 @@ finish, and then applies the approved items through the shared executor. Live
 transactions intersecting the barrier are deferred as complete transactions;
 unrelated scopes continue normally. After repair, deferred transactions drain
 in source order before the barrier is removed.</p>
+<h3 id="r2-transitional-plain-payload-limitation"><a class="header" href="#r2-transitional-plain-payload-limitation">R2 transitional plain-payload limitation</a></h3>
+<p>The preceding paragraph is the target isolation contract, but R2 does not yet
+fully provide it for the default <code>DATABASE_PLAIN</code> codec. The legacy deferred
+table stores only encrypted/object representations. R2 therefore returns
+<code>PAUSED</code> when a live transaction intersects an active replay barrier under the
+plain codec, holds the source position, and retries after barrier release. This
+preserves ordering and prevents payload loss, but it creates a temporary
+head-of-line stall: unrelated transactions sequenced later on that source do
+not advance even when their scopes do not intersect the barrier. The legacy
+encrypted codec still uses durable <code>DEFERRED</code> work and can advance the source.</p>
+<p>This limitation is accepted only for the early R2 development phase. Repair
+execution adds an exact-byte plain deferred representation, digest and
+retention rules, then restores <code>DEFERRED</code> behavior before cross-repository
+qualification. Tests must pin both the transitional behavior and the restored
+target so the general goal that unrelated scopes continue is not weakened.</p>
 <p>Replay requests use row locks, monotonic fencing tokens, leases, and advisory
 scope locks. A lease provides liveness and abandoned-work recovery; it never
 overrides a database lock or permits two workers to execute the same item.</p>
@@ -25836,6 +25851,11 @@ execute command calls <code>pg_notify('event_replay_ready', replayRequestId)</co
 PostgreSQL notification is delivered only after commit, so a listener cannot
 wake for work that later rolls back. The notification is only a wake-up hint;
 the durable request row remains the source of truth.</p>
+<p>Config reload has its own active callback into the replay dispatcher. That
+callback reloads <code>EventReplayConfig</code> and schedules a drain on a
+<code>false -&gt; true</code> transition. It must not rely on the blocked PostgreSQL listener
+or claimant to call <code>current()</code>: once the one-second R2 recovery loop is
+removed, neither may observe a config push until an independent event arrives.</p>
 <p>Each <code>hybrid-query</code> replica uses a lightweight virtual thread blocked on
 <code>LISTEN event_replay_ready</code>. It does not run a one-second claim loop. The
 listener may use a dedicated PostgreSQL connection or a shared internal
@@ -26093,6 +26113,10 @@ still has a version or revision gap.</li>
 </ul>
 <h3 id="execution-and-concurrency"><a class="header" href="#execution-and-concurrency">Execution and concurrency</a></h3>
 <ul>
+<li>In the R2 compatibility window, verify an intersecting barrier produces
+<code>PAUSED</code> for <code>DATABASE_PLAIN</code> and <code>DEFERRED</code> for the legacy encrypted codec;
+do not claim unrelated-scope concurrency for the plain path until its deferred
+representation lands.</li>
 <li>Process the same transaction through <code>LIVE</code> and <code>REPLAY</code> and compare every
 projection and ordering row.</li>
 <li>Verify requester/approver separation and plan-hash binding.</li>
