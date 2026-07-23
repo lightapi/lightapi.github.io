@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-87248d07.js";
+            window.path_to_searchindex_js = "searchindex-cdce75f7.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-a69c66aa.js"></script>
@@ -25855,7 +25855,10 @@ the durable request row remains the source of truth.</p>
 callback reloads <code>EventReplayConfig</code> and schedules a drain on a
 <code>false -&gt; true</code> transition. It must not rely on the blocked PostgreSQL listener
 or claimant to call <code>current()</code>: once the one-second R2 recovery loop is
-removed, neither may observe a config push until an independent event arrives.</p>
+removed, neither may observe a config push until an independent event arrives.
+The <code>light-4j</code> config-reload handler invokes the registered module’s optional
+public static <code>reload()</code> callback immediately after clearing its config cache;
+modules without that callback retain lazy reload behavior.</p>
 <p>Each <code>hybrid-query</code> replica uses a lightweight virtual thread blocked on
 <code>LISTEN event_replay_ready</code>. It does not run a one-second claim loop. The
 listener may use a dedicated PostgreSQL connection or a shared internal
@@ -25864,6 +25867,13 @@ virtual thread consumes no polling CPU. When notified, it submits a drain task
 that claims durable requests through the existing <code>SKIP LOCKED</code>, fencing, and
 lease protocol. Several replicas may wake for the same notification, but only
 one can claim a request.</p>
+<p>The current implementation reserves one connection from the application data
+source for the lifetime of each query replica. Size the pool for peak ordinary
+query/projection concurrency plus this listener connection; a pool size of one
+is invalid for a query replica. Some PostgreSQL driver versions may pin the
+listener virtual thread’s carrier while <code>getNotifications</code> waits. This is
+bounded to the single listener and is not a reason to fan out one listener per
+channel.</p>
 <p><code>LISTEN</code> requires session affinity. The listener connection must reach
 PostgreSQL directly or through a session-pooling endpoint; PgBouncer transaction
 or statement pooling is unsupported for this connection even when ordinary
@@ -25880,11 +25890,95 @@ worker drains the available requests, it returns to the blocked listener. This
 reduces an idle replica from one empty query per second to at most one recovery
 query per minute while preserving immediate normal execution.</p>
 <p>While <code>event-replay.enabled=false</code>, notifications may still wake the listener,
-but no drain task may claim work. Changing it back to <code>true</code> triggers an
+but <code>requestDrain</code> intentionally drops those wake-up hints and no drain task may
+claim work. Durable request rows are not dropped. Changing it back to <code>true</code>
+triggers an
 immediate recovery scan, so queued approved work does not wait for the periodic
 fallback. Kafka deployments use the same PostgreSQL replay control plane and
 therefore use this wake-up mechanism as well; it is independent of the live
 Pub/Sub source.</p>
+<h3 id="replay-worker-operational-status"><a class="header" href="#replay-worker-operational-status">Replay worker operational status</a></h3>
+<p>Each <code>hybrid-query</code> replica exposes the following replica-local administrative
+endpoint:</p>
+<pre><code class="language-http">GET /adm/event-replay/status
+</code></pre>
+<p>The endpoint returns <code>application/json</code>. It is an observation endpoint only: it
+does not list replay candidates, create or approve a plan, or start replay
+execution. Its purposes are to confirm that a replica loaded the expected
+execution-pause configuration, verify that its PostgreSQL <code>LISTEN/NOTIFY</code>
+worker is healthy, and provide enough evidence to confirm a fleet-wide pause.</p>
+<p>A healthy response has the following shape:</p>
+<pre><code class="language-json">{
+  "status": "HEALTHY",
+  "effectiveEnabled": true,
+  "configGeneration": "6b68d2...",
+  "configReloadTimestamp": "2026-07-23T18:20:31.123Z",
+  "processInstanceId": "019...",
+  "listenerConnectionRequirement": "DIRECT_OR_SESSION_POOLING",
+  "dedicatedListenerConnections": 1,
+  "listenerConnected": true,
+  "selfTestPassed": true,
+  "detail": "LISTEN/NOTIFY self-test passed",
+  "lastConnectedTimestamp": "2026-07-23T18:19:02.456Z",
+  "lastNotificationTimestamp": "2026-07-23T18:20:10.789Z",
+  "lastRecoveryScanTimestamp": "2026-07-23T18:20:02.456Z",
+  "reconnectCount": 0,
+  "notificationCount": 4,
+  "recoveryScanCount": 1,
+  "drainRunCount": 5
+}
+</code></pre>
+<p>The fields have these meanings:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>status</code></td><td>Dispatcher lifecycle or health: <code>STARTING</code>, <code>SELF_TESTING</code>, <code>HEALTHY</code>, <code>DEGRADED</code>, or <code>STOPPED</code>.</td></tr>
+<tr><td><code>effectiveEnabled</code></td><td>Effective value of <code>event-replay.enabled</code> on this replica. <code>false</code> pauses execution and claiming only.</td></tr>
+<tr><td><code>configGeneration</code></td><td>SHA-256-derived identity of the effective replay configuration. Replicas with the same intended config must report the same generation.</td></tr>
+<tr><td><code>configReloadTimestamp</code></td><td>Time this process last observed the current configuration generation.</td></tr>
+<tr><td><code>processInstanceId</code></td><td>Unique identity of this running query replica, used to distinguish reports across restarts and replicas.</td></tr>
+<tr><td><code>listenerConnectionRequirement</code></td><td>Required PostgreSQL connection mode. The value is <code>DIRECT_OR_SESSION_POOLING</code>; transaction pooling cannot preserve <code>LISTEN</code> session affinity.</td></tr>
+<tr><td><code>dedicatedListenerConnections</code></td><td>Number of JDBC connections permanently reserved by this replica’s listener; currently <code>1</code>.</td></tr>
+<tr><td><code>listenerConnected</code></td><td>Whether the dedicated PostgreSQL listener session is currently connected.</td></tr>
+<tr><td><code>selfTestPassed</code></td><td>Whether the session-affinity <code>LISTEN/NOTIFY</code> self-test passed on the current listener session.</td></tr>
+<tr><td><code>detail</code></td><td>Human-readable lifecycle or degradation detail, including the failure type when degraded.</td></tr>
+<tr><td><code>lastConnectedTimestamp</code></td><td>Most recent successful listener connection time, or <code>null</code> before the first connection.</td></tr>
+<tr><td><code>lastNotificationTimestamp</code></td><td>Most recent received replay-ready notification time, or <code>null</code> if none has been received.</td></tr>
+<tr><td><code>lastRecoveryScanTimestamp</code></td><td>Most recent periodic durable-work recovery scan time, or <code>null</code> before the first scan.</td></tr>
+<tr><td><code>reconnectCount</code></td><td>Number of listener reconnection attempts after listener failures.</td></tr>
+<tr><td><code>notificationCount</code></td><td>Number of PostgreSQL replay-ready notifications received by this process. Notifications are coalescible wake-up hints, not the durable work record.</td></tr>
+<tr><td><code>recoveryScanCount</code></td><td>Number of periodic recovery scans used to find work after a lost notification or listener failure.</td></tr>
+<tr><td><code>drainRunCount</code></td><td>Number of coalesced worker drain runs scheduled by startup, notification, resume, reconnect, or recovery. It is not expected to equal <code>notificationCount</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Before the dispatcher is installed, the endpoint reports <code>status=STARTING</code>,
+<code>listenerConnected=false</code>, <code>selfTestPassed=false</code>, and the configuration and
+connection-requirement fields. Listener timestamps and counters are added once
+the dispatcher exists. A <code>DEGRADED</code> status commonly means that the listener
+connection failed, its self-test failed, or a transaction-pooling proxy broke
+session affinity. The <code>detail</code> field identifies the observed condition.</p>
+<p>For fleet-wide pause confirmation, an operator or aggregator polls every target
+query replica and verifies all of the following:</p>
+<ul>
+<li>every expected <code>processInstanceId</code> is represented by a fresh response;</li>
+<li>every response has <code>effectiveEnabled=false</code>;</li>
+<li>every response has the intended <code>configGeneration</code>; and</li>
+<li>there are no missing or stale replicas.</li>
+</ul>
+<p>A missing or stale response never confirms a pause. Listener health is separate
+from pause confirmation: a replica can report <code>DEGRADED</code> while still finding
+durable work through the 60-second recovery scan.</p>
+<p>For that reason, listener degradation does not fail the service’s normal
+liveness endpoint. Restarting an otherwise healthy query service would disrupt
+unrelated APIs without repairing an unsupported connection-pooling mode. The
+administrative status endpoint must instead be monitored separately. It exposes
+no event payload or PII, but it reveals internal execution state, so the gateway
+or deployment ingress must protect it with the same administrative access
+controls used for other <code>/adm</code> routes.</p>
 <p>Request states are:</p>
 <pre><code class="language-text">PLANNING -&gt; READY -&gt; AWAITING_APPROVAL -&gt; APPROVED
          -&gt; INSTALLING_BARRIER -&gt; RUNNING -&gt; SUCCEEDED
