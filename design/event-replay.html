@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-27845d5b.js";
+            window.path_to_searchindex_js = "../searchindex-5c078111.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-a69c66aa.js"></script>
@@ -373,6 +373,42 @@ doing so would create a projection gap that cannot be replayed or safely waived.
 Such a handler must be made transactionally idempotent, normally by moving its
 external effect behind an outbox, before it can carry ordering metadata.</p>
 <h2 id="replay-eligibility-policy"><a class="header" href="#replay-eligibility-policy">Replay Eligibility Policy</a></h2>
+<h3 id="shared-append-validation-registry"><a class="header" href="#shared-append-validation-registry">Shared append-validation registry</a></h3>
+<p>Every portal or internal append is validated against the exact event type and
+event schema version in <code>event-replay-policy-v2</code>. The registry declares the
+transaction/order policy, dependency metadata, data validator, replay policy,
+repair disposition and optional repair-schema version. It is code-owned and
+versioned; it is not another operator switch in <code>event-replay.yml</code>.</p>
+<p>The common append boundary validates the complete transaction before reserving
+an outbox offset or inserting event, outbox, or notification rows. Interactive
+commands, graph/clone operations, global snapshot imports, and scheduler
+commands all use this boundary. A successful append pins <code>eventschema</code> and
+<code>replaypolicy</code> CloudEvent extensions, plus <code>repairschema</code> when applicable, and
+persists those versions in <code>event_store_t</code> and <code>outbox_message_t</code>. Canonical
+failure capture copies the pins into the failure transaction and member rows so
+planning and replay load the referenced version instead of reinterpreting an
+old event with the latest registry.</p>
+<p>Unknown portal/internal event types, malformed transactions, mixed host/user
+identity, non-contiguous member order, invalid aggregate or graph metadata, and
+schema-invalid data fail closed and commit no append-side writes. An unknown or
+structurally invalid external Kafka event can be retained as diagnostic failure
+evidence, but it is marked non-executable and cannot become a replay candidate.</p>
+<p><code>PORTAL_OBJECT_V1</code> is the shared baseline validator for current event schema
+version 1: it proves the CloudEvent data is a parseable JSON object and combines
+that with the registered envelope, identity, ordering, dependency, and size
+checks. It does not duplicate every command handler’s required-field and domain
+rules. Those rules still run before ordinary command event construction. Any
+event declared <code>SCHEMA_REPAIR</code> must instead name a concrete typed repair/data
+schema; R9 qualification rejects a repairable event that still relies only on
+the structural baseline. This distinction prevents the baseline name from being
+misread as complete per-event domain validation.</p>
+<p>The Kafka consumer invokes the same external validation before live projection.
+A registered, valid portal event remains executable. A structurally valid but
+unknown or excluded event is captured as canonical diagnostic evidence whose
+policy rejects planning. A malformed member makes the complete transaction
+non-executable; it is recorded through the bounded failure notification and
+configured legacy diagnostic path without creating a canonical replay
+candidate, and its offset may then advance rather than poison-loop forever.</p>
 <p>The default policy is derived from validated metadata:</p>
 <div class="table-wrapper">
 <table>
@@ -583,6 +619,16 @@ alerts report blocked-scope count, age, host, projection, and safe failure ID;
 crossing the reviewed duration threshold is an operator incident. The existing
 barrier release can recover worker isolation but cannot pretend an ordered gap
 is resolved or make later versions safe.</p>
+<p>The command guard reads normalized <code>OPEN</code> rows in
+<code>event_failure_scope_t</code> using the partial command-path index. It matches host
+plus <code>AGGREGATE</code> (<code>aggregateType:aggregateId</code>) or <code>GRAPH_ROOT</code> scope, so another
+host, aggregate, or root continues normally. Before a repair proposal it returns
+<code>AGGREGATE_PROJECTION_BLOCKED</code>; once a validated proposal is awaiting approval
+or approved it returns <code>AGGREGATE_REPAIR_REQUIRED</code>. The administrative replay
+status reports the blocked-scope count, oldest blocked timestamp and age. The
+reviewed code default is 900 seconds; an oldest blocked scope at or above that
+age sets <code>blockedScopeIncident=true</code>. This threshold is intentionally an
+internal runtime default, not additional development configuration.</p>
 <p><code>notification_t</code> is the latest user-facing status, not the replay ledger. The
 candidate APIs read canonical failure tables only.</p>
 <h2 id="payload-storage-and-encryption"><a class="header" href="#payload-storage-and-encryption">Payload Storage and Encryption</a></h2>
