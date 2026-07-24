@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-ffcf144a.js";
+            window.path_to_searchindex_js = "searchindex-68ccfb95.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-a69c66aa.js"></script>
@@ -25916,8 +25916,8 @@ in source order before the barrier is removed.</p>
 <p>R6 closes the temporary R2 plain-codec limitation. The deferred table now has
 an exact-byte <code>payload_plain</code> representation whose SHA-256 digest and byte count
 are database constrained. A live transaction intersecting an active barrier is
-durably recorded as <code>DEFERRED</code> before its source position advances, whether the
-runtime uses <code>DATABASE_PLAIN</code> or the legacy encrypted codec. Unrelated later
+durably recorded as <code>DEFERRED</code> in the supported <code>DATABASE_PLAIN</code>
+representation before its source position advances. Unrelated later
 transactions can therefore continue, while deferred work still drains in
 source order before barrier release. Deferred bytes are immutable and direct
 column access is restricted in the same way as canonical plain failure bytes.</p>
@@ -26261,6 +26261,30 @@ It must not silently downgrade to a partially working mode.</p>
 <p>There is no rollout table, rollout stage, source/host allowlist, legacy
 backfill job, or requirement to enable capture, planning, and execution
 separately.</p>
+<p>The R8 convergence migration removes the former rollout-audit and legacy
+backfill checkpoint/issue tables from upgraded databases and fresh-install
+DDL. The old dated Phase 11 migration remains in source as historical evidence
+only; it is followed by the repeatable R8 removal migration and is not a
+supported runtime or installation surface. The compiled runtime likewise has
+no backfill entry point, rollout model, change-ticket check, PKCS12 key
+provider, encrypted payload codec, object-store client, or configurable worker
+identity. Existing encrypted/object payload columns remain schema history, but
+the runtime accepts only exact-byte <code>DATABASE_PLAIN</code> payloads. Those columns
+are retained solely as a non-destructive upgrade and rollback boundary; they
+are not a reserved or advertised future storage mode, and rows using
+<code>DATABASE</code> or <code>OBJECT</code> are not executable by the R8 runtime. During R9,
+deployment qualification must count every historical non-plain row. A later
+destructive migration may remove the columns and dead constraint branches only
+after that count is zero across every deployment and the pre-R8 rollback window
+has closed.</p>
+<p>External Kafka DLQ compatibility remains available independently of replay
+execution. Kafka-source failures still publish through the normally configured
+Kafka producer to the code-owned topic template, retry, age, and acknowledgement
+defaults in <code>EventReplayRuntimePolicy.KafkaDlq</code>; no retired replay rollout,
+encryption, or object-store property controls it. PostgreSQL <code>dead_letter_queue</code>
+diagnostics and notification status also remain. The disabled durable external
+publication-outbox experiment is not required for canonical replay correctness;
+canonical capture remains authoritative.</p>
 <h2 id="validation-plan"><a class="header" href="#validation-plan">Validation Plan</a></h2>
 <h3 id="append-validation"><a class="header" href="#append-validation">Append validation</a></h3>
 <ul>
@@ -26335,10 +26359,8 @@ still has a version or revision gap.</li>
 </ul>
 <h3 id="execution-and-concurrency"><a class="header" href="#execution-and-concurrency">Execution and concurrency</a></h3>
 <ul>
-<li>In the R2 compatibility window, verify an intersecting barrier produces
-<code>PAUSED</code> for <code>DATABASE_PLAIN</code> and <code>DEFERRED</code> for the legacy encrypted codec;
-do not claim unrelated-scope concurrency for the plain path until its deferred
-representation lands.</li>
+<li>Verify an intersecting barrier is durably <code>DEFERRED</code> with exact plain bytes
+before source progress and drains in source order after barrier release.</li>
 <li>Process the same transaction through <code>LIVE</code> and <code>REPLAY</code> and compare every
 projection and ordering row.</li>
 <li>Verify requester/approver separation and plan-hash binding.</li>
