@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-3448fcb2.js";
+            window.path_to_searchindex_js = "searchindex-ef93505b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-a69c66aa.js"></script>
@@ -26094,6 +26094,45 @@ approver, and linked replay plan without exposing payload values.</li>
 <p>A legacy notification may remain visible in the lower notification table but
 must not be described as replayable. The empty candidate state explains that
 only newly captured canonical failures appear there.</p>
+<h3 id="event-admin-repair-interaction"><a class="header" href="#event-admin-repair-interaction">Event Admin repair interaction</a></h3>
+<p>Event Admin presents two intentionally separate recovery paths. <strong>Replay
+original</strong> creates an exact/dependency replay plan after a processor defect is
+fixed. <strong>Repair</strong> creates an append-only amendment when replaying the persisted
+business data unchanged would fail again. Selecting Repair always identifies
+the complete failed transaction as the unit; the form may correct one or more
+members but cannot split transaction membership.</p>
+<p>Repair forms are event-type and schema-version entries in <code>Forms.json</code>. Each
+entry mirrors the server repair schema and exposes only its declared business
+fields. The UI does not request original field values, so replacement inputs
+start blank. It has no generic JSON editor and cannot edit CloudEvent envelope,
+identity, ordering, key, header, or storage fields. A single repairable member
+uses <code>SINGLE_EVENT_FIELDS</code>; multiple compatible members use explicit
+event-ID-keyed <code>PER_EVENT_FIELDS</code>. The server still validates the pinned event
+policy, schema version, change shape, and every field; the UI schema is not a
+security boundary.</p>
+<p>After creation, the browser discards replacement values and displays metadata
+only: repair state, changed field names, original/corrected transaction
+fingerprints, per-member original/corrected digests, reason, requester,
+reviewer/approver, timestamps, and linked replay request. <code>repairId</code> is a
+host-scoped URL/local-state key so a second user can open the proposal. The
+repair query resolves the latest linked replay request and status from durable
+plan-item metadata; linkage never depends solely on one browser’s state. The
+requester is shown that another authorized user must approve or reject it, but
+the UI never interprets role names. Gateway endpoint policy plus backend host,
+actor, fingerprint, state, and requester-not-approver checks authorize every
+operation.</p>
+<p>Repair approval and replay-plan approval are independent. Only an <code>APPROVED</code>
+repair can create a repair-bound replay plan; the resulting immutable plan hash
+must then be approved through the normal replay workflow before execution.
+<code>CANCELLED</code>, <code>REJECTED</code>, <code>STALE_PLAN</code>, and
+<code>REPAIR_FINGERPRINT_MISMATCH</code> are terminal for the displayed artifact and tell
+the operator to refresh/re-plan rather than blindly retry.</p>
+<p>When a replay reports <code>SUCCEEDED</code> with <code>projectionCommitted=true</code>, Event Admin
+refreshes canonical candidates, repair metadata, and the legacy notification
+table. It also emits <code>portal:event-replay-applied</code> with only <code>hostId</code>,
+<code>replayRequestId</code>, and optional <code>repairId</code>; a mounted business view uses that
+event to invalidate and reload its projection query. No payload or changed
+field value is included in the event.</p>
 <p>Raw payloads, complete event JSON, Kafka keys, headers, and database payload
 references are never returned to the browser. A repair endpoint may return only
 the explicitly authorized and redacted business fields declared by the repair
