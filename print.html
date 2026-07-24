@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-68ccfb95.js";
+            window.path_to_searchindex_js = "searchindex-1876b192.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-a69c66aa.js"></script>
@@ -26116,6 +26116,31 @@ the complete transaction replay. If more than one form definition matches a
 mixed transaction, Event Admin fails closed instead of choosing by catalog
 order; the operator must use a server-supported unambiguous repair schema or
 fix the processor and replay the original transaction.</p>
+<p>The initial supported product contract deliberately permits exactly one repair
+schema version per failed transaction. <code>UserUpdatedEvent</code> schema version <code>1</code>
+is the first deployed typed-repair policy and binds <code>USER_UPDATED_V1</code> to
+<code>user-updated-repair-v1</code>. A transaction may contain multiple compatible
+members and use <code>PER_EVENT_FIELDS</code>; members with a non-repair disposition
+remain byte-identical. If members resolve to two different <code>SCHEMA_REPAIR</code>
+versions, both the provider and UI reject the proposal with
+<code>REPAIR_SCHEMA_VALIDATION_FAILED</code>. Supporting that case later requires a
+versioned multi-schema contract, approval fingerprint, persistence model,
+executor, and UI; catalog order is never a selection rule.</p>
+<p><code>USER_UPDATED_V1</code> append validation mirrors the already-published
+<code>user-command</code> <code>updateUserByIdRequest</code> schema; it must not add UUID, length, or
+<code>userType</code> restrictions that the command contract does not enforce. The repair
+schema may be narrower for operator-entered replacement values and currently
+limits <code>userType</code> to <code>C</code> or <code>E</code> plus the documented per-field lengths. Email,
+entity ID, user ID, and host ID are deliberately not editable repair fields.
+Corruption in those identity-adjacent values is not a schema-repair case: the
+source must be corrected through an authorized domain workflow or quarantined
+for explicit reconciliation.</p>
+<p><code>PORTAL_OBJECT_V1</code> is intentionally only a structural JSON-object validator.
+It cannot qualify an event for typed repair. Every deployed <code>SCHEMA_REPAIR</code>
+entry must instead name a concrete data validator, a concrete repair schema,
+an exact editable-field set, and a matching schema-driven <code>Forms.json</code> entry.
+The synthetic contract fixture remains in contract and test resources only; it
+is absent from runtime policy and form catalogs.</p>
 <p>After creation, the browser discards replacement values and displays metadata
 only: repair state, changed field names, original/corrected transaction
 fingerprints, per-member original/corrected digests, reason, requester,
@@ -26404,6 +26429,33 @@ browser, log, metric, or audit record.</li>
 <li>Verify legacy DLQ notifications and canonical candidates have unambiguous UI
 wording.</li>
 </ul>
+<h2 id="qualification-and-deployment"><a class="header" href="#qualification-and-deployment">Qualification and Deployment</a></h2>
+<p>Deploy in dependency order: <code>portal-db</code>, <code>light-portal</code>, <code>user-command</code>,
+<code>user-query</code>, gateway endpoint policy, <code>portal-view</code>, and finally the config
+mirrors. Run the R9 gate against a disposable PostgreSQL database before each
+environment promotion. The gate composes R0-R8, exercises the database and
+Kafka-source semantic paths, verifies the real repair policy and UI form, and
+builds the command, query, UI, and documentation artifacts.</p>
+<p>Before promotion, run the read-only storage inventory against every target
+database. <code>DATABASE_PLAIN</code> and tombstoned <code>DELETED</code> failure rows are supported;
+deferred and corrected repair rows must be <code>DATABASE_PLAIN</code>. Any historical
+<code>DATABASE</code> or <code>OBJECT</code> row is recorded as non-executable rollback-boundary
+evidence. The inventory exits non-zero when such a row exists, does not rewrite
+it automatically, and the legacy columns must not be dropped until the count
+is zero everywhere and the pre-R8 rollback window is closed.</p>
+<p>For PostgreSQL pub/sub, qualification proves capture, planning, approval,
+barrier installation, repair-aware execution, resolution, and deferred drain.
+For Kafka pub/sub, it additionally proves validation before projection,
+canonical capture before source-offset commit, idempotent redelivery, retained
+source coordinates, no live-topic republish, and no consumer-offset rewind.
+Gateway rules remain deployment-defined independently for all twelve replay
+endpoints, with two distinct authenticated users used for repair approval and
+replay-plan approval.</p>
+<p>The deployable evidence and exact commands are maintained in the R9
+qualification record under the implementation repository. <code>/adm/event-replay/status</code>
+is polled on every query replica after deployment to confirm listener health,
+effective execution state, config generation, reload timestamp, and instance
+identity; a missing or stale replica never confirms a fleet pause.</p>
 <h2 id="future-production-hardening"><a class="header" href="#future-production-hardening">Future Production Hardening</a></h2>
 <p>The following may be added later as advanced capabilities without changing the
 core replay contract:</p>
