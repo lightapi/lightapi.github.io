@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-96fb76ee.js";
+            window.path_to_searchindex_js = "searchindex-bc846035.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-800b5e2d.js"></script>
@@ -19656,7 +19656,7 @@ The prefixes remove <em>serialization</em> ambiguity — they guarantee that a f
 in one domain cannot serialize to the same string as a different field in another.
 They do not and cannot prevent two distinct strings from hashing to the same
 <code>BIGINT</code>; that is handled by cross-domain deduplication below.</p>
-<pre><code class="language-text">aggregate:   "eiu:v1:agg\x1F"  || aggregate_type || "\x1F" || aggregate_id
+<pre><code class="language-text">aggregate:   "eiu:v1:agg\x1F"  || aggregate_id
 identity:    "eiu:v1:sid\x1F"  || scope_type || "\x1F" || scope_id || "\x1F"
                                 || aggregate_type || "\x1F"
                                 || identity_schema_version || "\x1F"
@@ -19668,13 +19668,28 @@ idempotency: "eiu:v1:idem\x1F" || scope_type || "\x1F" || scope_id || "\x1F"
 <p>The encoding rules are exact, because two implementations that serialize
 differently do not share a lock:</p>
 <ul>
-<li>UTF-8, no normalization, no case folding — the canonical identity was already
-normalized before hashing.</li>
-<li><code>\x1F</code> (ASCII unit separator) is the only field delimiter, and it may not appear
-in any field value. Fields that could contain it are rejected at validation.</li>
-<li>No field is optional or omitted. <code>scope_id</code> is never null; a global scope uses
-its canonical sentinel.</li>
-<li><code>eiu:v1:</code> is the version prefix. Changing any encoding rule requires bumping it.</li>
+<li>
+<p>The aggregate lock follows the current event-store stream key and
+<code>UNIQUE (aggregate_id, aggregate_version)</code> constraint, so it deliberately
+excludes <code>aggregate_type</code>. Two candidate births with the same aggregate ID
+must serialize on one lock even if their declared types differ. Changing the
+event-store stream key requires a coordinated lock-format migration.</p>
+</li>
+<li>
+<p>UTF-8, no normalization, no case folding — the canonical identity was already
+normalized before hashing.</p>
+</li>
+<li>
+<p><code>\x1F</code> (ASCII unit separator) is the only field delimiter, and it may not appear
+in any field value. Fields that could contain it are rejected at validation.</p>
+</li>
+<li>
+<p>No field is optional or omitted. <code>scope_id</code> is never null; a global scope uses
+its canonical sentinel.</p>
+</li>
+<li>
+<p><code>eiu:v1:</code> is the version prefix. Changing any encoding rule requires bumping it.</p>
+</li>
 </ul>
 <p>Because a bumped prefix produces different <code>BIGINT</code> keys, old and new nodes would
 lock disjoint key spaces and provide no mutual exclusion at all — the most
