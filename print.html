@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-efd13fff.js";
+            window.path_to_searchindex_js = "searchindex-96fb76ee.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-a69c66aa.js"></script>
+        <script src="toc-800b5e2d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -18910,6 +18910,1339 @@ public class UuidUtil {
 
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="entity-creation-uniqueness"><a class="header" href="#entity-creation-uniqueness">Entity Creation Uniqueness</a></h1>
+<h2 id="status-3"><a class="header" href="#status-3">Status</a></h2>
+<p>Proposed design for <a href="https://github.com/lightapi/light-portal/issues/691">light-portal issue 691</a>.</p>
+<h2 id="executive-decision"><a class="header" href="#executive-decision">Executive Decision</a></h2>
+<p>Light Portal must enforce entity creation uniqueness in the authoritative command
+transaction, before a <code>*CreatedEvent</code> is appended. The UI and the asynchronous
+projection database may provide early feedback, but neither is authoritative.</p>
+<p>Two invariants are required:</p>
+<ol>
+<li>An aggregate stream can contain only one birth event. A normal create command
+must use expected version <code>0</code>, append version <code>1</code>, and fail if the aggregate
+stream already exists.</li>
+<li>Every creatable aggregate must declare either a semantic creation identity or
+explicitly declare that multiple semantically similar entities are allowed.
+This declaration is required even when the storage key is a generated UUID.</li>
+</ol>
+<p>A generated UUID makes two rows technically distinct. It does not prove that they
+represent different business entities. For example, categories with different
+UUIDs can still be the same category when host, entity type, parent, and normalized
+name are equal.</p>
+<p>The recommended implementation is a versioned creation-policy registry plus an
+<code>entity_identity_t</code> reservation table. The identity reservation, event-store
+append, outbox write, nonce allocation, and idempotency record must commit in one
+PostgreSQL transaction.</p>
+<h2 id="problem-16"><a class="header" href="#problem-16">Problem</a></h2>
+<p>Issue 691 demonstrates the same-aggregate form of the defect:</p>
+<ol>
+<li>A role such as <code>abc-123</code> already exists at aggregate version 1.</li>
+<li>A second create request uses the same role identity.</li>
+<li>The command path finds the existing stream and emits another
+<code>RoleCreatedEvent</code> at aggregate version 2.</li>
+<li>The role projection refuses to replace an active row and leaves it at version
+1.</li>
+<li><code>GetFreshRole</code> compares the projection with the event store and returns
+<code>ERR11645</code> because the read model is behind the write model.</li>
+</ol>
+<p>This behavior follows directly from the current shared command flow.
+<code>AbstractCommandHandler.populateAggregateVersion()</code> increments the aggregate
+version whenever a stream exists; it does not distinguish create from update.
+The role and rule create projections use conflict handling that only reactivates a
+soft-deleted row. A conflicting create for an active row is skipped, including its
+new aggregate version.</p>
+<p>The existing event-store constraint on <code>(aggregate_id, aggregate_version)</code> prevents
+two events from occupying the same version. It does not prevent a second birth
+event at version 2, 3, or later.</p>
+<p>Generated UUID aggregates have a second form of the same problem:</p>
+<ul>
+<li><code>CreateCategory</code> and <code>CreateTag</code> generate a new UUID for every request, while
+their projection tables define business uniqueness using names, scope, entity
+type, and parent fields.</li>
+<li>Some handlers, such as platform and config creation, query the projection for an
+existing business key and reuse its UUID. That check is vulnerable to projection
+lag and concurrent requests.</li>
+<li>Two create commands can therefore append two valid-looking event streams before
+the second event reaches a projection unique constraint.</li>
+</ul>
+<p>The failure is not specific to role or rule. It is a missing write-side creation
+contract shared by many command services.</p>
+<h2 id="goals-23"><a class="header" href="#goals-23">Goals</a></h2>
+<ul>
+<li>Reject a second create for an existing aggregate without changing its event
+stream.</li>
+<li>Prevent semantic duplicates when each request generates a different UUID.</li>
+<li>Resolve concurrent create races atomically.</li>
+<li>Distinguish a retry of the same request from a new conflicting request.</li>
+<li>Preserve tenant, global, and parent-scoped uniqueness boundaries.</li>
+<li>Preserve immutable event history and make existing corrupt streams repairable.</li>
+<li>Provide one reusable implementation rather than handler-specific query checks.</li>
+<li>Return an actionable conflict to the UI without exposing another tenant’s data.</li>
+</ul>
+<h2 id="non-goals-26"><a class="header" href="#non-goals-26">Non-goals</a></h2>
+<ul>
+<li>Treating all equal request payloads as the same entity.</li>
+<li>Preventing valid multiplicity for events such as audit records, workflow runs,
+messages, or orders.</li>
+<li>Replacing update optimistic concurrency control.</li>
+<li>Making the projection database part of the authoritative command transaction.</li>
+<li>Turning create into an upsert or silently changing an existing entity.</li>
+<li>Automatically allowing an identity to be reused after delete or rename.</li>
+</ul>
+<h2 id="terminology-1"><a class="header" href="#terminology-1">Terminology</a></h2>
+<h3 id="aggregate-id"><a class="header" href="#aggregate-id">Aggregate ID</a></h3>
+<p>The event-stream subject. It may be a natural composite ID such as
+<code>hostId|roleId</code>, or a generated UUID.</p>
+<h3 id="semantic-creation-identity"><a class="header" href="#semantic-creation-identity">Semantic Creation Identity</a></h3>
+<p>The minimum immutable domain fields that answer: “Would another create request
+represent the same entity?” It includes the uniqueness scope.</p>
+<p>Examples include:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Aggregate</th><th>Storage ID</th><th>Candidate semantic creation identity</th></tr>
+</thead>
+<tbody>
+<tr><td>Role</td><td><code>hostId|roleId</code></td><td>host + normalized role ID</td></tr>
+<tr><td>Rule</td><td>rule ID or composite event subject</td><td>global/host scope + normalized rule ID</td></tr>
+<tr><td>Category</td><td>generated UUID</td><td>global/host scope + entity type + parent category + normalized category name</td></tr>
+<tr><td>Tag</td><td>generated UUID</td><td>global/host scope + entity type + normalized tag name</td></tr>
+<tr><td>Platform</td><td>generated UUID</td><td>host + normalized platform name + platform version</td></tr>
+<tr><td>Config</td><td>generated UUID</td><td>normalized config name in its catalog scope</td></tr>
+<tr><td>Instance</td><td>generated UUID</td><td>host + service + resolved environment catalog tuple (<code>scope_type</code>, <code>scope_id</code>, normalized value) + product version</td></tr>
+</tbody>
+</table>
+</div>
+<p>These are candidate contracts derived from current event-subject and projection
+constraints. Phase 0 of implementation must inventory and approve the exact key for
+every create event.</p>
+<h3 id="idempotency-key"><a class="header" href="#idempotency-key">Idempotency Key</a></h3>
+<p>A client-generated identifier for one create attempt. It answers “Is this a retry
+of the same request?” It does not answer “Is this the same business entity?”</p>
+<h3 id="birth-event"><a class="header" href="#birth-event">Birth Event</a></h3>
+<p>The one event that establishes an aggregate stream, normally a registered
+<code>*CreatedEvent</code>. A restore or reactivation is a lifecycle mutation, not another
+birth event.</p>
+<h2 id="required-invariants"><a class="header" href="#required-invariants">Required Invariants</a></h2>
+<h3 id="one-birth-event-per-aggregate"><a class="header" href="#one-birth-event-per-aggregate">One Birth Event Per Aggregate</a></h3>
+<p>For a normal command append:</p>
+<ul>
+<li>a birth event must carry expected aggregate version <code>0</code>;</li>
+<li>its new aggregate version must be <code>1</code>;</li>
+<li>no event may already exist for the aggregate ID; and</li>
+<li>a second birth event is rejected even when the existing entity is inactive.</li>
+</ul>
+<p>Create handlers must not call the current “max version plus one” behavior. The
+shared command abstraction should expose an explicit command kind so that create
+commands always build a provisional version-1 event. The transactional append path
+remains the final enforcement point.</p>
+<h3 id="declared-semantic-multiplicity"><a class="header" href="#declared-semantic-multiplicity">Declared Semantic Multiplicity</a></h3>
+<p>Every registered birth event must have exactly one creation policy:</p>
+<ul>
+<li><code>UNIQUE</code>: extract and reserve a semantic creation identity; or</li>
+<li><code>ALLOW_MULTIPLE</code>: different aggregate IDs may intentionally have the same
+semantic fields.</li>
+</ul>
+<p><code>ALLOW_MULTIPLE</code> must be an explicit reviewed decision. It does not permit a second
+birth event on the same aggregate stream.</p>
+<p>This fail-closed inventory prevents a new UUID-based entity from accidentally
+bypassing semantic uniqueness just because nobody added a handler check.</p>
+<h3 id="write-side-authority"><a class="header" href="#write-side-authority">Write-side Authority</a></h3>
+<p>The event-store append transaction and its identity registry are authoritative.
+The following are advisory or defensive only:</p>
+<ul>
+<li>create-form duplicate checks;</li>
+<li>query-service existence checks;</li>
+<li>projection primary keys and unique indexes; and</li>
+<li>create-button disabling.</li>
+</ul>
+<h2 id="creation-policy-registry"><a class="header" href="#creation-policy-registry">Creation Policy Registry</a></h2>
+<p>Add a versioned, exact-event-type <code>EntityCreationPolicyRegistry</code> in the database
+provider. It should reuse the inventory and fail-closed techniques of the existing
+replay policy registry without mixing creation semantics into replay policy.</p>
+<p>Each entry contains at least:</p>
+<pre><code class="language-text">eventType
+eventSchemaVersion
+aggregateType
+commandKind: CREATE
+multiplicity: UNIQUE | ALLOW_MULTIPLE
+scopeExtractor: HOST | GLOBAL | HOST_OR_GLOBAL | PARENT | CUSTOM
+identityFields
+normalizerVersion
+reusePolicy: NEVER | EXPLICIT_RELEASE
+idempotencyRetention
+</code></pre>
+<p><code>idempotencyRetention</code> gives the policy-specific retention requirement a
+configuration owner. Without it the <code>ALLOW_MULTIPLE</code> retention rule is prose that
+nothing can enforce or validate. The registry startup check must reject an
+<code>ALLOW_MULTIPLE</code> entry whose retention is shorter than the configured maximum
+client and gateway retry horizon.</p>
+<p>The registry must verify at startup that every portal birth event has exactly one
+entry. A digest of the complete birth-event inventory should make addition or
+removal of a create event fail tests until its uniqueness policy is reviewed.</p>
+<p>The registry extracts identity fields from the validated CloudEvent data in the
+database provider. A handler must not supply an opaque, client-controlled identity
+string that bypasses the registered extractor.</p>
+<h3 id="scope-is-security-sensitive"><a class="header" href="#scope-is-security-sensitive">Scope Is Security-sensitive</a></h3>
+<p>Uniqueness scope must come from trusted command context, not an unverified
+<code>hostId</code> in the request body.</p>
+<ul>
+<li>Host scope uses the authenticated and validated host identity.</li>
+<li>Coarse permission to invoke a command is decided by Light Gateway against the
+command’s logical endpoint and its Portal-managed role and CEL policy.</li>
+<li>Global scope requires a gateway authorization decision that is specific to a
+global-only endpoint or to the global branch of a combined endpoint policy.</li>
+<li>Parent scope includes the trusted host plus the parent aggregate identity.</li>
+<li>The CloudEvent host extension identifies event ownership/routing; it must not be
+mistaken for entity scope when an authorized administrator creates a global
+entity.</li>
+</ul>
+<p>The command path should stamp an authenticated entity-scope extension when the
+scope cannot be derived unambiguously by the database provider.</p>
+<h4 id="tenant-local-and-global-name-reuse"><a class="header" href="#tenant-local-and-global-name-reuse">Tenant-local And Global Name Reuse</a></h4>
+<p>Semantic uniqueness is enforced <em>within</em> a declared scope, not across every
+tenant. <code>scope_type</code> and <code>scope_id</code> are part of the complete reservation key, so
+the same normalized identity may be reserved independently by different tenants.
+For example, the <code>environment</code> reference table supports a global catalog plus
+tenant-defined environment values:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Environment value</th><th>Scope tuple</th><th>Result</th></tr>
+</thead>
+<tbody>
+<tr><td>Global <code>dev</code></td><td><code>(GLOBAL, GLOBAL_SENTINEL)</code></td><td>one global reservation</td></tr>
+<tr><td>Tenant A <code>dev</code></td><td><code>(HOST, tenant-a-host-id)</code></td><td>permitted; distinct reservation</td></tr>
+<tr><td>Tenant B <code>dev</code></td><td><code>(HOST, tenant-b-host-id)</code></td><td>permitted; distinct reservation</td></tr>
+<tr><td>Second Tenant A <code>dev</code></td><td><code>(HOST, tenant-a-host-id)</code></td><td>rejected as a duplicate in Tenant A</td></tr>
+</tbody>
+</table>
+</div>
+<p>The effective <code>envTag</code> catalog may concatenate or merge global values with the
+authenticated tenant’s values. That read-side composition does not change the
+write-side reservation scope: a host reservation neither blocks another host nor
+claims the global name. If a catalog needs tenant-over-global precedence or
+deduplication for display, its query policy owns that behavior; the identity
+registry must not silently turn it into cross-tenant uniqueness.</p>
+<p>Every creation policy must therefore name its scope extractor explicitly. A
+tenant-owned reference value uses trusted host scope, a global reference value
+uses the global sentinel, and a parent-owned value includes both trusted host and
+parent identity. A missing or ambiguous scope is a policy error and fails closed.</p>
+<h4 id="current-scope-derivation-is-unsound"><a class="header" href="#current-scope-derivation-is-unsound">Current Scope Derivation Is Unsound</a></h4>
+<p>The existing code does not yet meet this contract, and identity enforcement must
+not be built on it as-is. The legacy command layer still makes a coarse
+authorization decision that now belongs to Light Gateway:</p>
+<ul>
+<li><code>handle()</code> decides global scope with <code>role.contains(PortalConstants.ADMIN_ROLE)</code>
+where <code>ADMIN_ROLE</code> is <code>"admin"</code>. Both <code>org-admin</code> and <code>host-admin</code> contain
+<code>"admin"</code> as a substring, so a tenant-scoped administrator can set the global
+flag, have <code>hostId</code> removed, and create a global entity.</li>
+</ul>
+<p>Replacing that substring test with <code>hasAnyRole()</code> would fix the immediate match
+bug, but it would preserve duplicated coarse authorization in every command
+service. The target model is instead:</p>
+<ol>
+<li>Light Portal assigns roles and request-access rules to logical endpoints such
+as <code>lightapi.net/role/createRole/0.1.0</code> and
+<code>lightapi.net/rule/createRule/0.1.0</code>.</li>
+<li>Light Portal publishes the generated endpoint permissions and rule bodies to
+the config server. Gateway instances load the effective policy from the config
+server; static <code>values.yml</code> is not the authorization source.</li>
+<li>Light Gateway derives the logical portal endpoint from the hybrid request,
+exposes the command <code>data</code> as the CEL request context, and denies the request
+unless the endpoint’s configured policy passes.</li>
+<li>After that deployment contract is proven, <code>AbstractCommandHandler</code> stops
+deciding whether the caller may invoke the command by parsing <code>admin</code>,
+<code>org-admin</code>, or <code>host-admin</code> itself.</li>
+</ol>
+<p>Policy publication needs an activation boundary. The Portal/config-server write
+must expose a revision or digest, and every gateway instance serving portal
+commands must acknowledge that effective revision before the command-layer role
+check is removed. An instance on an unacknowledged revision must be kept out of
+the portal route. <code>defaultDeny</code> protects an endpoint that is absent from the
+loaded policy, but it cannot make an older, still-permissive rule equivalent to a
+new revision.</p>
+<p>Assigning roles to an endpoint is necessary but not sufficient. The endpoint
+must also have an active <code>req-acc</code> rule, and the effective gateway policy must
+fail closed when either the role permission or rule is absent. For a command
+that supports both host and global creation, a static list such as
+<code>admin org-admin host-admin</code> cannot distinguish the two branches. Prefer
+separate tenant and global logical endpoints. If one endpoint must remain
+shared, use one combined CEL decision, or <code>accessRuleLogic: all</code>, so that:</p>
+<ul>
+<li>a host-scoped request requires an assigned role and the request host must match
+the authenticated host; and</li>
+<li>a global request requires the exact global-administrator permission.</li>
+</ul>
+<p>Do not combine an unconditional role rule and a scope rule under
+<code>accessRuleLogic: any</code>; either rule succeeding would admit the request.</p>
+<p>Gateway authorization is still not a replacement for command-side data
+integrity. The gateway currently returns allow or deny; it does not turn a
+caller-supplied <code>hostId</code> or <code>globalFlag</code> into trusted scope and it cannot inspect
+the stored target owner. The command boundary must therefore remain role-neutral
+and enforce:</p>
+<ul>
+<li><code>effectiveHost()</code> must not prefer a request-body <code>hostId</code> over the trusted host;</li>
+<li><code>handle()</code> must not fall back to <code>map.get(HOST_ID)</code> when authenticated host
+context is required;</li>
+<li>request host, target host, and parent scope must match trusted context;</li>
+<li>owner and owner-position checks must use the stored target; and</li>
+<li>ownership transfer, aggregate version, lifecycle, and uniqueness rules remain
+database-backed command invariants.</li>
+</ul>
+<p>Where an existing helper still uses a raw role to choose owner-wide or global
+scope, remove that dependency only after the gateway supplies an unforgeable
+authorization-scope decision or the operation is split into scope-specific
+logical endpoints. Until then, deleting the check would widen access rather than
+eliminate duplication.</p>
+<p>This is a pre-existing defect rather than one introduced here, but reserving
+identities under a spoofable scope converts it from a contained privilege bug into
+permanent cross-tenant name squatting: a host-admin could reserve global
+identities that, under the default <code>NEVER</code> reuse policy, block every other tenant
+forever. That is why Phase 0 treats this as a deployment gate.</p>
+<h3 id="canonicalization"><a class="header" href="#canonicalization">Canonicalization</a></h3>
+<p>Identity canonicalization must be versioned and field-specific:</p>
+<ul>
+<li>encode a typed, field-named canonical JSON structure in a stable field order;</li>
+<li>normalize Unicode, whitespace, and case only when the domain and database
+constraint define those values as equivalent;</li>
+<li>distinguish null, an empty string, and an absent optional field unless the
+entity contract says otherwise;</li>
+<li>use canonical parent IDs rather than display names;</li>
+<li>when an identity references a scoped catalog value, encode its resolved
+<code>(scope_type, scope_id, normalized value)</code> tuple rather than the bare display
+name; and</li>
+<li>exclude mutable descriptions, timestamps, generated IDs, and secrets.</li>
+</ul>
+<p>For example, an Instance identity must distinguish global <code>dev</code> from Tenant A’s
+<code>dev</code> even though both render the same <code>envTag</code> text. A later change to catalog
+precedence, fallback, or deduplication must not silently reinterpret an existing
+reservation. If the resolution contract changes, treat it as an identity
+normalizer-version change and follow the materialization and mixed-version
+protocol below.</p>
+<p>Do not lowercase all entity names globally and do not hash the entire request.
+Those shortcuts change domain semantics and make harmless mutable fields part of
+identity.</p>
+<p>The registry stores a SHA-256 digest for indexed lookup. The complete reservation
+key is <code>(scope_type, scope_id, aggregate_type, identity_schema_version, identity_hash)</code>; <code>identity_hash</code> is the discriminating component within a fixed
+scope, aggregate type, and schema version, not the whole key. Two identities
+producing the same digest under the same scope, aggregate type, and schema version
+are treated as the same reserved identity and fail closed.</p>
+<p>The canonical value is not persisted by default. A reviewed per-aggregate policy
+may opt in to retaining specific non-sensitive explanatory fields when operators
+need to explain a conflict; nothing else is stored. Identity material must not
+contain credentials, tokens, or other secrets.</p>
+<p>Changing a normalizer creates a new identity schema version. Because
+<code>identity_schema_version</code> is part of the reservation key, a lookup at version N+1
+does not see a reservation stored at version N. Retaining old-version rows as
+aliases is therefore <strong>not sufficient</strong>: an existing entity would be unprotected
+under the new hash, and a duplicate create could succeed against it.</p>
+<p>Before enforcement is enabled at a new version, every live entity’s identity must
+be <strong>materialized at the current version</strong> — recompute the canonical identity with
+the new normalizer and insert a version-N+1 row with <code>binding_status = CURRENT</code>
+for each aggregate whose owner row is <code>ACTIVE</code>. Version-N rows are retained
+unchanged so a create cannot impersonate a pre-migration identity; they keep their
+own <code>binding_status</code>, and an aggregate legitimately holds a <code>CURRENT</code> binding at
+both versions for the duration of the migration. Enforcement at version N+1 may
+only begin once materialization is complete and verified for the aggregate group.</p>
+<p>Materialization alone is not enough during a rolling deployment. A node still
+running version N writes version-N reservations, so it can create an identity
+<em>after</em> the N+1 backfill has run and that identity will have no version-N+1 row
+protecting it. Choose one of:</p>
+<ul>
+<li><strong>Dual-write.</strong> Nodes write both version-N and version-N+1 reservations for the
+duration of the migration. Both rows are inserted in the create transaction, so
+a late version-N writer still produces the N+1 row that enforcement depends on.</li>
+<li><strong>Drain.</strong> Stop all version-N writers for the aggregate group, then materialize,
+then enable N+1 enforcement. Simpler, but requires a write pause.</li>
+</ul>
+<p>Dual-write is preferred for aggregate groups that cannot tolerate a write pause.
+Either way, N+1 enforcement may only be enabled after the chosen protocol has
+completed, and the backfill must be re-verified after the last version-N writer
+exits.</p>
+<h2 id="persistence-model"><a class="header" href="#persistence-model">Persistence Model</a></h2>
+<h3 id="entity-identity-registry"><a class="header" href="#entity-identity-registry">Entity Identity Registry</a></h3>
+<p>A command-side table reserves semantic identities independently of asynchronous
+projections:</p>
+<p>Entity lifecycle belongs to the aggregate, not to any one identity binding, so it
+lives in its own owner table:</p>
+<pre><code class="language-sql">CREATE TABLE entity_aggregate_t (
+    aggregate_type   VARCHAR(255) NOT NULL,
+    aggregate_id     VARCHAR(255) NOT NULL,
+    entity_status    VARCHAR(16)  NOT NULL,
+    created_event_id UUID         NOT NULL,
+    created_ts       TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    retired_ts       TIMESTAMPTZ,
+    PRIMARY KEY (aggregate_type, aggregate_id),
+    CHECK (entity_status IN ('ACTIVE', 'RETIRED'))
+);
+
+CREATE TABLE entity_identity_t (
+    scope_type              VARCHAR(16)  NOT NULL,
+    scope_id                VARCHAR(255) NOT NULL,
+    aggregate_type          VARCHAR(255) NOT NULL,
+    identity_schema_version INTEGER      NOT NULL,
+    identity_hash           BYTEA        NOT NULL,
+    identity_explanation    JSONB,
+    aggregate_id            VARCHAR(255) NOT NULL,
+    binding_status          VARCHAR(16)  NOT NULL,
+    created_event_id        UUID         NOT NULL,
+    created_ts              TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    demoted_ts              TIMESTAMPTZ,
+    PRIMARY KEY (
+        scope_type,
+        scope_id,
+        aggregate_type,
+        identity_schema_version,
+        identity_hash
+    ),
+    FOREIGN KEY (aggregate_type, aggregate_id)
+        REFERENCES entity_aggregate_t (aggregate_type, aggregate_id),
+    CHECK (binding_status IN ('CURRENT', 'ALIAS'))
+);
+
+CREATE UNIQUE INDEX entity_identity_current_aggregate_version_uk
+    ON entity_identity_t (
+        aggregate_type,
+        aggregate_id,
+        identity_schema_version
+    )
+    WHERE binding_status = 'CURRENT';
+</code></pre>
+<p>The invariant is one <em>current binding</em> per aggregate per identity schema version,
+not one row per aggregate. A plain <code>UNIQUE (aggregate_type, aggregate_id)</code> would
+forbid the aliases that rename requires, and scoping the index to the aggregate
+alone would forbid the version-N/N+1 dual-write that normalizer migration
+requires.</p>
+<p><code>identity_explanation</code> is null unless a reviewed policy opts in to retaining
+non-sensitive explanatory fields. It is never part of the reservation key.</p>
+<p>Scoping the index by <code>identity_schema_version</code> is what permits normalizer
+dual-write: during a migration an aggregate legitimately holds one <code>CURRENT</code>
+binding at version N and another at version N+1.</p>
+<h4 id="why-lifecycle-is-not-stored-on-the-binding"><a class="header" href="#why-lifecycle-is-not-stored-on-the-binding">Why Lifecycle Is Not Stored On The Binding</a></h4>
+<p>An aggregate can hold several identity rows at once — aliases from earlier renames
+plus one <code>CURRENT</code> binding per schema version during dual-write. Entity lifecycle
+is a property of the aggregate, so storing <code>entity_status</code> on each binding would
+denormalize one fact across every one of those rows. Delete, restore, rename, and
+reparent would each have to update a set whose size depends on rename history and
+migration state, and any missed row would leave the aggregate simultaneously live
+and deleted.</p>
+<p><code>entity_aggregate_t</code> holds exactly one <code>entity_status</code> per aggregate:</p>
+<ul>
+<li><strong>Delete and restore</strong> update a single row, so they are correct regardless of how
+many aliases or schema versions exist. No fan-out, nothing to reconcile.</li>
+<li><strong>Rename and reparent</strong> touch only <code>binding_status</code>, and must demote the old
+binding and create the new <code>CURRENT</code> binding <strong>for every schema version
+currently participating in dual-write</strong>, all in one version-checked transaction.
+A rename that updated only version N would leave version N+1 pointing at the old
+name and enforcement inconsistent between them.</li>
+<li><strong>Conflict responses</strong> join to <code>entity_aggregate_t</code> for <code>entity_status</code>. There is
+one value to read, so <code>ENTITY_RETIRED</code> and <code>ENTITY_ALREADY_EXISTS</code> cannot
+disagree across bindings.</li>
+</ul>
+<p>The foreign key makes an orphaned binding unrepresentable, and the owner row is
+inserted in the same create transaction as the first binding and the first event.</p>
+<p>An <code>ALLOW_MULTIPLE</code> aggregate has no identity reservation and therefore no owner
+row; its lifecycle remains where it is today, in the projection. This keeps both
+write-side tables sparse rather than turning <code>entity_aggregate_t</code> into a general
+aggregate registry by accident.</p>
+<p><code>scope_id</code> is never null. A global scope uses an explicit canonical sentinel and a
+different <code>scope_type</code>, avoiding PostgreSQL null-uniqueness ambiguity.</p>
+<p>An <code>ALLOW_MULTIPLE</code> create inserts no row in this table; the table is sparse by
+design. Those aggregates are still covered by stream-birth enforcement, which
+rejects a second birth event on an existing aggregate stream.</p>
+<p>The table is a write-side reservation ledger, not a query projection. Its row is
+inserted in the same transaction as the first event. A rolled-back event append
+cannot leave an orphaned reservation, and a committed event cannot exist without
+its reservation.</p>
+<p>The two statuses are deliberately separate, and live on different tables, because
+they answer different questions and have different cardinality:</p>
+<ul>
+<li><code>binding_status</code> on <code>entity_identity_t</code> is <strong>identity binding</strong>: is this row the
+aggregate’s current identity at this schema version (<code>CURRENT</code>), or a historical
+name it no longer answers to (<code>ALIAS</code>)? A rename produces an <code>ALIAS</code> row. There
+are many per aggregate.</li>
+<li><code>entity_status</code> on <code>entity_aggregate_t</code> is <strong>entity lifecycle</strong>: is the entity
+live (<code>ACTIVE</code>) or deleted (<code>RETIRED</code>)? A delete updates it. There is exactly
+one per aggregate.</li>
+</ul>
+<p>These are orthogonal. A renamed but perfectly live entity has an <code>ALIAS</code> binding
+while its owner row stays <code>ACTIVE</code>. Collapsing both into one column would make a
+create that collides with a live entity’s former name report <code>ENTITY_RETIRED</code>,
+telling the user to restore an entity that was never deleted.</p>
+<p>Conflict responses must therefore read <code>entity_status</code> from the owner row, never
+infer lifecycle from <code>binding_status</code>. Both <code>CURRENT</code> and <code>ALIAS</code> rows reserve an
+identity by default; the binding only determines which name the aggregate
+currently answers to.</p>
+<h3 id="operational-ownership-and-maintenance"><a class="header" href="#operational-ownership-and-maintenance">Operational Ownership And Maintenance</a></h3>
+<p>The creation-policy registry and the identity tables have different cardinality
+and must not be maintained as the same artifact:</p>
+<ul>
+<li>the creation-policy registry has one reviewed definition per birth event type;
+for example, one <code>RoleCreatedEvent</code> policy declares its scope, multiplicity,
+identity fields, normalizer version, and reuse policy;</li>
+<li><code>entity_aggregate_t</code> has one row per actual <code>UNIQUE</code> aggregate instance; and</li>
+<li><code>entity_identity_t</code> has one or more rows per actual <code>UNIQUE</code> aggregate instance,
+including aliases and every normalizer version participating in dual-write.</li>
+</ul>
+<p>For example, creating 100 roles produces 100 owner rows and at least 100 identity
+bindings, while the registry still contains only one <code>RoleCreatedEvent</code> policy.
+The tables therefore cannot be populated or maintained by a hand-written list of
+event types.</p>
+<p>One shared database-backed identity transition component owns the rows. Every
+append path that can persist a registered lifecycle event must use it, including
+normal commands, event import, snapshot-generated event import, approved repair,
+and any replay or internal append path permitted to create authoritative events.
+Command handlers, UI code, and asynchronous projectors must not issue independent
+identity-table writes.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Domain transition</th><th><code>entity_aggregate_t</code></th><th><code>entity_identity_t</code></th></tr>
+</thead>
+<tbody>
+<tr><td><code>UNIQUE</code> create</td><td>insert one <code>ACTIVE</code> owner</td><td>insert one <code>CURRENT</code> binding per participating normalizer version</td></tr>
+<tr><td>Rename or reparent</td><td>unchanged</td><td>demote the old binding and reserve or reclaim the new binding at every participating version</td></tr>
+<tr><td>Delete</td><td>set the owner to <code>RETIRED</code></td><td>leave all bindings reserved</td></tr>
+<tr><td>Restore</td><td>set the owner to <code>ACTIVE</code></td><td>leave all bindings unchanged</td></tr>
+<tr><td>Normalizer migration</td><td>unchanged</td><td>materialize or dual-write bindings at the new version</td></tr>
+<tr><td>Explicit release</td><td>leave the owner row for aggregate lifecycle and audit</td><td>for the exact released identity, delete its reservation rows at every normalizer version participating in dual-write after appending the audited release event</td></tr>
+<tr><td>Approved repair</td><td>apply the registered lifecycle rule</td><td>apply an audited, versioned identity mutation</td></tr>
+<tr><td><code>ALLOW_MULTIPLE</code> transition</td><td>no row</td><td>no row</td></tr>
+</tbody>
+</table>
+</div>
+<p>These are synchronous write-side guard tables, not asynchronous query
+projections. Domain events define the business history and can be reduced to
+reconstruct the registry, but the corresponding owner and identity transition
+must commit in the same transaction as the event and outbox writes during normal
+operation. Projecting it later would reopen the race in which another create is
+admitted before the first reservation becomes visible.</p>
+<p>Every mutation that cannot be derived from an existing domain event, especially
+an explicit identity release, must have a versioned, audited event or repair
+record with deterministic rebuild semantics. Direct SQL or a UI edit that changes
+the guard without durable provenance is forbidden because a later rebuild would
+silently undo or contradict it.</p>
+<p><code>entity_identity_t</code> contains active reservations only, so its <code>binding_status</code>
+constraint remains <code>CURRENT | ALIAS</code>; it does not add a <code>RELEASED</code> state that
+would still occupy the reservation primary key. An <code>EXPLICIT_RELEASE</code> operation
+must append a versioned <code>*IdentityReleasedEvent</code> containing the aggregate, scope,
+released schema versions, and identity digests. The shared transition component,
+not the caller, derives the required schema-version set. During normalizer
+dual-write the release must cover every participating version in one transaction;
+an event whose version list is incomplete is rejected before any event or binding
+mutation. Within that complete version set, release deletes only the exact named
+identity and never unrelated current or alias bindings. The event store and repair
+audit retain provenance, and replaying that event deterministically removes the
+same reservations during a rebuild. The owner row remains. Restoring an aggregate
+after its identity has been released must reserve a permitted free identity
+through an explicit command; it cannot silently recreate the deleted binding.</p>
+<h3 id="bootstrap-backfill-and-generated-sql"><a class="header" href="#bootstrap-backfill-and-generated-sql">Bootstrap, Backfill, And Generated SQL</a></h3>
+<p>For a new empty database, <code>ddl.sql</code> creates empty identity tables. Bootstrap then
+imports the registered domain events through the same shared append transaction
+used at runtime; each imported birth, rename, reparent, delete, and restore event
+updates the identity tables synchronously. The expected order is:</p>
+<pre><code class="language-text">ddl.sql
+  -&gt; validate the creation-policy registry
+  -&gt; preflight every bootstrap event and planned identity transition
+  -&gt; import bootstrap events through the authoritative append path
+  -&gt; verify owner/binding counts and registry digest
+  -&gt; enable uniqueness enforcement
+</code></pre>
+<p>Preflight is required even when the destination is expected to be empty. It must
+report duplicate streams, semantic-identity conflicts, unsupported policy or
+normalizer versions, and invalid scope provenance before the first write. This
+makes bootstrap, event import, and generated-SQL backfill share the same
+fail-before-mutation contract.</p>
+<p>A generated SQL artifact such as <code>entity-identity-bootstrap.sql</code> may be used to
+upgrade an existing database that already contains authoritative events. It is an
+output of the versioned backfill tool, not a hand-maintained source of truth and
+not the ongoing maintenance mechanism. It must:</p>
+<ul>
+<li>identify the exact input event range or snapshot, creation-policy registry
+version, normalizer versions, and input digest;</li>
+<li>insert <code>entity_aggregate_t</code> owners before their binding rows;</li>
+<li>preserve current bindings, aliases, lifecycle, and source event provenance;</li>
+<li>execute in one controlled transaction after report-only conflict analysis;</li>
+<li>be idempotent only when an existing row has exactly the expected owner and
+binding, and fail rather than overwrite a conflicting reservation;</li>
+<li>include expected row counts and a deterministic verification digest; and</li>
+<li>be regenerated whenever the authoritative input or policy version changes.</li>
+</ul>
+<p>After bootstrap, creates, renames, reparents, deletes, restores, releases, imports,
+and normalizer migrations continue to maintain the rows transactionally. A static
+SQL file cannot replace those runtime transitions.</p>
+<h3 id="rebuild-and-environment-promotion"><a class="header" href="#rebuild-and-environment-promotion">Rebuild And Environment Promotion</a></h3>
+<p>The event store is the historical source for a complete rebuild, while the
+identity tables are the authoritative current admission index. A rebuild must run
+the same versioned identity transition component over events in aggregate-version
+order, preferably into shadow tables. It must report conflicts, verify owner and
+binding counts and digests, and replace or enable the rebuilt registry only after
+the affected aggregate groups are write-fenced or otherwise protected by the
+documented dual-write protocol.</p>
+<p>Event-history promotion is the preferred way to move identity-protected entities
+between environments:</p>
+<ol>
+<li>Export the domain event history and its policy/schema metadata.</li>
+<li>Apply approved target-host, scope, and identifier transformations.</li>
+<li>Preflight the transformed events against the destination creation-policy
+registry and report every reservation conflict.</li>
+<li>Recompute the destination owner and binding transitions from the transformed
+events; do not copy source rows with an unverified scope or normalizer version.</li>
+<li>Insert each event, identity transition, and outbox record atomically.</li>
+<li>Verify the destination registry before enabling writes for the imported groups.</li>
+</ol>
+<p>The current-materialized-snapshot flow needs an additional safeguard. A business
+snapshot contains current values but may omit former names that must remain
+reserved as <code>ALIAS</code> bindings. Snapshot-only promotion must therefore either carry
+a versioned identity-reservation manifest containing every required current and
+alias binding, or be rejected for identity-protected aggregate groups unless the
+relevant event history accompanies it.</p>
+<p><code>entity_aggregate_t</code>, <code>entity_identity_t</code>, and <code>command_idempotency_t</code> must be
+excluded from generic projection-table export and generic table-to-CreatedEvent
+conversion. They are not standalone business aggregates and must never become
+synthetic <code>EntityAggregateCreatedEvent</code>, <code>EntityIdentityCreatedEvent</code>, or
+<code>CommandIdempotencyCreatedEvent</code> records. If a snapshot carries an identity
+manifest, the importer handles that manifest explicitly, validates its policy and
+normalizer versions, and binds it to the imported business-event or snapshot
+digest.</p>
+<p><code>command_idempotency_t</code> is different from the identity tables: its rows describe
+request attempts and cannot be reconstructed from domain events. An in-place
+identity-registry rebuild must leave the existing ledger untouched. A promotion
+to a new database starts with an empty ledger unless a separate, security-reviewed
+active-ledger transfer is performed.</p>
+<p>For <code>UNIQUE</code> aggregates, an empty destination ledger does not permit a semantic
+duplicate because the reconstructed identity reservation remains authoritative.
+For <code>ALLOW_MULTIPLE</code> aggregates, the ledger is the only retry-deduplication
+defense. Their create endpoints must therefore be write-fenced during promotion
+and remain fenced until the maximum supported pre-promotion retry horizon has
+drained, or the promotion must securely transfer every still-live ledger entry.
+An idempotency epoch may be changed only when old-epoch keys are explicitly
+rejected; an old retry must never be treated as a new request merely because the
+destination ledger is empty.</p>
+<h3 id="administrative-ui"><a class="header" href="#administrative-ui">Administrative UI</a></h3>
+<p>There is no general CRUD UI for these tables. Operators must not insert, update,
+or delete reservation rows directly. An administrative identity-registry view may
+provide read-only status, rebuild preview, conflict review, and source-event and
+policy-version diagnostics. Any release or repair action must invoke a dedicated,
+elevated, audited command and produce the durable event or repair record required
+for deterministic reconstruction.</p>
+<h3 id="command-idempotency-ledger"><a class="header" href="#command-idempotency-ledger">Command Idempotency Ledger</a></h3>
+<p>Use a separate table for retry semantics:</p>
+<pre><code class="language-sql">CREATE TABLE command_idempotency_t (
+    scope_type       VARCHAR(16)  NOT NULL,
+    scope_id         VARCHAR(255) NOT NULL,
+    principal_id     VARCHAR(255) NOT NULL,
+    command_type     VARCHAR(255) NOT NULL,
+    idempotency_key  VARCHAR(128) NOT NULL,
+    request_hash     BYTEA        NOT NULL,
+    request_fingerprint_version INTEGER NOT NULL,
+    aggregate_id     VARCHAR(255) NOT NULL,
+    event_id         UUID         NOT NULL,
+    completed_ts     TIMESTAMPTZ  NOT NULL,
+    PRIMARY KEY (scope_type, scope_id, principal_id, command_type, idempotency_key)
+);
+</code></pre>
+<p><code>principal_id</code> is the authenticated caller, taken from trusted command context and
+never from the request body. Binding the key to a principal rather than only to a
+tenant prevents one user from replaying another user’s client-generated key and
+receiving the original success result, which would disclose an <code>aggregateId</code>
+without passing that entity’s own authorization check. It also removes accidental
+collisions between users whose clients derive weak keys from timestamps or form
+names.</p>
+<p>The ledger stores only the minimum response reference required to reproduce a
+successful response. It must not persist secrets copied from a create response.</p>
+<h4 id="request-fingerprint"><a class="header" href="#request-fingerprint">Request Fingerprint</a></h4>
+<p><code>request_hash</code> is a versioned fingerprint over <strong>validated client intent plus
+trusted scope</strong>. It must not be computed over the enriched event payload.</p>
+<p>Enrichment is where retries diverge: <code>CreateCategory</code> and <code>CreateTag</code> generate a
+fresh UUID per request, and the command path stamps event IDs, timestamps, and
+aggregate versions before the event is built. Hashing any of that makes a genuine
+retry look like a different request, so every retry would return
+<code>409 IDEMPOTENCY_KEY_REUSED</code> — turning the mechanism into the opposite of what it
+is for.</p>
+<p>The fingerprint therefore covers:</p>
+<ul>
+<li>the validated client-supplied command fields, after input validation and after
+defaults are applied, so that an unchanged resubmission is stable;</li>
+<li>the trusted scope (<code>scope_type</code>, <code>scope_id</code>) and <code>command_type</code>; and</li>
+<li>the fingerprint version.</li>
+</ul>
+<p>It explicitly excludes server-generated and transient values: generated aggregate
+UUIDs, event IDs, correlation and trace IDs, aggregate versions, timestamps,
+audit metadata, and any field the enrichment step introduces.</p>
+<p>Serialization follows the same discipline as identity canonicalization — typed,
+field-named, stable field order — and the version is bumped whenever the included
+field set or serialization changes.</p>
+<p>A retry must be compared using the fingerprint version that produced the stored
+entry, which is why <code>request_fingerprint_version</code> is persisted alongside
+<code>request_hash</code>. On lookup, read the stored version, compute the fingerprint with
+<em>that</em> implementation, and compare. Treating an older version as non-matching
+would break the guaranteed retry horizon during a rolling deployment: a request
+accepted by an old node and retried against a new one would return
+<code>IDEMPOTENCY_KEY_REUSED</code> for an identical request.</p>
+<p>Prior fingerprint implementations must therefore be retained and executable for at
+least the maximum configured <code>idempotencyRetention</code> across all policies. An
+implementation may only be deleted once no ledger entry can still reference it.</p>
+<p>Storing the version only solves the old-to-new direction. It does not help when a
+<strong>new</strong> node writes a version-N+1 entry and an <strong>old</strong> node — which has no N+1
+implementation — then serves the retry. That node cannot compute the stored
+version at all, so the comparison fails and an identical request is rejected. A
+fingerprint version change is therefore an expand/contract rollout:</p>
+<ol>
+<li>Deploy nodes that can <strong>read</strong> both N and N+1 but still <strong>write</strong> N.</li>
+<li>Drain every node that understands only N.</li>
+<li>Switch new entries to write N+1.</li>
+<li>Retain the N implementation until no retained ledger row references it.</li>
+</ol>
+<p>The ordering is what matters: read capability must be everywhere before any node
+writes the new version. Skipping step 1 or reordering step 3 before step 2 leaves
+a window where a retry lands on a node that cannot evaluate the entry it is
+being asked about.</p>
+<p>Retention is policy-specific, not one global TTL:</p>
+<ul>
+<li>For <code>UNIQUE</code> aggregates, retention may be bounded by the supported client retry
+window. The permanent entity identity reservation remains the semantic
+duplicate defense after an idempotency record expires.</li>
+<li>For <code>ALLOW_MULTIPLE</code> aggregates, there is no identity reservation, so this
+ledger is the <em>only</em> retry-deduplication defense. Its retention window is a
+correctness boundary: a delayed retry arriving after expiry creates a second
+entity. Retention for these aggregates must be at least the maximum client and
+gateway retry horizon.</li>
+</ul>
+<h2 id="atomic-create-algorithm"><a class="header" href="#atomic-create-algorithm">Atomic Create Algorithm</a></h2>
+<p>The create path should be implemented inside the existing graph-aware command
+append transaction, not as a query followed by an unrelated event insert.</p>
+<pre><code class="language-text">BEGIN
+  validate the registered creation policy and event schema
+  derive trusted scope
+  if multiplicity = UNIQUE:
+      derive canonical semantic identity
+  compute the lock key set:
+      aggregate lock
+      idempotency lock (always, when an idempotency key is supplied)
+      semantic-identity lock (only when multiplicity = UNIQUE)
+  acquire the deduplicated, numerically sorted lock set
+  resolve the idempotency ledger:
+      same key and same request fingerprint -&gt; return the original result
+      same key and different fingerprint    -&gt; IDEMPOTENCY_KEY_REUSED
+  verify that the aggregate stream does not exist
+  if multiplicity = UNIQUE:
+      insert the entity_aggregate_t owner row (entity_status = ACTIVE)
+      insert the entity_identity_t reservation (binding_status = CURRENT)
+      during dual-write, insert one CURRENT binding per participating version
+  reserve graph revision and user nonce as applicable
+  insert event_store_t and outbox_message_t rows
+  complete the idempotency record
+COMMIT
+</code></pre>
+<p>The semantic-identity steps are conditional. An <code>ALLOW_MULTIPLE</code> create derives no
+identity and inserts no reservation, but still takes the aggregate and idempotency
+locks and still enforces stream birth.</p>
+<p>The idempotency lock is what makes retry deduplication work for <code>ALLOW_MULTIPLE</code>.
+Those aggregates generate a fresh UUID per request, so two concurrent retries
+carrying the same idempotency key take <em>different</em> aggregate locks and would
+otherwise both pass the ledger check. The <code>command_idempotency_t</code> primary key
+still prevents two entities from being created — the loser fails on the unique
+constraint and rolls back — but the client receives a constraint error at exactly
+the moment idempotency was supposed to shield it. Locking on the idempotency key
+first makes the loser wait, observe the completed row, and return the original
+success result instead.</p>
+<h3 id="advisory-lock-keys"><a class="header" href="#advisory-lock-keys">Advisory Lock Keys</a></h3>
+<p>PostgreSQL advisory locks take a <code>bigint</code>, so the lock key is derived, not the
+logical identity string. There are three lock domains, each with a fixed prefix.
+The prefixes remove <em>serialization</em> ambiguity — they guarantee that a field value
+in one domain cannot serialize to the same string as a different field in another.
+They do not and cannot prevent two distinct strings from hashing to the same
+<code>BIGINT</code>; that is handled by cross-domain deduplication below.</p>
+<pre><code class="language-text">aggregate:   "eiu:v1:agg\x1F"  || aggregate_type || "\x1F" || aggregate_id
+identity:    "eiu:v1:sid\x1F"  || scope_type || "\x1F" || scope_id || "\x1F"
+                                || aggregate_type || "\x1F"
+                                || identity_schema_version || "\x1F"
+                                || lower(hex(identity_hash))
+idempotency: "eiu:v1:idem\x1F" || scope_type || "\x1F" || scope_id || "\x1F"
+                                || principal_id || "\x1F" || command_type || "\x1F"
+                                || idempotency_key
+</code></pre>
+<p>The encoding rules are exact, because two implementations that serialize
+differently do not share a lock:</p>
+<ul>
+<li>UTF-8, no normalization, no case folding — the canonical identity was already
+normalized before hashing.</li>
+<li><code>\x1F</code> (ASCII unit separator) is the only field delimiter, and it may not appear
+in any field value. Fields that could contain it are rejected at validation.</li>
+<li>No field is optional or omitted. <code>scope_id</code> is never null; a global scope uses
+its canonical sentinel.</li>
+<li><code>eiu:v1:</code> is the version prefix. Changing any encoding rule requires bumping it.</li>
+</ul>
+<p>Because a bumped prefix produces different <code>BIGINT</code> keys, old and new nodes would
+lock disjoint key spaces and provide no mutual exclusion at all — the most
+dangerous moment being precisely a rolling deployment. A lock-format change is
+therefore a three-step rollout, not a swap:</p>
+<ol>
+<li>Deploy a version that computes <strong>both</strong> the old and the new lock keys, adds
+both to the same set, and deduplicates and numerically sorts them together with
+every other key. Correctness is preserved because any two nodes now share at
+least one key for the same logical lock.</li>
+<li>Wait until all writers running the old-only format are drained.</li>
+<li>Deploy a version that computes the new format only.</li>
+</ol>
+<p>Skipping step 1 leaves a window in which two concurrent creates for the same
+identity take different locks and both proceed to the unique constraint — which
+still holds, but surfaces as a constraint error rather than an orderly conflict.</p>
+<p>Then:</p>
+<ol>
+<li>Compute each key with <code>hashtextextended(&lt;serialized lock key&gt;, 0)</code>.</li>
+<li>Deduplicate the resulting signed <code>BIGINT</code> values <strong>across all three domains
+together</strong>, not per domain.</li>
+<li>Sort the deduplicated values numerically.</li>
+<li>Call <code>pg_advisory_xact_lock</code> on each, in that order, within the lock-order
+phase below.</li>
+</ol>
+<p>Sorting must be on the numeric key, not on the logical identity string. Two
+strings that sort one way but hash into the opposite order would otherwise let
+concurrent transactions acquire locks in conflicting order and deadlock.
+Deduplication must span domains for the same reason: an aggregate key and an
+identity key can collide into one <code>BIGINT</code>, and a single sorted pass would then
+attempt the same key twice.</p>
+<p><code>pg_advisory_xact_lock</code> is required rather than a session-scoped lock. Transaction
+locks release at commit or rollback; session locks would leak across pooled
+connections and outlive the command.</p>
+<p>Key collisions may add contention but cannot weaken correctness, because the
+database unique constraints remain the final arbiter.</p>
+<p>The identity, aggregate, and idempotency locks join the existing documented lock
+order in <code>GraphCommandPersistence</code>. All call paths must use the same order:</p>
+<ol>
+<li>graph-root locks;</li>
+<li>the single sorted set of aggregate, semantic-identity, and idempotency locks;</li>
+<li>identity, idempotency, and graph-revision rows;</li>
+<li>user nonce;</li>
+<li>event offset, event store, outbox, and notification rows.</li>
+</ol>
+<p>The database unique constraints are the final race arbiter even when an advisory
+lock is omitted by a future bug. SQL unique-constraint failures must be translated
+to the same typed conflict instead of a generic database error.</p>
+<h3 id="concurrent-example"><a class="header" href="#concurrent-example">Concurrent Example</a></h3>
+<p>Two category requests can generate UUID A and UUID B while carrying the same host,
+entity type, parent, and category name.</p>
+<ul>
+<li>Both derive the same canonical semantic identity.</li>
+<li>One transaction obtains the identity lock and commits UUID A plus its event.</li>
+<li>The other waits, observes the committed reservation, and returns a conflict.</li>
+<li>No event for UUID B is appended, so the projection never has to repair the race.</li>
+</ul>
+<h2 id="result-contract"><a class="header" href="#result-contract">Result Contract</a></h2>
+<p>The command path returns a typed result rather than relying on projection or SQL
+error text.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Condition</th><th>Result</th></tr>
+</thead>
+<tbody>
+<tr><td>New aggregate and new semantic identity</td><td>create succeeds</td></tr>
+<tr><td>Same idempotency key and same request hash</td><td>return the original success result</td></tr>
+<tr><td>Same idempotency key and different request hash</td><td><code>409 IDEMPOTENCY_KEY_REUSED</code></td></tr>
+<tr><td>Existing aggregate stream</td><td><code>409 ENTITY_ALREADY_EXISTS</code></td></tr>
+<tr><td>Different UUID with an existing semantic identity</td><td><code>409 ENTITY_ALREADY_EXISTS</code></td></tr>
+<tr><td>Identity held by a live entity’s former name (<code>ALIAS</code> binding, owner <code>ACTIVE</code>)</td><td><code>409 ENTITY_ALREADY_EXISTS</code></td></tr>
+<tr><td>Identity held by a deleted entity (owner <code>RETIRED</code>) and reuse is not allowed</td><td><code>409 ENTITY_RETIRED</code></td></tr>
+<tr><td>Missing creation policy</td><td>fail closed; deployment/startup error</td></tr>
+</tbody>
+</table>
+</div>
+<p>A permitted response may include <code>existingAggregateId</code> so the UI can open the
+existing entity. It must only do so after authorization in the same trusted scope.
+Cross-tenant conflicts should return the generic not-found/conflict behavior and
+must not disclose another tenant’s identifier or fields.</p>
+<h2 id="retry-and-ui-behavior"><a class="header" href="#retry-and-ui-behavior">Retry And UI Behavior</a></h2>
+<p><code>portal-view</code> should generate an idempotency key when a create form is opened and
+reuse it for every retry of that submission. It generates a new key only after the
+attempt completes or the form is intentionally reset.</p>
+<p>The UI should also:</p>
+<ul>
+<li>disable the submit action while a create request is pending;</li>
+<li>optionally perform a debounced duplicate lookup for faster feedback;</li>
+<li>treat the lookup as advisory and still handle a command-side conflict;</li>
+<li>show “This entity already exists” instead of a generic aggregate-version error;</li>
+<li>show “This identity belongs to a retired entity; restore it or choose another
+identity.” for <code>ENTITY_RETIRED</code>, because the remedy differs from a live
+conflict;</li>
+<li>link to the existing entity when the response is authorized to reveal its ID;
+and</li>
+<li>preserve the user’s form values when a conflict is returned.</li>
+</ul>
+<p>The idempotency key and submit-button guard handle network retries and double
+clicks. The semantic identity reservation handles a new browser session, a new
+idempotency key, API clients, and concurrent users.</p>
+<h2 id="delete-restore-and-rename"><a class="header" href="#delete-restore-and-rename">Delete, Restore, And Rename</a></h2>
+<p>A delete does not erase the entity’s history or release its creation identity.
+The default <code>NEVER</code> reuse policy keeps every identity row reserved. Delete sets
+<code>entity_status</code> to <code>RETIRED</code> on the single <code>entity_aggregate_t</code> row and leaves all
+bindings unchanged; restore sets it back to <code>ACTIVE</code>. Because lifecycle lives in
+one place, both operations are correct however many aliases and schema versions
+the aggregate has accumulated.</p>
+<p>Reactivating a soft-deleted entity must use an explicit restore/reactivate command
+and a <code>*RestoredEvent</code> or <code>*ReactivatedEvent</code> at the next aggregate version. It must
+not append another <code>*CreatedEvent</code>.</p>
+<p>If a domain genuinely requires identity reuse, it must opt into
+<code>EXPLICIT_RELEASE</code>, define the retention and audit rules, and provide a dedicated
+release operation. Delete alone is not an implicit release. The release event and
+binding deletion follow the transaction contract in Operational Ownership And
+Maintenance; direct deletion and a <code>RELEASED</code> binding status are not supported.
+Like rename and reparent, release is a binding change and must fan out across every
+normalizer version currently participating in dual-write. A partial-version
+release fails closed and leaves the event store and every binding unchanged.</p>
+<p>When a mutable field also participates in a uniqueness constraint, update handling
+must atomically reserve the new identity before changing it. Under the default
+never-reuse policy, the old identity remains as an <code>ALIAS</code> binding so a later
+create cannot impersonate the renamed entity. The owner row is untouched — renaming
+a live entity leaves an <code>ALIAS</code> binding while <code>entity_status</code> stays <code>ACTIVE</code>, so a
+create colliding with the former name returns <code>ENTITY_ALREADY_EXISTS</code>, not
+<code>ENTITY_RETIRED</code>.</p>
+<p>During a normalizer migration the rename must demote and re-bind at <strong>every schema
+version currently participating in dual-write</strong>, in the same version-checked
+transaction. Renaming at version N alone would leave N+1 bound to the old name.</p>
+<p>Domains that need old-name reuse require an explicit policy and migration design.</p>
+<h3 id="parent-lifecycle-and-child-identities"><a class="header" href="#parent-lifecycle-and-child-identities">Parent Lifecycle And Child Identities</a></h3>
+<p>Parent-scoped identities follow the same never-release default as every other
+identity:</p>
+<ul>
+<li><strong>Deleting a parent does not cascade to child identity reservations and does not
+release them.</strong> The children’s rows stay as they are. A delete is a lifecycle
+mutation on the parent, not a licence to reuse names beneath it.</li>
+<li><strong>Restoring a parent preserves its children’s reservations.</strong> Because nothing was
+released, restore needs no identity repair and cannot collide with names created
+in the interim.</li>
+<li><strong>Reparenting explicitly transfers the child’s current identity binding.</strong> The
+child’s identity includes its parent, so a reparent demotes the identity under
+the old parent to <code>ALIAS</code> and reserves the new one as <code>CURRENT</code> in the same
+transaction, gated by the child’s expected version, and across every schema
+version participating in dual-write. The owner row is untouched — the child
+stays live throughout. If the destination parent already holds that name, the
+reparent fails with <code>ENTITY_ALREADY_EXISTS</code> and the original child is unchanged.</li>
+</ul>
+<p>An aggregate may reclaim <em>its own</em> alias during a version-checked rename. Renaming
+<code>A</code> to <code>B</code> and back to <code>A</code> flips the <code>A</code> row’s binding from <code>ALIAS</code> to <code>CURRENT</code>
+and demotes <code>B</code> to <code>ALIAS</code>, both in one transaction, gated by the aggregate’s
+expected version. This is safe because the reclaiming aggregate is the same one
+that created the alias, so no impersonation is possible. Another aggregate may
+never claim an alias: a reservation row belongs to exactly one <code>aggregate_id</code>, so
+a different aggregate’s create simply collides with the existing row and is
+rejected.</p>
+<h2 id="projection-contract"><a class="header" href="#projection-contract">Projection Contract</a></h2>
+<p>Projection primary keys and unique indexes remain required as defense in depth.
+They must agree with the creation-policy registry, and conformance tests must fail
+when the registry identity and projection constraint diverge.</p>
+<p>After enforcement:</p>
+<ul>
+<li>a normal <code>*CreatedEvent</code> is always version 1;</li>
+<li>exact redelivery of the same event is idempotent by event identity;</li>
+<li>a different create event for an existing active or retired identity is a
+permanent projection failure, not an upsert; and</li>
+<li>restore/reactivate events own the transition from inactive to active.</li>
+</ul>
+<p>Projection code must not silently skip a conflicting create while leaving its
+aggregate version behind. That behavior is what turns the original error into
+<code>ERR11645</code> rather than surfacing the invalid event at its source.</p>
+<h2 id="existing-data-repair"><a class="header" href="#existing-data-repair">Existing Data Repair</a></h2>
+<p>The new guard prevents future corruption but does not repair streams that already
+contain multiple birth events.</p>
+<p>Before enforcement, run an inventory that finds:</p>
+<ul>
+<li>aggregate streams with more than one registered birth event;</li>
+<li>projection rows whose aggregate version is below the event-store maximum;</li>
+<li>multiple aggregate IDs that map to one semantic identity; and</li>
+<li>projection uniqueness violations or permanent create-event failures; and</li>
+<li>global-scoped entities whose creating principal and historical policy evidence
+do not prove exact global-create authority at the time of creation.</li>
+</ul>
+<p>Older events may not contain a policy revision or enough authorization evidence
+to prove the historical decision. Classify those records as
+<code>UNKNOWN_SCOPE_PROVENANCE</code>; do not assume that a global row was legitimate merely
+because it exists. A global identity created through the legacy substring-role
+path must be reviewed or quarantined before backfill, otherwise Phase 5 would turn
+historical cross-tenant name squatting into a permanent reservation.</p>
+<p>Repair procedure:</p>
+<ol>
+<li>Validate or operator-attest the trusted scope provenance; quarantine ambiguous
+or unauthorized global creations before producing reservations.</li>
+<li>Select the first valid birth event and entity as canonical.</li>
+<li>Classify later creates as exact retries, harmless conflicting creates, or
+conflicts with dependent side effects.</li>
+<li>Backfill the canonical aggregate’s <code>entity_aggregate_t</code> owner row, then its
+<code>entity_identity_t</code> bindings under the foreign key.</li>
+<li>For a harmless legacy duplicate, apply an approved, versioned projection repair
+that keeps the original entity fields but advances the projection version past
+the invalid create.</li>
+<li>Require operator review when the later event changed data, created children, or
+triggered external side effects.</li>
+<li>Record the repair decision and evidence in the existing event-replay repair and
+audit workflow.</li>
+</ol>
+<p>Do not delete or rewrite the later event directly, and do not copy the conflicting
+create payload over the original entity merely to make versions equal.</p>
+<h2 id="why-common-alternatives-are-insufficient"><a class="header" href="#why-common-alternatives-are-insufficient">Why Common Alternatives Are Insufficient</a></h2>
+<h3 id="ui-only-duplicate-check"><a class="header" href="#ui-only-duplicate-check">UI-only Duplicate Check</a></h3>
+<p>Two users can pass the check concurrently, and the projection may be stale. Keep it
+for usability only.</p>
+<h3 id="query-the-projection-in-each-create-handler"><a class="header" href="#query-the-projection-in-each-create-handler">Query The Projection In Each Create Handler</a></h3>
+<p>This is the current pattern for some UUID entities. It cannot close the race
+between the query and append and creates inconsistent rules across services.</p>
+<h3 id="projection-unique-constraint-only"><a class="header" href="#projection-unique-constraint-only">Projection Unique Constraint Only</a></h3>
+<p>The constraint is evaluated after the event is authoritative. Rejecting the
+projection cannot undo the event or outbox publication.</p>
+<h3 id="create-as-upsert"><a class="header" href="#create-as-upsert">Create As Upsert</a></h3>
+<p>An upsert silently changes the original entity and makes create behave like update
+without an expected version. It hides client errors and weakens audit meaning.</p>
+<h3 id="uuid-uniqueness"><a class="header" href="#uuid-uniqueness">UUID Uniqueness</a></h3>
+<p>UUID uniqueness proves that two storage identifiers differ. It says nothing about
+whether the domain entities are duplicates.</p>
+<h3 id="deterministic-uuid-from-the-name"><a class="header" href="#deterministic-uuid-from-the-name">Deterministic UUID From The Name</a></h3>
+<p>This embeds normalization, scope, and rename policy into an identifier, complicates
+migration, and still needs collision and lifecycle rules. A separate semantic
+identity registry keeps the surrogate ID stable and the domain contract explicit.</p>
+<h3 id="hash-the-entire-request"><a class="header" href="#hash-the-entire-request">Hash The Entire Request</a></h3>
+<p>Descriptions, timestamps, ordering, and defaults may differ while the request still
+describes the same entity. Conversely, identical payloads can be valid for an
+<code>ALLOW_MULTIPLE</code> entity. Identity fields must be declared by the domain.</p>
+<h2 id="implementation-plan-4"><a class="header" href="#implementation-plan-4">Implementation Plan</a></h2>
+<h3 id="phase-0-freeze-the-inventory-and-move-coarse-authorization-to-gateway"><a class="header" href="#phase-0-freeze-the-inventory-and-move-coarse-authorization-to-gateway">Phase 0: Freeze The Inventory And Move Coarse Authorization To Gateway</a></h3>
+<p><strong>Deployment gate.</strong> Identity enforcement must not ship until every participating
+portal command has fail-closed gateway authorization and global and host scope are
+derived from trusted context. This is a prerequisite, not a task that can run in
+parallel with Phase 2.</p>
+<ul>
+<li>Inventory every logical birth endpoint and classify it as tenant-only,
+global-only, or combined tenant/global.</li>
+<li>Configure its role permissions and <code>req-acc</code> rule in Light Portal, publish the
+generated policy through the config server, and verify the effective policy on
+each gateway instance before removing command-layer coarse role checks.</li>
+<li>Record the published policy revision or digest and require every gateway
+instance serving portal commands to acknowledge it. Block promotion or remove
+an unacknowledged instance from routing rather than assuming an older policy
+fails closed.</li>
+<li>Prefer separate tenant and global logical endpoints. For a combined endpoint,
+use one CEL expression or <code>accessRuleLogic: all</code> to bind role, requested scope,
+and authenticated host in the same authorization decision.</li>
+<li>Remove the <code>role.contains(PortalConstants.ADMIN_ROLE)</code> branch from
+<code>AbstractCommandHandler.handle()</code> after the gateway deployment gate passes; do
+not replace it with another command-layer list of <code>admin</code>, <code>org-admin</code>, and
+<code>host-admin</code>.</li>
+<li>Derive host scope only from authenticated context; stop preferring the
+request-body <code>hostId</code> in <code>effectiveHost()</code> and stop falling back to
+<code>map.get(HOST_ID)</code> in <code>handle()</code>.</li>
+<li>Preserve command-side target-host, parent, owner, owner-transfer, lifecycle,
+aggregate-version, and uniqueness validation. Replace any remaining raw-role
+scope exemption only with an unforgeable gateway authorization-scope decision
+or a scope-specific endpoint.</li>
+<li>Add tests proving <code>org-admin</code> and <code>host-admin</code> can call only their configured
+host-scoped endpoints and cannot select global scope. Prove <code>admin</code> can use the
+separately protected global endpoint or global branch.</li>
+<li>Add qualification tests proving that a missing role permission, missing
+<code>req-acc</code> rule, or unavailable effective policy denies the command before it
+reaches the service, and that an unacknowledged config-server revision blocks
+deployment or routing to the stale gateway instance.</li>
+<li>Enumerate all registered portal birth events and their command handlers.</li>
+<li>Record aggregate ID, scope, projection key, projection unique constraints,
+semantic identity, normalization, delete behavior, and multiplicity.</li>
+<li>Require <code>UNIQUE</code> or <code>ALLOW_MULTIPLE</code> for every entry.</li>
+<li>Add contract fixtures for role, rule, category, tag, platform, config, instance,
+and at least one intentional-multiplicity aggregate.</li>
+<li>Audit global entities and child-resource scopes separately.</li>
+</ul>
+<h3 id="phase-1-stop-same-stream-duplicate-births"><a class="header" href="#phase-1-stop-same-stream-duplicate-births">Phase 1: Stop Same-stream Duplicate Births</a></h3>
+<ul>
+<li>Add explicit create command kind to the shared command abstraction.</li>
+<li>Set create expected/new versions to <code>0/1</code>; never use max-plus-one for create.</li>
+<li>Enforce stream absence transactionally in <code>GraphCommandPersistence</code>.</li>
+<li>Translate aggregate/version uniqueness conflicts to
+<code>409 ENTITY_ALREADY_EXISTS</code>.</li>
+<li>Migrate role and rule first and prove that the second create appends no event.</li>
+<li>Stop silently skipping a conflicting create in projections. Make it a loud,
+alerting failure now rather than in Phase 4: while append protection is rolling
+out group by group, this is the only detector for unprotected append paths such
+as importers, replay tooling, and direct SQL. Permanent-failure enforcement can
+then be enabled per aggregate group as protection lands.</li>
+<li>Migrate aggregate versions from <code>int</code> to <code>long</code> as a coordinated
+provider-interface change. PostgreSQL already stores <code>aggregate_version</code> as
+<code>BIGINT</code>, so the Java contract should match it throughout. This touches
+<code>PortalDbProvider</code>, <code>EventPersistence</code>, their implementations
+(<code>PortalDbProviderImpl</code>, <code>EventPersistenceImpl</code>), test doubles, the
+<code>ProductVersionConfig*Enricher</code> call sites, and the private helper in
+<code>SchedulePersistenceImpl</code>. Because db-provider exists so databases can be
+swapped, alternate implementations break on recompile and the change must be
+version-coordinated rather than treated as a local type cleanup.</li>
+</ul>
+<p>This phase directly resolves the reported <code>ERR11645</code> path.</p>
+<h3 id="phase-2-protect-generated-uuid-entities"><a class="header" href="#phase-2-protect-generated-uuid-entities">Phase 2: Protect Generated UUID Entities</a></h3>
+<ul>
+<li>Add the versioned creation-policy registry.</li>
+<li>Add <code>entity_identity_t</code> and semantic identity locks.</li>
+<li>Reserve identity and append event/outbox in one transaction.</li>
+<li>Migrate UUID-based entities in groups, starting with tables that already have
+natural unique constraints.</li>
+<li>Replace projection existence lookups as correctness checks; retain them only for
+optional UX or ID discovery during migration.</li>
+</ul>
+<h3 id="phase-3-idempotent-client-retries"><a class="header" href="#phase-3-idempotent-client-retries">Phase 3: Idempotent Client Retries</a></h3>
+<ul>
+<li>Add <code>command_idempotency_t</code>.</li>
+<li>Define and version the request fingerprint over validated client intent plus
+trusted scope, excluding enrichment output. Prove a retry whose enrichment
+regenerates a UUID still matches.</li>
+<li>Add the principal-bound idempotency advisory lock to the sorted lock set so
+concurrent <code>ALLOW_MULTIPLE</code> retries replay instead of failing on the ledger
+constraint.</li>
+<li>Ship fingerprint read capability before write capability, following the
+expand/contract order, and gate the N+1 write switch on old readers being
+drained.</li>
+<li>Accept and propagate a standard create idempotency key.</li>
+<li>Update <code>portal-view</code> create forms to reuse one key per submission attempt.</li>
+<li>Return the original success for an exact retry and a conflict for key reuse with
+a different request hash.</li>
+</ul>
+<h3 id="phase-4-projection-and-lifecycle-alignment"><a class="header" href="#phase-4-projection-and-lifecycle-alignment">Phase 4: Projection And Lifecycle Alignment</a></h3>
+<ul>
+<li>Replace create-as-reactivate behavior with explicit restore/reactivate events.</li>
+<li>Complete permanent-failure enforcement for the remaining aggregate groups.
+Detection and alerting already landed in Phase 1.</li>
+<li>Add registry-to-DDL conformance tests for semantic unique constraints.</li>
+<li>Define explicit identity transfer/release behavior for mutable unique fields.</li>
+</ul>
+<h3 id="phase-5-backfill-and-enforce"><a class="header" href="#phase-5-backfill-and-enforce">Phase 5: Backfill And Enforce</a></h3>
+<ul>
+<li>Run the legacy duplicate, version-gap, and historical scope-provenance inventory.</li>
+<li>Quarantine global entities whose creation lacks exact historical global-create
+authority or an approved operator attestation; never backfill them blindly.</li>
+<li>Repair or quarantine existing conflicts with audit evidence.</li>
+<li>Backfill owner rows and identity reservations with the versioned generator;
+optionally emit a reviewable generated SQL artifact for existing databases.</li>
+<li>Add both guard tables and the idempotency ledger to the generic snapshot export
+and conversion skip lists.</li>
+<li>Make event import invoke the shared identity transition component and add a
+preflight mode that reports every destination reservation conflict before any
+event is written.</li>
+<li>Require event history or a validated identity-reservation manifest for
+snapshot-only promotion of identity-protected aggregate groups.</li>
+<li>Operate first in report-only mode, then reject mode by aggregate group.</li>
+<li>Reject deployment when a new birth event lacks a reviewed creation policy.</li>
+<li>Follow the dual-write or drain protocol for any normalizer-version migration,
+and re-verify the backfill after the last old-version writer exits.</li>
+</ul>
+<h2 id="test-matrix"><a class="header" href="#test-matrix">Test Matrix</a></h2>
+<p>The shared implementation must cover at least:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Scenario</th><th>Expected result</th></tr>
+</thead>
+<tbody>
+<tr><td>First create for natural aggregate ID</td><td>event version 1 and success</td></tr>
+<tr><td>Sequential second create for same role/rule</td><td>conflict; event count unchanged</td></tr>
+<tr><td>Concurrent creates for same aggregate ID</td><td>one success, one conflict</td></tr>
+<tr><td>Two UUIDs with same category semantic key</td><td>one success, one conflict</td></tr>
+<tr><td>Same name in two permitted host scopes</td><td>both succeed</td></tr>
+<tr><td>Tenant A and Tenant B each define environment <code>dev</code></td><td>both succeed with distinct host-scoped reservations</td></tr>
+<tr><td>Global environment <code>dev</code> and Tenant A environment <code>dev</code></td><td>both succeed; effective catalog composition remains a query concern</td></tr>
+<tr><td>Second environment <code>dev</code> within Tenant A</td><td>conflict in Tenant A only</td></tr>
+<tr><td>Global and tenant identity according to policy</td><td>scope-specific expected result</td></tr>
+<tr><td>Same idempotency key and request hash</td><td>original success returned</td></tr>
+<tr><td>Same idempotency key with changed request</td><td>idempotency conflict</td></tr>
+<tr><td>New key for existing semantic identity</td><td>entity-exists conflict</td></tr>
+<tr><td>Create after soft delete</td><td>retired conflict</td></tr>
+<tr><td>Explicit restore after soft delete</td><td>next version succeeds</td></tr>
+<tr><td>Sibling names under one parent scope</td><td>duplicate rejected within the parent</td></tr>
+<tr><td>Same child name under two different parents</td><td>both succeed</td></tr>
+<tr><td>Parent deleted while a child identity is reserved</td><td>child reservations retained; not released</td></tr>
+<tr><td>Create child name under a deleted parent</td><td>conflict; reservation still held</td></tr>
+<tr><td>Parent restored after delete</td><td>child reservations intact; no repair needed</td></tr>
+<tr><td>Child reparented to a free destination</td><td>old identity retired, new one reserved, one transaction</td></tr>
+<tr><td>Child reparented into a scope holding that name</td><td>conflict; original child unchanged</td></tr>
+<tr><td>Aggregate reclaims its own alias</td><td>version-checked rename succeeds</td></tr>
+<tr><td>Another aggregate claims an alias</td><td>conflict; alias unchanged</td></tr>
+<tr><td>Create colliding with a live entity’s former name</td><td><code>ENTITY_ALREADY_EXISTS</code>, not <code>ENTITY_RETIRED</code></td></tr>
+<tr><td>Normalizer dual-write holds CURRENT at N and N+1</td><td>both rows permitted by the partial index</td></tr>
+<tr><td>Delete, then restore, with aliases at N and N+1</td><td>one owner row flips; every binding unchanged and still reserved</td></tr>
+<tr><td>Rename during normalizer dual-write</td><td>demoted and re-bound at N and N+1 in one transaction</td></tr>
+<tr><td>Reparent during normalizer dual-write</td><td>transferred at N and N+1 in one transaction; owner row untouched</td></tr>
+<tr><td>Binding rows referencing a missing owner row</td><td>rejected by the foreign key; unrepresentable</td></tr>
+<tr><td>Conflict lookup for an aliased live entity</td><td>single owner read; <code>ENTITY_ALREADY_EXISTS</code></td></tr>
+<tr><td>Intentional <code>ALLOW_MULTIPLE</code> entity</td><td>two UUID streams succeed</td></tr>
+<tr><td>Concurrent <code>ALLOW_MULTIPLE</code> retries, same idempotency key</td><td>one create; the other returns the original result, not a constraint error</td></tr>
+<tr><td>Retry after enrichment regenerates a UUID</td><td>same fingerprint; original success returned</td></tr>
+<tr><td>Normalizer upgrade before materialization completes</td><td>enforcement blocked for that aggregate group</td></tr>
+<tr><td>Version-N idempotency retry after version N+1 is deployed</td><td>stored version used; identical request replays</td></tr>
+<tr><td>N+1 write attempted while an N-only reader still serves traffic</td><td>rejected; writes stay at N until step 2 completes</td></tr>
+<tr><td>Concurrent old-format and new-format lock writers, same idempotency key</td><td>shared key acquired; one create, one replay</td></tr>
+<tr><td>Version-N writer creates after N+1 materialization</td><td>dual-write produces the N+1 row, or the writer is drained first</td></tr>
+<tr><td>Projection lag during duplicate create</td><td>command-side conflict still occurs</td></tr>
+<tr><td>Identity normalizer version migration</td><td>old aliases remain protected</td></tr>
+<tr><td>Unauthorized cross-tenant duplicate probe</td><td>no existing ID disclosed</td></tr>
+<tr><td>Failure after identity insert before event insert</td><td>whole transaction rolls back</td></tr>
+<tr><td>New database bootstrap imports a UNIQUE birth event</td><td>event, owner, binding, and outbox commit together</td></tr>
+<tr><td>Generated upgrade SQL reruns against identical rows</td><td>verifies exact matches without overwriting them</td></tr>
+<tr><td>Generated upgrade SQL encounters a different owner or binding</td><td>fails closed; no partial backfill</td></tr>
+<tr><td>Event-history promotion rewrites the target host scope</td><td>destination identity is recomputed under the target scope</td></tr>
+<tr><td>Snapshot-only promotion omits identity history</td><td>rejected for identity-protected groups</td></tr>
+<tr><td>Snapshot promotion includes a valid identity manifest</td><td>all current and alias bindings are restored and verified</td></tr>
+<tr><td>Generic snapshot conversion encounters guard tables</td><td>tables are skipped; no synthetic guard-table CreatedEvents are emitted</td></tr>
+<tr><td>Operator attempts direct identity-table CRUD</td><td>no UI/API path exists; audited command or repair workflow is required</td></tr>
+<tr><td>Bootstrap input contains a semantic conflict</td><td>preflight reports it and writes no event or reservation</td></tr>
+<tr><td>Historical global entity lacks exact authorization evidence</td><td>classified <code>UNKNOWN_SCOPE_PROVENANCE</code> and quarantined before backfill</td></tr>
+<tr><td>Explicit release covers every dual-write schema version</td><td>audited release event and exact binding deletions commit together; owner remains</td></tr>
+<tr><td>Explicit release omits one participating schema version</td><td>rejected before append; no binding is deleted</td></tr>
+<tr><td>Rebuild encounters an identity release event</td><td>released bindings remain absent after deterministic reduction</td></tr>
+<tr><td>Catalog precedence changes which scoped <code>dev</code> an Instance resolves</td><td>requires a new normalizer version; existing identity is not silently reinterpreted</td></tr>
+<tr><td>Promotion of UNIQUE entities starts with an empty idempotency ledger</td><td>identity reservations still prevent semantic duplicates</td></tr>
+<tr><td>Promotion of ALLOW_MULTIPLE entities with live retry keys</td><td>writes remain fenced until the retry horizon drains or live ledger entries transfer</td></tr>
+<tr><td>Portal role permission and <code>req-acc</code> rule published through the config server</td><td>gateway admits only configured logical endpoints</td></tr>
+<tr><td>Role permission exists but <code>req-acc</code> rule is absent</td><td>gateway denies before command dispatch</td></tr>
+<tr><td>Gateway effective policy is unavailable</td><td>command fails closed; no event or reservation is written</td></tr>
+<tr><td>Gateway has not acknowledged the published policy revision</td><td>deployment or routing to that instance remains blocked</td></tr>
+<tr><td><code>org-admin</code> or <code>host-admin</code> submits global scope on a combined endpoint</td><td>gateway denies; command handler is not invoked</td></tr>
+<tr><td>Host-scoped request contains another tenant’s <code>hostId</code></td><td>gateway or command boundary denies; no reservation is written</td></tr>
+<tr><td>Direct command invocation bypasses gateway authorization</td><td>rejected by ingress isolation or missing trusted authorization context</td></tr>
+</tbody>
+</table>
+</div>
+<p>PostgreSQL-backed concurrency tests are required. Mock-only tests cannot prove the
+unique constraint, advisory-lock, and rollback behavior.</p>
+<h2 id="observability-2"><a class="header" href="#observability-2">Observability</a></h2>
+<p>Add bounded metrics without identity values:</p>
+<ul>
+<li><code>entity_create_accepted_total{aggregateType}</code></li>
+<li><code>entity_create_conflict_total{aggregateType,reason}</code></li>
+<li><code>entity_create_idempotent_replay_total{aggregateType}</code></li>
+<li><code>entity_create_policy_missing_total{eventType}</code></li>
+<li><code>entity_identity_backfill_conflict_total{aggregateType}</code></li>
+<li><code>duplicate_create_projection_failure_total{aggregateType}</code></li>
+</ul>
+<p>Structured logs may include event type, aggregate type, event ID, correlation ID,
+scope type, policy version, and a short identity-digest prefix. They must not log
+raw canonical identities, request payloads, or credentials.</p>
+<p>Alert on any duplicate-create projection failure after an aggregate group enters
+enforce mode. Once command-side enforcement is active, that signal indicates an
+unprotected append path, importer problem, or policy drift.</p>
+<h2 id="security-and-abuse-considerations"><a class="header" href="#security-and-abuse-considerations">Security And Abuse Considerations</a></h2>
+<ul>
+<li>Derive scope from authenticated command context.</li>
+<li>Do not reveal an existing aggregate ID until authorization is confirmed.</li>
+<li>Bound identity field count and canonical size before hashing.</li>
+<li>Never use secret fields as semantic identities.</li>
+<li>Rate-limit advisory duplicate lookups so they cannot enumerate catalog names.</li>
+<li>Treat identity-registry or policy-registry unavailability as fail-closed for
+create commands.</li>
+<li>Require elevated, audited authorization for identity release and legacy repair.</li>
+</ul>
+<h2 id="acceptance-criteria-1"><a class="header" href="#acceptance-criteria-1">Acceptance Criteria</a></h2>
+<p>The design is implemented when:</p>
+<ol>
+<li>A second role or rule create returns a typed conflict and appends no event.</li>
+<li>No normal aggregate stream can contain two registered birth events.</li>
+<li>Every birth event declares <code>UNIQUE</code> or <code>ALLOW_MULTIPLE</code> in a versioned registry.</li>
+<li>Concurrent create tests prove one winner for both natural-ID and UUID-based
+semantic identities.</li>
+<li>Identity reservation, event store, outbox, nonce, and idempotency changes are
+atomic.</li>
+<li>A generated UUID cannot bypass a declared business unique key.</li>
+<li>Delete does not silently release identity, and restore is not modeled as create.</li>
+<li>Projection constraints and creation policies have executable conformance tests.</li>
+<li>The UI uses stable per-attempt idempotency keys and handles authorized conflicts.</li>
+<li>Existing multiple-create streams are inventoried and repaired or quarantined
+before full enforcement.</li>
+<li>Metrics and logs expose conflict cause without leaking identity values.</li>
+<li>Adding a new birth event without a creation policy fails the deployment gate.</li>
+<li>Every participating logical command endpoint has a Portal-managed,
+config-server-published role permission and <code>req-acc</code> policy that fails closed.</li>
+<li>Every gateway instance serving portal commands acknowledges the published
+policy revision or is excluded from routing.</li>
+<li>Java command handlers do not use <code>admin</code>, <code>org-admin</code>, or <code>host-admin</code> token
+parsing as the coarse endpoint-invocation authorization boundary.</li>
+<li>Host, parent, owner, lifecycle, version, and uniqueness invariants remain
+enforced at the database-backed command boundary.</li>
+<li>Bootstrap, import, replay, and approved repair use the same versioned identity
+transition component as normal commands.</li>
+<li>A new database populates guard rows through bootstrap event append; generated
+SQL is limited to versioned, verified upgrade backfills.</li>
+<li>Event-history promotion reconstructs destination reservations, and
+snapshot-only promotion cannot silently lose aliases.</li>
+<li>The guard and idempotency tables are excluded from generic snapshot conversion
+and cannot be maintained through direct UI CRUD.</li>
+<li>The same normalized name may be reserved independently in global and different
+trusted tenant scopes, while a duplicate within one scope is rejected.</li>
+<li>Historical global creations with missing or invalid authorization provenance
+are quarantined rather than converted into permanent reservations.</li>
+<li>Bootstrap preflight reports all reservation and scope conflicts before the
+first mutation.</li>
+<li>Explicit identity release has event-backed deletion semantics that can be
+reproduced during rebuild.</li>
+<li>Promotion accounts for the non-reconstructible idempotency ledger and fences
+<code>ALLOW_MULTIPLE</code> writes across any unprotected retry horizon.</li>
+<li>Explicit release covers every normalizer version participating in dual-write
+or fails before appending its event or deleting any binding.</li>
+<li>Identities that reference scoped catalog values encode the resolved scope and
+normalized value, and a resolution-rule change uses normalizer migration.</li>
+</ol>
+<h2 id="settled-decisions-1"><a class="header" href="#settled-decisions-1">Settled Decisions</a></h2>
+<ul>
+<li>The authoritative check belongs in the database-backed command append path.</li>
+<li>UUIDs remain surrogate storage IDs; semantic uniqueness is separate.</li>
+<li>Projection and UI checks are helpful but never authoritative.</li>
+<li>Creation-policy entries are per birth event type; owner and identity rows are
+per actual aggregate instance and are maintained by a shared synchronous
+identity transition component.</li>
+<li>New databases populate the guard tables by importing bootstrap events. A
+generated SQL file is an optional, versioned upgrade artifact, never a
+hand-maintained registry or runtime maintenance mechanism.</li>
+<li>Event history is the preferred promotion source. Snapshot-only promotion of an
+identity-protected group requires a validated reservation manifest so aliases
+and lifecycle cannot be lost.</li>
+<li>The guard tables have no direct CRUD UI and are not asynchronous projections.</li>
+<li>Semantic uniqueness is scoped. Global and tenant-local reference values, and
+values belonging to different tenants, may share a normalized name because
+their trusted scope tuples differ; only duplicates within one scope conflict.</li>
+<li>Explicit release removes the named active reservation rows at every normalizer
+version participating in dual-write and records one versioned audited event;
+incomplete version coverage fails closed and <code>RELEASED</code> is not a binding status.</li>
+<li>Scoped catalog references are canonicalized as resolved scope/value tuples, not
+bare display names. A change to resolution semantics is a normalizer-version
+migration.</li>
+<li>Idempotency ledger entries are request facts, not event-derived state. In-place
+identity rebuilds retain them, while cross-database promotion fences
+<code>ALLOW_MULTIPLE</code> writes until active retry protection is preserved or drained.</li>
+<li>Semantic identity and request idempotency are separate mechanisms.</li>
+<li>Create is not upsert, restore, or update.</li>
+<li>Identity remains reserved after delete by default.</li>
+<li>Every create event must explicitly declare uniqueness or intentional multiplicity.</li>
+<li>Coarse command authorization belongs to Light Gateway logical-endpoint policy.
+Light Portal owns role permissions and rules and publishes them through the
+config server; static <code>values.yml</code> is not the policy source.</li>
+<li>Java command handlers do not duplicate endpoint invocation policy by parsing
+<code>admin</code>, <code>org-admin</code>, or <code>host-admin</code>, but trusted host, target, owner,
+lifecycle, version, and uniqueness checks remain command-side invariants.</li>
+<li>Combined host/global commands use scope-specific endpoints where practical;
+otherwise one fail-closed CEL decision binds role, requested scope, and trusted
+host. <code>accessRuleLogic: any</code> must not separate those required conditions.</li>
+<li>Trusted scope derivation and effective gateway policy qualification are
+prerequisites for enforcement, not parallel workstreams.</li>
+<li>The reservation key is scope, aggregate type, schema version, and
+<code>identity_hash</code> together; equal digests within one such key are one identity.</li>
+<li>Idempotency keys are bound to the authenticated principal, not only the tenant.</li>
+<li>Identity binding (<code>CURRENT</code>/<code>ALIAS</code>) and entity lifecycle (<code>ACTIVE</code>/<code>RETIRED</code>)
+are separate concerns on separate tables. Lifecycle is stored once per
+aggregate; conflict responses read it from the owner row.</li>
+<li>One <em>current binding</em> per aggregate per identity schema version.</li>
+<li>Binding changes fan out across every schema version participating in
+dual-write; lifecycle changes never fan out at all.</li>
+<li>Every versioned artifact — fingerprint, lock encoding, normalizer — needs a
+mixed-version transition protocol, and it must work in <strong>both</strong> directions:
+old nodes reading new data as well as new nodes reading old. Rolling
+deployments run both versions at once, so a version bump is never a swap, and
+read capability always ships before write capability.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="composit-key-vs-surrogate-uuid-key"><a class="header" href="#composit-key-vs-surrogate-uuid-key">Composit key vs Surrogate UUID key</a></h1>
 <h3 id="composite-key-with-5-or-more-columns"><a class="header" href="#composite-key-with-5-or-more-columns">Composite key with 5 or more columns</a></h3>
 <p>User the following three tables as examples. We have composite key with 5 columns and some of them are varchar types in product version_property_t table. Is is a good idea to create UUID keys for config_property_t and product_version_t?</p>
@@ -22685,7 +24018,7 @@ scale well if every Java or Rust release requires a hand-maintained set of
 mapping events across all portal instances. This design proposes a release
 mapping automation model that keeps the existing event-sourced write path and
 removes the need to manually recreate mapping files for every product release.</p>
-<h2 id="problem-16"><a class="header" href="#problem-16">Problem</a></h2>
+<h2 id="problem-17"><a class="header" href="#problem-17">Problem</a></h2>
 <p>Product versions are released often. Each new release can introduce a new
 <code>productVersionId</code>, and the config update page only knows which configs and
 properties are applicable when mappings exist for that exact product version.</p>
@@ -22786,7 +24119,7 @@ unchanged products and to the new <code>productVersionId</code> for rebuilt prod
 </tbody>
 </table>
 </div>
-<h2 id="goals-23"><a class="header" href="#goals-23">Goals</a></h2>
+<h2 id="goals-24"><a class="header" href="#goals-24">Goals</a></h2>
 <ul>
 <li>Auto-populate config mappings for every new Java or Rust product release.</li>
 <li>Preserve event replay, auditability, and projection rebuild behavior.</li>
@@ -22799,7 +24132,7 @@ event amplification.</li>
 <li>Detect missing config and property definitions before a release appears
 complete.</li>
 </ul>
-<h2 id="non-goals-26"><a class="header" href="#non-goals-26">Non-Goals</a></h2>
+<h2 id="non-goals-27"><a class="header" href="#non-goals-27">Non-Goals</a></h2>
 <ul>
 <li>Do not change the config override hierarchy.</li>
 <li>Do not write directly to config mapping projection tables.</li>
@@ -23341,7 +24674,7 @@ through the command API.</p>
 profile to that product version. Avoid negative host-specific overrides in the
 MVP because they make query resolution and audit history harder to reason
 about.</p>
-<h2 id="observability-2"><a class="header" href="#observability-2">Observability</a></h2>
+<h2 id="observability-3"><a class="header" href="#observability-3">Observability</a></h2>
 <p>The generator or command should publish a structured summary:</p>
 <ul>
 <li>release set</li>
@@ -23435,7 +24768,7 @@ event-sourced product release model without duplicating standard mappings for
 every tenant.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="release-workflow"><a class="header" href="#release-workflow">Release Workflow</a></h1>
-<h2 id="status-3"><a class="header" href="#status-3">Status</a></h2>
+<h2 id="status-4"><a class="header" href="#status-4">Status</a></h2>
 <p>Proposed design.</p>
 <p>Light Portal should use <code>light-workflow</code> as the durable release orchestrator
 for Java and Rust releases. The workflow should coordinate repository checkout,
@@ -23445,7 +24778,7 @@ artifact publishing, AI-assisted failure diagnosis, and human approval.</p>
 portal service process. Command execution belongs in a sandboxed release
 runner, with <code>light-workflow</code> owning state, task routing, retries, approvals,
 and audit history.</p>
-<h2 id="problem-17"><a class="header" href="#problem-17">Problem</a></h2>
+<h2 id="problem-18"><a class="header" href="#problem-18">Problem</a></h2>
 <p>Java releases currently depend on <code>light-bot</code>, while Rust releases are handled
 through separate command-line and repository-specific steps. This works, but it
 keeps release knowledge outside the same workflow model used by Light Portal
@@ -23464,7 +24797,7 @@ and who approved publication.</li>
 <p>The release workflow should be flexible enough to call existing command-line
 tools, but controlled enough that it does not become an unrestricted shell
 inside Light Portal.</p>
-<h2 id="goals-24"><a class="header" href="#goals-24">Goals</a></h2>
+<h2 id="goals-25"><a class="header" href="#goals-25">Goals</a></h2>
 <ul>
 <li>Replace the current Java <code>light-bot</code> release path with <code>light-workflow</code> once
 parity is proven.</li>
@@ -23482,7 +24815,7 @@ reporting into the release gate.</li>
 behind explicit approval.</li>
 <li>Preserve release auditability and reproducibility.</li>
 </ul>
-<h2 id="non-goals-27"><a class="header" href="#non-goals-27">Non-Goals</a></h2>
+<h2 id="non-goals-28"><a class="header" href="#non-goals-28">Non-Goals</a></h2>
 <ul>
 <li>Do not run arbitrary release commands in the Light Portal service process.</li>
 <li>Do not replace Maven, Cargo, Docker, GitHub CLI, or existing release scripts
@@ -25197,7 +26530,7 @@ waitPeriod: 1000  # ms to wait between polls when no records
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="event-replay"><a class="header" href="#event-replay">Event Replay</a></h1>
-<h2 id="status-4"><a class="header" href="#status-4">Status</a></h2>
+<h2 id="status-5"><a class="header" href="#status-5">Status</a></h2>
 <p>This document defines the revised target design for event replay during the
 early development stage of light-portal. The implementation still contains
 legacy-backfill, staged-rollout, feature-gate, mandatory-encryption, and
@@ -25237,7 +26570,7 @@ transactions first;</li>
 <p>Event replay therefore operates on complete canonical failure transactions,
 not individual notification or DLQ rows. It invokes the same projection
 executor as live processing without rewinding PostgreSQL or Kafka offsets.</p>
-<h2 id="goals-25"><a class="header" href="#goals-25">Goals</a></h2>
+<h2 id="goals-26"><a class="header" href="#goals-26">Goals</a></h2>
 <ul>
 <li>Capture every new failed projection transaction in a replayable canonical
 form.</li>
@@ -25262,7 +26595,7 @@ schema is present.</li>
 <li>Keep configuration small enough that a developer can understand the entire
 replay setup from one screen.</li>
 </ul>
-<h2 id="non-goals-28"><a class="header" href="#non-goals-28">Non-Goals</a></h2>
+<h2 id="non-goals-29"><a class="header" href="#non-goals-29">Non-Goals</a></h2>
 <ul>
 <li>Historical or legacy <code>dead_letter_queue</code> rows are not imported. They remain
 diagnostic history only.</li>
@@ -26240,7 +27573,7 @@ provision those roles and credentials outside this schema before promotion.</li>
 <li>Application-level encryption is an optional production hardening control,
 not a prerequisite for development replay.</li>
 </ul>
-<h2 id="observability-3"><a class="header" href="#observability-3">Observability</a></h2>
+<h2 id="observability-4"><a class="header" href="#observability-4">Observability</a></h2>
 <p>Recommended bounded-cardinality metrics are:</p>
 <ul>
 <li>canonical failures captured, open, resolved, repaired, and waived;</li>
@@ -26966,7 +28299,7 @@ Location: https://portal.lightapi.net/authorization?code=auth_code_abc&amp;state
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="auth-client-secret-regeneration"><a class="header" href="#auth-client-secret-regeneration">Auth Client Secret Regeneration</a></h1>
-<h2 id="problem-18"><a class="header" href="#problem-18">Problem</a></h2>
+<h2 id="problem-19"><a class="header" href="#problem-19">Problem</a></h2>
 <p>An OAuth auth client receives a <code>client_id</code> and <code>client_secret</code> when it is
 created. The clear text <code>client_secret</code> is intentionally a one-time value. The
 database projection stores only a verifier value in <code>auth_client_t.client_secret</code>
@@ -27800,7 +29133,7 @@ Kubernetes cluster from the Instance Admin page.</p>
 <p>The goal is to provide a production-like deployment path for small businesses
 and enterprise tenants without requiring Light Portal to have direct network
 access to every customer cluster.</p>
-<h2 id="problem-19"><a class="header" href="#problem-19">Problem</a></h2>
+<h2 id="problem-20"><a class="header" href="#problem-20">Problem</a></h2>
 <p>Each API or application repository can contain a <code>k8s/</code> folder with Kubernetes
 deployment templates. The templates contain variables in the following format:</p>
 <pre><code class="language-text">${key:defaultValue}
@@ -28342,7 +29675,7 @@ deployment intent and history, while the deployer owns safe cluster-local
 execution.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-oauth-and-oauth-kafka-agentcore-oidc-discovery"><a class="header" href="#light-oauth-and-oauth-kafka-agentcore-oidc-discovery">Light OAuth and OAuth Kafka AgentCore OIDC Discovery</a></h1>
-<h2 id="problem-20"><a class="header" href="#problem-20">Problem</a></h2>
+<h2 id="problem-21"><a class="header" href="#problem-21">Problem</a></h2>
 <p>Issue https://github.com/lightapi/portal-service/issues/44 asks whether
 <code>portal-service/apps/light-oauth</code> can support AWS AgentCore JWT inbound
 authorization.</p>
@@ -28472,7 +29805,7 @@ the provider <code>jwk</code> from <code>auth_provider_t</code>. The implementat
 that the JWT header <code>kid</code> is present in the returned JWKS for the same provider.
 That guarantee matters more once external AWS services cache the discovery and
 JWKS responses.</p>
-<h2 id="goals-26"><a class="header" href="#goals-26">Goals</a></h2>
+<h2 id="goals-27"><a class="header" href="#goals-27">Goals</a></h2>
 <ul>
 <li>Let AWS AgentCore use Rust <code>light-oauth</code> or Java <code>oauth-kafka</code> as a JWT
 bearer token issuer.</li>
@@ -28484,7 +29817,7 @@ claims working.</li>
 <li>Keep issuer, audience, and discovery URLs deterministic across environments.</li>
 <li>Add tests that prove discovery, JWKS, and signed token claims line up.</li>
 </ul>
-<h2 id="non-goals-29"><a class="header" href="#non-goals-29">Non-Goals</a></h2>
+<h2 id="non-goals-30"><a class="header" href="#non-goals-30">Non-Goals</a></h2>
 <ul>
 <li>Do not implement full OIDC identity-provider behavior in the first phase.</li>
 <li>Do not add dynamic client registration.</li>
@@ -28666,7 +29999,7 @@ URL:</p>
 <p>If the customer wants <code>allowedAudience</code> to be the AgentCore runtime or an API
 identifier instead of <code>urn:com.networknt</code>, make <code>jwtAudience</code> environment
 specific and align it with the AgentCore authorizer configuration.</p>
-<h2 id="implementation-plan-4"><a class="header" href="#implementation-plan-4">Implementation Plan</a></h2>
+<h2 id="implementation-plan-5"><a class="header" href="#implementation-plan-5">Implementation Plan</a></h2>
 <h3 id="phase-1-discovery-metadata"><a class="header" href="#phase-1-discovery-metadata">Phase 1: Discovery Metadata</a></h3>
 <ul>
 <li>Rust: add <code>publicIssuerBaseUrl</code>, <code>oidcDiscoveryEnabled</code>, and
