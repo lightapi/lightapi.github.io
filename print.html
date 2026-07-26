@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-ccfaf1d3.js";
+            window.path_to_searchindex_js = "searchindex-a22fbcdc.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-800b5e2d.js"></script>
@@ -18912,7 +18912,10 @@ public class UuidUtil {
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="entity-creation-uniqueness"><a class="header" href="#entity-creation-uniqueness">Entity Creation Uniqueness</a></h1>
 <h2 id="status-3"><a class="header" href="#status-3">Status</a></h2>
-<p>Proposed design for <a href="https://github.com/lightapi/light-portal/issues/691">light-portal issue 691</a>.</p>
+<p>Implemented through Phase 3 for Role/Rule stream births, Category/Tag semantic
+identity, and Category/Tag client retries. Later aggregate groups, lifecycle
+alignment, historical backfill, and full enforcement remain phased work for
+<a href="https://github.com/lightapi/light-portal/issues/691">light-portal issue 691</a>.</p>
 <h2 id="executive-decision"><a class="header" href="#executive-decision">Executive Decision</a></h2>
 <p>Light Portal must enforce entity creation uniqueness in the authoritative command
 transaction, before a <code>*CreatedEvent</code> is appended. The UI and the asynchronous
@@ -20019,6 +20022,13 @@ natural unique constraints.</li>
 optional UX or ID discovery during migration.</li>
 </ul>
 <h3 id="phase-3-idempotent-client-retries"><a class="header" href="#phase-3-idempotent-client-retries">Phase 3: Idempotent Client Retries</a></h3>
+<p>The initial implementation enables the public retry contract only for Category
+and Tag. Both are single-event creates whose original success response can be
+reconstructed from the ledger’s aggregate ID after UUID enrichment runs again.
+The append-side ledger and lock implementation is generic for any single-event
+<code>CREATE</code>, but another handler must explicitly declare its replay aggregate-ID
+field before accepting <code>Idempotency-Key</code>. Multi-event create responses remain
+fail closed until their durable result-reference contract is defined.</p>
 <ul>
 <li>Add <code>command_idempotency_t</code>.</li>
 <li>Define and version the request fingerprint over validated client intent plus
@@ -20031,6 +20041,10 @@ constraint.</li>
 expand/contract order, and gate the N+1 write switch on old readers being
 drained.</li>
 <li>Accept and propagate a standard create idempotency key.</li>
+<li>Advertise idempotency support per logical endpoint. An unmigrated handler must
+reject <code>Idempotency-Key</code> instead of silently performing a non-idempotent create;
+multi-event creates remain unsupported until their durable replay result is
+defined.</li>
 <li>Update <code>portal-view</code> create forms to reuse one key per submission attempt.</li>
 <li>Return the original success for an exact retry and a conflict for key reuse with
 a different request hash.</li>
@@ -20068,6 +20082,11 @@ registry/normalizer versions, expected counts, and digest match.</li>
 <li>Reject deployment when a new birth event lacks a reviewed creation policy.</li>
 <li>Follow the dual-write or drain protocol for any normalizer-version migration,
 and re-verify the backfill after the last old-version writer exits.</li>
+<li>Add policy-aware idempotency-ledger cleanup and bounded age/cardinality
+telemetry. Treat each registry duration as a minimum retention requirement,
+never as one global TTL, and require this worker before enabling a public
+<code>ALLOW_MULTIPLE</code> create endpoint. Until it lands, retaining rows indefinitely
+is the safe Phase 3 behavior.</li>
 </ul>
 <h2 id="test-matrix"><a class="header" href="#test-matrix">Test Matrix</a></h2>
 <p>The shared implementation must cover at least:</p>
@@ -20222,6 +20241,9 @@ reproduced during rebuild.</li>
 or fails before appending its event or deleting any binding.</li>
 <li>Identities that reference scoped catalog values encode the resolved scope and
 normalized value, and a resolution-rule change uses normalizer migration.</li>
+<li>Idempotency-ledger cleanup honors each policy’s minimum retention, exposes
+bounded age/cardinality telemetry, and is deployed before any public
+<code>ALLOW_MULTIPLE</code> create endpoint is enabled.</li>
 </ol>
 <h2 id="settled-decisions-1"><a class="header" href="#settled-decisions-1">Settled Decisions</a></h2>
 <ul>
