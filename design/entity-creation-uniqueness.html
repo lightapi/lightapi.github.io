@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-bc846035.js";
+            window.path_to_searchindex_js = "../searchindex-ccfaf1d3.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-800b5e2d.js"></script>
@@ -714,6 +714,23 @@ updates the identity tables synchronously. The expected order is:</p>
   -&gt; verify owner/binding counts and registry digest
   -&gt; enable uniqueness enforcement
 </code></pre>
+<p>That sequence is the Phase 5 target contract, not a capability of the legacy
+bootstrap fixture today. The current <code>event-importer/events.json</code> birth events do
+not carry the trusted <code>commandkind</code> and <code>entityscope</code> extensions required by the
+Phase 2 guard, and the importer must not guess whether historical Category or Tag
+events were tenant-local or global. Therefore a newly created database populated
+from that fixture is treated exactly like an existing database: keep create
+traffic fenced, import the events, run the Phase 5 scope-provenance preflight and
+versioned backfill, verify the completion record, and only then enable reject
+mode. Only an empty database that imports no historical identity-protected events
+may enable Phase 2 writers immediately.</p>
+<p>Phase 5 records materialization completion per aggregate group. The record is
+bound to the covered event range or high-water mark and input digest, creation-
+policy registry version, normalizer version, expected owner/binding counts, and
+verification digest. Deployment refuses reject mode without a matching completion
+record. A non-zero reservation count is not an acceptable substitute: a partial
+import or failed backfill can produce rows while still leaving older identities
+unprotected.</p>
 <p>Preflight is required even when the destination is expected to be empty. It must
 report duplicate streams, semantic-identity conflicts, unsupported policy or
 normalizer versions, and invalid scope provenance before the first write. This
@@ -1289,6 +1306,9 @@ a different request hash.</li>
 Detection and alerting already landed in Phase 1.</li>
 <li>Add registry-to-DDL conformance tests for semantic unique constraints.</li>
 <li>Define explicit identity transfer/release behavior for mutable unique fields.</li>
+<li>Resolve identity collisions through the owner row once delete/restore is
+implemented: an <code>ACTIVE</code> owner, including a former-name alias, returns
+<code>ENTITY_ALREADY_EXISTS</code>; a <code>RETIRED</code> owner returns <code>ENTITY_RETIRED</code>.</li>
 </ul>
 <h3 id="phase-5-backfill-and-enforce"><a class="header" href="#phase-5-backfill-and-enforce">Phase 5: Backfill And Enforce</a></h3>
 <ul>
@@ -1306,6 +1326,9 @@ event is written.</li>
 <li>Require event history or a validated identity-reservation manifest for
 snapshot-only promotion of identity-protected aggregate groups.</li>
 <li>Operate first in report-only mode, then reject mode by aggregate group.</li>
+<li>Persist the verified per-group materialization completion record and make the
+deployment gate reject Category/Tag create traffic until its event coverage,
+registry/normalizer versions, expected counts, and digest match.</li>
 <li>Reject deployment when a new birth event lacks a reviewed creation policy.</li>
 <li>Follow the dual-write or drain protocol for any normalizer-version migration,
 and re-verify the backfill after the last old-version writer exits.</li>
