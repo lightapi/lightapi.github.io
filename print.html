@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-5bffd9d1.js";
+            window.path_to_searchindex_js = "searchindex-a37b6ae9.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-800b5e2d.js"></script>
+        <script src="toc-a087366f.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -19920,8 +19920,8 @@ contain multiple birth events.</p>
 <li>global-scoped entities whose creating principal and historical policy evidence
 do not prove exact global-create authority at the time of creation.</li>
 </ul>
-<p>Older events may not contain a policy revision or enough authorization evidence
-to prove the historical decision. Classify those records as
+<p>Older events may not contain enough authorization evidence to prove the
+historical decision. Classify those records as
 <code>UNKNOWN_SCOPE_PROVENANCE</code>; do not assume that a global row was legitimate merely
 because it exists. A global identity created through the legacy substring-role
 path must be reviewed or quarantined before backfill, otherwise Phase 5 would turn
@@ -19981,10 +19981,10 @@ global-only, or combined tenant/global.</li>
 <li>Configure its role permissions and <code>req-acc</code> rule in Light Portal, publish the
 generated policy through the config server, and verify the effective policy on
 each gateway instance before removing command-layer coarse role checks.</li>
-<li>Record the published policy revision or digest and require every gateway
-instance serving portal commands to acknowledge it. Block promotion or remove
-an unacknowledged instance from routing rather than assuming an older policy
-fails closed.</li>
+<li>Verify through the standard config-server reload and deployment health checks
+that every gateway instance serving Portal commands has loaded the intended
+policy publication. Block promotion or remove a stale instance from routing
+rather than assuming an older policy fails closed.</li>
 <li>Prefer separate tenant and global logical endpoints. For a combined endpoint,
 use one CEL expression or <code>accessRuleLogic: all</code> to bind role, requested scope,
 and authenticated host in the same authorization decision.</li>
@@ -20196,10 +20196,10 @@ cleanup worker; deployments that disable it must not enable such an endpoint.</l
 <tr><td>Portal role permission and <code>req-acc</code> rule published through the config server</td><td>gateway admits only configured logical endpoints</td></tr>
 <tr><td>Role permission exists but <code>req-acc</code> rule is absent</td><td>gateway denies before command dispatch</td></tr>
 <tr><td>Gateway effective policy is unavailable</td><td>command fails closed; no event or reservation is written</td></tr>
-<tr><td>Gateway has not acknowledged the published policy revision</td><td>deployment or routing to that instance remains blocked</td></tr>
+<tr><td>Gateway has not loaded the intended config-server policy publication</td><td>deployment or routing to that instance remains blocked by operational readiness checks</td></tr>
 <tr><td><code>org-admin</code> or <code>host-admin</code> submits global scope on a combined endpoint</td><td>gateway denies; command handler is not invoked</td></tr>
 <tr><td>Host-scoped request contains another tenant’s <code>hostId</code></td><td>gateway or command boundary denies; no reservation is written</td></tr>
-<tr><td>Direct command invocation bypasses gateway authorization</td><td>rejected by ingress isolation or missing trusted authorization context</td></tr>
+<tr><td>Direct command invocation bypasses gateway authorization</td><td>prevented by ingress isolation or a mutually authenticated command-service hop</td></tr>
 </tbody>
 </table>
 </div>
@@ -20263,8 +20263,9 @@ before full enforcement.</li>
 <li>Adding a new birth event without a creation policy fails the deployment gate.</li>
 <li>Every participating logical command endpoint has a Portal-managed,
 config-server-published role permission and <code>req-acc</code> policy that fails closed.</li>
-<li>Every gateway instance serving portal commands acknowledges the published
-policy revision or is excluded from routing.</li>
+<li>Every gateway instance serving Portal commands passes the standard
+config-server reload and deployment health checks for the intended policy
+publication or is excluded from routing.</li>
 <li>Java command handlers do not use <code>admin</code>, <code>org-admin</code>, or <code>host-admin</code> token
 parsing as the coarse endpoint-invocation authorization boundary.</li>
 <li>Host, parent, owner, lifecycle, version, and uniqueness invariants remain
@@ -32180,6 +32181,7 @@ loaded from <code>light-gateway/config/mcp-router.yml</code>.</p>
 <tr><td style="text-align: left"><strong><a href="#access-control-default-deny">defaultDeny</a></strong></td><td style="text-align: left">Boolean</td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Fallback policy when no authorization rules are defined for a requested endpoint.</td></tr>
 <tr><td style="text-align: left"><strong><a href="#access-control-default-include">defaultInclude</a></strong></td><td style="text-align: left">Boolean</td><td style="text-align: left"><code>false</code></td><td style="text-align: left">Fallback policy for response row filtering when a user’s claims do not match any rules.</td></tr>
 <tr><td style="text-align: left"><strong><a href="#access-control-skip-path-prefixes">skipPathPrefixes</a></strong></td><td style="text-align: left">Array of String</td><td style="text-align: left"><code>[]</code></td><td style="text-align: left">List of path or tool name prefixes that bypass access control checking and filtering.</td></tr>
+<tr><td style="text-align: left"><strong><a href="#access-control-claim-mappings">claimMappings</a></strong></td><td style="text-align: left">Map of String to Array of String</td><td style="text-align: left"><code>{}</code></td><td style="text-align: left">Maps permission dimensions such as <code>roles</code> or <code>tenant</code> to JWT claim names.</td></tr>
 </tbody>
 </table>
 </div>
@@ -32316,6 +32318,77 @@ loaded from <code>light-gateway/config/mcp-router.yml</code>.</p>
 <li><strong>Tool Name Prefix</strong>: If the invoked tool name starts with a prefix listed in <code>skipPathPrefixes</code> (e.g. <code>local_mcp</code> matching a tool named <code>local_mcp_echo</code>), the tool call bypasses <code>req-acc</code> and the results bypass <code>res-fil</code> response filtering.</li>
 <li><strong>Endpoint Key Prefix</strong>: If the target endpoint key derived for the tool call starts with a configured prefix (e.g. <code>accounts</code> matching <code>accounts@call</code>), the tool call and response also bypass all access control enforcement.</li>
 </ol>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="access-control-claim-mappings"><a class="header" href="#access-control-claim-mappings">Access Control: Claim Mappings</a></h1>
+<p>The <code>claimMappings</code> property maps access-control permission dimensions to the
+JWT claim names used by your identity provider.</p>
+<ul>
+<li><strong>Type:</strong> Map of permission dimension to an array of claim names</li>
+<li><strong>Default:</strong> <code>{}</code></li>
+<li><strong>Config-server property prefix:</strong> <code>access-control.claimMappings</code></li>
+</ul>
+<pre><code class="language-yaml">claimMappings:
+  roles:
+    - realm_roles
+    - application_roles
+  groups:
+    - member_of
+  tenant:
+    - tenant_id
+</code></pre>
+<p>In config-server <code>values.yml</code>, set individual map entries with fully qualified
+property names:</p>
+<pre><code class="language-yaml">access-control.claimMappings.roles: [realm_roles, application_roles]
+access-control.claimMappings.groups: [member_of]
+access-control.claimMappings.tenant: [tenant_id]
+</code></pre>
+<h2 id="what-it-is-designed-for"><a class="header" href="#what-it-is-designed-for">What It Is Designed For</a></h2>
+<p>The mapping allows policies to keep stable permission keys even when tokens use
+deployment-specific claim names. It is shared by:</p>
+<ul>
+<li>role-based request authorization (<code>req-acc</code>);</li>
+<li>row and column response filters (<code>res-fil</code>); and</li>
+<li>MCP <code>tools/list</code> visibility evaluation.</li>
+</ul>
+<p>The standard permission keys and their built-in claim aliases are:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Permission key</th><th style="text-align: left">Built-in JWT claim aliases</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>roles</code></td><td style="text-align: left"><code>role</code>, <code>roles</code></td></tr>
+<tr><td style="text-align: left"><code>groups</code></td><td style="text-align: left"><code>scp</code>, <code>grp</code>, <code>group</code>, <code>groups</code></td></tr>
+<tr><td style="text-align: left"><code>positions</code></td><td style="text-align: left"><code>pos</code>, <code>position</code>, <code>positions</code></td></tr>
+<tr><td style="text-align: left"><code>attributes</code></td><td style="text-align: left"><code>att</code>, <code>attribute</code>, <code>attributes</code></td></tr>
+<tr><td style="text-align: left"><code>users</code></td><td style="text-align: left"><code>uid</code>, <code>user_id</code>, <code>sub</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>If a key has a non-empty configured mapping, its configured claim names replace
+the built-in aliases for that key. Unmapped standard keys continue to use their
+built-in aliases. When multiple claim names are listed, values from all present
+claims are combined for matching.</p>
+<p>Custom row or column dimensions are also supported. For example, a <code>tenant</code>
+mapping makes the <code>tenant_id</code> claim available to <code>row.tenant</code> and <code>col.tenant</code>
+policy entries. For an unmapped custom dimension, the runtime looks for a claim
+with the same name as the dimension.</p>
+<h2 id="setup"><a class="header" href="#setup">Setup</a></h2>
+<ol>
+<li>Inspect the verified JWT claims produced by the deployment’s identity
+provider.</li>
+<li>Add a mapping only where the token’s claim name differs from the built-in
+alias or where the policy uses a custom dimension.</li>
+<li>Use plural keys (<code>roles</code>, <code>groups</code>, <code>positions</code>, <code>attributes</code>, and <code>users</code>)
+in <code>claimMappings</code>, even though row and column policy objects use singular
+dimension names such as <code>row.role</code> and <code>col.group</code>.</li>
+<li>Reload the access-control configuration and test both a matching and a
+non-matching caller for each affected authorization or filter rule.</li>
+</ol>
+<p>The older <code>toolsListAccessControl.claimMappings</code> location remains a compatibility
+fallback. Top-level <code>claimMappings</code> takes precedence for the same key and is the
+recommended location because it applies consistently across authorization,
+response filtering, and MCP tool visibility.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="logging-filter"><a class="header" href="#logging-filter">Logging Filter</a></h1>
 <p>Use <code>logging.filter</code> to control Rust runtime logging for <code>light-gateway</code> and other <code>light-fabric</code> services from config server <code>values.yml</code>.</p>
@@ -33887,7 +33960,7 @@ IMPORT_EVENTS=true \
 <li><code>/google</code>, <code>/facebook</code>, <code>/github</code>: Endpoints to exchange social tokens/codes for LightAPI authorization codes.</li>
 </ul>
 <h2 id="development"><a class="header" href="#development">Development</a></h2>
-<h3 id="setup"><a class="header" href="#setup">Setup</a></h3>
+<h3 id="setup-1"><a class="header" href="#setup-1">Setup</a></h3>
 <pre><code class="language-bash">yarn install
 </code></pre>
 <h3 id="run-locally"><a class="header" href="#run-locally">Run Locally</a></h3>

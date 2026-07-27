@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-5bffd9d1.js";
+            window.path_to_searchindex_js = "../searchindex-a37b6ae9.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-800b5e2d.js"></script>
+        <script src="../toc-a087366f.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -1184,8 +1184,8 @@ contain multiple birth events.</p>
 <li>global-scoped entities whose creating principal and historical policy evidence
 do not prove exact global-create authority at the time of creation.</li>
 </ul>
-<p>Older events may not contain a policy revision or enough authorization evidence
-to prove the historical decision. Classify those records as
+<p>Older events may not contain enough authorization evidence to prove the
+historical decision. Classify those records as
 <code>UNKNOWN_SCOPE_PROVENANCE</code>; do not assume that a global row was legitimate merely
 because it exists. A global identity created through the legacy substring-role
 path must be reviewed or quarantined before backfill, otherwise Phase 5 would turn
@@ -1245,10 +1245,10 @@ global-only, or combined tenant/global.</li>
 <li>Configure its role permissions and <code>req-acc</code> rule in Light Portal, publish the
 generated policy through the config server, and verify the effective policy on
 each gateway instance before removing command-layer coarse role checks.</li>
-<li>Record the published policy revision or digest and require every gateway
-instance serving portal commands to acknowledge it. Block promotion or remove
-an unacknowledged instance from routing rather than assuming an older policy
-fails closed.</li>
+<li>Verify through the standard config-server reload and deployment health checks
+that every gateway instance serving Portal commands has loaded the intended
+policy publication. Block promotion or remove a stale instance from routing
+rather than assuming an older policy fails closed.</li>
 <li>Prefer separate tenant and global logical endpoints. For a combined endpoint,
 use one CEL expression or <code>accessRuleLogic: all</code> to bind role, requested scope,
 and authenticated host in the same authorization decision.</li>
@@ -1460,10 +1460,10 @@ cleanup worker; deployments that disable it must not enable such an endpoint.</l
 <tr><td>Portal role permission and <code>req-acc</code> rule published through the config server</td><td>gateway admits only configured logical endpoints</td></tr>
 <tr><td>Role permission exists but <code>req-acc</code> rule is absent</td><td>gateway denies before command dispatch</td></tr>
 <tr><td>Gateway effective policy is unavailable</td><td>command fails closed; no event or reservation is written</td></tr>
-<tr><td>Gateway has not acknowledged the published policy revision</td><td>deployment or routing to that instance remains blocked</td></tr>
+<tr><td>Gateway has not loaded the intended config-server policy publication</td><td>deployment or routing to that instance remains blocked by operational readiness checks</td></tr>
 <tr><td><code>org-admin</code> or <code>host-admin</code> submits global scope on a combined endpoint</td><td>gateway denies; command handler is not invoked</td></tr>
 <tr><td>Host-scoped request contains another tenant’s <code>hostId</code></td><td>gateway or command boundary denies; no reservation is written</td></tr>
-<tr><td>Direct command invocation bypasses gateway authorization</td><td>rejected by ingress isolation or missing trusted authorization context</td></tr>
+<tr><td>Direct command invocation bypasses gateway authorization</td><td>prevented by ingress isolation or a mutually authenticated command-service hop</td></tr>
 </tbody>
 </table>
 </div>
@@ -1527,8 +1527,9 @@ before full enforcement.</li>
 <li>Adding a new birth event without a creation policy fails the deployment gate.</li>
 <li>Every participating logical command endpoint has a Portal-managed,
 config-server-published role permission and <code>req-acc</code> policy that fails closed.</li>
-<li>Every gateway instance serving portal commands acknowledges the published
-policy revision or is excluded from routing.</li>
+<li>Every gateway instance serving Portal commands passes the standard
+config-server reload and deployment health checks for the intended policy
+publication or is excluded from routing.</li>
 <li>Java command handlers do not use <code>admin</code>, <code>org-admin</code>, or <code>host-admin</code> token
 parsing as the coarse endpoint-invocation authorization boundary.</li>
 <li>Host, parent, owner, lifecycle, version, and uniqueness invariants remain
