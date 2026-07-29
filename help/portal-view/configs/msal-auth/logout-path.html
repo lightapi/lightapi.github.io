@@ -35,7 +35,7 @@
             const path_to_root = "../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../searchindex-a37b6ae9.js";
+            window.path_to_searchindex_js = "../../../../searchindex-3ca9508b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../../../toc-a087366f.js"></script>
@@ -180,14 +180,40 @@
 <pre><code class="language-yaml">logoutPath: /auth/ms/logout
 </code></pre>
 <h2 id="usage"><a class="header" href="#usage">Usage</a></h2>
-<p>When the <code>msal-auth</code> handler receives a request matching this exact path, it handles the session termination by clearing the session cookies.</p>
-<p>Specifically, it returns <code>Set-Cookie</code> headers with a past expiration date for the <code>accessToken</code> and <code>csrf</code> cookies, ensuring the browser immediately removes them from storage.</p>
+<p>When the <code>msal-auth</code> handler receives a credentialed <code>POST</code> matching this
+exact path, it handles session termination by clearing the session cookies.
+Send the readable <code>csrf</code> cookie value as <code>X-CSRF-TOKEN</code> when logout CSRF
+enforcement is enabled. No request body is required; a zero-length body is
+also accepted with <code>Content-Type: application/json</code>.</p>
+<p>On success it returns <code>204 No Content</code> with no body or response content type.
+It also returns deletion <code>Set-Cookie</code> headers for <code>accessToken</code> and <code>csrf</code>, the
+complete cookie set owned by this runtime.</p>
 <p>This path <strong>must</strong> also be mapped in <code>handler.yml</code> to trigger the <code>msal-auth</code> handler.</p>
-<pre><code class="language-yaml">paths:
+<pre><code class="language-yaml">chains:
+  bff:
+    - cors
+    - msal-auth
+
+paths:
   - path: /auth/ms/logout
+    method: POST
     exec:
-      - msal-auth
+      - bff
+  # Temporary compatibility bridge for cached pre-migration clients.
+  - path: /auth/ms/logout
+    method: GET
+    exec:
+      - bff
+  # Keep permanently so preflight reaches CORS before the auth handler.
+  - path: /auth/ms/logout
+    method: OPTIONS
+    exec:
+      - bff
 </code></pre>
+<p>The GET route is migration-only and is removed at the strict Phase 4 release
+boundary after the compatibility and telemetry gates pass. After strict
+enforcement, legacy mutation methods return <code>405</code>, <code>ERR10008</code>, and
+<code>Allow: POST</code>. The <code>OPTIONS</code> route remains.</p>
 
                     </main>
 

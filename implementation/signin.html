@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-a37b6ae9.js";
+            window.path_to_searchindex_js = "../searchindex-3ca9508b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-a087366f.js"></script>
@@ -297,9 +297,20 @@
 <h2 id="createmarketcode"><a class="header" href="#createmarketcode">createMarketCode</a></h2>
 <p>This method in dbProvider will put the event value into cacheManager cache named “auth_code”. Now, the code is ready to be query from the market-query.</p>
 <h2 id="portal-view"><a class="header" href="#portal-view">Portal View</a></h2>
-<p>The HostIdCodePostHandler redirects the code to the Portal View with /authorization?code=??? and this request will be sent to the light-gateway StatelessAuthHandler.</p>
+<p>The <code>HostIdCodePostHandler</code> redirects the browser to Portal View with
+<code>GET /authorization?code=...&amp;state=...</code>. This is an OAuth callback and remains
+GET-only; it is not part of the session-mutation POST migration. Enabled
+<code>/google</code>, <code>/facebook</code>, and <code>/github</code> authorization-code callbacks follow the
+same GET-only rule.</p>
 <h2 id="statelessauthhandler"><a class="header" href="#statelessauthhandler">StatelessAuthHandler</a></h2>
 <p>If the request path matches to the configured authPath, it will retrieve the code from the query parameter. Then create a csrf UUID token and an AuthorizationCodeRequest to get a token via OauthHelper. This request will have the auth code, the csrf token and other properties from the configuration. The request is sent to the HostIdTokenPostHandler to create the authorization code token.</p>
+<p>Consent cancellation and normal stateless sign-out use credentialed,
+bodyless <code>POST /logout</code>. When logout CSRF enforcement is qualified, send the
+readable <code>csrf</code> cookie value as <code>X-CSRF-TOKEN</code>. Success is <code>204 No Content</code>
+with deletion cookies. Route <code>OPTIONS /logout</code> permanently through CORS before
+<code>StatelessAuthHandler</code>. The temporary compatibility GET route is removed at
+the Phase 4 release boundary; strict legacy-method rejection is <code>405</code> with
+<code>Allow: POST</code>.</p>
 <h2 id="hostidtokenposthandler"><a class="header" href="#hostidtokenposthandler">HostIdTokenPostHandler</a></h2>
 <p>It calls dbProvider.queryClientByClientId and then verify the clientId and clientSecret matches.</p>
 <p>It invokes ClientUtil.getAuthCodeDetail from the market-query service and calls the ClientUtil.deleteAuthCode to remove the auth code as it is one-time code.</p>

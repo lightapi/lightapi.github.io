@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-a37b6ae9.js";
+            window.path_to_searchindex_js = "searchindex-3ca9508b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-a087366f.js"></script>
@@ -22810,6 +22810,7 @@ function MyComponent() {
       // 2. Send it to our backend for exchange
       const backendResponse = await fetch('/auth/ms/exchange', {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Authorization': `Bearer ${microsoftAccessToken}`,
           'Content-Type': 'application/json',
@@ -22820,12 +22821,10 @@ function MyComponent() {
         throw new Error('Token exchange failed');
       }
 
-      // The backend will likely set a secure HttpOnly cookie,
-      // so there might be nothing else to do here.
-      // Or, it might return the new token to be stored in memory.
-      const { newAccessToken } = await backendResponse.json();
-      console.log("Received new, enriched token from our backend!");
-      // Now use this newAccessToken for subsequent API calls
+      // The backend stores the internal tokens in BFF cookies and returns
+      // the scopes that the SPA may display for consent.
+      const { scopes } = await backendResponse.json();
+      console.log("Gateway session established", scopes);
 
     } catch (error) {
       // Handle token acquisition or exchange errors
@@ -22848,7 +22847,11 @@ function MyComponent() {
 </li>
 <li>
 <p><strong>Implement the Exchange Logic:</strong></p>
-<pre><code class="language-Java">    if (exchange.getRelativePath().equals(config.getExchangePath())) {
+<pre><code class="language-Java">    // Endpoint classification happens before this flow. OPTIONS passes to
+    // CORS. During the compatibility release, explicitly routed GET and
+    // POST mutation requests are accepted; Phase 4 makes POST strict and
+    // returns ERR10008/405 with Allow: POST for a legacy method.
+    if (exchange.getRelativePath().equals(config.getExchangePath())) {
         // token exchange request handling.
         if(logger.isTraceEnabled()) logger.trace("MsalTokenExchangeHandler exchange is called.");
 
@@ -22903,7 +22906,9 @@ function MyComponent() {
     } else if (exchange.getRelativePath().equals(config.getLogoutPath())) {
         // logout request handling, this is the same as StatelessAuthHandler to remove the cookies.
         if(logger.isTraceEnabled()) logger.trace("MsalTokenExchangeHandler logout is called.");
+        // Logout CSRF is observed or enforced before cookie deletion.
         removeCookies(exchange);
+        exchange.setStatusCode(StatusCodes.NO_CONTENT);
         exchange.endExchange();
     } else {
         // This is the subsequent request handling after the token exchange. Here we verify the JWT in the cookies.
@@ -23065,9 +23070,23 @@ function MyComponent() {
 <h2 id="single-page-application"><a class="header" href="#single-page-application">Single Page Application</a></h2>
 <p>There are two endpoints that the SPA should access for both token exchange and logout.</p>
 <h3 id="login"><a class="header" href="#login">Login</a></h3>
-<p>After the SSO with Azure AD via SSO, you need to send this ID token to the backend API endpoint “/auth/ms/exchange” to establish the session with a GET request. The header is the standard authorization header with “Bearer IdToken”. You will receive a response in JSON with a list of scopes that is represent the access permission. You can display them to the user for consent or simply ignore them. Along with the response body, some cookies will be set on the browser local storage to establish the session. Once the login is done, the backend will automatically renew the access token with a refresh token automatically as long as the user sending the request to the server.</p>
+<p>After Microsoft Entra ID SSO, send the ID token to
+<code>POST /auth/ms/exchange</code> in the standard <code>Authorization: Bearer &lt;id-token&gt;</code>
+header. Include credentials and do not place the token in the URL or request
+body. No body is required; a zero-length request is valid when a shared client
+sets <code>Content-Type: application/json</code>. The response contains the permitted
+scopes and sets the BFF cookies used for the session.</p>
 <h3 id="logout"><a class="header" href="#logout">Logout</a></h3>
-<p>To logout, you need to logout from the Azure AD and then send a GET request to the backend API endpoint “/auth/ms/logout” to remove session cookies.</p>
+<p>Call credentialed <code>POST /auth/ms/logout</code> with <code>X-CSRF-TOKEN</code> read from the
+readable <code>csrf</code> cookie, then complete the Microsoft logout. Successful backend
+logout returns <code>204 No Content</code> and deletion cookies for all cookies owned by
+the handler.</p>
+<p>During the compatibility release, explicitly routed legacy GET exchange and
+logout requests remain accepted and measured. Those GET routes are migration
+history, not the public method contract, and are removed only at the Phase 4
+release boundary. Strict enforcement returns <code>405</code>, <code>ERR10008</code>, and
+<code>Allow: POST</code>. Keep explicit <code>OPTIONS</code> routes through a chain with CORS before
+the auth handler.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="user-registration-and-onboarding"><a class="header" href="#user-registration-and-onboarding">User Registration and Onboarding</a></h1>
 <p>In light-portal, user management is the foundation of the authentication and authorization to access different services.</p>
@@ -32528,19 +32547,31 @@ logging.filter: info,light_pingora::security=debug,reqwest=warn,hyper_util=warn,
 <pre><code class="language-yaml">loginPath: /auth/ms/login
 </code></pre>
 <h2 id="usage-1"><a class="header" href="#usage-1">Usage</a></h2>
-<p>When the <code>msal-auth</code> handler receives a request (typically a <code>POST</code>) matching this exact path:</p>
+<p>When the <code>msal-auth</code> handler receives a <code>POST</code> matching this exact path:</p>
 <ol>
 <li>It expects a valid Microsoft Entra ID token in the <code>Authorization: Bearer</code> header.</li>
 <li>It validates the token using the <code>security-msal.yml</code> configuration.</li>
 <li>If valid, it generates a fresh CSRF token and responds with the <code>accessToken</code> and <code>csrf</code> cookies using <code>Set-Cookie</code> headers.</li>
 </ol>
+<p>The request body is optional. A zero-length request is accepted even when a
+shared client sets <code>Content-Type: application/json</code>.</p>
 <p>This path <strong>must</strong> also be mapped in <code>handler.yml</code> to trigger the <code>msal-auth</code> handler.</p>
-<pre><code class="language-yaml">paths:
+<pre><code class="language-yaml">chains:
+  bff:
+    - cors
+    - msal-auth
+
+paths:
   - path: /auth/ms/login
     method: POST
     exec:
-      - msal-auth
+      - bff
+  - path: /auth/ms/login
+    method: OPTIONS
+    exec:
+      - bff
 </code></pre>
+<p>Keep <code>OPTIONS</code> routed through a chain with CORS before <code>msal-auth</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="msal-auth-logout-path"><a class="header" href="#msal-auth-logout-path">MSAL Auth: Logout Path</a></h1>
 <p>The <code>logoutPath</code> property specifies the endpoint where the Single Page Application (SPA) can explicitly terminate an active session.</p>
@@ -32548,14 +32579,40 @@ logging.filter: info,light_pingora::security=debug,reqwest=warn,hyper_util=warn,
 <pre><code class="language-yaml">logoutPath: /auth/ms/logout
 </code></pre>
 <h2 id="usage-2"><a class="header" href="#usage-2">Usage</a></h2>
-<p>When the <code>msal-auth</code> handler receives a request matching this exact path, it handles the session termination by clearing the session cookies.</p>
-<p>Specifically, it returns <code>Set-Cookie</code> headers with a past expiration date for the <code>accessToken</code> and <code>csrf</code> cookies, ensuring the browser immediately removes them from storage.</p>
+<p>When the <code>msal-auth</code> handler receives a credentialed <code>POST</code> matching this
+exact path, it handles session termination by clearing the session cookies.
+Send the readable <code>csrf</code> cookie value as <code>X-CSRF-TOKEN</code> when logout CSRF
+enforcement is enabled. No request body is required; a zero-length body is
+also accepted with <code>Content-Type: application/json</code>.</p>
+<p>On success it returns <code>204 No Content</code> with no body or response content type.
+It also returns deletion <code>Set-Cookie</code> headers for <code>accessToken</code> and <code>csrf</code>, the
+complete cookie set owned by this runtime.</p>
 <p>This path <strong>must</strong> also be mapped in <code>handler.yml</code> to trigger the <code>msal-auth</code> handler.</p>
-<pre><code class="language-yaml">paths:
+<pre><code class="language-yaml">chains:
+  bff:
+    - cors
+    - msal-auth
+
+paths:
   - path: /auth/ms/logout
+    method: POST
     exec:
-      - msal-auth
+      - bff
+  # Temporary compatibility bridge for cached pre-migration clients.
+  - path: /auth/ms/logout
+    method: GET
+    exec:
+      - bff
+  # Keep permanently so preflight reaches CORS before the auth handler.
+  - path: /auth/ms/logout
+    method: OPTIONS
+    exec:
+      - bff
 </code></pre>
+<p>The GET route is migration-only and is removed at the strict Phase 4 release
+boundary after the compatibility and telemetry gates pass. After strict
+enforcement, legacy mutation methods return <code>405</code>, <code>ERR10008</code>, and
+<code>Allow: POST</code>. The <code>OPTIONS</code> route remains.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="msal-auth-cookie-domain"><a class="header" href="#msal-auth-cookie-domain">MSAL Auth: Cookie Domain</a></h1>
 <p>The <code>cookieDomain</code> property controls the <code>Domain</code> attribute applied to all <code>Set-Cookie</code> headers generated by the handler.</p>
@@ -33893,9 +33950,20 @@ IMPORT_EVENTS=true \
 <h2 id="createmarketcode"><a class="header" href="#createmarketcode">createMarketCode</a></h2>
 <p>This method in dbProvider will put the event value into cacheManager cache named “auth_code”. Now, the code is ready to be query from the market-query.</p>
 <h2 id="portal-view-4"><a class="header" href="#portal-view-4">Portal View</a></h2>
-<p>The HostIdCodePostHandler redirects the code to the Portal View with /authorization?code=??? and this request will be sent to the light-gateway StatelessAuthHandler.</p>
+<p>The <code>HostIdCodePostHandler</code> redirects the browser to Portal View with
+<code>GET /authorization?code=...&amp;state=...</code>. This is an OAuth callback and remains
+GET-only; it is not part of the session-mutation POST migration. Enabled
+<code>/google</code>, <code>/facebook</code>, and <code>/github</code> authorization-code callbacks follow the
+same GET-only rule.</p>
 <h2 id="statelessauthhandler"><a class="header" href="#statelessauthhandler">StatelessAuthHandler</a></h2>
 <p>If the request path matches to the configured authPath, it will retrieve the code from the query parameter. Then create a csrf UUID token and an AuthorizationCodeRequest to get a token via OauthHelper. This request will have the auth code, the csrf token and other properties from the configuration. The request is sent to the HostIdTokenPostHandler to create the authorization code token.</p>
+<p>Consent cancellation and normal stateless sign-out use credentialed,
+bodyless <code>POST /logout</code>. When logout CSRF enforcement is qualified, send the
+readable <code>csrf</code> cookie value as <code>X-CSRF-TOKEN</code>. Success is <code>204 No Content</code>
+with deletion cookies. Route <code>OPTIONS /logout</code> permanently through CORS before
+<code>StatelessAuthHandler</code>. The temporary compatibility GET route is removed at
+the Phase 4 release boundary; strict legacy-method rejection is <code>405</code> with
+<code>Allow: POST</code>.</p>
 <h2 id="hostidtokenposthandler"><a class="header" href="#hostidtokenposthandler">HostIdTokenPostHandler</a></h2>
 <p>It calls dbProvider.queryClientByClientId and then verify the clientId and clientSecret matches.</p>
 <p>It invokes ClientUtil.getAuthCodeDetail from the market-query service and calls the ClientUtil.deleteAuthCode to remove the auth code as it is one-time code.</p>

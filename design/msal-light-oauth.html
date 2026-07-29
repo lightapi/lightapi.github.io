@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-a37b6ae9.js";
+            window.path_to_searchindex_js = "../searchindex-3ca9508b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-a087366f.js"></script>
@@ -262,6 +262,7 @@ function MyComponent() {
       // 2. Send it to our backend for exchange
       const backendResponse = await fetch('/auth/ms/exchange', {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Authorization': `Bearer ${microsoftAccessToken}`,
           'Content-Type': 'application/json',
@@ -272,12 +273,10 @@ function MyComponent() {
         throw new Error('Token exchange failed');
       }
 
-      // The backend will likely set a secure HttpOnly cookie,
-      // so there might be nothing else to do here.
-      // Or, it might return the new token to be stored in memory.
-      const { newAccessToken } = await backendResponse.json();
-      console.log("Received new, enriched token from our backend!");
-      // Now use this newAccessToken for subsequent API calls
+      // The backend stores the internal tokens in BFF cookies and returns
+      // the scopes that the SPA may display for consent.
+      const { scopes } = await backendResponse.json();
+      console.log("Gateway session established", scopes);
 
     } catch (error) {
       // Handle token acquisition or exchange errors
@@ -300,7 +299,11 @@ function MyComponent() {
 </li>
 <li>
 <p><strong>Implement the Exchange Logic:</strong></p>
-<pre><code class="language-Java">    if (exchange.getRelativePath().equals(config.getExchangePath())) {
+<pre><code class="language-Java">    // Endpoint classification happens before this flow. OPTIONS passes to
+    // CORS. During the compatibility release, explicitly routed GET and
+    // POST mutation requests are accepted; Phase 4 makes POST strict and
+    // returns ERR10008/405 with Allow: POST for a legacy method.
+    if (exchange.getRelativePath().equals(config.getExchangePath())) {
         // token exchange request handling.
         if(logger.isTraceEnabled()) logger.trace("MsalTokenExchangeHandler exchange is called.");
 
@@ -355,7 +358,9 @@ function MyComponent() {
     } else if (exchange.getRelativePath().equals(config.getLogoutPath())) {
         // logout request handling, this is the same as StatelessAuthHandler to remove the cookies.
         if(logger.isTraceEnabled()) logger.trace("MsalTokenExchangeHandler logout is called.");
+        // Logout CSRF is observed or enforced before cookie deletion.
         removeCookies(exchange);
+        exchange.setStatusCode(StatusCodes.NO_CONTENT);
         exchange.endExchange();
     } else {
         // This is the subsequent request handling after the token exchange. Here we verify the JWT in the cookies.
@@ -517,9 +522,23 @@ function MyComponent() {
 <h2 id="single-page-application"><a class="header" href="#single-page-application">Single Page Application</a></h2>
 <p>There are two endpoints that the SPA should access for both token exchange and logout.</p>
 <h3 id="login"><a class="header" href="#login">Login</a></h3>
-<p>After the SSO with Azure AD via SSO, you need to send this ID token to the backend API endpoint “/auth/ms/exchange” to establish the session with a GET request. The header is the standard authorization header with “Bearer IdToken”. You will receive a response in JSON with a list of scopes that is represent the access permission. You can display them to the user for consent or simply ignore them. Along with the response body, some cookies will be set on the browser local storage to establish the session. Once the login is done, the backend will automatically renew the access token with a refresh token automatically as long as the user sending the request to the server.</p>
+<p>After Microsoft Entra ID SSO, send the ID token to
+<code>POST /auth/ms/exchange</code> in the standard <code>Authorization: Bearer &lt;id-token&gt;</code>
+header. Include credentials and do not place the token in the URL or request
+body. No body is required; a zero-length request is valid when a shared client
+sets <code>Content-Type: application/json</code>. The response contains the permitted
+scopes and sets the BFF cookies used for the session.</p>
 <h3 id="logout"><a class="header" href="#logout">Logout</a></h3>
-<p>To logout, you need to logout from the Azure AD and then send a GET request to the backend API endpoint “/auth/ms/logout” to remove session cookies.</p>
+<p>Call credentialed <code>POST /auth/ms/logout</code> with <code>X-CSRF-TOKEN</code> read from the
+readable <code>csrf</code> cookie, then complete the Microsoft logout. Successful backend
+logout returns <code>204 No Content</code> and deletion cookies for all cookies owned by
+the handler.</p>
+<p>During the compatibility release, explicitly routed legacy GET exchange and
+logout requests remain accepted and measured. Those GET routes are migration
+history, not the public method contract, and are removed only at the Phase 4
+release boundary. Strict enforcement returns <code>405</code>, <code>ERR10008</code>, and
+<code>Allow: POST</code>. Keep explicit <code>OPTIONS</code> routes through a chain with CORS before
+the auth handler.</p>
 
                     </main>
 

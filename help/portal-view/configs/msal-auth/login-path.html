@@ -35,7 +35,7 @@
             const path_to_root = "../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../searchindex-a37b6ae9.js";
+            window.path_to_searchindex_js = "../../../../searchindex-3ca9508b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../../../toc-a087366f.js"></script>
@@ -180,19 +180,31 @@
 <pre><code class="language-yaml">loginPath: /auth/ms/login
 </code></pre>
 <h2 id="usage"><a class="header" href="#usage">Usage</a></h2>
-<p>When the <code>msal-auth</code> handler receives a request (typically a <code>POST</code>) matching this exact path:</p>
+<p>When the <code>msal-auth</code> handler receives a <code>POST</code> matching this exact path:</p>
 <ol>
 <li>It expects a valid Microsoft Entra ID token in the <code>Authorization: Bearer</code> header.</li>
 <li>It validates the token using the <code>security-msal.yml</code> configuration.</li>
 <li>If valid, it generates a fresh CSRF token and responds with the <code>accessToken</code> and <code>csrf</code> cookies using <code>Set-Cookie</code> headers.</li>
 </ol>
+<p>The request body is optional. A zero-length request is accepted even when a
+shared client sets <code>Content-Type: application/json</code>.</p>
 <p>This path <strong>must</strong> also be mapped in <code>handler.yml</code> to trigger the <code>msal-auth</code> handler.</p>
-<pre><code class="language-yaml">paths:
+<pre><code class="language-yaml">chains:
+  bff:
+    - cors
+    - msal-auth
+
+paths:
   - path: /auth/ms/login
     method: POST
     exec:
-      - msal-auth
+      - bff
+  - path: /auth/ms/login
+    method: OPTIONS
+    exec:
+      - bff
 </code></pre>
+<p>Keep <code>OPTIONS</code> routed through a chain with CORS before <code>msal-auth</code>.</p>
 
                     </main>
 
