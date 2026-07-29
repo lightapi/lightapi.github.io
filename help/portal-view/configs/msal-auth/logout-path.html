@@ -35,7 +35,7 @@
             const path_to_root = "../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../searchindex-3ca9508b.js";
+            window.path_to_searchindex_js = "../../../../searchindex-f79a928e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../../../toc-a087366f.js"></script>
@@ -199,21 +199,15 @@ paths:
     method: POST
     exec:
       - bff
-  # Temporary compatibility bridge for cached pre-migration clients.
-  - path: /auth/ms/logout
-    method: GET
-    exec:
-      - bff
   # Keep permanently so preflight reaches CORS before the auth handler.
   - path: /auth/ms/logout
     method: OPTIONS
     exec:
       - bff
 </code></pre>
-<p>The GET route is migration-only and is removed at the strict Phase 4 release
-boundary after the compatibility and telemetry gates pass. After strict
-enforcement, legacy mutation methods return <code>405</code>, <code>ERR10008</code>, and
-<code>Allow: POST</code>. The <code>OPTIONS</code> route remains.</p>
+<p>Logout is POST-only. A legacy GET or another unsupported method returns <code>405</code>,
+<code>ERR10008</code>, and <code>Allow: POST</code> before cookie deletion. The <code>OPTIONS</code> route
+remains.</p>
 
                     </main>
 
