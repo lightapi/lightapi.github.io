@@ -1,0 +1,799 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>LLM Gateway Topology Per Host And Environment - Light Portal Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../../css/general-e96d0476.css">
+        <link rel="stylesheet" href="../../css/chrome-d279d366.css">
+        <link rel="stylesheet" href="../../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../../searchindex-995bd770.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../../toc-2dcc1cd3.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Light Portal Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="llm-gateway-topology-per-host-and-environment"><a class="header" href="#llm-gateway-topology-per-host-and-environment">LLM Gateway Topology Per Host And Environment</a></h1>
+<h2 id="status"><a class="header" href="#status">Status</a></h2>
+<p>Proposed design for discussion.</p>
+<h2 id="decision-summary"><a class="header" href="#decision-summary">Decision Summary</a></h2>
+<p>Use exactly one <strong>logical LLM gateway configuration</strong> for each Light Portal
+<code>(host, environment)</code> pair. Run that logical gateway as multiple stateless
+replicas for availability and capacity.</p>
+<p>Allow many MCP, Agent, API, or other AI-oriented microgateways in the same host
+and environment, but do not give those microgateways direct LLM provider access.
+They must invoke the logical LLM gateway through an authenticated internal
+contract.</p>
+<p>Do not add multiple independently configured LLM gateway targets to the initial
+control-plane schema. Revisit that decision only when a concrete regulatory,
+network-isolation, ownership, or independent-change-boundary requirement cannot
+be represented by Aliases, Policy Bindings, Routes, Deployments, quotas, and
+normal replica scaling.</p>
+<p>This decision means <strong>one configuration authority</strong>, not one process, pod,
+machine, region, or availability zone.</p>
+<h2 id="context"><a class="header" href="#context">Context</a></h2>
+<p>The LLM control plane already separates the major concerns:</p>
+<ul>
+<li>Models describe the shared model catalog.</li>
+<li>Registrations approve models for a host and environment.</li>
+<li>Provider Accounts and Deployments describe quota ownership and callable
+provider endpoints.</li>
+<li>Credentials reference external secrets.</li>
+<li>Public Aliases provide stable model names.</li>
+<li>Routes connect Aliases to eligible Deployments.</li>
+<li>Pricing records effective rates.</li>
+<li>Policies describe governance intent.</li>
+<li>Bindings assign Policies to Agents, Clients, Principals, or Product Profiles.</li>
+<li>Publications create immutable gateway projection roots.</li>
+</ul>
+<p>This structure can expose different models and policies to different subjects
+without requiring a different LLM gateway configuration for every Agent, team,
+product, or MCP server.</p>
+<p>The current implementation also already assumes one publication stream per
+host and environment:</p>
+<ul>
+<li><code>llm_projection_resource_t</code> keys resources and sequence numbers by
+<code>host_id + environment</code>.</li>
+<li><code>llm_gateway_publication_t</code> keys publication versions and manifest digests by
+<code>host_id + environment</code>.</li>
+<li>the latest-publication query accepts only Host Id and Environment.</li>
+<li>candidate validation selects the active Alias surface for the environment.</li>
+<li>the publication command has no gateway target identifier.</li>
+<li>runtime <code>gatewayInstance</code> identifies a replica acknowledgement; it does not
+select a different model or policy configuration.</li>
+</ul>
+<p>Relevant current sources are:</p>
+<pre><code class="language-text">portal-db/postgres/ddl.sql
+light-portal/db-provider/.../LlmModelPersistenceImpl.java
+genai-command/src/main/resources/spec.yaml
+light-fabric/crates/llm-gateway/src/config.rs
+light-fabric/crates/llm-gateway/src/projection.rs
+</code></pre>
+<h2 id="terminology"><a class="header" href="#terminology">Terminology</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Term</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td>Host</td><td>Portal tenant boundary represented by <code>host_id</code>.</td></tr>
+<tr><td>Environment</td><td>Deployment stage such as <code>dev</code>, <code>test</code>, or <code>prod</code>.</td></tr>
+<tr><td>Logical LLM gateway</td><td>The single model-access and policy-enforcement authority for one host and environment.</td></tr>
+<tr><td>LLM gateway replica</td><td>One process or pod serving the same immutable LLM projection as its peers.</td></tr>
+<tr><td>AI microgateway</td><td>A gateway close to an MCP server, Agent, workflow, API, or execution domain. It handles that domain’s routing and security but has no direct provider credential or LLM model access.</td></tr>
+<tr><td>Publication</td><td>One immutable desired-state root containing supported LLM Deployments, Routes, Policies, and Pricing.</td></tr>
+<tr><td>Gateway instance</td><td>Operational identity of an individual replica, used for acknowledgements, audit, and diagnostics. It is not a configuration partition.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="goals"><a class="header" href="#goals">Goals</a></h2>
+<ul>
+<li>Provide one unambiguous model-governance authority per host and environment.</li>
+<li>Scale request capacity and availability with replicas.</li>
+<li>Keep provider credentials and model egress out of microgateways.</li>
+<li>Support different models, budgets, data rules, and capabilities for different
+Agents and subjects through control-plane resources.</li>
+<li>Preserve immutable, versioned publication and rollback semantics.</li>
+<li>Make authorization decisions resistant to caller-controlled gateway choice.</li>
+<li>Keep operational ownership, delivery status, and incident response clear.</li>
+<li>Leave an explicit migration path if multiple isolated LLM gateway realms are
+later justified.</li>
+</ul>
+<h2 id="non-goals"><a class="header" href="#non-goals">Non-Goals</a></h2>
+<ul>
+<li>This design does not limit the number of gateway processes or pods.</li>
+<li>It does not require all subjects to use the same model or Policy.</li>
+<li>It does not prohibit regionally distributed replicas.</li>
+<li>It does not make every MCP or Agent request pass through one physical host.</li>
+<li>It does not define provider-specific policy-object vocabulary.</li>
+<li>It does not treat an application microgateway as an LLM provider proxy.</li>
+</ul>
+<h2 id="required-invariants"><a class="header" href="#required-invariants">Required Invariants</a></h2>
+<ol>
+<li>There is one desired LLM publication sequence for each <code>(host, environment)</code>.</li>
+<li>Every LLM gateway replica for that pair applies the same immutable
+publication root, subject to bounded rollout convergence.</li>
+<li><code>gatewayInstance</code> identifies a replica but never changes the authorized
+model, Alias, Route, Policy, or Credential set.</li>
+<li>Only the logical LLM gateway resolves provider credential references and
+opens provider inference connections.</li>
+<li>AI microgateways cannot read LLM projection roots, resolve provider secrets,
+or call approved model providers directly.</li>
+<li>A caller selects an authorized Public Alias, not a gateway instance or
+provider Deployment.</li>
+<li>Host and environment are derived from trusted request and deployment
+context; clients cannot override them to reach another publication.</li>
+<li>Policy and Alias selection is determined by trusted bindings and claims, not
+by a caller-selected route to a less restrictive gateway.</li>
+<li>Every served request records the publication sequence or root digest used by
+the handling replica.</li>
+<li>A failed candidate or replica acknowledgement never mutates the last valid
+published root.</li>
+</ol>
+<h2 id="option-a-one-logical-llm-gateway-per-host-and-environment"><a class="header" href="#option-a-one-logical-llm-gateway-per-host-and-environment">Option A: One Logical LLM Gateway Per Host And Environment</a></h2>
+<h3 id="topology"><a class="header" href="#topology">Topology</a></h3>
+<pre><code class="language-text">Host A / prod
+│
+├── MCP microgateway 1 ─┐
+├── MCP microgateway 2 ─┤
+├── Agent service ──────┼──&gt; logical LLM gateway endpoint
+└── Workflow service ───┘       ├── replica 1
+                                ├── replica 2
+                                └── replica 3
+                                      │
+                                      ├── Provider Deployment A
+                                      ├── Provider Deployment B
+                                      └── Provider Deployment C
+
+One Portal publication root defines the models, routes, policies, and pricing
+used by all three replicas.
+</code></pre>
+<h3 id="how-different-model-needs-are-represented"><a class="header" href="#how-different-model-needs-are-represented">How Different Model Needs Are Represented</a></h3>
+<p>Different requirements remain data and policy decisions inside the one logical
+configuration:</p>
+<ul>
+<li>Public Aliases expose different approved model contracts.</li>
+<li>Alias Routes select different Deployments, regions, priorities, and fallbacks.</li>
+<li>Policy Bindings assign different Policies and default Aliases to Agents or
+other subjects.</li>
+<li>Provider Accounts and quota groups separate capacity and billing ownership.</li>
+<li>Registration and Alias environment fields prevent cross-environment use.</li>
+<li>Credentials remain Deployment-specific.</li>
+</ul>
+<p>For example, a support Agent can resolve <code>support-chat</code>, a coding Agent can
+resolve <code>code-assistant</code>, and a document workflow can resolve
+<code>document-summarizer</code>. They can use different providers and Policies while the
+same logical LLM gateway enforces the resulting publication.</p>
+<h3 id="advantages"><a class="header" href="#advantages">Advantages</a></h3>
+<ul>
+<li><strong>One security choke point.</strong> Provider credentials, outbound provider access,
+PII controls, budgets, audit, and policy enforcement have one authority.</li>
+<li><strong>No gateway shopping.</strong> A caller cannot choose a different gateway with a
+larger model set or weaker Policy.</li>
+<li><strong>Matches the current schema.</strong> Publication versions, projection sequences,
+validation, rollback, and latest-root lookup already use Host and Environment.</li>
+<li><strong>Clear semantics.</strong> An Alias has one meaning and one effective publication
+in the environment.</li>
+<li><strong>Simpler operations.</strong> One dashboard, desired-state sequence, rollback line,
+conformance gate, and incident owner exist per host and environment.</li>
+<li><strong>Efficient resource sharing.</strong> Provider clients, connection pools, model
+metadata, rate data, and compiled policy structures can be reused across
+workloads.</li>
+<li><strong>Capacity scales horizontally.</strong> Replicas add throughput without multiplying
+configuration authorities.</li>
+<li><strong>Consistent audit.</strong> Usage, cost, policy decision, and projection evidence
+share a common root digest and sequence.</li>
+<li><strong>Safer policy evolution.</strong> A new publication can be validated as a complete
+environment-wide graph before it replaces the previous root.</li>
+<li><strong>Smaller Portal surface.</strong> No target registry, target assignment matrix,
+target-specific validation, or gateway selector is required.</li>
+</ul>
+<h3 id="disadvantages"><a class="header" href="#disadvantages">Disadvantages</a></h3>
+<ul>
+<li><strong>Larger logical blast radius.</strong> A bad publication can affect every workload
+in the host and environment, even though the last valid root is retained on
+validation failure.</li>
+<li><strong>Shared change cadence.</strong> Teams cannot independently publish unrelated
+gateway roots without coordination.</li>
+<li><strong>Shared capacity plane.</strong> Noisy-neighbor protection must be enforced with
+subject, Alias, quota-group, and provider limits rather than separate gateway
+configurations.</li>
+<li><strong>More demanding availability design.</strong> The logical service must be deployed
+across enough replicas, failure domains, and capacity pools.</li>
+<li><strong>Strict backward compatibility.</strong> Every replica version participating in a
+rollout must understand the published schema and enabled features.</li>
+<li><strong>Hard isolation requires infrastructure controls.</strong> A Policy alone is not a
+substitute for legally required network, credential, or administrative
+separation.</li>
+</ul>
+<h3 id="mitigations"><a class="header" href="#mitigations">Mitigations</a></h3>
+<ul>
+<li>Deploy replicas across availability zones and, where allowed, regions.</li>
+<li>Apply per-subject, per-Alias, per-quota-group, and global concurrency limits.</li>
+<li>Use multiple provider Deployments and explicit fallback Routes.</li>
+<li>Validate the complete candidate before publication and retain the last valid
+root on compiler or delivery failure.</li>
+<li>Require a pre-production environment before production publication.</li>
+<li>Record per-replica acknowledgements and alert on version or root divergence.</li>
+<li>Use admission fairness and bounded queues so one Agent cannot exhaust the
+shared service.</li>
+<li>Keep request handling snapshot-based so each request observes exactly one
+immutable root even during rollout.</li>
+<li>Separate operational duties for Policy approval, Credential management, and
+publication approval.</li>
+</ul>
+<h2 id="option-b-multiple-logical-llm-gateways-per-host-and-environment"><a class="header" href="#option-b-multiple-logical-llm-gateways-per-host-and-environment">Option B: Multiple Logical LLM Gateways Per Host And Environment</a></h2>
+<p>Under this option, one host and environment contains multiple gateway targets
+or realms, each with its own publication sequence and model/policy graph.</p>
+<pre><code class="language-text">Host A / prod
+├── gateway realm regulated
+│   ├── replicas
+│   └── restricted models and policies
+└── gateway realm general
+    ├── replicas
+    └── general models and policies
+</code></pre>
+<h3 id="advantages-1"><a class="header" href="#advantages-1">Advantages</a></h3>
+<ul>
+<li><strong>Smaller configuration blast radius.</strong> A publication affects only one realm.</li>
+<li><strong>Independent change cadence.</strong> Separate teams can publish and roll back
+without coordinating one environment-wide root.</li>
+<li><strong>Harder infrastructure isolation.</strong> Realms can use different networks,
+regions, provider accounts, credentials, keys, or administrative owners.</li>
+<li><strong>Independent capacity and SLOs.</strong> Critical and best-effort workloads do not
+have to share a compiled root or replica pool.</li>
+<li><strong>Targeted feature rollout.</strong> A realm can adopt a new gateway version or
+projection feature before other realms.</li>
+<li><strong>Regulatory separation.</strong> A realm can form a provable boundary when policy
+filtering inside one process is insufficient.</li>
+</ul>
+<h3 id="disadvantages-1"><a class="header" href="#disadvantages-1">Disadvantages</a></h3>
+<ul>
+<li><strong>Gateway selection becomes authorization.</strong> Every Agent, Client, Principal,
+and Product Profile needs an authoritative gateway-realm assignment. The
+caller must never choose it directly.</li>
+<li><strong>Gateway-shopping risk.</strong> If selection is ambiguous or user-controlled, a
+caller can bypass a restrictive realm by reaching a more permissive one.</li>
+<li><strong>Alias ambiguity.</strong> The same Alias may mean different models or Policies in
+the same environment, complicating discovery, caching, audit, and support.</li>
+<li><strong>Policy precedence becomes two-dimensional.</strong> Effective policy depends on
+both subject bindings and gateway realm, increasing conflict and fallback
+rules.</li>
+<li><strong>Substantial schema expansion.</strong> Publications, resources, sequences,
+rollbacks, validation, delivery evidence, commands, and queries need a target
+key.</li>
+<li><strong>More complex distribution.</strong> Each replica must receive exactly the root for
+its assigned realm and prove that assignment during acknowledgement.</li>
+<li><strong>Duplicated configuration.</strong> Common models, Pricing, Policies, and Routes may
+be copied or require a new shared-resource plus publication-membership model.</li>
+<li><strong>Fragmented capacity.</strong> Idle capacity in one realm cannot automatically serve
+another, and provider quota coordination becomes harder.</li>
+<li><strong>Cross-realm fallback is dangerous.</strong> Falling back to a model in another
+realm can violate the isolation reason for having realms.</li>
+<li><strong>Higher operational cost.</strong> Each realm needs ownership, monitoring,
+qualification, deployment, rollback, on-call, and disaster recovery.</li>
+<li><strong>Harder incident reconstruction.</strong> Support must identify both environment
+and realm before determining the active root and applicable Policy.</li>
+</ul>
+<h3 id="schema-and-runtime-work-required"><a class="header" href="#schema-and-runtime-work-required">Schema And Runtime Work Required</a></h3>
+<p>A safe multiple-realm design would require at least:</p>
+<ol>
+<li>A host-scoped gateway-realm table, such as
+<code>llm_gateway_realm_t(host_id, environment, gateway_realm_id, realm_name, ...)</code>.</li>
+<li><code>gateway_realm_id</code> in publication and projection primary keys, uniqueness,
+sequence, rollback, validation, and latest-root queries.</li>
+<li>An authoritative subject-to-realm assignment that is evaluated before
+routing and cannot be overridden by request input.</li>
+<li>Explicit Alias ownership or availability per realm.</li>
+<li>Target-scoped candidate validation that follows only the realm’s Aliases,
+Routes, Deployments, Pricing, Credentials, Policies, and Bindings.</li>
+<li>A separate <code>gatewayRealmId</code> deployment setting and a distinct
+<code>gatewayInstance</code> replica identity.</li>
+<li>Realm-specific distribution roots and checkpoints.</li>
+<li>Per-publication, per-replica acknowledgement records.</li>
+<li>Rules for Alias-name uniqueness, cross-realm discovery, migration, and
+whether cross-realm fallback is forbidden.</li>
+<li>Portal forms, permissions, audit views, and operational dashboards for
+realm administration.</li>
+</ol>
+<p>Adding only <code>gateway_id</code> to the publication table would not be sufficient.
+Selection, authorization, validation, delivery, and audit all need the same
+realm boundary.</p>
+<h2 id="comparison"><a class="header" href="#comparison">Comparison</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Criterion</th><th>One logical gateway per host and environment</th><th>Multiple gateway realms per host and environment</th></tr>
+</thead>
+<tbody>
+<tr><td>Security authority</td><td>One unambiguous enforcement point</td><td>Strong isolation possible, but selection becomes a new authorization boundary</td></tr>
+<tr><td>Caller behavior</td><td>Caller selects an authorized Alias</td><td>Caller needs a trusted realm assignment plus an authorized Alias</td></tr>
+<tr><td>Model and Policy variation</td><td>Expressed through Aliases, Routes, Policies, and Bindings</td><td>Expressed through those resources plus realm membership</td></tr>
+<tr><td>Schema fit</td><td>Matches the current database</td><td>Requires cross-stack schema and contract changes</td></tr>
+<tr><td>Horizontal scaling</td><td>Add replicas</td><td>Add replicas independently per realm</td></tr>
+<tr><td>Publication blast radius</td><td>Entire host/environment graph</td><td>One realm</td></tr>
+<tr><td>Operational complexity</td><td>Lower</td><td>Significantly higher</td></tr>
+<tr><td>Resource utilization</td><td>Shared pools are efficient</td><td>Capacity and connections are fragmented</td></tr>
+<tr><td>Independent team cadence</td><td>Requires coordination</td><td>Strong</td></tr>
+<tr><td>Hard network or credential isolation</td><td>Requires infrastructure controls around one logical service</td><td>Natural boundary between realms</td></tr>
+<tr><td>Alias semantics</td><td>One meaning per environment</td><td>Potentially ambiguous without realm-qualified discovery</td></tr>
+<tr><td>Audit and cost attribution</td><td>One sequence/root namespace</td><td>Must include realm in every record and report</td></tr>
+<tr><td>Current implementation effort</td><td>Small; improve replica delivery tracking</td><td>Large migration across DB, commands, queries, Portal, distribution, and runtime</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="recommendation"><a class="header" href="#recommendation">Recommendation</a></h2>
+<p>Adopt Option A for the initial production design:</p>
+<blockquote>
+<p>Each host and environment owns one logical LLM gateway configuration and one
+publication sequence. The gateway is deployed with multiple replicas. All
+direct LLM model access goes through that logical service.</p>
+</blockquote>
+<p>This is the better default because the primary variations discussed so far are
+model choice, Agent choice, provider route, quota, Policy, region, and
+capability. Those are already control-plane dimensions and do not require
+multiple configuration authorities.</p>
+<p>The one-gateway design also makes the security rule easy to state and audit:</p>
+<pre><code class="language-text">One host + one environment -&gt; one authoritative LLM policy and routing graph.
+</code></pre>
+<p>Multiple replicas solve availability and throughput. Multiple Aliases, Routes,
+Deployments, Policies, and Bindings solve workload variation. AI microgateways
+solve domain-local ingress and tool routing without becoming alternate paths to
+model providers.</p>
+<h2 id="ai-microgateway-boundary"><a class="header" href="#ai-microgateway-boundary">AI Microgateway Boundary</a></h2>
+<p>AI microgateways may provide:</p>
+<ul>
+<li>MCP session and tool routing;</li>
+<li>Agent or workflow ingress;</li>
+<li>API authentication and local authorization;</li>
+<li>protocol translation unrelated to provider inference;</li>
+<li>request-size, rate, and connection controls for their owned domain;</li>
+<li>service discovery and telemetry for MCP servers or Agents.</li>
+</ul>
+<p>They must not provide:</p>
+<ul>
+<li>direct OpenAI-compatible model dispatch;</li>
+<li>provider-specific model clients;</li>
+<li>provider API keys or Credential resolution;</li>
+<li>access to the LLM projection distribution directory;</li>
+<li>a locally configured model that bypasses Public Alias authorization;</li>
+<li>fallback directly to a provider when the LLM gateway is unavailable.</li>
+</ul>
+<p>Enforce the boundary with both application and infrastructure controls:</p>
+<ul>
+<li>only LLM gateway workloads receive provider Credential references;</li>
+<li>provider egress allowlists permit the LLM gateway identity, not
+microgateway identities;</li>
+<li>service authorization permits microgateways to call the logical LLM gateway
+but not provider endpoints;</li>
+<li>the central gateway derives Host and Environment from trusted identity and
+routing context;</li>
+<li>audit alerts detect provider-domain traffic from any unauthorized workload.</li>
+</ul>
+<h2 id="request-flow"><a class="header" href="#request-flow">Request Flow</a></h2>
+<pre><code class="language-text">Caller
+  -&gt; Agent, workflow, API, or MCP microgateway
+  -&gt; authenticated internal LLM request
+  -&gt; logical LLM gateway service for host/environment
+  -&gt; authorize subject and Alias
+  -&gt; apply compiled Policy and budgets
+  -&gt; select eligible Route and Deployment
+  -&gt; resolve external Credential reference
+  -&gt; call provider
+  -&gt; record usage, cost, Policy, Alias, Deployment, and publication digest
+</code></pre>
+<p>The microgateway may forward an Alias requested by its application, but the
+central LLM gateway remains responsible for determining whether the authenticated
+subject may use that Alias. It must never trust a forwarded provider Deployment,
+Policy result, price, or Credential.</p>
+<h2 id="publication-and-replica-delivery"><a class="header" href="#publication-and-replica-delivery">Publication And Replica Delivery</a></h2>
+<p>One logical configuration still needs replica-aware operations.</p>
+<p>The existing runtime writes one acknowledgement per <code>gatewayInstance</code>, but the
+Portal publication row currently has one aggregate <code>deliveryState</code> and one
+<code>deliveryEvidence</code> object. Production hardening should normalize replica
+delivery without introducing multiple configuration realms.</p>
+<p>A future table can use this shape:</p>
+<pre><code class="language-text">llm_gateway_publication_ack_t
+  host_id
+  environment
+  gateway_publication_id
+  gateway_instance
+  applied_sequence
+  root_digest
+  gateway_version
+  applied_ts
+  state
+  evidence
+</code></pre>
+<p>Recommended delivery semantics:</p>
+<ol>
+<li>Validate the complete immutable candidate.</li>
+<li>Make the new projection root available to replicas.</li>
+<li>Each replica validates and atomically swaps its local root.</li>
+<li>Each replica writes an acknowledgement containing its instance identity,
+sequence, root digest, and gateway version.</li>
+<li>Portal shows desired replicas, acknowledged replicas, divergent replicas,
+and rollout age.</li>
+<li>Deployment automation determines success using an explicit quorum or
+all-required-replicas rule.</li>
+<li>A failed replica retains its last valid root and is removed from readiness
+until it converges or is deliberately rolled back.</li>
+</ol>
+<p>This per-replica evidence solves the operational need without allowing replicas
+to have intentionally different model or Policy configurations.</p>
+<h2 id="availability-and-scaling"><a class="header" href="#availability-and-scaling">Availability And Scaling</a></h2>
+<p>The logical gateway must not be a physical single point of failure.</p>
+<ul>
+<li>Run at least two replicas in production and spread them across failure zones.</li>
+<li>Use a stable internal service identity and health-aware load balancing.</li>
+<li>Keep request execution stateless apart from bounded local caches and immutable
+compiled snapshots.</li>
+<li>Coordinate provider quotas through the published Account quota group rather
+than per-replica counters alone.</li>
+<li>Bound global and per-subject concurrency, streaming concurrency, queue depth,
+replay bytes, and timeouts.</li>
+<li>Do not route traffic to a replica that has not applied an acceptable root or
+whose required Credential material cannot be resolved.</li>
+<li>Preserve the prior root for bounded rollback and restart recovery.</li>
+</ul>
+<p>Regional replicas may still share one logical publication. Region and residency
+decisions should be expressed through supported Routes, Deployments, claims,
+and compiled policy. If a legal boundary requires separate administrators,
+keys, networks, and publications, that is evidence for a future realm rather
+than an ordinary replica.</p>
+<h2 id="failure-modes"><a class="header" href="#failure-modes">Failure Modes</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Failure</th><th>Required behavior</th></tr>
+</thead>
+<tbody>
+<tr><td>Candidate validation fails</td><td>Keep the current publication; do not distribute the candidate.</td></tr>
+<tr><td>One replica rejects the new root</td><td>Keep its last valid root, remove it from readiness if necessary, and surface divergent delivery.</td></tr>
+<tr><td>Provider Deployment fails</td><td>Use only eligible configured fallback Routes; never bypass Policy or Credential controls.</td></tr>
+<tr><td>Logical gateway unavailable</td><td>Fail closed or use a bounded application-specific retry; microgateways must not call providers directly.</td></tr>
+<tr><td>Policy cannot resolve one Agent default</td><td>Reject model resolution rather than selecting an arbitrary Alias.</td></tr>
+<tr><td>Publication and Credential rotation overlap</td><td>Reload the external secret through the approved mechanism while retaining the immutable topology root.</td></tr>
+<tr><td>Microgateway attempts provider egress</td><td>Deny at network and identity policy and emit a security alert.</td></tr>
+<tr><td>Replicas report different digests at one sequence</td><td>Treat as a severe consistency incident and stop routing to divergent replicas.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="when-to-revisit-multiple-gateway-realms"><a class="header" href="#when-to-revisit-multiple-gateway-realms">When To Revisit Multiple Gateway Realms</a></h2>
+<p>Do not introduce a second logical LLM gateway merely because a team wants a
+different model, provider, budget, Alias, Agent default, or release preference.
+Those belong in the existing control plane.</p>
+<p>Revisit Option B only when at least one of these is demonstrated:</p>
+<ul>
+<li>a regulatory requirement mandates separate network or administrative
+boundaries inside the same host and environment;</li>
+<li>provider Credentials must be inaccessible to the operators or runtime of the
+other realm;</li>
+<li>residency rules require physically isolated egress that cannot safely be
+represented by supported routing policy;</li>
+<li>separate business units require independent SLOs and publication authority,
+and shared Policy governance is explicitly not acceptable;</li>
+<li>the shared logical service cannot meet measured scaling or failure-isolation
+requirements after horizontal scaling and quota isolation are exhausted;</li>
+<li>a merger, sovereign deployment, or high-assurance workload requires an
+independently audited model-access boundary.</li>
+</ul>
+<p>Before approving multiple realms, require an architecture review that defines:</p>
+<ul>
+<li>the trusted subject-to-realm selector;</li>
+<li>why the caller cannot influence that selector;</li>
+<li>Alias naming and discovery rules;</li>
+<li>whether any cross-realm fallback is permitted;</li>
+<li>separate Credential, network, audit, and operational ownership;</li>
+<li>migration and rollback behavior;</li>
+<li>the additional Portal and runtime contracts.</li>
+</ul>
+<h2 id="future-compatible-naming"><a class="header" href="#future-compatible-naming">Future-Compatible Naming</a></h2>
+<p>Use <strong>logical LLM gateway</strong> for the current <code>(host, environment)</code> authority and
+<strong>gateway instance</strong> for a replica. Avoid calling an instance a gateway target.</p>
+<p>If multiple isolated configurations are later required, introduce the explicit
+term <strong>LLM gateway realm</strong>. Do not overload <code>gatewayInstance</code>, Environment, Alias
+names, or synthetic Host records to represent the realm. That keeps a future
+additive migration understandable:</p>
+<pre><code class="language-text">(host_id, environment)
+</code></pre>
+<p>can become:</p>
+<pre><code class="language-text">(host_id, environment, gateway_realm_id)
+</code></pre>
+<p>with the existing data migrated into a generated <code>default</code> realm.</p>
+<h2 id="implementation-guidance"><a class="header" href="#implementation-guidance">Implementation Guidance</a></h2>
+<h3 id="phase-1-confirm-the-single-logical-gateway-contract"><a class="header" href="#phase-1-confirm-the-single-logical-gateway-contract">Phase 1: Confirm The Single-Logical-Gateway Contract</a></h3>
+<ul>
+<li>Document the one-publication-stream invariant in database and API contracts.</li>
+<li>Treat duplicate independently managed LLM gateways for one host/environment
+as a deployment error.</li>
+<li>Ensure every LLM replica has a unique, stable <code>gatewayInstance</code>.</li>
+<li>Ensure all replicas receive the same root and use a common readiness policy.</li>
+<li>Block model-provider egress and Credential distribution for microgateways.</li>
+</ul>
+<h3 id="phase-2-harden-delivery-and-operations"><a class="header" href="#phase-2-harden-delivery-and-operations">Phase 2: Harden Delivery And Operations</a></h3>
+<ul>
+<li>Add normalized per-replica publication acknowledgements.</li>
+<li>Add Portal views for replica convergence, version compatibility, and stale
+roots.</li>
+<li>Add alerts for digest divergence, missing acknowledgements, unauthorized
+provider egress, and capacity saturation.</li>
+<li>Test replica replacement, partial rollout, rollback, Credential rotation, and
+provider failover.</li>
+</ul>
+<h3 id="phase-3-prove-workload-isolation-inside-one-configuration"><a class="header" href="#phase-3-prove-workload-isolation-inside-one-configuration">Phase 3: Prove Workload Isolation Inside One Configuration</a></h3>
+<ul>
+<li>Verify per-subject and per-Alias admission fairness.</li>
+<li>Verify Policy Binding and default-Alias behavior.</li>
+<li>Verify quota-group sharing across replicas.</li>
+<li>Verify residency and classification handling supported by the publication
+compiler and gateway version.</li>
+<li>Demonstrate that MCP and Agent microgateways cannot bypass the central path.</li>
+</ul>
+<h3 id="phase-4-optional-realm-adr"><a class="header" href="#phase-4-optional-realm-adr">Phase 4: Optional Realm ADR</a></h3>
+<p>Only start this phase when the revisit criteria are met. Produce a separate ADR
+and threat model before changing the current primary keys or publication API.</p>
+<h2 id="acceptance-criteria"><a class="header" href="#acceptance-criteria">Acceptance Criteria</a></h2>
+<ul>
+<li>A host/environment has one current desired publication version and root
+digest.</li>
+<li>All ready replicas report that root digest and an allowed gateway version.</li>
+<li>Different Agents can resolve different Aliases and Policies without separate
+gateway configurations.</li>
+<li>Provider Credentials are available only to the logical LLM gateway workload.</li>
+<li>Microgateways can invoke approved Aliases but cannot call model providers.</li>
+<li>Removing the logical LLM gateway causes model requests to fail closed.</li>
+<li>A bad publication leaves the last valid root serving.</li>
+<li>Portal can identify every replica that has or has not applied a publication.</li>
+<li>Audit records identify Host, Environment, subject, Alias, Policy decision,
+Deployment, cost, publication sequence/root digest, and gateway instance.</li>
+</ul>
+<h2 id="open-questions"><a class="header" href="#open-questions">Open Questions</a></h2>
+<ul>
+<li>Should production delivery require acknowledgement from every desired replica
+or a configurable quorum before Portal marks the publication delivered?</li>
+<li>Which service owns the authoritative desired-replica inventory used to judge
+acknowledgement completeness?</li>
+<li>Should a replica that is one valid root behind remain ready during a bounded
+rollout window?</li>
+<li>Which internal identity and claims bind a microgateway request to Host and
+Environment?</li>
+<li>Which network-policy mechanism will prove that microgateways cannot reach
+provider endpoints?</li>
+<li>Which supported policy fields provide per-subject fairness before production?</li>
+<li>Are regional replicas allowed to serve the same Alias when the current
+compiler cannot enforce a requested residency condition?</li>
+<li>What measured requirement would trigger a gateway-realm architecture review?</li>
+</ul>
+<h2 id="final-recommendation"><a class="header" href="#final-recommendation">Final Recommendation</a></h2>
+<p>Keep the current cardinality and make it explicit:</p>
+<pre><code class="language-text">one host + one environment
+  = one logical LLM gateway configuration
+  = one immutable publication sequence
+  = many interchangeable replicas
+</code></pre>
+<p>Allow many AI microgateways, but keep them outside the LLM trust boundary. This
+design provides the strongest default governance model, aligns with the current
+database, and still supports different models and Policies through the existing
+Alias, Route, Deployment, Policy, and Binding abstractions.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../../design/light-portal-fga.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../../design/light-portal/global-tenant-entity-scope.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../../design/light-portal-fga.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../../design/light-portal/global-tenant-entity-scope.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../../mark-09e88c2c.min.js"></script>
+        <script src="../../searcher-09f2665d.js"></script>
+
+        <script src="../../clipboard-1626706a.min.js"></script>
+        <script src="../../highlight-abc7f01d.js"></script>
+        <script src="../../book-609e4cb8.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../../mermaid-3a6b472a.min.js"></script>
+        <script src="../../mermaid-init-025d9952.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

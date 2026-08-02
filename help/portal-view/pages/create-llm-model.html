@@ -35,10 +35,10 @@
             const path_to_root = "../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../searchindex-f79a928e.js";
+            window.path_to_searchindex_js = "../../../searchindex-995bd770.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../toc-a087366f.js"></script>
+        <script src="../../../toc-2dcc1cd3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -176,8 +176,9 @@
                     <main>
                         <h1 id="create-llm-model"><a class="header" href="#create-llm-model">Create LLM Model</a></h1>
 <p>Use the <strong>Create LLM Model</strong> form to add a physical provider model to the LLM
-Model Catalog for the selected host. Open it from <strong>Marketplace &gt; LLM Model
-Catalog</strong> and choose <strong>Create</strong>.</p>
+global Model Catalog shared by every host. Open it from <strong>Marketplace &gt; LLM
+Model Catalog</strong> and choose <strong>Create</strong>. Only platform catalog administrators
+should have permission to use this command.</p>
 <p>This guide applies only to <code>/app/form/createLlmModel</code>. For registrations,
 deployments, aliases, policies, and publication, see the
 <a href="./llm-model-control-plane.html">LLM Model Control Plane</a> guide.</p>
@@ -188,7 +189,6 @@ deployments, aliases, policies, and publication, see the
 <tr><th>Field</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td>Host Id</td><td>The selected host. The form supplies this read-only value.</td></tr>
 <tr><td>Provider Type</td><td>Provider identifier, such as <code>openai</code>.</td></tr>
 <tr><td>Physical Model Id</td><td>The model identifier recognized by the provider.</td></tr>
 <tr><td>Model Family</td><td>The provider’s model family or product family.</td></tr>
@@ -197,8 +197,9 @@ deployments, aliases, policies, and publication, see the
 </tbody>
 </table>
 </div>
-<p><code>Model Version</code> is optional. <code>Lifecycle Status</code> defaults to <code>DRAFT</code>, and
-<code>Active</code> defaults to enabled.</p>
+<p><code>Model Version</code> is optional, and <code>Lifecycle Status</code> defaults to <code>DRAFT</code>.
+<code>active</code> is backend-managed: create and update keep the model active, while the
+delete command soft-deletes it.</p>
 <h2 id="structured-fields"><a class="header" href="#structured-fields">Structured Fields</a></h2>
 <p><code>Modalities</code>, <code>Operations</code>, and <code>Declared Capabilities</code> are stored as typed
 arrays or objects. Do not enter JSON or YAML as a quoted string.</p>
@@ -229,14 +230,14 @@ is valid. Choose <strong>Reset</strong> to discard the draft and restore the las
 value. The Create action remains blocked while a structured draft is invalid
 or has not been applied.</p>
 <h2 id="categories-and-tags"><a class="header" href="#categories-and-tags">Categories and Tags</a></h2>
-<p>Categories and tags are optional. The selectors show active global and
-host-specific taxonomy values registered for the <code>llm_model</code> entity type. A
-taxonomy value belonging to another host or entity type cannot be assigned.</p>
+<p>Categories and tags are optional. The selectors show active global taxonomy
+values registered for the <code>llm_model</code> entity type. Host-specific taxonomy
+cannot be assigned to a global model.</p>
 <h2 id="create-the-record"><a class="header" href="#create-the-record">Create the Record</a></h2>
 <p>Review the values and choose <strong>Create LLM Model</strong>. The form sends the
 <code>createLlmModel</code> command and preserves <code>modalities</code> and <code>operations</code> as arrays
 and <code>declaredCapabilities</code> as an object. After a successful command, the
-browser returns to <strong>Marketplace &gt; LLM Model Catalog</strong>.</p>
+browser returns to <strong>GenAI Admin &gt; LLM Models</strong>.</p>
 <h2 id="common-problems"><a class="header" href="#common-problems">Common Problems</a></h2>
 <ul>
 <li><strong>Create is blocked after editing JSON or YAML</strong>: choose <strong>Apply</strong> to commit
@@ -245,8 +246,8 @@ the draft, or <strong>Reset</strong> to discard it.</li>
 again. The last valid value remains unchanged.</li>
 <li><strong>Required-field validation</strong>: provide every required field and use positive
 integers for both token limits.</li>
-<li><strong>No categories or tags are available</strong>: confirm that the taxonomy values
-are active and registered for <code>llm_model</code> on the selected host.</li>
+<li><strong>No categories or tags are available</strong>: confirm that global taxonomy values
+are active and registered for <code>llm_model</code>.</li>
 <li><strong>403 on Create</strong>: confirm access to the
 <code>lightapi.net/genai/createLlmModel/0.1.0</code> command endpoint with the required
 write scope and role permission.</li>
