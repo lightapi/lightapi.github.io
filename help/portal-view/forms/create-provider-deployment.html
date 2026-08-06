@@ -35,7 +35,7 @@
             const path_to_root = "../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../searchindex-3321a7e2.js";
+            window.path_to_searchindex_js = "../../../searchindex-0530fa91.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../../toc-2dcc1cd3.js"></script>
@@ -198,23 +198,26 @@ identifier accepted by that endpoint.</p>
 </thead>
 <tbody>
 <tr><td>Host Id</td><td>Yes</td><td><code>selected-host-id</code></td><td>Read-only host that owns the Deployment.</td></tr>
-<tr><td>LLM Registration</td><td>Yes</td><td><code>Production / GPT-4o</code></td><td>Non-deleted host-scoped Registration that approves the catalog model and environment. The selector submits its <code>modelRegistrationId</code>.</td></tr>
+<tr><td>LLM Registration</td><td>Yes</td><td><code>dev — groq / llama-3.3-70b-versatile</code></td><td>Non-deleted host-scoped Registration that approves the catalog model and environment. Labels combine environment, provider, and physical model; the selector still submits only its <code>modelRegistrationId</code>.</td></tr>
 <tr><td>Provider Account</td><td>Yes</td><td><code>OpenAI Production</code></td><td>Non-deleted host-scoped billing/quota Account. The selector submits its <code>providerAccountId</code>.</td></tr>
 <tr><td>Deployment Name</td><td>Yes</td><td><code>openai-gpt-5.6-sol-ca-prod</code></td><td>Operator-friendly name. It must be unique within the host.</td></tr>
-<tr><td>Provider Type</td><td>Yes</td><td><code>openai</code></td><td>Provider adapter/format. Select it before Physical Model Id.</td></tr>
+<tr><td>Provider Type</td><td>Yes</td><td><code>groq</code></td><td>Provider identity used for the Account, model catalog, and billing. Select it before Physical Model Id.</td></tr>
+<tr><td>Provider Protocol</td><td>Yes</td><td><code>openai</code></td><td>Upstream wire protocol. Choose <code>openai</code> for OpenAI-compatible endpoints such as Groq or Gemini, or <code>anthropic</code> for the Anthropic Messages protocol.</td></tr>
 <tr><td>Physical Model Id</td><td>Yes</td><td><code>gpt-4o</code></td><td>Exact model name sent to the provider. Options are filtered by Provider Type.</td></tr>
 <tr><td>Base URL</td><td>Yes</td><td><code>https://api.openai.com/v1</code></td><td>HTTPS base endpoint used by the provider client. Do not include credentials.</td></tr>
-<tr><td>Region</td><td>No</td><td><code>ca-central-1</code></td><td>Placement or residency region associated with the endpoint.</td></tr>
+<tr><td>Region</td><td>No</td><td><code>ca-central-1</code></td><td>Optional placement or residency region. Leave it empty for a global endpoint.</td></tr>
 <tr><td>Transport Bounds</td><td>No</td><td><code>{"connectTimeoutMs":5000}</code></td><td>Non-secret JSON object for provider-specific transport annotations. Defaults to <code>{}</code>.</td></tr>
-<tr><td>Refresh Before Seconds</td><td>No</td><td><code>86400</code></td><td>Positive number of seconds before expiry when conformance becomes due for refresh.</td></tr>
-<tr><td>Lifecycle Status</td><td>No</td><td><code>DRAFT</code></td><td>New Deployments are created as drafts. Activate them only after validation and conformance complete.</td></tr>
+<tr><td>Refresh Before Seconds</td><td>No</td><td><code>86400</code></td><td>Reserved refresh lead time for a future trusted conformance runner.</td></tr>
+<tr><td>Lifecycle Status</td><td>No</td><td><code>DRAFT</code></td><td>New Deployments are created as drafts. Activate them after their runtime credential is provisioned.</td></tr>
 </tbody>
 </table>
 </div>
 <p>The backend creates <code>providerDeploymentId</code>. The form does not accept <code>active</code>;
 that value is backend-managed for soft deletion.</p>
 <h2 id="registration-and-account"><a class="header" href="#registration-and-account">Registration And Account</a></h2>
-<p>Both selectors load non-deleted reference labels for the selected host. The
+<p>Both selectors load non-deleted reference labels for the selected host. An LLM
+Registration label has the form <code>environment — provider / physical-model</code>, so
+registrations in the same environment remain distinguishable. The
 command rejects an ID that does not exist under that host. Choose a Registration
 for the intended environment and an Account whose provider and billing owner
 match this endpoint. The Account owns the quota-group identity; the Deployment
@@ -222,7 +225,11 @@ does not duplicate it.</p>
 <h2 id="provider-model-and-endpoint"><a class="header" href="#provider-model-and-endpoint">Provider, Model, And Endpoint</a></h2>
 <p>Choose <strong>Provider Type</strong> first. <strong>Physical Model Id</strong> then loads the model names
 related to that provider. The selected physical model must be the same model
-actually served by <code>baseUrl</code> and later reported by the conformance result.</p>
+actually served by <code>baseUrl</code>.</p>
+<p>Provider Type and Provider Protocol have different meanings. Type identifies
+the provider; Protocol selects the request/response codec used by the gateway.
+For example, a Groq deployment uses <code>providerType: groq</code> with
+<code>providerProtocol: openai</code>.</p>
 <p><code>baseUrl</code> must start with <code>https://</code>. Examples include:</p>
 <pre><code class="language-text">https://api.openai.com/v1
 https://my-resource.openai.azure.com/openai
@@ -251,29 +258,17 @@ publication, Portal copies that authoritative value into the immutable gateway
 resource. Deployments published under the same quota group share the gateway’s
 provider-account runtime capacity identity.</p>
 <h2 id="conformance-fields"><a class="header" href="#conformance-fields">Conformance Fields</a></h2>
-<p>Conformance evidence is not editable on this form. Portal creates the
-Deployment with state <code>UNKNOWN</code> and no digest, validity time, or result. After
-creation, use <strong>Validate</strong> and <strong>Conformance</strong> on the Deployments tab.</p>
-<p>The workflow produces a result containing the provider, physical model,
-validity time, detected capabilities, and captured evidence. If state is
-<code>PASS</code>, Portal requires all of the following to agree:</p>
-<ul>
-<li><code>conformanceDigest</code> matches the canonical result digest;</li>
-<li><code>conformanceValidUntil</code> matches the result’s <code>validUntil</code> and is in the
-future;</li>
-<li>the result provider and physical model match <code>providerType</code> and
-<code>physicalModelId</code>;</li>
-<li>the result contains capability and capability-evidence objects.</li>
-</ul>
-<p>Administrative create and update commands reject manually supplied conformance
-evidence. Incomplete, mismatched, or expired workflow evidence is rejected and
-cannot become a healthy published route.</p>
+<p>Conformance evidence is not editable on this form. Portal retains the backend
+fields for a future trusted runner, but the current Deployments tab does not
+offer validation or conformance actions. <code>UNKNOWN</code> or <code>PENDING</code> evidence does
+not block the current route-preview or instance-targeted publication flow. Do
+not manually supply conformance state, digest, validity, or result fields.</p>
 <h2 id="lifecycle-status"><a class="header" href="#lifecycle-status">Lifecycle Status</a></h2>
 <p>New records use <code>DRAFT</code>. The update form supports <code>VALIDATING</code>, <code>ACTIVE</code>,
 <code>SUSPENDED</code>, and <code>RETIRED</code> after creation.</p>
 <p>Lifecycle <code>ACTIVE</code> alone does not make the Deployment routable. It also needs
-unexpired <code>PASS</code> conformance evidence, an effective Credential, Pricing, an
-Alias Route, and publication.</p>
+an effective <code>ACTIVE</code> or <code>ROTATING</code> Credential, effective Pricing, an Alias
+Route, and publication.</p>
 <h2 id="create-the-deployment"><a class="header" href="#create-the-deployment">Create The Deployment</a></h2>
 <p>Choose <strong>Create Provider Deployment</strong>. The form sends
 <code>lightapi.net/genai/createLlmProviderDeployment/0.1.0</code> and returns to
@@ -284,6 +279,8 @@ Alias Route, and publication.</p>
 confirm the current host selection.</li>
 <li><strong>Physical Model Id is empty</strong>: select Provider Type first and confirm the
 provider-to-model reference relation is configured.</li>
+<li><strong>Provider Protocol is rejected</strong>: choose <code>openai</code> or <code>anthropic</code>; do not put
+a provider identity such as <code>groq</code> or <code>gemini</code> in this field.</li>
 <li><strong>Base URL is rejected</strong>: use a complete HTTPS URL.</li>
 <li><strong>Transport Bounds error</strong>: enter an object, correct JSON/YAML syntax, and
 choose <strong>Apply</strong>.</li>

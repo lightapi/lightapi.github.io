@@ -35,7 +35,7 @@
             const path_to_root = "../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../searchindex-3321a7e2.js";
+            window.path_to_searchindex_js = "../../../searchindex-0530fa91.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../../toc-2dcc1cd3.js"></script>
@@ -365,7 +365,7 @@ Account; do not add or edit <code>active</code> in the JSON draft.</p>
 <h2 id="deployments-tab"><a class="header" href="#deployments-tab">Deployments Tab</a></h2>
 <p>Use Deployments to define a callable provider endpoint for an approved LLM. A
 Deployment binds a host-scoped Registration and provider Account to the exact
-provider type, physical model, HTTPS endpoint, region, and conformance record
+provider type, protocol, physical model, HTTPS endpoint, and optional region
 that Portal will govern. The referenced Account owns the quota group.</p>
 <h3 id="why-deployments-are-separate"><a class="header" href="#why-deployments-are-separate">Why Deployments Are Separate</a></h3>
 <p>The Registration answers <em>which catalog model is approved for an environment</em>.
@@ -390,8 +390,8 @@ exact upstream model, and HTTPS endpoint used to build the callable provider.</l
 <li><code>region</code> and <code>transportBounds</code> retain control-plane placement and transport
 metadata. Arbitrary transport-bound properties are not automatically enforced
 by the current gateway configuration compiler.</li>
-<li>The conformance fields record whether the endpoint has passed the provider
-capability suite and when that evidence must be refreshed.</li>
+<li>Conformance fields are retained for a future trusted provider-test runner,
+but they are not part of the current interactive deployment workflow.</li>
 </ul>
 <p>Alias Routes reference <code>providerDeploymentId</code>. Before a route is publishable,
 the Deployment must be active, have lifecycle status <code>ACTIVE</code>, and have an
@@ -410,36 +410,26 @@ before the gateway consumes the new materialized values.</p>
 <p>Choose <strong>Create provider deployment</strong> to open
 <code>/app/form/createProviderDeployment</code>. Required create fields are
 <code>modelRegistrationId</code>, <code>providerAccountId</code>, <code>deploymentName</code>, <code>providerType</code>,
-<code>physicalModelId</code>, and <code>baseUrl</code>. <code>baseUrl</code> must use HTTPS.</p>
+<code>providerProtocol</code>, <code>physicalModelId</code>, and <code>baseUrl</code>. <code>providerProtocol</code> is
+<code>openai</code> or <code>anthropic</code>; it is independent from provider identity, so Groq and
+Gemini OpenAI-compatible endpoints use <code>openai</code>. <code>baseUrl</code> must use HTTPS.</p>
 <p>Choose a row’s edit action to open <code>/app/form/updateProviderDevelopment</code>. The
 update form retains read-only <code>hostId</code>, <code>providerDeploymentId</code>, and
 <code>aggregateVersion</code> values for host isolation and optimistic concurrency.</p>
 <p>See <a href="../forms/create-provider-deployment.html">Create Provider Deployment</a> and
 <a href="../forms/update-provider-development.html">Update Provider Deployment</a> for
 field-by-field examples.</p>
-<p>After saving, use <strong>Validate</strong> for deployment validation and <strong>Conformance</strong> to
-run the provider conformance workflow. Administrative forms do not accept
-conformance evidence. New deployments start with <code>conformanceState</code> set to
-<code>UNKNOWN</code>. Clicking <strong>Conformance</strong> records a versioned <code>PENDING</code> transition,
-clears any stale result, digest, and validity time, and disables the button for
-that row. It does not manufacture a passing result in the browser or command
-service.</p>
-<p>A trusted conformance runner consumes the pending work, tests the exact
-provider and physical model with resolved credentials, and calls
-<code>recordLlmProviderConformanceResult</code> with canonical evidence. That completion
-action requires the available <code>portal.w</code> scope. It accepts
-only <code>PASS</code>, <code>FAIL</code>, or <code>QUARANTINED</code>, verifies the result digest and deployment
-identity, and rejects expired PASS evidence. Both interactive requests and the
-runner callback use <code>portal.w</code>; restrict the completion action through its
-endpoint rule and role permissions instead of a separate scope.</p>
-<p>If a row remains <code>PENDING</code>, the Portal request succeeded but no trusted runner
-has completed it. Check that a conformance worker is consuming the deployment
-update event, can resolve the active Credential’s <code>secretReference</code>, and is
-authorized to call the completion action. A deployment in <code>PASS</code> state must
-carry the complete, matching, unexpired workflow result, digest, and validity
-time.
-Due-conformance processing uses <code>refreshBeforeSeconds</code> to schedule a refresh
-before that evidence expires.</p>
+<p>The Deployments tab does not expose <strong>Validate</strong> or <strong>Conformance</strong> actions in
+the current MVP because Portal has no trusted runner to complete those jobs.
+Older records may retain <code>UNKNOWN</code> or <code>PENDING</code> conformance state; that state is
+informational and does not block current route preview or instance-targeted
+publication. Do not manufacture a <code>PASS</code>, digest, validity time, or result.</p>
+<p>To make a Deployment available, provision its external secret in the target
+gateway runtime, change the related Credential to <code>ACTIVE</code>, change the
+Deployment lifecycle to <code>ACTIVE</code>, add effective Pricing and an Alias Route,
+and publish the configuration. Provider connectivity is then tested through
+the tenant gateway. The backend conformance contract remains reserved for a
+future trusted runner.</p>
 <p>As with the other tabs, <code>active</code> is backend-managed. Create and update keep the
 row active; Delete soft-deletes it.</p>
 <h2 id="credentials-tab"><a class="header" href="#credentials-tab">Credentials Tab</a></h2>
@@ -917,8 +907,8 @@ against each versioned service endpoint:</p>
 </thead>
 <tbody>
 <tr><td>List and preview</td><td><code>/portal/query</code></td><td><code>lightapi.net/genai/&lt;queryAction&gt;/0.1.0</code></td><td><code>portal.r</code></td></tr>
-<tr><td>Create, update, delete, validate, request conformance, publish, rollback</td><td><code>/portal/command</code></td><td><code>lightapi.net/genai/&lt;commandAction&gt;/0.1.0</code></td><td><code>portal.w</code></td></tr>
-<tr><td>Record trusted conformance result</td><td><code>/portal/command</code></td><td><code>lightapi.net/genai/recordLlmProviderConformanceResult/0.1.0</code></td><td><code>portal.w</code></td></tr>
+<tr><td>Create, update, delete, publish, rollback</td><td><code>/portal/command</code></td><td><code>lightapi.net/genai/&lt;commandAction&gt;/0.1.0</code></td><td><code>portal.w</code></td></tr>
+<tr><td>Reserved conformance runner callbacks</td><td><code>/portal/command</code></td><td><code>lightapi.net/genai/&lt;conformanceAction&gt;/0.1.0</code></td><td><code>portal.w</code></td></tr>
 </tbody>
 </table>
 </div>
@@ -932,7 +922,7 @@ against each versioned service endpoint:</p>
 <tr><td>Models</td><td><code>getLlmModel</code></td><td><code>createLlmModel</code>, <code>updateLlmModel</code>, <code>deleteLlmModel</code></td></tr>
 <tr><td>Registrations</td><td><code>getLlmModelRegistration</code></td><td><code>createLlmModelRegistration</code>, <code>updateLlmModelRegistration</code>, <code>deleteLlmModelRegistration</code></td></tr>
 <tr><td>Accounts</td><td><code>getLlmProviderAccount</code></td><td><code>createLlmProviderAccount</code>, <code>updateLlmProviderAccount</code>, <code>deleteLlmProviderAccount</code></td></tr>
-<tr><td>Deployments</td><td><code>getLlmProviderDeployment</code></td><td><code>createLlmProviderDeployment</code>, <code>updateLlmProviderDeployment</code>, <code>deleteLlmProviderDeployment</code>, <code>validateLlmProviderDeployment</code>, <code>runLlmProviderConformance</code></td></tr>
+<tr><td>Deployments</td><td><code>getLlmProviderDeployment</code></td><td><code>createLlmProviderDeployment</code>, <code>updateLlmProviderDeployment</code>, <code>deleteLlmProviderDeployment</code></td></tr>
 <tr><td>Credentials</td><td><code>getLlmProviderCredential</code></td><td><code>createLlmProviderCredential</code>, <code>updateLlmProviderCredential</code>, <code>deleteLlmProviderCredential</code></td></tr>
 <tr><td>Aliases</td><td><code>getLlmPublicAlias</code>, <code>previewLlmAliasRoutes</code></td><td><code>createLlmPublicAlias</code>, <code>updateLlmPublicAlias</code>, <code>deleteLlmPublicAlias</code></td></tr>
 <tr><td>Routes</td><td><code>getLlmAliasRoute</code></td><td><code>createLlmAliasRoute</code>, <code>updateLlmAliasRoute</code>, <code>deleteLlmAliasRoute</code></td></tr>
