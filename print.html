@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-0530fa91.js";
+            window.path_to_searchindex_js = "searchindex-4aef98cd.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-2dcc1cd3.js"></script>
@@ -18738,6 +18738,10 @@ calls reuse it so proposed IDs remain stable while the user edits selections.</p
     "targetProductVersionId": "...",
     "includeFiles": false,
     "fileSelections": [],
+    "includeApis": true,
+    "apiSelections": ["..."],
+    "includeApps": true,
+    "appSelections": ["..."],
     "includeDeployments": false,
     "deploymentSelections": [],
     "createSnapshot": true,
@@ -18765,6 +18769,20 @@ environment tag should normally have the same value.</p>
 <p>Optional instance overrides include description, zone, region, line of
 business, resource name, business name, topic classification, and ownership
 when the caller is an administrator.</p>
+<p>API and app selections are parent-aware. When <code>apiSelections</code> or
+<code>appSelections</code> is omitted from an initial plan request, every active source API
+or app is selected. Once a plan has been returned, the client sends the explicit
+selected IDs. <code>includeApis: false</code> or <code>includeApps: false</code> with an empty
+selection removes the entire corresponding section. A non-empty selection is
+invalid when its include flag is false.</p>
+<p>Execution requires both <code>apiSelections</code> and <code>appSelections</code> to be present and
+returns <code>INVALID_CLONE_REQUEST</code> when either field is omitted; older clients must
+be upgraded before they can execute clones planned with this contract.</p>
+<p>Excluding an instance API also excludes its path prefixes, API properties, and
+every app/API association that references it. Excluding an instance app also
+excludes its app properties and every app/API association that references it.
+An association and its properties are copied only when both its app and API are
+selected. Property selectors whose parent entity is excluded are rejected.</p>
 <h3 id="property-selector"><a class="header" href="#property-selector">Property selector</a></h3>
 <p>Property choices are an array, not a map keyed by configuration/property name.
 The stable selector is:</p>
@@ -18793,8 +18811,10 @@ It fails if omission would leave a required property missing or would expose an
 invalid lower-precedence value.</p>
 <h3 id="sensitive-values"><a class="header" href="#sensitive-values">Sensitive values</a></h3>
 <p>The property inventory always returns property metadata but does not return raw
-values by default. It includes configuration name, property name, scope,
-<code>valueType</code>, parent display identity, aggregate version, and <code>valueState</code>.</p>
+values by default. <code>propertyMetadata</code> is keyed by property ID and includes the
+configuration name, property name, and <code>valueType</code>; selectors continue to carry
+the stable property UUID. The UI falls back to the UUID when catalog metadata is
+unavailable.</p>
 <p><code>COPY</code> never requires the raw value to leave the server. A user who needs to
 inspect a value uses a separate audited POST reveal action with the same owner
 and <code>portal.w</code> checks. Until reliable sensitivity metadata exists, every value
@@ -18869,6 +18889,10 @@ the returned <code>sourceGraphDigest</code> and <code>planHash</code>:</p>
     "targetProductVersionId": "...",
     "includeFiles": false,
     "fileSelections": [],
+    "includeApis": true,
+    "apiSelections": ["..."],
+    "includeApps": true,
+    "appSelections": ["..."],
     "includeDeployments": false,
     "deploymentSelections": [],
     "createSnapshot": true,
@@ -18882,6 +18906,10 @@ covers the current schemas and value-type constraints of every referenced
 configuration property. A schema change after preview returns
 <code>PLAN_DEPENDENCY_CHANGED</code> and requires a new preview. Client-provided target or
 child IDs that do not match the deterministic mapping are rejected.</p>
+<p>The clone page renders the planned instance APIs and instance apps as explicit
+checkbox lists with <strong>Select all</strong> and <strong>Clear all</strong> controls. Changing either
+list invalidates the current plan and clears property overrides so the next
+plan contains only properties whose parents remain selected.</p>
 <p>The immediate response is <code>ACCEPTED</code>, not completed. It contains the clone
 request ID, target instance ID, transaction ID, terminal event ID, event counts,
 and status URL/action.</p>
