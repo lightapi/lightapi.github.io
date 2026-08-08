@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-4aef98cd.js";
+            window.path_to_searchindex_js = "searchindex-72251a87.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-2dcc1cd3.js"></script>
@@ -9446,9 +9446,14 @@ agent.</p>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="agent-memory-event-refactor"><a class="header" href="#agent-memory-event-refactor">Agent Memory Event Refactor</a></h1>
-<h2 id="problem-8"><a class="header" href="#problem-8">Problem</a></h2>
-<p><code>GlobalSnapshotPersistenceImpl</code> currently skips these Hindsight memory tables
-for both snapshot export and snapshot-to-event conversion:</p>
+<h2 id="implementation-status"><a class="header" href="#implementation-status">Implementation Status</a></h2>
+<p>The development implementation now exposes a bank-first Hindsight workspace at
+<code>/app/genai/MemoryBanks</code> and a bank detail workspace at
+<code>/app/genai/MemoryBanks/:bankId</code>. The old flat session, user, agent, and
+organization memory pages and service actions have been removed. There is no
+legacy data migration or compatibility path: development databases are rebuilt
+from the current DDL.</p>
+<p>The current Hindsight table family is:</p>
 <pre><code class="language-text">agent_memory_bank_t
 agent_memory_doc_t
 agent_memory_unit_t
@@ -9460,88 +9465,119 @@ agent_memory_directive_t
 agent_memory_reflection_t
 agent_session_history_t
 </code></pre>
-<p>The skip is intentional for the current implementation. These tables are not
-currently populated from portal events as the source of truth. They are runtime
-state written directly by <code>light-agent</code> or memory client code, so exporting them
-as portable portal domain state or converting them into generic created events
-would be unsafe.</p>
-<p>The current implementation also has a schema drift risk:</p>
-<ul>
-<li><code>light-agent</code> writes directly to the current Hindsight tables:
-<code>agent_memory_bank_t</code>, <code>agent_session_history_t</code>, and
-<code>agent_memory_unit_t</code>.</li>
-<li><code>light-fabric/crates/hindsight-client</code> writes directly to
-<code>agent_memory_unit_t</code>.</li>
-<li><code>light-portal</code> Java db-provider has event replay methods for
-<code>AgentSessionHistory</code> and <code>AgentMemory</code>, but those methods do not cover the
-current Hindsight table family. <code>AgentMemory</code> writes <code>agent_memory_t</code>, and
-<code>AgentSessionHistory</code> expects the older <code>session_history_id</code>, <code>process_id</code>,
-<code>role</code>, and <code>content</code> shape rather than the current
-<code>(host_id, bank_id, session_id, messages)</code> schema.</li>
-<li>The Rust importer also skips the same <code>agent_memory_*</code> and
-<code>agent_session_history_t</code> tables, so the Java and Rust conversion paths are
-aligned around the current non-event-backed behavior.</li>
-</ul>
+<p>The Portal command/event path projects current Hindsight events into these
+tables. <code>light-agent</code> remains an intentional direct writer in direct-PostgreSQL
+mode and is the owner of the session-history projection. The retained
+Portal-command runtime mode creates session history with
+<code>durable_session_id = sessionId</code>, allowing the runtime reconciler to rebuild it
+from <code>agent_session_event_t</code>.</p>
+<p><code>GlobalSnapshotPersistenceImpl</code> treats the memory family as one explicit
+<code>agent_memory_t</code> export entity. Session history is opt-in and sensitive;
+co-occurrence state is derived and is not exported as authoritative state.
+The <code>agent_memory_t</code> name in that export dispatch is a current compatibility
+alias for the Hindsight table set, not the removed legacy table.</p>
 <h2 id="goal"><a class="header" href="#goal">Goal</a></h2>
-<p>Refactor the agent memory persistence path so that memory state has a clear
-owner:</p>
+<p>Keep ownership explicit while supporting Portal administration:</p>
 <pre><code class="language-text">command/event path -&gt; event_store_t -&gt; db-provider replay -&gt; Hindsight tables
 </code></pre>
-<p>Once that contract is in place, snapshot export and conversion can safely
-include the event-backed memory state where appropriate.</p>
+<ul>
+<li>Portal administrators manage banks and supported bank-scoped resources
+through command events and current read-model queries.</li>
+<li><code>light-agent</code> owns runtime session history and may use either the direct-PG or
+Portal-command memory store.</li>
+<li>derived and vector state is never presented as Portal-authored authoritative
+content.</li>
+</ul>
 <h2 id="non-goals-15"><a class="header" href="#non-goals-15">Non-Goals</a></h2>
 <ul>
-<li>Do not promote existing direct-write memory rows into snapshots before a
-backfill/migration event strategy exists.</li>
+<li>Do not add legacy table migration, dual reads, or compatibility writers.</li>
 <li>Do not convert derived caches into authoritative state unless a product
 decision requires exact cache promotion.</li>
 <li>Do not require every chat token or partial model response to become an event.</li>
-<li>Do not remove the current direct PostgreSQL path until <code>light-agent</code> has a
-stable command-backed memory store and operational validation.</li>
+<li>Do not remove the current direct PostgreSQL path; it remains the default
+development runtime store.</li>
 </ul>
-<h2 id="current-state-3"><a class="header" href="#current-state-3">Current State</a></h2>
-<h3 id="snapshot-export-and-conversion"><a class="header" href="#snapshot-export-and-conversion">Snapshot Export And Conversion</a></h3>
-<p><code>GlobalSnapshotPersistenceImpl</code> excludes the memory tables from export and
-conversion. This prevents two bad outcomes:</p>
+<h2 id="current-portal-contract"><a class="header" href="#current-portal-contract">Current Portal Contract</a></h2>
+<p>All operations use service <code>lightapi.net/genai</code>, version <code>0.1.0</code>.</p>
+<p>Read actions (<code>portal.r</code>) are:</p>
+<pre><code class="language-text">getAgentMemoryBanks              getFreshAgentMemoryBank
+getAgentMemoryDocs               getFreshAgentMemoryDoc
+getAgentMemoryUnits              getFreshAgentMemoryUnit
+getAgentMemoryEntities           getFreshAgentMemoryEntity
+getAgentMemoryUnitEntities       getAgentMemoryEntityCooccurrences
+getAgentMemoryLinks              getFreshAgentMemoryLink
+getAgentMemoryDirectives         getFreshAgentMemoryDirective
+getAgentMemoryReflections        getFreshAgentMemoryReflection
+getAgentSessionHistories         getAgentSessionHistoryProjection
+</code></pre>
+<p>Portal-enabled commands (<code>portal.w</code>) are:</p>
+<pre><code class="language-text">createAgentMemoryBank            updateAgentMemoryBank
+deleteAgentMemoryBank            createAgentMemoryDoc
+updateAgentMemoryDoc             deleteAgentMemoryDoc
+deleteAgentMemoryUnit            createAgentMemoryEntity
+updateAgentMemoryEntity          deleteAgentMemoryEntity
+linkAgentMemoryUnitEntity        unlinkAgentMemoryUnitEntity
+createAgentMemoryLink            updateAgentMemoryLink
+deleteAgentMemoryLink            createAgentMemoryDirective
+updateAgentMemoryDirective       deleteAgentMemoryDirective
+deleteAgentMemoryReflection
+</code></pre>
+<p>The direct retain and session-history command operations remain available for
+<code>light-agent</code> runtime use. They require a client-credentials token; an
+authorization-code token for a logged-in Portal user is rejected by the
+command handler even if it carries <code>portal.w</code>.
+The three update/create operations below are deliberately absent from both the
+published service action registry and the Portal until an asynchronous
+embedding owner and state machine exist:</p>
+<pre><code class="language-text">updateAgentMemoryUnit            createAgentMemoryReflection
+updateAgentMemoryReflection
+</code></pre>
+<p>Session-history commands are retained for <code>light-agent</code> runtime use only:</p>
+<pre><code class="language-text">createAgentSessionHistory        appendAgentSessionHistory
+compactAgentSessionHistory       deleteAgentSessionHistory
+</code></pre>
+<h3 id="read-model-and-lifecycle-rules"><a class="header" href="#read-model-and-lifecycle-rules">Read-model and lifecycle rules</a></h3>
 <ul>
-<li>exporting user/session memory into another environment without an explicit
-promotion contract</li>
-<li>converting rows into events that no replay handler can faithfully apply</li>
+<li>Every child query uses the full <code>(host_id, bank_id, resource key)</code> identity.</li>
+<li>List responses use <code>agentMemoryBanks</code>, <code>agentMemoryDocs</code>,
+<code>agentMemoryUnits</code>, <code>agentMemoryEntities</code>, <code>agentMemoryUnitEntities</code>,
+<code>agentMemoryEntityCooccurrences</code>, <code>agentMemoryLinks</code>,
+<code>agentMemoryDirectives</code>, <code>agentMemoryReflections</code>, or
+<code>agentSessionHistories</code> as appropriate.</li>
+<li>Runtime-managed banks are identified structurally through
+<code>agent_session_t.bank_id</code> and excluded before default count and pagination.
+A session-ID equality fallback exists only for pre-binding interactive rows.</li>
+<li>Interactive sessions bind their durable <code>agent_session_t</code> row after either
+memory store creates the bank. A conflicting binding fails closed.
+Workflow-job sessions are intentionally bankless.</li>
+<li>Session history is bank-scoped, projection-aware, and read-only in the
+Portal. Lists omit message bodies; detail reads are bounded and redact
+credential-like fields.</li>
+<li>Unit/entity associations are hard links without active/version fields.
+Entity co-occurrence is a derived, read-only diagnostic.</li>
+<li>Bank deactivation is rejected while active children or active/closing bound
+interactive sessions exist.</li>
+<li>Embeddings are never returned to the browser.</li>
 </ul>
-<p>The Rust importer has the same conversion skip list. Any future change must
-update both Java and Rust paths.</p>
-<h3 id="light-agent"><a class="header" href="#light-agent">light-agent</a></h3>
-<p><code>light-agent</code> currently owns some memory writes directly:</p>
-<pre><code class="language-text">ensure_session_memory_bank
-  INSERT INTO agent_memory_bank_t
-
-session history persistence
-  INSERT INTO agent_session_history_t ... ON CONFLICT DO UPDATE
-
-hindsight retain
-  INSERT INTO agent_memory_unit_t
+<h3 id="development-qualification"><a class="header" href="#development-qualification">Development qualification</a></h3>
+<p>Run the source-only contract gate from the workspace root with:</p>
+<pre><code class="language-bash">./implementation/light-portal/scripts/run-hindsight-memory-phase-6-gate.sh --source-only
 </code></pre>
-<p>This is operationally simple and gives the agent read-your-writes behavior, but
-it bypasses portal command validation, event persistence, replay, and snapshot
-conversion.</p>
-<h3 id="java-db-provider"><a class="header" href="#java-db-provider">Java db-provider</a></h3>
-<p>The Java db-provider already has event handler plumbing for many GenAI tables.
-For memory, however, the existing methods are not aligned with the Hindsight
-schema:</p>
-<pre><code class="language-text">AgentMemoryCreatedEvent -&gt; agent_memory_t
-AgentSessionHistoryCreatedEvent -&gt; old session-history row shape
+<p>The full local gate installs <code>light-portal</code> artifacts first, then tests
+<code>genai-query</code>, <code>genai-command</code>, <code>portal-view</code>, <code>light-agent</code>, and this book:</p>
+<pre><code class="language-bash">./implementation/light-portal/scripts/run-hindsight-memory-phase-6-gate.sh
 </code></pre>
-<p>There are no current event handlers for:</p>
-<pre><code class="language-text">agent_memory_bank_t
-agent_memory_doc_t
-agent_memory_unit_t
-agent_memory_entity_t
-agent_memory_unit_entity_t
-agent_memory_entity_cooccur_t
-agent_memory_link_t
-agent_memory_directive_t
-agent_memory_reflection_t
-</code></pre>
+<p>Pass <code>--postgres-url jdbc:postgresql://...</code> to execute the isolated-schema
+command-projection-query lifecycle test. After deploying the development
+services, set <code>HINDSIGHT_SMOKE_PORTAL_URL</code>, <code>HINDSIGHT_SMOKE_HOST_ID</code>, and
+either <code>HINDSIGHT_SMOKE_BEARER_TOKEN</code> or <code>HINDSIGHT_SMOKE_COOKIE</code>, explicitly
+authorize the disposable lifecycle with <code>HINDSIGHT_SMOKE_ALLOW_WRITE=true</code>,
+and add <code>--live</code>. The live gate creates a uniquely named bank, waits for the
+query projection, updates it, verifies isolated lookup, and deactivates it.</p>
+<h2 id="historical-design-notes"><a class="header" href="#historical-design-notes">Historical Design Notes</a></h2>
+<p>The sections below record the design path that produced the implemented
+contract. Where they differ from the Current Portal Contract above, the current
+contract is authoritative.</p>
 <h2 id="recommended-design-1"><a class="header" href="#recommended-design-1">Recommended Design</a></h2>
 <p>Use events for durable memory state, and treat pure caches as rebuildable
 projection state.</p>
@@ -9810,7 +9846,7 @@ platform can re-embed after model upgrades.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="tool-description-embedding-population"><a class="header" href="#tool-description-embedding-population">Tool Description Embedding Population</a></h1>
-<h2 id="problem-9"><a class="header" href="#problem-9">Problem</a></h2>
+<h2 id="problem-8"><a class="header" href="#problem-8">Problem</a></h2>
 <p>The GenAI Tool page lets users update <code>tool_t.description</code> through the
 <code>updateTool</code> form. Endpoint-backed tools are also projected into <code>tool_t</code> when
 <code>api_endpoint_t</code> is populated from OpenAPI, MCP <code>tools/list</code>, or LightAPI
@@ -10204,7 +10240,7 @@ and other endpoint details belong in LightAPI descriptions, OpenAPI/OpenRPC
 documents, protobuf metadata, or the portal endpoint catalog. Workflow tasks
 reference those descriptions and provide step-level wiring, guards, exports,
 and error handling.</p>
-<h2 id="current-state-4"><a class="header" href="#current-state-4">Current State</a></h2>
+<h2 id="current-state-3"><a class="header" href="#current-state-3">Current State</a></h2>
 <p>The current Portal implementation already has the persistence and generic CRUD
 surface needed for a first editor:</p>
 <ul>
@@ -10540,7 +10576,7 @@ workflow editor provides YAML editing, step preview, validation, and test runs
 for every workflow authoring use case in Portal.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="portal-catalog-scope"><a class="header" href="#portal-catalog-scope">Portal Catalog Scope</a></h1>
-<h2 id="problem-10"><a class="header" href="#problem-10">Problem</a></h2>
+<h2 id="problem-9"><a class="header" href="#problem-9">Problem</a></h2>
 <p>Light Portal supports multiple tenants through <code>host_id</code> and can also host
 multiple runtime environments in one portal instance. A common deployment shape
 is:</p>
@@ -13568,7 +13604,7 @@ structure is intentional: it makes cross-tenant impact explicit and auditable.</
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="claim-org-role-bootstrap"><a class="header" href="#claim-org-role-bootstrap">Claim Org Role Bootstrap</a></h1>
-<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
+<h2 id="problem-10"><a class="header" href="#problem-10">Problem</a></h2>
 <p>The Claim Org action lets a signed-in user create an organization and its default host from the profile menu. The <code>createOrg</code> form captures the organization owner, default subdomain, host description, and host owner. The backend create-org flow then creates the organization, the default host, and user-host membership rows in one transaction.</p>
 <p>That transaction is not sufficient for a usable tenant. A new host membership without role assignments can leave the owner unable to authorize after switching to the newly claimed host. The user profile/login query joins roles through <code>role_user_t</code> by the current <code>user_host_t.host_id</code>; if the current host has no active role rows for that user, role-dependent reads can return no user context.</p>
 <p>The Claim Org bootstrap must create the minimum administration roles and assignments for the default host at the same time as the organization and host.</p>
@@ -13719,7 +13755,7 @@ structure is intentional: it makes cross-tenant impact explicit and auditable.</
 <p>The owner-transfer role policy also remains open. The system should decide whether owner changes imply role grants, role revokes, both, or neither before adding role side effects to <code>UpdateOrg</code> or <code>UpdateHost</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="master-oauth-host-tenant-login"><a class="header" href="#master-oauth-host-tenant-login">Master OAuth Host Tenant Login</a></h1>
-<h2 id="problem-12"><a class="header" href="#problem-12">Problem</a></h2>
+<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
 <p>In a deployed portal instance, <code>dev.lightapi.net</code> is the master host for the instance. Its host ID is:</p>
 <pre><code class="language-text">01964b05-552a-7c4b-9184-6857e7f3dc5f
 </code></pre>
@@ -14112,7 +14148,7 @@ support is not required for the initial hardening pass. This design focuses on
 hardening the current <code>schema-query</code>, <code>schema-command</code>, and <code>schema_t</code>
 implementation so it can safely validate configuration property values and
 support future schema reuse across portal features.</p>
-<h2 id="current-state-5"><a class="header" href="#current-state-5">Current State</a></h2>
+<h2 id="current-state-4"><a class="header" href="#current-state-4">Current State</a></h2>
 <p>The portal already has the core pieces of a schema registry:</p>
 <ul>
 <li><code>schema_t</code> stores schema metadata and the schema body.</li>
@@ -15727,13 +15763,13 @@ GROUP BY
 <p>This approach provides a seamless experience while maintaining compatibility with applications requiring roles for authorization or UI customization.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="private-messages"><a class="header" href="#private-messages">Private Messages</a></h1>
-<h2 id="problem-13"><a class="header" href="#problem-13">Problem</a></h2>
+<h2 id="problem-12"><a class="header" href="#problem-12">Problem</a></h2>
 <p>Portal users need a way to exchange private messages from the user profile
 without exposing email addresses to each other. The sender should only need a
 recipient user id or a display-safe user label. The backend can resolve email
 internally when it needs to send an external notification, but email must not be
 part of the user-facing message contract.</p>
-<h2 id="current-state-6"><a class="header" href="#current-state-6">Current State</a></h2>
+<h2 id="current-state-5"><a class="header" href="#current-state-5">Current State</a></h2>
 <p>The current codebase already has a partial private-message skeleton:</p>
 <ul>
 <li><code>user-command</code> exposes <code>lightapi.net/user/sendMessage/0.1.0</code>.</li>
@@ -17917,7 +17953,7 @@ public class ConfigRollbackService {
 <p>This approach provides a clean and relatively robust way to restore the specific override state from your snapshots using the DELETE/INSERT strategy. Remember to test thoroughly!</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="sid-and-host-verification"><a class="header" href="#sid-and-host-verification">SID and Host Verification</a></h1>
-<h2 id="problem-14"><a class="header" href="#problem-14">Problem</a></h2>
+<h2 id="problem-13"><a class="header" href="#problem-13">Problem</a></h2>
 <p>GitHub issue https://github.com/lightapi/portal-service/issues/39 reports that
 <code>config-server</code> accepted a valid JWT whose service identity did not match the
 requested service configuration.</p>
@@ -18525,7 +18561,7 @@ authorization grants.</li>
 <li>Perform a cross-host or cross-database promotion.</li>
 <li>Split one logical clone across independently committed event batches.</li>
 </ul>
-<h2 id="current-state-7"><a class="header" href="#current-state-7">Current State</a></h2>
+<h2 id="current-state-6"><a class="header" href="#current-state-6">Current State</a></h2>
 <p><code>instance-command</code> already declares <code>cloneInstance</code>. Its handler currently
 emits <code>InstanceClonedEvent</code> with a bare <code>targetInstanceId</code> aggregate subject.
 Normal Instance aggregates use <code>hostId|instanceId</code>, so the placeholder event is
@@ -19392,7 +19428,7 @@ retries return a retryable conflict with no committed clone state.</li>
 <li>Non-standard instance files are copied into <code>snapshot_instance_file_t</code>.</li>
 </ul>
 <p>The <code>/config-server/files</code> endpoint must return both sets. It already filters standard files by <code>config_phase</code> through <code>config_snapshot_property_t.config_phase</code>, but <code>instance_file_t</code> and <code>snapshot_instance_file_t</code> do not currently carry <code>config_phase</code>. That makes it impossible to union the two sources while preserving runtime, deployment, and generator phase semantics.</p>
-<h2 id="problem-15"><a class="header" href="#problem-15">Problem</a></h2>
+<h2 id="problem-14"><a class="header" href="#problem-14">Problem</a></h2>
 <p>When a service starts through <code>DefaultConfigLoader</code>, it calls <code>/config-server/files</code> with <code>host</code>, <code>serviceId</code>, and <code>envTag</code>. The endpoint resolves the current snapshot and returns the files that should be written into <code>/config</code>.</p>
 <p>For the sidecar case, <code>openapi.yaml</code> exists in both <code>instance_file_t</code> and <code>snapshot_instance_file_t</code>, but it does not exist in <code>config_snapshot_property_t</code>. Since the current <code>/files</code> query reads only <code>config_snapshot_property_t</code>, the response does not include <code>openapi.yaml</code>, and the sidecar cannot write it to <code>/config</code>.</p>
 <p>The correct endpoint behavior is:</p>
@@ -20123,7 +20159,7 @@ name are equal.</p>
 <code>entity_identity_t</code> reservation table. The identity reservation, event-store
 append, outbox write, nonce allocation, and idempotency record must commit in one
 PostgreSQL transaction.</p>
-<h2 id="problem-16"><a class="header" href="#problem-16">Problem</a></h2>
+<h2 id="problem-15"><a class="header" href="#problem-15">Problem</a></h2>
 <p>Issue 691 demonstrates the same-aggregate form of the defect:</p>
 <ol>
 <li>A role such as <code>abc-123</code> already exists at aggregate version 1.</li>
@@ -25329,7 +25365,7 @@ scale well if every Java or Rust release requires a hand-maintained set of
 mapping events across all portal instances. This design proposes a release
 mapping automation model that keeps the existing event-sourced write path and
 removes the need to manually recreate mapping files for every product release.</p>
-<h2 id="problem-17"><a class="header" href="#problem-17">Problem</a></h2>
+<h2 id="problem-16"><a class="header" href="#problem-16">Problem</a></h2>
 <p>Product versions are released often. Each new release can introduce a new
 <code>productVersionId</code>, and the config update page only knows which configs and
 properties are applicable when mappings exist for that exact product version.</p>
@@ -26089,7 +26125,7 @@ artifact publishing, AI-assisted failure diagnosis, and human approval.</p>
 portal service process. Command execution belongs in a sandboxed release
 runner, with <code>light-workflow</code> owning state, task routing, retries, approvals,
 and audit history.</p>
-<h2 id="problem-18"><a class="header" href="#problem-18">Problem</a></h2>
+<h2 id="problem-17"><a class="header" href="#problem-17">Problem</a></h2>
 <p>Java releases currently depend on <code>light-bot</code>, while Rust releases are handled
 through separate command-line and repository-specific steps. This works, but it
 keeps release knowledge outside the same workflow model used by Light Portal
@@ -26138,7 +26174,7 @@ should be portable manifests, not customer import output.</li>
 <li>Do not remove <code>light-bot</code> until Java release parity has been demonstrated
 through several successful workflow-managed releases.</li>
 </ul>
-<h2 id="current-state-8"><a class="header" href="#current-state-8">Current State</a></h2>
+<h2 id="current-state-7"><a class="header" href="#current-state-7">Current State</a></h2>
 <p><code>light-bot</code> is the practical Java release automation path today. It contains
 working release knowledge and should remain available as a fallback during the
 migration.</p>
@@ -29610,7 +29646,7 @@ Location: https://portal.lightapi.net/authorization?code=auth_code_abc&amp;state
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="auth-client-secret-regeneration"><a class="header" href="#auth-client-secret-regeneration">Auth Client Secret Regeneration</a></h1>
-<h2 id="problem-19"><a class="header" href="#problem-19">Problem</a></h2>
+<h2 id="problem-18"><a class="header" href="#problem-18">Problem</a></h2>
 <p>An OAuth auth client receives a <code>client_id</code> and <code>client_secret</code> when it is
 created. The clear text <code>client_secret</code> is intentionally a one-time value. The
 database projection stores only a verifier value in <code>auth_client_t.client_secret</code>
@@ -29619,7 +29655,7 @@ so the clear secret cannot be recovered later.</p>
 one-time response, close the page, or forget to copy the secret into their
 deployment system. Once that happens, the portal needs a way to issue a new
 secret without weakening the storage model.</p>
-<h2 id="current-state-9"><a class="header" href="#current-state-9">Current State</a></h2>
+<h2 id="current-state-8"><a class="header" href="#current-state-8">Current State</a></h2>
 <p>The current create flow in <code>oauth-command</code> generates both values in
 <code>CreateClient</code>:</p>
 <ul>
@@ -30444,7 +30480,7 @@ Kubernetes cluster from the Instance Admin page.</p>
 <p>The goal is to provide a production-like deployment path for small businesses
 and enterprise tenants without requiring Light Portal to have direct network
 access to every customer cluster.</p>
-<h2 id="problem-20"><a class="header" href="#problem-20">Problem</a></h2>
+<h2 id="problem-19"><a class="header" href="#problem-19">Problem</a></h2>
 <p>Each API or application repository can contain a <code>k8s/</code> folder with Kubernetes
 deployment templates. The templates contain variables in the following format:</p>
 <pre><code class="language-text">${key:defaultValue}
@@ -30986,7 +31022,7 @@ deployment intent and history, while the deployer owns safe cluster-local
 execution.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-oauth-and-oauth-kafka-agentcore-oidc-discovery"><a class="header" href="#light-oauth-and-oauth-kafka-agentcore-oidc-discovery">Light OAuth and OAuth Kafka AgentCore OIDC Discovery</a></h1>
-<h2 id="problem-21"><a class="header" href="#problem-21">Problem</a></h2>
+<h2 id="problem-20"><a class="header" href="#problem-20">Problem</a></h2>
 <p>Issue https://github.com/lightapi/portal-service/issues/44 asks whether
 <code>portal-service/apps/light-oauth</code> can support AWS AgentCore JWT inbound
 authorization.</p>

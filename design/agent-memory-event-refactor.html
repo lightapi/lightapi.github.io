@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-4aef98cd.js";
+            window.path_to_searchindex_js = "../searchindex-72251a87.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2dcc1cd3.js"></script>
@@ -175,9 +175,14 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="agent-memory-event-refactor"><a class="header" href="#agent-memory-event-refactor">Agent Memory Event Refactor</a></h1>
-<h2 id="problem"><a class="header" href="#problem">Problem</a></h2>
-<p><code>GlobalSnapshotPersistenceImpl</code> currently skips these Hindsight memory tables
-for both snapshot export and snapshot-to-event conversion:</p>
+<h2 id="implementation-status"><a class="header" href="#implementation-status">Implementation Status</a></h2>
+<p>The development implementation now exposes a bank-first Hindsight workspace at
+<code>/app/genai/MemoryBanks</code> and a bank detail workspace at
+<code>/app/genai/MemoryBanks/:bankId</code>. The old flat session, user, agent, and
+organization memory pages and service actions have been removed. There is no
+legacy data migration or compatibility path: development databases are rebuilt
+from the current DDL.</p>
+<p>The current Hindsight table family is:</p>
 <pre><code class="language-text">agent_memory_bank_t
 agent_memory_doc_t
 agent_memory_unit_t
@@ -189,88 +194,119 @@ agent_memory_directive_t
 agent_memory_reflection_t
 agent_session_history_t
 </code></pre>
-<p>The skip is intentional for the current implementation. These tables are not
-currently populated from portal events as the source of truth. They are runtime
-state written directly by <code>light-agent</code> or memory client code, so exporting them
-as portable portal domain state or converting them into generic created events
-would be unsafe.</p>
-<p>The current implementation also has a schema drift risk:</p>
-<ul>
-<li><code>light-agent</code> writes directly to the current Hindsight tables:
-<code>agent_memory_bank_t</code>, <code>agent_session_history_t</code>, and
-<code>agent_memory_unit_t</code>.</li>
-<li><code>light-fabric/crates/hindsight-client</code> writes directly to
-<code>agent_memory_unit_t</code>.</li>
-<li><code>light-portal</code> Java db-provider has event replay methods for
-<code>AgentSessionHistory</code> and <code>AgentMemory</code>, but those methods do not cover the
-current Hindsight table family. <code>AgentMemory</code> writes <code>agent_memory_t</code>, and
-<code>AgentSessionHistory</code> expects the older <code>session_history_id</code>, <code>process_id</code>,
-<code>role</code>, and <code>content</code> shape rather than the current
-<code>(host_id, bank_id, session_id, messages)</code> schema.</li>
-<li>The Rust importer also skips the same <code>agent_memory_*</code> and
-<code>agent_session_history_t</code> tables, so the Java and Rust conversion paths are
-aligned around the current non-event-backed behavior.</li>
-</ul>
+<p>The Portal command/event path projects current Hindsight events into these
+tables. <code>light-agent</code> remains an intentional direct writer in direct-PostgreSQL
+mode and is the owner of the session-history projection. The retained
+Portal-command runtime mode creates session history with
+<code>durable_session_id = sessionId</code>, allowing the runtime reconciler to rebuild it
+from <code>agent_session_event_t</code>.</p>
+<p><code>GlobalSnapshotPersistenceImpl</code> treats the memory family as one explicit
+<code>agent_memory_t</code> export entity. Session history is opt-in and sensitive;
+co-occurrence state is derived and is not exported as authoritative state.
+The <code>agent_memory_t</code> name in that export dispatch is a current compatibility
+alias for the Hindsight table set, not the removed legacy table.</p>
 <h2 id="goal"><a class="header" href="#goal">Goal</a></h2>
-<p>Refactor the agent memory persistence path so that memory state has a clear
-owner:</p>
+<p>Keep ownership explicit while supporting Portal administration:</p>
 <pre><code class="language-text">command/event path -&gt; event_store_t -&gt; db-provider replay -&gt; Hindsight tables
 </code></pre>
-<p>Once that contract is in place, snapshot export and conversion can safely
-include the event-backed memory state where appropriate.</p>
+<ul>
+<li>Portal administrators manage banks and supported bank-scoped resources
+through command events and current read-model queries.</li>
+<li><code>light-agent</code> owns runtime session history and may use either the direct-PG or
+Portal-command memory store.</li>
+<li>derived and vector state is never presented as Portal-authored authoritative
+content.</li>
+</ul>
 <h2 id="non-goals"><a class="header" href="#non-goals">Non-Goals</a></h2>
 <ul>
-<li>Do not promote existing direct-write memory rows into snapshots before a
-backfill/migration event strategy exists.</li>
+<li>Do not add legacy table migration, dual reads, or compatibility writers.</li>
 <li>Do not convert derived caches into authoritative state unless a product
 decision requires exact cache promotion.</li>
 <li>Do not require every chat token or partial model response to become an event.</li>
-<li>Do not remove the current direct PostgreSQL path until <code>light-agent</code> has a
-stable command-backed memory store and operational validation.</li>
+<li>Do not remove the current direct PostgreSQL path; it remains the default
+development runtime store.</li>
 </ul>
-<h2 id="current-state"><a class="header" href="#current-state">Current State</a></h2>
-<h3 id="snapshot-export-and-conversion"><a class="header" href="#snapshot-export-and-conversion">Snapshot Export And Conversion</a></h3>
-<p><code>GlobalSnapshotPersistenceImpl</code> excludes the memory tables from export and
-conversion. This prevents two bad outcomes:</p>
+<h2 id="current-portal-contract"><a class="header" href="#current-portal-contract">Current Portal Contract</a></h2>
+<p>All operations use service <code>lightapi.net/genai</code>, version <code>0.1.0</code>.</p>
+<p>Read actions (<code>portal.r</code>) are:</p>
+<pre><code class="language-text">getAgentMemoryBanks              getFreshAgentMemoryBank
+getAgentMemoryDocs               getFreshAgentMemoryDoc
+getAgentMemoryUnits              getFreshAgentMemoryUnit
+getAgentMemoryEntities           getFreshAgentMemoryEntity
+getAgentMemoryUnitEntities       getAgentMemoryEntityCooccurrences
+getAgentMemoryLinks              getFreshAgentMemoryLink
+getAgentMemoryDirectives         getFreshAgentMemoryDirective
+getAgentMemoryReflections        getFreshAgentMemoryReflection
+getAgentSessionHistories         getAgentSessionHistoryProjection
+</code></pre>
+<p>Portal-enabled commands (<code>portal.w</code>) are:</p>
+<pre><code class="language-text">createAgentMemoryBank            updateAgentMemoryBank
+deleteAgentMemoryBank            createAgentMemoryDoc
+updateAgentMemoryDoc             deleteAgentMemoryDoc
+deleteAgentMemoryUnit            createAgentMemoryEntity
+updateAgentMemoryEntity          deleteAgentMemoryEntity
+linkAgentMemoryUnitEntity        unlinkAgentMemoryUnitEntity
+createAgentMemoryLink            updateAgentMemoryLink
+deleteAgentMemoryLink            createAgentMemoryDirective
+updateAgentMemoryDirective       deleteAgentMemoryDirective
+deleteAgentMemoryReflection
+</code></pre>
+<p>The direct retain and session-history command operations remain available for
+<code>light-agent</code> runtime use. They require a client-credentials token; an
+authorization-code token for a logged-in Portal user is rejected by the
+command handler even if it carries <code>portal.w</code>.
+The three update/create operations below are deliberately absent from both the
+published service action registry and the Portal until an asynchronous
+embedding owner and state machine exist:</p>
+<pre><code class="language-text">updateAgentMemoryUnit            createAgentMemoryReflection
+updateAgentMemoryReflection
+</code></pre>
+<p>Session-history commands are retained for <code>light-agent</code> runtime use only:</p>
+<pre><code class="language-text">createAgentSessionHistory        appendAgentSessionHistory
+compactAgentSessionHistory       deleteAgentSessionHistory
+</code></pre>
+<h3 id="read-model-and-lifecycle-rules"><a class="header" href="#read-model-and-lifecycle-rules">Read-model and lifecycle rules</a></h3>
 <ul>
-<li>exporting user/session memory into another environment without an explicit
-promotion contract</li>
-<li>converting rows into events that no replay handler can faithfully apply</li>
+<li>Every child query uses the full <code>(host_id, bank_id, resource key)</code> identity.</li>
+<li>List responses use <code>agentMemoryBanks</code>, <code>agentMemoryDocs</code>,
+<code>agentMemoryUnits</code>, <code>agentMemoryEntities</code>, <code>agentMemoryUnitEntities</code>,
+<code>agentMemoryEntityCooccurrences</code>, <code>agentMemoryLinks</code>,
+<code>agentMemoryDirectives</code>, <code>agentMemoryReflections</code>, or
+<code>agentSessionHistories</code> as appropriate.</li>
+<li>Runtime-managed banks are identified structurally through
+<code>agent_session_t.bank_id</code> and excluded before default count and pagination.
+A session-ID equality fallback exists only for pre-binding interactive rows.</li>
+<li>Interactive sessions bind their durable <code>agent_session_t</code> row after either
+memory store creates the bank. A conflicting binding fails closed.
+Workflow-job sessions are intentionally bankless.</li>
+<li>Session history is bank-scoped, projection-aware, and read-only in the
+Portal. Lists omit message bodies; detail reads are bounded and redact
+credential-like fields.</li>
+<li>Unit/entity associations are hard links without active/version fields.
+Entity co-occurrence is a derived, read-only diagnostic.</li>
+<li>Bank deactivation is rejected while active children or active/closing bound
+interactive sessions exist.</li>
+<li>Embeddings are never returned to the browser.</li>
 </ul>
-<p>The Rust importer has the same conversion skip list. Any future change must
-update both Java and Rust paths.</p>
-<h3 id="light-agent"><a class="header" href="#light-agent">light-agent</a></h3>
-<p><code>light-agent</code> currently owns some memory writes directly:</p>
-<pre><code class="language-text">ensure_session_memory_bank
-  INSERT INTO agent_memory_bank_t
-
-session history persistence
-  INSERT INTO agent_session_history_t ... ON CONFLICT DO UPDATE
-
-hindsight retain
-  INSERT INTO agent_memory_unit_t
+<h3 id="development-qualification"><a class="header" href="#development-qualification">Development qualification</a></h3>
+<p>Run the source-only contract gate from the workspace root with:</p>
+<pre><code class="language-bash">./implementation/light-portal/scripts/run-hindsight-memory-phase-6-gate.sh --source-only
 </code></pre>
-<p>This is operationally simple and gives the agent read-your-writes behavior, but
-it bypasses portal command validation, event persistence, replay, and snapshot
-conversion.</p>
-<h3 id="java-db-provider"><a class="header" href="#java-db-provider">Java db-provider</a></h3>
-<p>The Java db-provider already has event handler plumbing for many GenAI tables.
-For memory, however, the existing methods are not aligned with the Hindsight
-schema:</p>
-<pre><code class="language-text">AgentMemoryCreatedEvent -&gt; agent_memory_t
-AgentSessionHistoryCreatedEvent -&gt; old session-history row shape
+<p>The full local gate installs <code>light-portal</code> artifacts first, then tests
+<code>genai-query</code>, <code>genai-command</code>, <code>portal-view</code>, <code>light-agent</code>, and this book:</p>
+<pre><code class="language-bash">./implementation/light-portal/scripts/run-hindsight-memory-phase-6-gate.sh
 </code></pre>
-<p>There are no current event handlers for:</p>
-<pre><code class="language-text">agent_memory_bank_t
-agent_memory_doc_t
-agent_memory_unit_t
-agent_memory_entity_t
-agent_memory_unit_entity_t
-agent_memory_entity_cooccur_t
-agent_memory_link_t
-agent_memory_directive_t
-agent_memory_reflection_t
-</code></pre>
+<p>Pass <code>--postgres-url jdbc:postgresql://...</code> to execute the isolated-schema
+command-projection-query lifecycle test. After deploying the development
+services, set <code>HINDSIGHT_SMOKE_PORTAL_URL</code>, <code>HINDSIGHT_SMOKE_HOST_ID</code>, and
+either <code>HINDSIGHT_SMOKE_BEARER_TOKEN</code> or <code>HINDSIGHT_SMOKE_COOKIE</code>, explicitly
+authorize the disposable lifecycle with <code>HINDSIGHT_SMOKE_ALLOW_WRITE=true</code>,
+and add <code>--live</code>. The live gate creates a uniquely named bank, waits for the
+query projection, updates it, verifies isolated lookup, and deactivates it.</p>
+<h2 id="historical-design-notes"><a class="header" href="#historical-design-notes">Historical Design Notes</a></h2>
+<p>The sections below record the design path that produced the implemented
+contract. Where they differ from the Current Portal Contract above, the current
+contract is authoritative.</p>
 <h2 id="recommended-design"><a class="header" href="#recommended-design">Recommended Design</a></h2>
 <p>Use events for durable memory state, and treat pure caches as rebuildable
 projection state.</p>
