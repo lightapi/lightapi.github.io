@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-55936b78.js";
+            window.path_to_searchindex_js = "searchindex-ab10cabf.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-04fe2fcc.js"></script>
@@ -15275,11 +15275,16 @@ and ACL freshness policy;</li>
 <li>the last applied Portal event sequence, signed heartbeat time, and projection
 acknowledgement.</li>
 </ul>
-<p>The retrieval API reads this projection, the active generation pointer, source
-ACL revisions, and candidate rows in one database transaction at a repeatable
-snapshot. It never authorizes from a Portal-database join or a process-local
-cache. The projection consumer applies events in aggregate order and uses an
-idempotent inbox; applied state and acknowledgement are committed together.</p>
+<p>The retrieval API first serializes quota admission in a short read-committed
+transaction that locks the consumer quota row. It then reads the runtime
+authorization projection, active generation pointer, source ACL revisions, and
+candidate rows in one separate transaction at a repeatable snapshot. It never
+authorizes from a Portal-database join or a process-local cache. The projection
+consumer applies events in aggregate order and uses an idempotent inbox;
+applied state and acknowledgement are committed together. A sequence gap parks
+only the affected aggregate and cannot stop progress for unrelated aggregates.
+The signed heartbeat and authorization-lease renewal run on an independent
+timer, so a parked or malformed event cannot expire every healthy binding.</p>
 <p>An authorization-removing action such as unbind, source deactivation, Knowledge
 Base deactivation, or strategy revocation is <code>PENDING</code> until the knowledge
 database acknowledges the deny fence. The initial SLO is five seconds from
@@ -15311,6 +15316,7 @@ KnowledgeSourceUpdatedEvent
 KnowledgeSourceDeactivatedEvent
 KnowledgeSourceDeletedEvent
 KnowledgeSourceSyncRequestedEvent
+KnowledgeSourceConnectivityTestRequestedEvent
 
 AgentKnowledgeBaseBoundEvent
 AgentKnowledgeBaseBindingUpdatedEvent
@@ -16101,9 +16107,12 @@ is insufficient.</p>
 <p>Use two internal workload Aliases and two independently admitted gateway
 workload lanes:</p>
 <ul>
-<li><code>kb-index-embedding</code> is asynchronous and throughput-oriented;</li>
-<li><code>kb-query-embedding</code> is latency-oriented and has protected capacity.</li>
+<li><code>kb-index</code> is asynchronous and throughput-oriented;</li>
+<li><code>kb-query</code> is latency-oriented and has protected capacity.</li>
 </ul>
+<p>The Alias names are <code>kb-index</code> and <code>kb-query</code>; the distinct workload-lane
+identifiers remain <code>kb_index</code> and <code>kb_query</code>. Alias names and lane identifiers
+are separate contracts and must not be substituted for one another.</p>
 <p>The immutable space registry and gateway conformance/admission implementation
 are shared platform services used by Knowledge Base, Hindsight, and
 tool-description embedding. Each consumer registers its own operation, space,
@@ -16779,6 +16788,10 @@ importKnowledgeBasePortabilityManifest
 bindImportedKnowledgeDependencies
 approveKnowledgeBaseImportBuild
 abandonKnowledgeBaseImport
+
+acknowledgeKnowledgeProjection
+acknowledgeKnowledgeBaseIndexGenerationPromotion
+acknowledgeKnowledgeBaseIndexGenerationRollback
 </code></pre>
 <p>Suggested query actions are:</p>
 <pre><code class="language-text">getKnowledgeBases
@@ -16810,7 +16823,11 @@ verifies them and establishes the target <code>DRAFT</code> plus identity lineag
 only after every required mapping and policy gate passes; and
 <code>abandonKnowledgeBaseImport</code> makes an incomplete import terminal without
 releasing its publication identity. The two import queries expose minimized
-status and source-to-target lineage without returning secrets or source content.</p>
+status and source-to-target lineage without returning secrets or source content.
+The three <code>acknowledge*</code> actions are workload-authenticated internal actions,
+not administrator or browser operations. They make projection progress and
+knowledge-service pointer outcomes durable in Portal history through an
+idempotent reverse acknowledgement path.</p>
 <p>estimateKnowledgeBaseEmbeddingMigration accepts a visible qualified target
 profile and returns chunk/token counts, cost and duration ranges, temporary
 storage, changed-contract consequences, and blocking conditions. It does not
@@ -17002,6 +17019,26 @@ unsupported filter or query contract, 429 quota, 503 stale authorization
 projection or unavailable required dependency, and 504 propagated deadline.
 Complete, empty, and permitted partial retrieval use 200 with the explicit body
 status. Every error uses a stable code, retryable flag, and correlation ID.</p>
+<p>The initial frozen error-code mapping is:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Code</th><th style="text-align: right">HTTP</th><th>Retryable</th></tr>
+</thead>
+<tbody>
+<tr><td>KNOWLEDGE_INVALID_REQUEST</td><td style="text-align: right">400</td><td>No</td></tr>
+<tr><td>KNOWLEDGE_AUTHENTICATION_REQUIRED</td><td style="text-align: right">401</td><td>No</td></tr>
+<tr><td>KNOWLEDGE_FORBIDDEN</td><td style="text-align: right">403</td><td>No</td></tr>
+<tr><td>KNOWLEDGE_NOT_FOUND</td><td style="text-align: right">404</td><td>No</td></tr>
+<tr><td>KNOWLEDGE_STATE_CONFLICT</td><td style="text-align: right">409</td><td>No</td></tr>
+<tr><td>KNOWLEDGE_UNSUPPORTED_CONTRACT</td><td style="text-align: right">422</td><td>No</td></tr>
+<tr><td>KNOWLEDGE_QUOTA_EXCEEDED</td><td style="text-align: right">429</td><td>Yes</td></tr>
+<tr><td>KNOWLEDGE_PROJECTION_STALE</td><td style="text-align: right">503</td><td>Yes</td></tr>
+<tr><td>KNOWLEDGE_DEPENDENCY_UNAVAILABLE</td><td style="text-align: right">503</td><td>Yes</td></tr>
+<tr><td>KNOWLEDGE_DEADLINE_EXCEEDED</td><td style="text-align: right">504</td><td>Yes</td></tr>
+</tbody>
+</table>
+</div>
 <p>Also expose an authorized document-resolution endpoint for a user following a
 citation:</p>
 <pre><code class="language-http">GET /v1/knowledge/documents/{documentId}/versions/{versionId}
