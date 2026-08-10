@@ -35,10 +35,10 @@
             const path_to_root = "../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../searchindex-9646612b.js";
+            window.path_to_searchindex_js = "../../../searchindex-026fe4a5.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../toc-04fe2fcc.js"></script>
+        <script src="../../../toc-2b9a4022.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -175,13 +175,19 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="create-public-alias"><a class="header" href="#create-public-alias">Create Public Alias</a></h1>
-<p>Use this form to create a stable, environment-specific model name and define
-the policy requirements that its provider routes must satisfy. Applications
-use the alias name instead of a provider deployment or physical model ID.</p>
-<p>Only <strong>Environment</strong> and <strong>Alias Name</strong> are required in addition to the
-read-only host. Start new aliases in <code>DRAFT</code>, add and validate their routes,
-pricing, and credentials, and then change the lifecycle to <code>ACTIVE</code> when the
-alias is ready for publication.</p>
+<p>Use this form to create a stable, environment-specific model name and the
+policy contract that every route behind that name must satisfy. Applications
+use the Alias Name instead of a provider Deployment or physical model ID.</p>
+<p>Despite the entity name, an Alias can be generally available (<code>PUBLIC</code>) or
+restricted to an agent or workload identity. Start a new Alias in <code>DRAFT</code>, add
+and validate its Routes, credentials, pricing, and deployment qualification,
+and make it <code>ACTIVE</code> only when it is ready for publication.</p>
+<blockquote>
+<p><strong>Important:</strong> <code>operations</code>, <code>requiredCapabilities.embeddingSpace</code>,
+<code>requireExpectedEmbeddingSpace</code>, and <code>embeddingWorkloadLane</code> form an
+immutable routing contract. To change any of them, create a new Alias
+revision instead of updating the existing Alias.</p>
+</blockquote>
 <h2 id="fields"><a class="header" href="#fields">Fields</a></h2>
 <div class="table-wrapper">
 <table>
@@ -189,32 +195,131 @@ alias is ready for publication.</p>
 <tr><th>Field</th><th>Description</th><th>Example</th></tr>
 </thead>
 <tbody>
-<tr><td>Host Id</td><td>Read-only tenant boundary supplied by the portal. All referenced records must belong to this host.</td><td><code>10000000-0000-4000-8000-000000000001</code></td></tr>
-<tr><td>Environment</td><td>Environment in which clients use the alias. Routes attached to the alias must use registrations from the same environment.</td><td><code>prod</code></td></tr>
-<tr><td>Alias Name</td><td>Stable model name presented to applications and agents. It must be unique within the host and environment.</td><td><code>governed-chat</code></td></tr>
-<tr><td>Operations</td><td>JSON or YAML array of operations allowed for the alias. Use <strong>Apply</strong> after editing structured data.</td><td><code>["chat_completions"]</code></td></tr>
-<tr><td>Required Capabilities</td><td>JSON or YAML object of capabilities every eligible route must support. An empty object adds no capability constraint.</td><td><code>{"tools":true,"streaming":true}</code></td></tr>
-<tr><td>Maximum Input Tokens</td><td>Optional maximum number of input tokens accepted through this alias.</td><td><code>128000</code></td></tr>
-<tr><td>Maximum Output Tokens</td><td>Optional maximum number of output tokens generated through this alias.</td><td><code>8192</code></td></tr>
-<tr><td>Maximum Request Bytes</td><td>Optional maximum serialized request size. This remains a governance limit unless the publication compiler and gateway version support projecting it.</td><td><code>1048576</code></td></tr>
-<tr><td>Data Classification</td><td>Optional classification used when evaluating data-handling and route policy. Use the classification vocabulary established for the host.</td><td><code>internal</code></td></tr>
-<tr><td>Logging Mode</td><td>Desired logging policy: <code>NONE</code>, <code>METADATA</code>, or <code>REDACTED</code>. Supported settings are translated into gateway audit policy during publication.</td><td><code>METADATA</code></td></tr>
-<tr><td>PII Mode</td><td>Desired PII policy: <code>DENY</code>, <code>REDACT</code>, <code>TOKENIZE</code>, or <code>ALLOW</code>. Choose the most restrictive mode compatible with the use case.</td><td><code>REDACT</code></td></tr>
-<tr><td>Lifecycle Status</td><td>Alias lifecycle. <code>DRAFT</code> is the safe create default; <code>ACTIVE</code> aliases are considered for publication, <code>DEPRECATED</code> marks a migration period, and <code>RETIRED</code> removes the alias from use.</td><td><code>DRAFT</code></td></tr>
-<tr><td>Replacement Alias</td><td>Optional active alias selected as the intended successor. This is a migration reference, not an automatic redirect.</td><td><code>governed-chat-v2</code></td></tr>
-<tr><td>Alias Visibility</td><td><code>PUBLIC</code> exposes the alias for normal discovery and routing. <code>INTERNAL_LEGACY</code> restricts it to one selected agent definition.</td><td><code>PUBLIC</code></td></tr>
-<tr><td>Bound Agent Definition</td><td>Required only for <code>INTERNAL_LEGACY</code>; select the agent that may resolve this alias. Leave it empty for <code>PUBLIC</code>.</td><td><code>Legacy Support Agent</code> (<code>10000000-0000-4000-8000-000000000099</code>)</td></tr>
+<tr><td>Host Id</td><td>Read-only tenant boundary supplied by Portal. All referenced records must belong to this host.</td><td><code>10000000-0000-4000-8000-000000000001</code></td></tr>
+<tr><td>Environment</td><td>Environment in which clients use the Alias. Its Routes must use compatible registrations and Deployments.</td><td><code>loc</code></td></tr>
+<tr><td>Alias Name</td><td>Stable model name presented to applications and agents. It must be unique within the host and environment.</td><td><code>kb-index</code></td></tr>
+<tr><td>Operations</td><td>JSON or YAML array containing <code>generate</code>, <code>embed</code>, or both. Choose <strong>Apply</strong> after editing structured data.</td><td><code>["embed"]</code></td></tr>
+<tr><td>Required Capabilities</td><td>JSON or YAML object that every eligible Deployment must satisfy. Embedding Aliases require the complete <code>embeddingSpace</code> object described below.</td><td>See <a href="#embedding-space">Embedding space</a></td></tr>
+<tr><td>Require Expected Embedding Space</td><td>When enabled, embedding clients must send the expected space ID and revision. Enable this for Knowledge Base Aliases.</td><td><code>true</code></td></tr>
+<tr><td>Embedding Workload Lane</td><td><code>standard</code>, <code>kb_query</code>, or <code>kb_index</code>. The two Knowledge Base lanes provide separate query and indexing admission paths.</td><td><code>kb_index</code></td></tr>
+<tr><td>Maximum Input Tokens</td><td>Optional Alias-level input-token limit. It must not exceed the selected model and qualified Deployment.</td><td><code>4096</code></td></tr>
+<tr><td>Maximum Output Tokens</td><td>Optional generation output limit. Leave it empty for an embedding-only Alias.</td><td><code>8192</code></td></tr>
+<tr><td>Maximum Request Bytes</td><td>Optional maximum serialized request size accepted through the Alias.</td><td><code>1048576</code></td></tr>
+<tr><td>Data Classification</td><td>Optional classification used by data-handling and route policy. Use the vocabulary established for the host.</td><td><code>public</code></td></tr>
+<tr><td>Logging Mode</td><td><code>NONE</code>, <code>METADATA</code>, or <code>REDACTED</code>.</td><td><code>METADATA</code></td></tr>
+<tr><td>PII Mode</td><td><code>DENY</code>, <code>REDACT</code>, <code>TOKENIZE</code>, or <code>ALLOW</code>. Choose the most restrictive mode compatible with the use case.</td><td><code>DENY</code></td></tr>
+<tr><td>Lifecycle Status</td><td><code>DRAFT</code>, <code>ACTIVE</code>, <code>DEPRECATED</code>, or <code>RETIRED</code>. <code>DRAFT</code> is the safe creation value.</td><td><code>DRAFT</code></td></tr>
+<tr><td>Replacement Alias</td><td>Optional intended successor for migration. It is not an automatic redirect and cannot reference the Alias being created.</td><td><code>governed-chat-v2</code></td></tr>
+<tr><td>Alias Visibility</td><td><code>PUBLIC</code>, <code>INTERNAL_LEGACY</code>, or <code>INTERNAL_WORKLOAD</code>. The visibility determines which identity binding fields are allowed.</td><td><code>INTERNAL_WORKLOAD</code></td></tr>
+<tr><td>Bound Agent Definition</td><td>Required only for <code>INTERNAL_LEGACY</code>; select the single agent allowed to resolve the Alias. Leave it empty for the other visibility modes.</td><td><code>Legacy Support Agent</code></td></tr>
+<tr><td>Bound Workload Principal</td><td>Required only for <code>INTERNAL_WORKLOAD</code>. It must exactly match the principal derived from the workload’s bearer token.</td><td><code>knowledge-indexer</code></td></tr>
 </tbody>
 </table>
 </div>
-<p><code>Operations</code> and <code>Required Capabilities</code> accept JSON or YAML. After changing an
-editor value, choose <strong>Apply</strong> before submitting the form.</p>
-<h2 id="example"><a class="header" href="#example">Example</a></h2>
-<p>For a generally available production chat alias:</p>
+<p><code>Operations</code> and <code>Required Capabilities</code> are structured editors. After changing
+their JSON or YAML value, choose <strong>Apply</strong> before submitting the form.</p>
+<h2 id="visibility-and-identity-rules"><a class="header" href="#visibility-and-identity-rules">Visibility and identity rules</a></h2>
+<p>Use exactly one of these shapes:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Visibility</th><th>Bound Agent Definition</th><th>Bound Workload Principal</th><th>Intended use</th></tr>
+</thead>
+<tbody>
+<tr><td><code>PUBLIC</code></td><td>Empty</td><td>Empty</td><td>Normal model discovery and routing</td></tr>
+<tr><td><code>INTERNAL_LEGACY</code></td><td>Required</td><td>Empty</td><td>One selected legacy agent</td></tr>
+<tr><td><code>INTERNAL_WORKLOAD</code></td><td>Empty</td><td>Required</td><td>A service or worker authenticated as the exact workload principal</td></tr>
+</tbody>
+</table>
+</div>
+<p>A non-standard Knowledge Base lane (<code>kb_query</code> or <code>kb_index</code>) additionally
+requires all of the following:</p>
+<ul>
+<li><code>operations</code> is exactly <code>["embed"]</code>;</li>
+<li><strong>Require Expected Embedding Space</strong> is enabled; and</li>
+<li><strong>Alias Visibility</strong> is <code>INTERNAL_WORKLOAD</code> with a non-empty workload
+principal.</li>
+</ul>
+<p>The Alias names <code>kb-query</code> and <code>kb-index</code> use hyphens. The corresponding lane
+identifiers <code>kb_query</code> and <code>kb_index</code> use underscores. They are distinct
+contracts and must not be substituted for each other.</p>
+<h2 id="embedding-space"><a class="header" href="#embedding-space">Embedding space</a></h2>
+<p>An embedding Alias must declare exactly these six fields under
+<code>requiredCapabilities.embeddingSpace</code>:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>spaceId</code></td><td>Operator-assigned identity for vectors that are safe to compare. Include the provider/model/output profile when that makes the identity unambiguous.</td></tr>
+<tr><td><code>revision</code></td><td>Positive revision of that vector-space contract.</td></tr>
+<tr><td><code>dimension</code></td><td>Exact number of floating-point values returned for each vector.</td></tr>
+<tr><td><code>normalization</code></td><td><code>none</code> or <code>l2</code>.</td></tr>
+<tr><td><code>distanceMetric</code></td><td><code>cosine</code>, <code>inner_product</code>, or <code>l2</code>.</td></tr>
+<tr><td><code>documentInputTransformVersion</code></td><td>Versioned document preprocessing contract used before embedding, such as <code>document-v1</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Matching dimensions alone do not make two embedding spaces compatible. Both
+Knowledge Base Aliases and every eligible primary or fallback Deployment must
+publish exactly the same six-field contract.</p>
+<h2 id="nvidia-nemotron-knowledge-base-example"><a class="header" href="#nvidia-nemotron-knowledge-base-example">NVIDIA Nemotron Knowledge Base example</a></h2>
+<p>For <code>nvidia/nemotron-3-embed-1b</code>, NVIDIA currently documents a native
+2048-dimensional float embedding, a 4096-token NIM limit, and no reduced
+dimension support. NVIDIA’s model card describes the output as L2-normalized,
+so the example uses L2 normalization with cosine distance. See the
+<a href="https://docs.nvidia.com/nim/nemo-retriever/text-embedding/latest/support-matrix.html">NVIDIA NIM support matrix</a>
+and <a href="https://huggingface.co/nvidia/Nemotron-3-Embed-1B-BF16">NVIDIA model card</a>.</p>
+<p>Create the indexing Alias first:</p>
+<pre><code class="language-json">{
+  "environment": "loc",
+  "aliasName": "kb-index",
+  "operations": ["embed"],
+  "requiredCapabilities": {
+    "embeddingSpace": {
+      "spaceId": "nvidia-nemotron-3-embed-1b-float-v1",
+      "revision": 1,
+      "dimension": 2048,
+      "normalization": "l2",
+      "distanceMetric": "cosine",
+      "documentInputTransformVersion": "document-v1"
+    }
+  },
+  "requireExpectedEmbeddingSpace": true,
+  "embeddingWorkloadLane": "kb_index",
+  "maxInputTokens": 4096,
+  "maxRequestBytes": 1048576,
+  "dataClassification": "public",
+  "loggingMode": "METADATA",
+  "piiMode": "DENY",
+  "lifecycleStatus": "DRAFT",
+  "aliasVisibility": "INTERNAL_WORKLOAD",
+  "boundWorkloadPrincipal": "knowledge-indexer"
+}
+</code></pre>
+<p>Then create the query Alias with the same embedding-space object and policy,
+changing only:</p>
+<pre><code class="language-json">{
+  "aliasName": "kb-query",
+  "embeddingWorkloadLane": "kb_query",
+  "boundWorkloadPrincipal": "knowledge-service"
+}
+</code></pre>
+<p>The two workload-principal examples assume that the indexing and query bearer
+tokens resolve to <code>knowledge-indexer</code> and <code>knowledge-service</code>. If your tokens
+use different subjects, enter those exact resolved principal IDs instead.</p>
+<p>NVIDIA retrieval models distinguish document (<code>passage</code>) input from query
+input. The Alias records the immutable vector-space and document-transform
+identity, but provider-specific request transformation remains a Deployment
+and gateway responsibility. Verify that the qualified provider path applies
+the corresponding passage and query behavior before activating the Routes.</p>
+<h2 id="general-generation-example"><a class="header" href="#general-generation-example">General generation example</a></h2>
+<p>For a generally available generation Alias:</p>
 <pre><code class="language-json">{
   "environment": "prod",
   "aliasName": "governed-chat",
-  "operations": ["chat_completions"],
+  "operations": ["generate"],
   "requiredCapabilities": {
     "tools": true,
     "streaming": true
@@ -229,10 +334,8 @@ editor value, choose <strong>Apply</strong> before submitting the form.</p>
   "aliasVisibility": "PUBLIC"
 }
 </code></pre>
-<p>For an <code>INTERNAL_LEGACY</code> alias, select a <strong>Bound Agent Definition</strong>. A <code>PUBLIC</code>
-alias must not have a bound agent. The backend creates the Public Alias Id and
-aggregate version. The <code>active</code> state is also backend-managed through soft
-delete and is not part of this form.</p>
+<p>The backend creates the Public Alias Id and aggregate version. The <code>active</code>
+state is backend-managed through soft delete and is not part of this form.</p>
 
                     </main>
 

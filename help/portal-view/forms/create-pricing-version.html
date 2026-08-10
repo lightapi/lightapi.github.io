@@ -35,10 +35,10 @@
             const path_to_root = "../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../searchindex-9646612b.js";
+            window.path_to_searchindex_js = "../../../searchindex-026fe4a5.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../toc-04fe2fcc.js"></script>
+        <script src="../../../toc-2b9a4022.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -175,55 +175,65 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="create-pricing-version"><a class="header" href="#create-pricing-version">Create Pricing Version</a></h1>
-<p>Use this form to add an approved, effective-dated rate schedule for a Provider
-Deployment. Pricing Versions are separate from Deployments so rate changes can
-be reviewed, audited, and published without changing provider endpoint or
-credential configuration.</p>
-<p>Rates use integer <strong>micros per one million tokens</strong>. One unit of currency is
-<code>1,000,000</code> micros. For example, <code>$2.50</code> per million tokens is entered as
-<code>2500000</code>, not <code>2.5</code>.</p>
+<p>Use this form to add an approved, effective-dated rate schedule for one
+Provider Deployment and operation. Pricing is separate from Deployment and
+Credential identity so rate changes remain versioned and auditable.</p>
+<p>Rates use integer micros per one million tokens. One currency unit is
+<code>1,000,000</code> micros.</p>
 <h2 id="fields"><a class="header" href="#fields">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Field</th><th>Description</th><th>Example</th></tr>
+<tr><th>Field</th><th>Required</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td>Host Id</td><td>Read-only tenant boundary supplied by the portal. The selected Deployment must belong to this host.</td><td><code>10000000-0000-4000-8000-000000000001</code></td></tr>
-<tr><td>Provider Deployment</td><td>Active provider endpoint to which this rate schedule applies.</td><td><code>openai-prod-ca</code> (<code>30000000-0000-4000-8000-000000000030</code>)</td></tr>
-<tr><td>Pricing Version</td><td>Positive operator-assigned sequence for this Deployment’s pricing. It is business versioning, distinct from Aggregate Version. The Deployment and Pricing Version pair must be unique.</td><td><code>3</code></td></tr>
-<tr><td>Input Micros Per Million Tokens</td><td>Non-negative charge for one million non-cached input tokens. <code>$2.50</code> is <code>2500000</code> micros.</td><td><code>2500000</code></td></tr>
-<tr><td>Output Micros Per Million Tokens</td><td>Non-negative charge for one million generated output tokens. <code>$10.00</code> is <code>10000000</code> micros.</td><td><code>10000000</code></td></tr>
-<tr><td>Cached Input Micros Per Million Tokens</td><td>Optional non-negative cached-input rate. The control plane retains it, but the current MVP gateway projection does not consume it separately.</td><td><code>1250000</code></td></tr>
-<tr><td>Effective Time</td><td>ISO 8601 timestamp at which the rate becomes eligible for use and publication.</td><td><code>2026-08-01T12:00:00Z</code></td></tr>
-<tr><td>Expiration Time</td><td>Optional ISO 8601 end of the pricing window. It must be later than Effective Time. Leave it empty for an open-ended rate.</td><td><code>2026-11-01T12:00:00Z</code></td></tr>
-<tr><td>Pricing Source</td><td>Bounded reference describing where the approved numbers came from, such as a provider contract, price sheet, or internal agreement.</td><td><code>provider-contract-2026-08</code></td></tr>
-<tr><td>Approved By</td><td>Person, group, or approval identity responsible for authorizing this rate.</td><td><code>finops@example.com</code></td></tr>
+<tr><td>Host Id</td><td>Yes</td><td>Read-only tenant boundary.</td></tr>
+<tr><td>Provider Deployment</td><td>Yes</td><td>Deployment whose operation is being priced.</td></tr>
+<tr><td>Operation</td><td>Yes</td><td><code>generate</code> or <code>embed</code>; it must match the Deployment protocol.</td></tr>
+<tr><td>Pricing Version</td><td>Yes</td><td>Positive business version unique for the Deployment.</td></tr>
+<tr><td>Pricing Basis</td><td>Yes</td><td><code>EXTERNAL_PROVIDER</code>, <code>ZERO_MARGINAL</code>, or <code>AMORTIZED_INTERNAL</code>.</td></tr>
+<tr><td>Input Micros Per Million Tokens</td><td>Yes</td><td>Non-negative input/embedding token rate.</td></tr>
+<tr><td>Output Micros Per Million Tokens</td><td>For <code>generate</code> only</td><td>Required for generation and prohibited for <code>embed</code>.</td></tr>
+<tr><td>Cached Input Micros Per Million Tokens</td><td>No</td><td>Optional cached-input rate.</td></tr>
+<tr><td>Effective Time</td><td>Yes</td><td>ISO-8601 timestamp with timezone.</td></tr>
+<tr><td>Expiration Time</td><td>No</td><td>Optional cutoff later than Effective Time.</td></tr>
+<tr><td>Pricing Source</td><td>Yes</td><td>Reference to the contract, provider page, or approved demo assumption.</td></tr>
+<tr><td>Approved By</td><td>Yes</td><td>Person, group, or automation identity approving the rate.</td></tr>
 </tbody>
 </table>
 </div>
-<h2 id="example"><a class="header" href="#example">Example</a></h2>
+<p>Pricing-basis rules are:</p>
+<ul>
+<li><code>EXTERNAL_PROVIDER</code> records a provider charge and may use zero only when the
+approved external rate is actually zero;</li>
+<li><code>ZERO_MARGINAL</code> requires all supplied rates to be zero; and</li>
+<li><code>AMORTIZED_INTERNAL</code> requires at least one non-zero rate.</li>
+</ul>
+<h2 id="nvidia-free-endpoint-example"><a class="header" href="#nvidia-free-endpoint-example">NVIDIA free endpoint example</a></h2>
+<p>For a free-demo entitlement with no marginal token charge, select the NVIDIA
+Nemotron Deployment and use:</p>
 <pre><code class="language-json">{
-  "providerDeploymentId": "30000000-0000-4000-8000-000000000030",
-  "pricingVersion": 3,
-  "inputMicrosPerMillion": 2500000,
-  "outputMicrosPerMillion": 10000000,
-  "cachedInputMicrosPerMillion": 1250000,
-  "effectiveTs": "2026-08-01T12:00:00Z",
-  "expiresTs": "2026-11-01T12:00:00Z",
-  "source": "provider-contract-2026-08",
-  "approvedBy": "finops@example.com"
+  "operation": "embed",
+  "pricingVersion": 1,
+  "pricingBasis": "ZERO_MARGINAL",
+  "inputMicrosPerMillion": 0,
+  "cachedInputMicrosPerMillion": 0,
+  "effectiveTs": "2026-08-10T00:00:00Z",
+  "expiresTs": null,
+  "source": "nvidia-build-free-endpoint-demo",
+  "approvedBy": "local-demo-operator"
 }
 </code></pre>
-<p>The system does not automatically close an older Pricing Version or reject
-overlapping effective windows. Before creating the record, review existing
-Pricing entries for the Deployment and choose a unique version and an
-unambiguous time window.</p>
-<p>Creating the record makes the price available to control-plane validation; it
-does not immediately change a running gateway. The rate reaches the gateway
-only through a valid new publication. The backend generates the Pricing
-Version Id and Aggregate Version. The <code>active</code> state is backend-managed through
-soft delete and is not part of this form.</p>
+<p>Leave Output Micros Per Million Tokens empty. Do not enter <code>0</code> in that field:
+the embedding contract requires it to be omitted/null.</p>
+<p>Verify the current NVIDIA account terms before using <code>ZERO_MARGINAL</code>. If the
+account is billed or quota usage must carry a monetary rate, choose
+<code>EXTERNAL_PROVIDER</code> and enter the approved input price instead. A free endpoint
+can still have capacity and rate limits even when its marginal price is zero.</p>
+<p>The system does not automatically close an older Pricing Version or reject all
+overlapping windows. Use a new version for a new rate period and publish a new
+gateway candidate. Portal generates Pricing Version Id and Aggregate Version;
+<code>active</code> remains backend-managed.</p>
 
                     </main>
 

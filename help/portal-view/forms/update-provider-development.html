@@ -35,10 +35,10 @@
             const path_to_root = "../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../searchindex-9646612b.js";
+            window.path_to_searchindex_js = "../../../searchindex-026fe4a5.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../toc-04fe2fcc.js"></script>
+        <script src="../../../toc-2b9a4022.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -206,9 +206,16 @@ is not included in the form.</p>
 <tr><td>Provider Account</td><td><code>OpenAI Production</code></td><td>Host-scoped billing and quota owner.</td></tr>
 <tr><td>Deployment Name</td><td><code>openai-gpt4o-ca-prod</code></td><td>Unique operator-friendly name within the host.</td></tr>
 <tr><td>Provider Type</td><td><code>groq</code></td><td>Provider identity. Changing it reloads Physical Model Id options.</td></tr>
-<tr><td>Provider Protocol</td><td><code>openai</code></td><td>Gateway wire protocol: <code>openai</code> for OpenAI-compatible endpoints, or <code>anthropic</code> for the Anthropic Messages protocol.</td></tr>
+<tr><td>Provider Protocol</td><td><code>openai_embeddings</code></td><td>Exact gateway wire contract: <code>openai_chat</code>, <code>openai_responses</code>, <code>openai_embeddings</code>, or <code>anthropic_messages</code>.</td></tr>
 <tr><td>Physical Model Id</td><td><code>gpt-4o</code></td><td>Exact upstream model served by the endpoint.</td></tr>
 <tr><td>Base URL</td><td><code>https://api.openai.com/v1</code></td><td>HTTPS provider base endpoint without credentials.</td></tr>
+<tr><td>Provider Endpoint</td><td><code>nvidia-free-embeddings</code></td><td>Reusable transport/authentication profile. Protocol and Base URL must remain consistent with it.</td></tr>
+<tr><td>Deployment Revision Id</td><td><code>nvidia-free-embedding-demo/r1</code></td><td>Operator revision of this exact callable configuration.</td></tr>
+<tr><td>Physical Runtime Id</td><td><code>nvidia/integrate-api/free-embeddings</code></td><td>Stable external service/process identity.</td></tr>
+<tr><td>Capacity Domain Id</td><td><code>nvidia-free-embedding-demo</code></td><td>Runtime capacity domain; protected lanes must not share one.</td></tr>
+<tr><td>Runtime Capacity</td><td><code>{"maxParallelRequests":32,...}</code></td><td>Required positive parallel, queue, cold-start, stream-setup, and request timeout bounds.</td></tr>
+<tr><td>Readiness Policy</td><td><code>IMMEDIATE</code></td><td><code>IMMEDIATE</code> or <code>WARM_BEFORE_ELIGIBLE</code>.</td></tr>
+<tr><td>Expected Sidecar Identity</td><td>Empty</td><td>Profile/digest only for a managed sidecar; leave empty for a native hosted Endpoint.</td></tr>
 <tr><td>Region</td><td><code>ca-central-1</code></td><td>Optional placement or residency region. Leave it empty for a global endpoint.</td></tr>
 <tr><td>Transport Bounds</td><td><code>{"requestTimeoutMs":60000}</code></td><td>Optional non-secret transport metadata object.</td></tr>
 <tr><td>Refresh Before Seconds</td><td><code>86400</code></td><td>Reserved refresh lead time for a future trusted conformance runner.</td></tr>
@@ -229,8 +236,8 @@ rewrite an already published gateway snapshot.</p>
 administrative update form. They are reserved for a future trusted runner; the
 current Deployments tab does not expose validation or conformance actions.</p>
 <h2 id="structured-fields"><a class="header" href="#structured-fields">Structured Fields</a></h2>
-<p><strong>Transport Bounds</strong> supports JSON and YAML. Choose <strong>Apply</strong> after editing. For
-example:</p>
+<p><strong>Runtime Capacity</strong>, <strong>Expected Sidecar Identity</strong>, and <strong>Transport Bounds</strong>
+support JSON and YAML. Choose <strong>Apply</strong> after editing. For example:</p>
 <pre><code class="language-json">{
   "connectTimeoutMs": 5000,
   "requestTimeoutMs": 60000
@@ -246,6 +253,11 @@ The selected Account’s provider type must match the Deployment.</p>
 <p>Changing lifecycle status to <code>ACTIVE</code> does not bypass Credential, Pricing,
 Alias Route, or publication requirements. A retired Deployment cannot
 transition back to an earlier lifecycle state.</p>
+<p>For the hosted NVIDIA Deployment, preserve Provider Type <code>nvidia</code>, Protocol
+<code>openai_embeddings</code>, Physical Model Id <code>nvidia/nemotron-3-embed-1b</code>, Base URL
+<code>https://integrate.api.nvidia.com/v1</code>, and Endpoint
+<code>nvidia-free-embeddings</code>. Rotate <code>env:NVIDIA_API_KEY</code> through Credentials rather
+than changing Endpoint or Deployment fields.</p>
 <h2 id="save-the-update"><a class="header" href="#save-the-update">Save The Update</a></h2>
 <p>Choose <strong>Update Provider Deployment</strong>. The form sends
 <code>lightapi.net/genai/updateLlmProviderDeployment/0.1.0</code> with
@@ -266,8 +278,8 @@ belongs to the selected host.</li>
 <strong>Apply</strong>, or choose <strong>Reset</strong> to restore the last valid value.</li>
 <li><strong>Provider mismatch</strong>: select an Account whose provider type matches the
 Deployment.</li>
-<li><strong>Provider Protocol is rejected</strong>: choose <code>openai</code> or <code>anthropic</code>; Groq and
-Gemini OpenAI-compatible endpoints use <code>openai</code>.</li>
+<li><strong>Provider Protocol is rejected</strong>: choose the exact protocol enum; NVIDIA
+embeddings use <code>openai_embeddings</code>.</li>
 <li><strong>403 on Update</strong>: confirm access to
 <code>lightapi.net/genai/updateLlmProviderDeployment/0.1.0</code> and the required write
 permission.</li>

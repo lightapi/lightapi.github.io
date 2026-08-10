@@ -35,10 +35,10 @@
             const path_to_root = "../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../searchindex-9646612b.js";
+            window.path_to_searchindex_js = "../../../searchindex-026fe4a5.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../toc-04fe2fcc.js"></script>
+        <script src="../../../toc-2b9a4022.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -193,7 +193,7 @@ approved publication mapping and a gateway that supports the mapped fields.</p>
 <tbody>
 <tr><td>Host Id</td><td>Read-only tenant boundary supplied by the portal. The generated Policy and all of its Bindings belong to this host.</td><td><code>10000000-0000-4000-8000-000000000001</code></td></tr>
 <tr><td>Policy Name</td><td>Required, recognizable name unique within the host. Use a stable governance name rather than a provider or Deployment identifier.</td><td><code>governed-chat-standard</code></td></tr>
-<tr><td>Access Policy</td><td>Object describing intended subject and operation access. The example vocabulary must be mapped by the publication implementation before it can affect runtime authorization.</td><td><code>{"allowedSubjectTypes":["AGENT","CLIENT"],"allowedOperations":["chat_completions"]}</code></td></tr>
+<tr><td>Access Policy</td><td>Object describing intended subject and operation access. The example vocabulary must be mapped by the publication implementation before it can affect runtime authorization.</td><td><code>{"allowedSubjectTypes":["AGENT","CLIENT"],"allowedOperations":["generate"]}</code></td></tr>
 <tr><td>Budget Policy</td><td>Object describing intended per-request or period spending controls. Monetary examples use integer micros, where <code>1000000</code> micros is one currency unit.</td><td><code>{"maxCostMicrosPerRequest":500000,"monthlyCostMicros":50000000}</code></td></tr>
 <tr><td>Content Policy</td><td>Object describing intended logging and prompt or response handling.</td><td><code>{"loggingMode":"METADATA","allowPromptLogging":false}</code></td></tr>
 <tr><td>Cache Policy</td><td>Object describing intended cache use and constraints.</td><td><code>{"enabled":false}</code></td></tr>
@@ -208,7 +208,7 @@ approved publication mapping and a gateway that supports the mapped fields.</p>
   "policyName": "governed-chat-standard",
   "accessPolicy": {
     "allowedSubjectTypes": ["AGENT", "CLIENT"],
-    "allowedOperations": ["chat_completions"]
+    "allowedOperations": ["generate"]
   },
   "budgetPolicy": {
     "maxCostMicrosPerRequest": 500000,
@@ -241,6 +241,14 @@ publication workflow to translate supported policy intent into a new immutable
 gateway candidate. Creating the row alone does not change a running gateway.
 The backend generates Model Policy Id and Aggregate Version. The <code>active</code> state
 is backend-managed through soft delete and is not part of this form.</p>
+<h2 id="nvidia-knowledge-base-note"><a class="header" href="#nvidia-knowledge-base-note">NVIDIA Knowledge Base note</a></h2>
+<p>A Model Policy is optional for the initial NVIDIA transport smoke test. If the
+host requires one for <code>kb-index</code> or <code>kb-query</code>, use operation <code>embed</code>, bind the
+Policy to the intended workload/Alias, and use budgets appropriate to the
+approved free entitlement. Do not place <code>NVIDIA_API_KEY</code> or its value in any
+policy object. A native-extension allowlist also does not implement NVIDIA’s
+query/passage transformation by itself; the provider adapter must support that
+request contract.</p>
 
                     </main>
 

@@ -35,10 +35,10 @@
             const path_to_root = "../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../searchindex-9646612b.js";
+            window.path_to_searchindex_js = "../../../searchindex-026fe4a5.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../toc-04fe2fcc.js"></script>
+        <script src="../../../toc-2b9a4022.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -191,13 +191,13 @@ capabilities.</p>
 </thead>
 <tbody>
 <tr><td>Host Id</td><td>Read-only tenant boundary supplied by the portal. Both referenced records must belong to this host.</td><td><code>10000000-0000-4000-8000-000000000001</code></td></tr>
-<tr><td>Public Alias</td><td>Active Alias that clients use as their stable model name.</td><td><code>governed-chat</code> (<code>20000000-0000-4000-8000-000000000020</code>)</td></tr>
-<tr><td>Provider Deployment</td><td>Active provider endpoint that can serve the Alias. The command validates its environment and capabilities against the Alias.</td><td><code>openai-prod-ca</code> (<code>30000000-0000-4000-8000-000000000030</code>)</td></tr>
+<tr><td>Public Alias</td><td>Non-deleted Alias that clients use as their stable model name. Lifecycle activation is required later for publication.</td><td><code>kb-index</code></td></tr>
+<tr><td>Provider Deployment</td><td>Non-deleted Deployment that can serve the Alias. Its environment and embedding capabilities must match the Alias.</td><td><code>nvidia-nemotron-3-embed-1b-loc</code></td></tr>
 <tr><td>Route Priority</td><td>Non-negative ordering value. Lower values are evaluated first and must be unique within the Alias.</td><td><code>0</code></td></tr>
 <tr><td>Route Weight</td><td>Read-only value fixed at <code>1</code> for the current MVP. Weighted selection is not supported yet.</td><td><code>1</code></td></tr>
 <tr><td>Fallback Enabled</td><td>Select when this Deployment should be used as a fallback rather than the preferred route.</td><td><code>false</code></td></tr>
 <tr><td>Canary Percent</td><td>Read-only value fixed at <code>0</code> for the current MVP. Percentage-based canary routing is not supported yet.</td><td><code>0</code></td></tr>
-<tr><td>Residency Conditions</td><td>JSON or YAML governance object describing route residency constraints. Use <strong>Apply</strong> after editing. Current preview does not evaluate it, and runtime enforcement depends on compiler and gateway support for the chosen vocabulary.</td><td><code>{"regions":["ca-central-1"]}</code></td></tr>
+<tr><td>Residency Conditions</td><td>JSON or YAML governance object describing route residency constraints. Use <strong>Apply</strong> after editing. Use <code>{}</code> when no approved restriction applies. Current preview does not evaluate arbitrary conditions.</td><td><code>{}</code></td></tr>
 </tbody>
 </table>
 </div>
@@ -232,11 +232,50 @@ fallback:</p>
   }
 }
 </code></pre>
-<p>Creating a Route does not by itself make the Alias publishable. The selected
-Deployment must also be active, have current passing conformance, an effective
-Credential, and effective Pricing. The backend generates the Alias Route Id
-and aggregate version. The <code>active</code> state is backend-managed through soft
-delete and is not part of this form.</p>
+<p>Creating a Route does not by itself make the Alias publishable. The Alias and
+Deployment must reach the required lifecycle state, and the Deployment needs
+an effective Credential and effective Pricing. Conformance evidence is
+machine-owned and is required only when the applicable qualification policy
+requires it; never manufacture it in this form. The backend generates the
+Alias Route Id and aggregate version. The <code>active</code> state is backend-managed
+through soft delete and is not part of this form.</p>
+<h2 id="nvidia-knowledge-base-routes"><a class="header" href="#nvidia-knowledge-base-routes">NVIDIA Knowledge Base routes</a></h2>
+<p>Submit this form twice: create one priority-zero Route for each Knowledge Base
+Alias. For the functional demo, both Routes may select the same hosted NVIDIA
+Deployment:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Alias</th><th>Deployment</th><th style="text-align: right">Priority</th><th>Fallback</th><th style="text-align: right">Weight</th><th style="text-align: right">Canary</th></tr>
+</thead>
+<tbody>
+<tr><td><code>kb-index</code></td><td><code>nvidia-nemotron-3-embed-1b-loc</code></td><td style="text-align: right"><code>0</code></td><td><code>false</code></td><td style="text-align: right"><code>1</code></td><td style="text-align: right"><code>0</code></td></tr>
+<tr><td><code>kb-query</code></td><td><code>nvidia-nemotron-3-embed-1b-loc</code></td><td style="text-align: right"><code>0</code></td><td><code>false</code></td><td style="text-align: right"><code>1</code></td><td style="text-align: right"><code>0</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>First submission:</p>
+<pre><code class="language-json">{
+  "publicAliasId": "select kb-index",
+  "providerDeploymentId": "select nvidia-nemotron-3-embed-1b-loc",
+  "routePriority": 0,
+  "routeWeight": 1,
+  "fallbackEnabled": false,
+  "canaryPercent": 0,
+  "residencyConditions": {}
+}
+</code></pre>
+<p>Second submission uses the same values but selects <code>kb-query</code> as Public Alias.
+The values shown for the two selectors are dropdown labels; the form submits
+their UUIDs.</p>
+<p>Use <code>{}</code> for Residency Conditions unless the Registration and Deployment carry
+an approved region restriction. Every routed Deployment must match the Alias’s
+complete embedding-space contract, not only dimension <code>2048</code>.</p>
+<p>Production-protected <code>kb_index</code> and <code>kb_query</code> lanes require genuinely separate
+runtime and capacity/quota domains. Routing both Aliases through one free
+shared NVIDIA Deployment is appropriate for this functional demo, but it is
+not production-isolation evidence and can be rejected by protected-lane
+qualification.</p>
 
                     </main>
 

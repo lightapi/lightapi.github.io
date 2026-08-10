@@ -35,10 +35,10 @@
             const path_to_root = "../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../searchindex-9646612b.js";
+            window.path_to_searchindex_js = "../../../searchindex-026fe4a5.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../toc-04fe2fcc.js"></script>
+        <script src="../../../toc-2b9a4022.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -175,129 +175,128 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="create-provider-deployment"><a class="header" href="#create-provider-deployment">Create Provider Deployment</a></h1>
-<p>Use <code>/app/form/createProviderDeployment</code> to define the callable provider
-endpoint for an approved LLM Registration and provider Account. Open the form
-from <strong>Administration &gt; GenAI Admin &gt; LLM Models &gt; Deployments</strong> by choosing
-<strong>Create provider deployment</strong>.</p>
-<p>A Deployment contains endpoint and governance metadata. It does not contain a
-raw API key or password. Add an external secret reference later on the
-Credentials tab.</p>
-<h2 id="before-you-begin"><a class="header" href="#before-you-begin">Before You Begin</a></h2>
-<p>Create these records first for the same host:</p>
+<p>Use <code>/app/form/createProviderDeployment</code> to bind an approved LLM Registration,
+Provider Account, and Provider Endpoint to an exact callable model runtime.
+Open it from <strong>Administration &gt; GenAI Admin &gt; LLM Models &gt; Deployments</strong>.</p>
+<p>A Deployment contains runtime identity, capacity, readiness, and non-secret
+transport metadata. Provider credentials remain separate.</p>
+<h2 id="before-you-begin"><a class="header" href="#before-you-begin">Before you begin</a></h2>
+<p>Create these records first under the same host:</p>
 <ul>
-<li>an LLM Model and environment-specific Registration;</li>
-<li>a provider Account for the intended billing and quota owner.</li>
+<li>the global catalog Model and environment-specific Registration;</li>
+<li>the Provider Account; and</li>
+<li>the Provider Endpoint.</li>
 </ul>
-<p>You also need the provider’s HTTPS inference base URL and the physical model
-identifier accepted by that endpoint.</p>
-<h2 id="form-fields"><a class="header" href="#form-fields">Form Fields</a></h2>
+<p>The Registration, Account, Endpoint, provider type, protocol, physical model,
+and base URL must describe the same provider path.</p>
+<h2 id="fields"><a class="header" href="#fields">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Field</th><th>Required</th><th>Example</th><th>Description</th></tr>
+<tr><th>Field</th><th>Required</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td>Host Id</td><td>Yes</td><td><code>selected-host-id</code></td><td>Read-only host that owns the Deployment.</td></tr>
-<tr><td>LLM Registration</td><td>Yes</td><td><code>dev — groq / llama-3.3-70b-versatile</code></td><td>Non-deleted host-scoped Registration that approves the catalog model and environment. Labels combine environment, provider, and physical model; the selector still submits only its <code>modelRegistrationId</code>.</td></tr>
-<tr><td>Provider Account</td><td>Yes</td><td><code>OpenAI Production</code></td><td>Non-deleted host-scoped billing/quota Account. The selector submits its <code>providerAccountId</code>.</td></tr>
-<tr><td>Deployment Name</td><td>Yes</td><td><code>openai-gpt-5.6-sol-ca-prod</code></td><td>Operator-friendly name. It must be unique within the host.</td></tr>
-<tr><td>Provider Type</td><td>Yes</td><td><code>groq</code></td><td>Provider identity used for the Account, model catalog, and billing. Select it before Physical Model Id.</td></tr>
-<tr><td>Provider Protocol</td><td>Yes</td><td><code>openai</code></td><td>Upstream wire protocol. Choose <code>openai</code> for OpenAI-compatible endpoints such as Groq or Gemini, or <code>anthropic</code> for the Anthropic Messages protocol.</td></tr>
-<tr><td>Physical Model Id</td><td>Yes</td><td><code>gpt-4o</code></td><td>Exact model name sent to the provider. Options are filtered by Provider Type.</td></tr>
-<tr><td>Base URL</td><td>Yes</td><td><code>https://api.openai.com/v1</code></td><td>HTTPS base endpoint used by the provider client. Do not include credentials.</td></tr>
-<tr><td>Region</td><td>No</td><td><code>ca-central-1</code></td><td>Optional placement or residency region. Leave it empty for a global endpoint.</td></tr>
-<tr><td>Transport Bounds</td><td>No</td><td><code>{"connectTimeoutMs":5000}</code></td><td>Non-secret JSON object for provider-specific transport annotations. Defaults to <code>{}</code>.</td></tr>
-<tr><td>Refresh Before Seconds</td><td>No</td><td><code>86400</code></td><td>Reserved refresh lead time for a future trusted conformance runner.</td></tr>
-<tr><td>Lifecycle Status</td><td>No</td><td><code>DRAFT</code></td><td>New Deployments are created as drafts. Activate them after their runtime credential is provisioned.</td></tr>
+<tr><td>Host Id</td><td>Yes</td><td>Read-only host that owns the Deployment.</td></tr>
+<tr><td>LLM Registration</td><td>Yes</td><td>Environment-specific approval of the catalog Model.</td></tr>
+<tr><td>Provider Account</td><td>Yes</td><td>Billing, quota, and capacity owner.</td></tr>
+<tr><td>Deployment Name</td><td>Yes</td><td>Host-unique operator name.</td></tr>
+<tr><td>Provider Type</td><td>Yes</td><td>Provider identity, such as <code>nvidia</code>.</td></tr>
+<tr><td>Provider Protocol</td><td>Yes</td><td>Exact wire contract: <code>openai_chat</code>, <code>openai_responses</code>, <code>openai_embeddings</code>, or <code>anthropic_messages</code>.</td></tr>
+<tr><td>Physical Model Id</td><td>Yes</td><td>Exact upstream model string.</td></tr>
+<tr><td>Base URL</td><td>Yes</td><td>HTTPS compatibility URL. Copy it exactly from the selected Endpoint.</td></tr>
+<tr><td>Provider Endpoint</td><td>Yes</td><td>Reusable transport/authentication profile.</td></tr>
+<tr><td>Deployment Revision Id</td><td>Yes</td><td>Stable operator revision for this callable runtime configuration.</td></tr>
+<tr><td>Physical Runtime Id</td><td>Yes</td><td>Stable identity of the external service, process, or GPU runtime.</td></tr>
+<tr><td>Capacity Domain Id</td><td>Yes</td><td>Capacity/isolation domain. Protected query and index lanes must not share one.</td></tr>
+<tr><td>Runtime Capacity</td><td>Yes</td><td>JSON object with all five positive bounded-capacity fields shown below.</td></tr>
+<tr><td>Readiness Policy</td><td>Yes</td><td><code>IMMEDIATE</code> or <code>WARM_BEFORE_ELIGIBLE</code>.</td></tr>
+<tr><td>Expected Sidecar Identity</td><td>No</td><td>Sidecar profile/digest object only; leave empty for a native hosted Endpoint. Never include credentials.</td></tr>
+<tr><td>Region</td><td>No</td><td>Optional provider placement/residency label.</td></tr>
+<tr><td>Transport Bounds</td><td>No</td><td>Additional non-secret transport annotations; use <code>{}</code> when none are approved.</td></tr>
+<tr><td>Refresh Before Seconds</td><td>No</td><td>Lead time used by trusted refresh/qualification workflows.</td></tr>
+<tr><td>Lifecycle Status</td><td>Yes</td><td>New Deployments start as <code>DRAFT</code>.</td></tr>
 </tbody>
 </table>
 </div>
-<p>The backend creates <code>providerDeploymentId</code>. The form does not accept <code>active</code>;
-that value is backend-managed for soft deletion.</p>
-<h2 id="registration-and-account"><a class="header" href="#registration-and-account">Registration And Account</a></h2>
-<p>Both selectors load non-deleted reference labels for the selected host. An LLM
-Registration label has the form <code>environment — provider / physical-model</code>, so
-registrations in the same environment remain distinguishable. The
-command rejects an ID that does not exist under that host. Choose a Registration
-for the intended environment and an Account whose provider and billing owner
-match this endpoint. The Account owns the quota-group identity; the Deployment
-does not duplicate it.</p>
-<h2 id="provider-model-and-endpoint"><a class="header" href="#provider-model-and-endpoint">Provider, Model, And Endpoint</a></h2>
-<p>Choose <strong>Provider Type</strong> first. <strong>Physical Model Id</strong> then loads the model names
-related to that provider. The selected physical model must be the same model
-actually served by <code>baseUrl</code>.</p>
-<p>Provider Type and Provider Protocol have different meanings. Type identifies
-the provider; Protocol selects the request/response codec used by the gateway.
-For example, a Groq deployment uses <code>providerType: groq</code> with
-<code>providerProtocol: openai</code>.</p>
-<p><code>baseUrl</code> must start with <code>https://</code>. Examples include:</p>
-<pre><code class="language-text">https://api.openai.com/v1
-https://my-resource.openai.azure.com/openai
-https://llm-provider.example.com/v1
-</code></pre>
-<p>Do not put a query-string token, API key, password, or authorization header in
-the URL or any other Deployment field.</p>
-<h2 id="transport-bounds"><a class="header" href="#transport-bounds">Transport Bounds</a></h2>
-<p><code>transportBounds</code> is an optional object for non-secret transport annotations.
-The editor supports <strong>JSON</strong> and <strong>YAML</strong>. For example:</p>
+<p>Runtime Capacity requires exactly usable positive bounds. A suitable demo
+starting point is:</p>
 <pre><code class="language-json">{
-  "connectTimeoutMs": 5000,
-  "requestTimeoutMs": 60000,
-  "maxConnections": 50
+  "maxParallelRequests": 32,
+  "maxQueuedRequests": 32,
+  "coldStartTimeoutMs": 30000,
+  "streamSetupTimeoutMs": 10000,
+  "requestTimeoutMs": 30000
 }
 </code></pre>
-<p>Use <code>{}</code> when no annotations are required. Choose <strong>Apply</strong> after editing JSON
-or YAML. The Create action remains blocked while a structured draft is invalid
-or has unapplied changes.</p>
-<p>These properties are currently retained as control-plane metadata. Arbitrary
-keys are not automatically projected into or enforced by the gateway runtime.</p>
-<h2 id="account-owned-quota-group"><a class="header" href="#account-owned-quota-group">Account-Owned Quota Group</a></h2>
-<p>There is no Quota Group field on this form. The selected Provider Account owns
-<code>quotaGroupId</code>, and Portal derives it through <code>providerAccountId</code>. During
-publication, Portal copies that authoritative value into the immutable gateway
-resource. Deployments published under the same quota group share the gateway’s
-provider-account runtime capacity identity.</p>
-<h2 id="conformance-fields"><a class="header" href="#conformance-fields">Conformance Fields</a></h2>
-<p>Conformance evidence is not editable on this form. Portal retains the backend
-fields for a future trusted runner, but the current Deployments tab does not
-offer validation or conformance actions. <code>UNKNOWN</code> or <code>PENDING</code> evidence does
-not block the current route-preview or instance-targeted publication flow. Do
-not manually supply conformance state, digest, validity, or result fields.</p>
-<h2 id="lifecycle-status"><a class="header" href="#lifecycle-status">Lifecycle Status</a></h2>
-<p>New records use <code>DRAFT</code>. The update form supports <code>VALIDATING</code>, <code>ACTIVE</code>,
-<code>SUSPENDED</code>, and <code>RETIRED</code> after creation.</p>
-<p>Lifecycle <code>ACTIVE</code> alone does not make the Deployment routable. It also needs
-an effective <code>ACTIVE</code> or <code>ROTATING</code> Credential, effective Pricing, an Alias
-Route, and publication.</p>
-<h2 id="create-the-deployment"><a class="header" href="#create-the-deployment">Create The Deployment</a></h2>
-<p>Choose <strong>Create Provider Deployment</strong>. The form sends
-<code>lightapi.net/genai/createLlmProviderDeployment/0.1.0</code> and returns to
-<strong>Administration &gt; GenAI Admin &gt; LLM Models</strong> after success.</p>
-<h2 id="common-problems"><a class="header" href="#common-problems">Common Problems</a></h2>
+<p>Choose <strong>Apply</strong> after editing Runtime Capacity, Expected Sidecar Identity, or
+Transport Bounds.</p>
+<h2 id="nvidia-nemotron-embedding-example"><a class="header" href="#nvidia-nemotron-embedding-example">NVIDIA Nemotron embedding example</a></h2>
+<p>Select the <code>loc</code> NVIDIA Nemotron Registration, Account
+<code>nvidia-free-embedding-demo</code>, and Endpoint <code>nvidia-free-embeddings</code>. Then use:</p>
+<pre><code class="language-json">{
+  "deploymentName": "nvidia-nemotron-3-embed-1b-loc",
+  "providerType": "nvidia",
+  "providerProtocol": "openai_embeddings",
+  "physicalModelId": "nvidia/nemotron-3-embed-1b",
+  "baseUrl": "https://integrate.api.nvidia.com/v1",
+  "deploymentRevisionId": "nvidia-free-embedding-demo/r1",
+  "physicalRuntimeId": "nvidia/integrate-api/free-embeddings",
+  "capacityDomainId": "nvidia-free-embedding-demo",
+  "runtimeCapacity": {
+    "maxParallelRequests": 32,
+    "maxQueuedRequests": 32,
+    "coldStartTimeoutMs": 30000,
+    "streamSetupTimeoutMs": 10000,
+    "requestTimeoutMs": 30000
+  },
+  "readinessPolicy": "IMMEDIATE",
+  "expectedSidecar": null,
+  "region": null,
+  "transportBounds": {},
+  "lifecycleStatus": "DRAFT"
+}
+</code></pre>
+<p>The form still requires Base URL and Provider Protocol even though the selected
+Endpoint already stores them. Copy the exact values; a mismatch creates an
+internally inconsistent legacy/deployment record.</p>
+<h3 id="protected-knowledge-base-lanes"><a class="header" href="#protected-knowledge-base-lanes">Protected Knowledge Base lanes</a></h3>
+<p><code>kb-index</code> and <code>kb-query</code> are separate protected workload lanes. For a
+production-like qualification, create distinct index/query Deployments with
+different Deployment Revision and Capacity Domain identities, and use provider
+Accounts/quota that supply real capacity isolation. Merely giving two records
+different strings does not create physical isolation when both consume the
+same free external quota.</p>
+<p>For a functional local demo, one hosted Deployment can prove transport and
+embedding correctness, but it must not be represented as production lane
+isolation evidence.</p>
+<h2 id="qualification-and-activation"><a class="header" href="#qualification-and-activation">Qualification and activation</a></h2>
+<p>Conformance/qualification evidence is machine-owned and is not editable on
+this form. A trusted runner must test the exact protocol, physical model,
+operation, credential path, and embedding-space evidence. Do not manufacture a
+PASS result.</p>
+<p>After creation, provision the Credential, Pricing, Alias, and Route. Move the
+Deployment to <code>ACTIVE</code> only after the runtime path is ready, then publish a new
+gateway candidate. Portal generates Provider Deployment Id and Aggregate
+Version; <code>active</code> remains backend-managed.</p>
+<h2 id="common-problems"><a class="header" href="#common-problems">Common problems</a></h2>
 <ul>
-<li><strong>Registration or Account is empty</strong>: create a non-deleted host-scoped record or
-confirm the current host selection.</li>
-<li><strong>Physical Model Id is empty</strong>: select Provider Type first and confirm the
-provider-to-model reference relation is configured.</li>
-<li><strong>Provider Protocol is rejected</strong>: choose <code>openai</code> or <code>anthropic</code>; do not put
-a provider identity such as <code>groq</code> or <code>gemini</code> in this field.</li>
-<li><strong>Base URL is rejected</strong>: use a complete HTTPS URL.</li>
-<li><strong>Transport Bounds error</strong>: enter an object, correct JSON/YAML syntax, and
+<li><strong>Protocol rejected:</strong> use <code>openai_embeddings</code>, not <code>openai</code> or <code>nvidia</code>.</li>
+<li><strong>Base URL rejected:</strong> use the exact HTTPS base URL without <code>/embeddings</code> and
+without a key or query string.</li>
+<li><strong>Endpoint missing:</strong> create the Provider Endpoint first under the same host.</li>
+<li><strong>Runtime Capacity rejected:</strong> supply all five positive integer fields and
 choose <strong>Apply</strong>.</li>
-<li><strong>Provider mismatch</strong>: select an Account whose provider type matches the
-Deployment.</li>
-<li><strong>403 on Create</strong>: confirm access to
-<code>lightapi.net/genai/createLlmProviderDeployment/0.1.0</code> and the required write
-permission.</li>
+<li><strong>Provider mismatch:</strong> the Registration, Account, Endpoint, and Deployment
+must all describe NVIDIA.</li>
+<li><strong>Raw secret rejected:</strong> credentials belong only in an external secret store
+referenced from the Credentials tab.</li>
 </ul>
-<p>For downstream routing and publication behavior, see the
-<a href="../pages/llm-model-control-plane.html#deployments-tab">Deployments tab guide</a>.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../../../help/portal-view/forms/create-provider-account.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../../../help/portal-view/forms/update-llm-provider-endpoint.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
@@ -311,7 +310,7 @@ permission.</li>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../../../help/portal-view/forms/create-provider-account.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../../../help/portal-view/forms/update-llm-provider-endpoint.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 

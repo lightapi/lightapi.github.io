@@ -35,10 +35,10 @@
             const path_to_root = "../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../searchindex-9646612b.js";
+            window.path_to_searchindex_js = "../../../searchindex-026fe4a5.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../toc-04fe2fcc.js"></script>
+        <script src="../../../toc-2b9a4022.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -189,6 +189,7 @@ deployments, aliases, policies, and publication, see the
 <tr><th>Field</th><th>Description</th></tr>
 </thead>
 <tbody>
+<tr><td>Global Catalog</td><td>Read-only <code>true</code>; catalog Models are platform-global and are not owned by the selected host.</td></tr>
 <tr><td>Provider Type</td><td>Provider identifier, such as <code>openai</code>.</td></tr>
 <tr><td>Physical Model Id</td><td>The model identifier recognized by the provider.</td></tr>
 <tr><td>Model Family</td><td>The provider’s model family or product family.</td></tr>
@@ -208,8 +209,8 @@ arrays or objects. Do not enter JSON or YAML as a quoted string.</p>
 also use the <strong>JSON</strong> or <strong>YAML</strong> tab, for example:</p>
 <pre><code class="language-json">["text", "image"]
 </code></pre>
-<pre><code class="language-yaml">- chat_completions
-- embeddings
+<pre><code class="language-yaml">- generate
+- embed
 </code></pre>
 <h3 id="declared-capabilities"><a class="header" href="#declared-capabilities">Declared Capabilities</a></h3>
 <p>This open-ended object starts on the <strong>JSON</strong> tab. The Form tab is unavailable
@@ -233,6 +234,43 @@ or has not been applied.</p>
 <p>Categories and tags are optional. The selectors show active global taxonomy
 values registered for the <code>llm_model</code> entity type. Host-specific taxonomy
 cannot be assigned to a global model.</p>
+<h2 id="nvidia-nemotron-embedding-example"><a class="header" href="#nvidia-nemotron-embedding-example">NVIDIA Nemotron embedding example</a></h2>
+<p>For the <code>light-knowledge</code> demo, use these values for the NVIDIA catalog Model:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>Provider Type</td><td><code>nvidia</code></td></tr>
+<tr><td>Physical Model Id</td><td><code>nvidia/nemotron-3-embed-1b</code></td></tr>
+<tr><td>Model Family</td><td><code>nemotron-3-embed</code></td></tr>
+<tr><td>Model Version</td><td>Leave empty unless the provider publishes a stable version identifier</td></tr>
+<tr><td>Lifecycle Status</td><td><code>DRAFT</code> initially</td></tr>
+<tr><td>Context Token Limit</td><td><code>4096</code></td></tr>
+<tr><td>Output Token Limit</td><td><code>1</code> because the current generic schema requires a positive value; embedding calls do not generate output tokens</td></tr>
+<tr><td>Modalities</td><td><code>["text"]</code></td></tr>
+<tr><td>Operations</td><td><code>["embed"]</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Use this Declared Capabilities object:</p>
+<pre><code class="language-json">{
+  "embedding": {
+    "dimensions": [2048],
+    "defaultDimension": 2048,
+    "encodings": ["float"],
+    "normalization": "l2",
+    "distanceMetrics": ["cosine"],
+    "inputTypes": ["query", "passage"]
+  }
+}
+</code></pre>
+<p>NVIDIA currently documents only the native 2048-dimensional output for this
+hosted model. Document indexing must use passage semantics and retrieval must
+use query semantics. The catalog capability declaration records that contract;
+the qualified provider adapter must still send the correct provider request.
+See the <a href="https://docs.nvidia.com/nim/nemo-retriever/text-embedding/latest/support-matrix.html">NVIDIA NIM support matrix</a>.</p>
 <h2 id="create-the-record"><a class="header" href="#create-the-record">Create the Record</a></h2>
 <p>Review the values and choose <strong>Create LLM Model</strong>. The form sends the
 <code>createLlmModel</code> command and preserves <code>modalities</code> and <code>operations</code> as arrays

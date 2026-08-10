@@ -35,10 +35,10 @@
             const path_to_root = "../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../searchindex-9646612b.js";
+            window.path_to_searchindex_js = "../../../searchindex-026fe4a5.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../toc-04fe2fcc.js"></script>
+        <script src="../../../toc-2b9a4022.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -192,13 +192,13 @@ a newer change.</p>
 <tbody>
 <tr><td>Host Id</td><td>Read-only tenant boundary supplied by the portal.</td><td><code>10000000-0000-4000-8000-000000000001</code></td></tr>
 <tr><td>Alias Route Id</td><td>Read-only identifier generated when the Route was created.</td><td><code>40000000-0000-4000-8000-000000000040</code></td></tr>
-<tr><td>Public Alias</td><td>Alias served by this Route. Changing it revalidates the selected Deployment against the new Alias.</td><td><code>governed-chat</code> (<code>20000000-0000-4000-8000-000000000020</code>)</td></tr>
-<tr><td>Provider Deployment</td><td>Provider endpoint used by the Route. It must match the Alias environment and required capabilities.</td><td><code>anthropic-prod-ca</code> (<code>30000000-0000-4000-8000-000000000031</code>)</td></tr>
-<tr><td>Route Priority</td><td>Non-negative ordering value; lower values come first. It must be unique among Routes for the Alias.</td><td><code>10</code></td></tr>
+<tr><td>Public Alias</td><td>Alias served by this Route. Changing it revalidates the selected Deployment against the new Alias.</td><td><code>kb-index</code> or <code>kb-query</code></td></tr>
+<tr><td>Provider Deployment</td><td>Provider endpoint used by the Route. It must match the Alias environment and required capabilities.</td><td><code>nvidia-nemotron-3-embed-1b-loc</code></td></tr>
+<tr><td>Route Priority</td><td>Non-negative ordering value; lower values come first. It must be unique among Routes for the Alias.</td><td><code>0</code></td></tr>
 <tr><td>Route Weight</td><td>Read-only value fixed at <code>1</code>. Weighted traffic splitting is not supported by the current MVP.</td><td><code>1</code></td></tr>
-<tr><td>Fallback Enabled</td><td>Whether this Route is intended as a fallback-only choice.</td><td><code>true</code></td></tr>
+<tr><td>Fallback Enabled</td><td>Whether this Route is intended as a fallback-only choice.</td><td><code>false</code></td></tr>
 <tr><td>Canary Percent</td><td>Read-only value fixed at <code>0</code>. Percentage canary routing is not supported by the current MVP.</td><td><code>0</code></td></tr>
-<tr><td>Residency Conditions</td><td>JSON or YAML governance object for residency requirements. Choose <strong>Apply</strong> after editing. Current preview does not evaluate it; runtime enforcement depends on compiler and gateway support.</td><td><code>{"regions":["ca-central-1"]}</code></td></tr>
+<tr><td>Residency Conditions</td><td>JSON or YAML governance object for residency requirements. Choose <strong>Apply</strong> after editing. Use <code>{}</code> for this public NVIDIA demo.</td><td><code>{}</code></td></tr>
 <tr><td>Aggregate Version</td><td>Read-only record version sent with the update for optimistic concurrency. Reload the Route if another update has advanced it.</td><td><code>6</code></td></tr>
 </tbody>
 </table>
@@ -222,8 +222,33 @@ a newer change.</p>
 <p>The Route preview reports ordering and eligibility, but it does not execute a
 provider request or guarantee that fallback will succeed at runtime. Before
 publication, confirm that at least one Route for every active Alias has an
-active, conformant, credentialed, and priced Deployment. The <code>active</code> state is
-backend-managed through soft delete and is not part of this form.</p>
+active, credentialed, and priced Deployment. Conformance evidence is
+machine-owned and applies when required by the qualification policy. The
+<code>active</code> state is backend-managed through soft delete and is not part of this
+form.</p>
+<p>For <code>kb-index</code> or <code>kb-query</code>, select only a Deployment qualified for
+<code>openai_embeddings</code> and the Alias’s exact 2048-dimensional Nemotron embedding
+space. Changing a Route to another Deployment with the same vector dimension
+but a different space ID, revision, normalization, distance metric, or document
+transform is incompatible.</p>
+<h2 id="nvidia-knowledge-base-update"><a class="header" href="#nvidia-knowledge-base-update">NVIDIA Knowledge Base update</a></h2>
+<p>For the functional demo, the <code>kb-index</code> and <code>kb-query</code> Route rows may both use
+<code>nvidia-nemotron-3-embed-1b-loc</code>. Preserve these primary-route values:</p>
+<pre><code class="language-json">{
+  "routePriority": 0,
+  "routeWeight": 1,
+  "fallbackEnabled": false,
+  "canaryPercent": 0,
+  "residencyConditions": {}
+}
+</code></pre>
+<p>Normally there is nothing to update after creating those two rows. Use this
+form only to replace the Deployment, introduce a real fallback, or apply an
+approved residency condition. Select the correct Alias row before editing;
+changing the Public Alias moves the Route rather than copying it.</p>
+<p>For production-protected <code>kb_index</code> and <code>kb_query</code> lanes, route each Alias to
+its separately qualified runtime and capacity/quota domain. Merely creating
+two Route rows that share one Deployment does not provide that isolation.</p>
 
                     </main>
 

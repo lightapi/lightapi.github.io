@@ -35,10 +35,10 @@
             const path_to_root = "../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../searchindex-9646612b.js";
+            window.path_to_searchindex_js = "../../../searchindex-026fe4a5.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../toc-04fe2fcc.js"></script>
+        <script src="../../../toc-2b9a4022.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -195,7 +195,7 @@ key requires an approved compiler mapping and compatible gateway support.</p>
 <tr><td>Host Id</td><td>Read-only tenant boundary supplied by the portal.</td><td><code>10000000-0000-4000-8000-000000000001</code></td></tr>
 <tr><td>Model Policy Id</td><td>Read-only stable identifier generated when the Policy was created and referenced by Bindings or Agent configuration.</td><td><code>60000000-0000-4000-8000-000000000060</code></td></tr>
 <tr><td>Policy Name</td><td>Recognizable name unique within the host. Renaming does not change the stable Model Policy Id.</td><td><code>governed-chat-standard-v2</code></td></tr>
-<tr><td>Access Policy</td><td>Object describing intended subject and operation access.</td><td><code>{"allowedSubjectTypes":["AGENT"],"allowedOperations":["chat_completions"]}</code></td></tr>
+<tr><td>Access Policy</td><td>Object describing intended subject and operation access. Operations use the control-plane vocabulary <code>generate</code> or <code>embed</code>.</td><td><code>{"allowedSubjectTypes":["AGENT"],"allowedOperations":["generate"]}</code></td></tr>
 <tr><td>Budget Policy</td><td>Object describing intended spending controls. Monetary examples use integer micros.</td><td><code>{"maxCostMicrosPerRequest":400000,"monthlyCostMicros":40000000}</code></td></tr>
 <tr><td>Content Policy</td><td>Object describing intended content logging and handling.</td><td><code>{"loggingMode":"METADATA","allowPromptLogging":false}</code></td></tr>
 <tr><td>Cache Policy</td><td>Object describing intended cache behavior.</td><td><code>{"enabled":false}</code></td></tr>
@@ -212,7 +212,7 @@ key requires an approved compiler mapping and compatible gateway support.</p>
   "policyName": "governed-chat-standard-v2",
   "accessPolicy": {
     "allowedSubjectTypes": ["AGENT"],
-    "allowedOperations": ["chat_completions"]
+    "allowedOperations": ["generate"]
   },
   "budgetPolicy": {
     "maxCostMicrosPerRequest": 400000,
@@ -246,6 +246,11 @@ selects its Model Policy Id. After any enforceable change, create and apply a
 new valid publication; an existing gateway snapshot does not update in place.
 The <code>active</code> state is backend-managed through soft delete and is not part of
 this form.</p>
+<p>For the NVIDIA Knowledge Base aliases, use operation <code>embed</code> if a Policy is
+needed at all. Keep <code>apiKey</code> and <code>input_type</code> out of the policy: the API key is
+represented by the Credential’s <code>env:NVIDIA_API_KEY</code> reference, while the
+query-versus-passage request transformation belongs in the approved embedding
+adapter.</p>
 
                     </main>
 
