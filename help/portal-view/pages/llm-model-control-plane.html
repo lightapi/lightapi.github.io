@@ -35,10 +35,10 @@
             const path_to_root = "../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../searchindex-026fe4a5.js";
+            window.path_to_searchindex_js = "../../../searchindex-fe0fd90c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../toc-2b9a4022.js"></script>
+        <script src="../../../toc-d6423cc1.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -175,901 +175,134 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="llm-model-control-plane"><a class="header" href="#llm-model-control-plane">LLM Model Control Plane</a></h1>
-<p>Use the LLM Model Control Plane to maintain the global model catalog and define
-which models each host can use, connect registrations to provider accounts and
-deployments, expose governed aliases, apply policy and pricing, and publish an
-immutable configuration to the gateway.</p>
-<p>The model inventory is available under <strong>Marketplace &gt; LLM Model Catalog</strong>.
-The operational tabs are under <strong>Administration &gt; GenAI Admin &gt; LLM Models</strong>.</p>
-<h2 id="before-you-start"><a class="header" href="#before-you-start">Before You Start</a></h2>
+<p>Use <code>/app/genai/LlmModelControlPlane</code> to assemble the configuration that Portal
+publishes to a <code>light-gateway</code> instance. Authoring records are usable as soon as
+they are created. Portal keeps <code>active</code> as a backend-managed soft-delete flag;
+it is not an operator workflow field.</p>
+<p>Portal validates record shape and cross-record consistency during commands and
+again on Publish. It does not call the provider or resolve API keys. Provider
+connectivity is tested through the live gateway after publication, where the
+runtime secret is available.</p>
+<h2 id="recommended-order"><a class="header" href="#recommended-order">Recommended order</a></h2>
+<p>Create records in this order:</p>
+<ol>
+<li>Model catalog entry</li>
+<li>Registration</li>
+<li>Provider Account</li>
+<li>Network Zone, only for an approved private provider</li>
+<li>Provider Endpoint</li>
+<li>Provider Deployment</li>
+<li>Provider Credential reference</li>
+<li>Public Alias</li>
+<li>Alias Route</li>
+<li>Pricing</li>
+<li>Optional policy and policy binding</li>
+<li>Publish, review, and create the gateway snapshot</li>
+</ol>
+<p>If Publish reports a problem, return to the named tab, correct that record, and
+publish again.</p>
+<h2 id="nvidia-nemotron-embeddings-demo"><a class="header" href="#nvidia-nemotron-embeddings-demo">NVIDIA Nemotron embeddings demo</a></h2>
+<p>The hosted NVIDIA demo uses:</p>
 <ul>
-<li>The <strong>LLM Models</strong> tab is global and does not change when the selected host
-changes. Select a host for Registrations and every downstream operational tab.</li>
-<li>Use an account with the role permissions and rules for the LLM query and
-command endpoints.</li>
-<li>Create dependent records in this order: Catalog, Registration, Account,
-optional Network Zone, Provider Endpoint, Deployment, Credential, Alias,
-Route, Pricing, optional Policy and Binding, then Publication.</li>
-<li>Keep the <code>aggregateVersion</code> returned by a query. Update and delete commands
-require it for optimistic concurrency.</li>
+<li>Provider: <code>nvidia</code></li>
+<li>Physical model: <code>nvidia/nemotron-3-embed-1b</code></li>
+<li>Protocol: <code>openai_embeddings</code></li>
+<li>Base URL: <code>https://integrate.api.nvidia.com/v1</code></li>
+<li>Endpoint authentication: <code>BEARER</code></li>
+<li>Secret reference: <code>env:NVIDIA_API_KEY</code></li>
+<li>Network profile: <code>PUBLIC_TLS</code></li>
+<li>Termination: <code>NATIVE</code></li>
 </ul>
-<h2 id="nvidia-nemotron-embedding-demo-sequence"><a class="header" href="#nvidia-nemotron-embedding-demo-sequence">NVIDIA Nemotron embedding demo sequence</a></h2>
-<p>The following records form the hosted NVIDIA path used by the
-<code>light-knowledge</code> demo:</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th style="text-align: right">Step</th><th>Tab or page</th><th>Key values</th></tr>
-</thead>
-<tbody>
-<tr><td style="text-align: right">1</td><td>LLM Model Catalog</td><td><code>nvidia</code>, <code>nvidia/nemotron-3-embed-1b</code>, operation <code>embed</code>, dimension <code>2048</code></td></tr>
-<tr><td style="text-align: right">2</td><td>Registrations</td><td>Environment <code>loc</code>, data classification <code>public</code>, no capability restriction beyond the catalog contract</td></tr>
-<tr><td style="text-align: right">3</td><td>Accounts</td><td><code>nvidia-free-embedding-demo</code> with provider type <code>nvidia</code>; no secret values</td></tr>
-<tr><td style="text-align: right">4</td><td>Network Zones</td><td>Skip for NVIDIA’s public HTTPS endpoint</td></tr>
-<tr><td style="text-align: right">5</td><td>Provider Endpoints</td><td><code>nvidia-free-embeddings</code>, <code>openai_embeddings</code>, <code>https://integrate.api.nvidia.com/v1</code>, <code>BEARER</code>, <code>PUBLIC_TLS</code>, <code>NATIVE</code></td></tr>
-<tr><td style="text-align: right">6</td><td>Deployments</td><td>Exact NVIDIA Registration, Account, Endpoint, physical model, protocol, and base URL</td></tr>
-<tr><td style="text-align: right">7</td><td>Credentials</td><td>Purpose <code>ENDPOINT</code>, secret reference <code>env:NVIDIA_API_KEY</code>, version <code>1</code>, initially <code>PENDING</code></td></tr>
-<tr><td style="text-align: right">8</td><td>Aliases</td><td><code>kb-index</code>/<code>kb_index</code> and <code>kb-query</code>/<code>kb_query</code>, both using the same immutable 2048-dimensional embedding space</td></tr>
-<tr><td style="text-align: right">9</td><td>Routes</td><td>Connect each Alias to its compatible embedding Deployment; priority <code>0</code>, weight <code>1</code>, canary <code>0</code></td></tr>
-<tr><td style="text-align: right">10</td><td>Pricing</td><td>Operation <code>embed</code>; omit output pricing. Use the approved free-demo pricing basis described in the Pricing help.</td></tr>
-<tr><td style="text-align: right">11</td><td>Policies and Bindings</td><td>Optional for the initial provider smoke test; required when the host’s governance design selects a policy for these workload Aliases</td></tr>
-<tr><td style="text-align: right">12</td><td>Publication</td><td>Activate only verified records, generate a new candidate, publish, and test through the gateway</td></tr>
-</tbody>
-</table>
-</div>
-<p>The NVIDIA API key never belongs in the catalog, Account, Endpoint,
-Deployment, Alias, Route, Pricing, or policy records. Portal stores only the
-external reference <code>env:NVIDIA_API_KEY</code>; the gateway process receives the
-actual environment variable at runtime.</p>
-<h2 id="forms-and-structured-editors"><a class="header" href="#forms-and-structured-editors">Forms And Structured Editors</a></h2>
-<p>The Models and Registrations tabs use typed Create and Update forms. Model
-forms use global taxonomy and do not send <code>hostId</code>; Registration forms retain
-the selected host. Both preserve arrays and objects as JSON values and keep
-record identifiers and <code>aggregateVersion</code> read-only on update.</p>
-<p>The downstream tabs also use schema-driven Create and Update forms. Structured
-arrays and objects offer Form, JSON, and YAML editors; choose <strong>Apply</strong> after
-editing JSON or YAML. The server creates resource IDs. Update forms retain the
-resource ID, <code>hostId</code>, and <code>aggregateVersion</code> as read-only values for host
-isolation and optimistic concurrency.</p>
-<p>The editor sends the versioned Portal command contract. Do not paste an API
-key, bearer token, password, or other secret value into any draft. The backend
-owns <code>active</code>: create and update keep rows active, while delete soft-deletes
-them.</p>
-<h2 id="llm-model-catalog"><a class="header" href="#llm-model-catalog">LLM Model Catalog</a></h2>
-<p>Open <strong>Marketplace &gt; LLM Model Catalog</strong> to browse the platform-global provider
-model inventory. A catalog record describes a canonical provider model
-independently of a tenant, environment, account, credential, or deployment.
-Only platform catalog administrators create, update, retire, or delete models.</p>
-<p>Required create fields:</p>
-<ul>
-<li><code>providerType</code></li>
-<li><code>physicalModelId</code></li>
-<li><code>modelFamily</code></li>
-<li><code>contextTokenLimit</code></li>
-<li><code>outputTokenLimit</code></li>
-</ul>
-<p>Optional fields include <code>modelVersion</code>, <code>modalities</code>, <code>operations</code>,
-<code>declaredCapabilities</code>, <code>lifecycleStatus</code>, <code>categoryIds</code>, and <code>tagIds</code>.</p>
-<p>The Create and Update forms load active global categories and tags whose entity
-type is <code>llm_model</code>. The selected identifiers are carried in
-the <code>LlmModelCreatedEvent</code> or <code>LlmModelUpdatedEvent</code>; the Portal projection
-updates <code>llm_model_t</code>, <code>entity_category_t</code>, and <code>entity_tag_t</code> in one database
-transaction. Host-specific taxonomy, another entity type, or an inactive
-taxonomy row is rejected before an event is emitted.</p>
-<p>Create a catalog entry before creating a Registration that refers to its
-<code>modelId</code>.</p>
-<p>For NVIDIA Nemotron, create or select the catalog record with provider type
-<code>nvidia</code>, physical model <code>nvidia/nemotron-3-embed-1b</code>, operation <code>embed</code>, text
-modality, context limit <code>4096</code>, and declared native dimension <code>2048</code>. See
-<a href="./create-llm-model.html">Create LLM Model</a> for the complete example.</p>
-<h2 id="registrations-tab"><a class="header" href="#registrations-tab">Registrations Tab</a></h2>
-<p>Use Registrations to approve a catalog model for an environment, one or more
-regions, data classifications, and capability restrictions.</p>
-<p>Choose <strong>Create registration</strong> to open the <code>createLlmRegistration</code> form.</p>
-<ul>
-<li><strong>LLM Model</strong> is required and lists active models from the global catalog.</li>
-<li><strong>Environment</strong> is required and comes from the host’s <code>environment</code>
-reference data.</li>
-<li><strong>Regions</strong> is optional and supports multiple values from the host’s <code>region</code>
-reference data.</li>
-<li><strong>Data Classifications</strong> is an optional array. Enter JSON such as
-<code>["internal", "confidential"]</code>, or use the YAML tab.</li>
-<li><strong>Capability Restrictions</strong> is an optional object. Use it to narrow the
-catalog model capabilities for this environment; for example,
-<code>{"tools": false, "streaming": true}</code>.</li>
-<li><strong>Lifecycle Status</strong> starts at <code>DRAFT</code>. Supported values are <code>DRAFT</code>,
-<code>ACTIVE</code>, <code>SUSPENDED</code>, and <code>RETIRED</code>.</li>
-</ul>
-<h3 id="data-classifications"><a class="header" href="#data-classifications">Data Classifications</a></h3>
-<p>Enter a JSON array describing the classes of data this registration may
-process. For example:</p>
-<pre><code class="language-json">["internal", "confidential"]
-</code></pre>
-<p>Common names include <code>public</code>, <code>internal</code>, <code>confidential</code>, and <code>restricted</code>.
-The field currently accepts free-form strings, so use the same names in aliases,
-routing rules, and policies. Enter an empty array when no classifications are
-required:</p>
-<pre><code class="language-json">[]
-</code></pre>
-<h3 id="capability-restrictions"><a class="header" href="#capability-restrictions">Capability Restrictions</a></h3>
-<p>Enter a JSON object that narrows the capabilities declared by the catalog
-model. For example:</p>
+<p>Do not enter the NVIDIA key in Portal. Inject <code>NVIDIA_API_KEY</code> into the target
+<code>light-gateway</code> process.</p>
+<h3 id="model-contract"><a class="header" href="#model-contract">Model contract</a></h3>
+<p>Set Model operations to <code>["embed"]</code>. The declared capabilities are the static
+contract used by publication and gateway compilation:</p>
 <pre><code class="language-json">{
-  "tools": false,
-  "streaming": true,
-  "images": false,
-  "structuredJson": true
+  "operations": ["embed"],
+  "embedding": {
+    "maxBatchItems": 1,
+    "maxInputTokensPerItem": 4096,
+    "maxAggregateInputTokens": 4096,
+    "supportedDimensions": [2048],
+    "supportedEncodings": ["float"],
+    "maxResponseBytes": 16777216,
+    "space": {
+      "spaceId": "nvidia-nemotron-3-embed-1b-float-v1",
+      "revision": 1,
+      "dimension": 2048,
+      "normalization": "l2",
+      "distanceMetric": "cosine",
+      "documentInputTransformVersion": "document-v1"
+    }
+  }
 }
 </code></pre>
-<p>Use capability names consistently with routing and policy configuration. Enter
-an empty object when the registration does not impose additional restrictions:</p>
-<pre><code class="language-json">{}
-</code></pre>
-<p>The create form submits <code>createLlmModelRegistration</code>. A host can have only one
-registration for the same <code>modelId</code> and <code>environment</code> pair.</p>
-<p>Choose the row’s edit action to open <code>updateLlmRegistration</code>. The form submits
-<code>updateLlmModelRegistration</code>; <code>hostId</code>, <code>modelRegistrationId</code>, and
-<code>aggregateVersion</code> are retained for host isolation and optimistic concurrency.
-Update the intended fields without removing those read-only values. A retired
-registration cannot transition back to an earlier lifecycle state.</p>
-<p><code>active</code> is managed by the backend and is not editable in either form. Create
-and update events keep the row active; the delete command sets it to false for
-soft deletion.</p>
-<p>Both forms return to <strong>Administration &gt; GenAI Admin &gt; LLM Models</strong> after a
-successful save. A referenced model must exist in the global catalog; otherwise
-the command is rejected before an event is emitted.</p>
-<p>For the NVIDIA <code>light-knowledge</code> demo, select the
-<code>nvidia/nemotron-3-embed-1b</code> catalog Model and use:</p>
-<pre><code class="language-json">{
-  "environment": "loc",
-  "regions": [],
-  "dataClassifications": ["public"],
-  "capabilityRestrictions": {},
-  "lifecycleStatus": "DRAFT"
-}
-</code></pre>
-<p>Do not redefine the embedding dimension in Capability Restrictions unless the
-host intentionally narrows a broader catalog declaration. This NVIDIA endpoint
-supports only its native 2048-dimensional output.</p>
-<h2 id="accounts-tab"><a class="header" href="#accounts-tab">Accounts Tab</a></h2>
-<p>Use Accounts to describe the provider billing and quota boundary under which
-one or more LLM deployments run. An Account is host-scoped, non-secret
-governance metadata. It is not a Portal user account and it does not contain an
-API key or other provider credential.</p>
-<h3 id="why-accounts-are-separate"><a class="header" href="#why-accounts-are-separate">Why Accounts Are Separate</a></h3>
-<p>The control plane keeps these concerns separate:</p>
+<p>The embedding-space identity is immutable. A model, dimension, normalization,
+distance metric, or document-transform change requires a new space identity and
+newly indexed vectors.</p>
+<h3 id="account-and-endpoint"><a class="header" href="#account-and-endpoint">Account and Endpoint</a></h3>
+<p>Create the Account with a stable quota group such as <code>nvidia-free-embedding-demo</code>.
+Create the Endpoint under that Account with the protocol, URL, authentication,
+and network values above. <code>apiKeyHeader</code> must be empty for <code>BEARER</code>.</p>
+<p>Safe non-secret headers may be configured, but Authorization, cookies, proxy
+credentials, and secret-looking values are rejected.</p>
+<h3 id="deployment"><a class="header" href="#deployment">Deployment</a></h3>
+<p>Select the Nemotron Registration, NVIDIA Account, and NVIDIA Endpoint. Preserve
+the exact protocol, physical model, and base URL. Use a stable revision and
+runtime-capacity declaration. A functional demo may use one Deployment for both
+Knowledge Base lanes; production isolation requires distinct physical capacity,
+not merely different names.</p>
+<h3 id="credential"><a class="header" href="#credential">Credential</a></h3>
+<p>Use purpose <code>ENDPOINT</code>, select the NVIDIA Endpoint, and set Secret Reference to
+<code>env:NVIDIA_API_KEY</code>. Effective Time must be current or earlier. Expiration Time
+is optional. Portal stores and publishes the reference only.</p>
+<h3 id="aliases-and-routes"><a class="header" href="#aliases-and-routes">Aliases and Routes</a></h3>
+<p>Create <code>kb-index</code> and <code>kb-query</code> as embedding-only internal workload Aliases.
+For each Alias:</p>
 <ul>
-<li>A <strong>Model</strong> describes a physical model in the catalog.</li>
-<li>A <strong>Registration</strong> approves that model for an environment.</li>
-<li>An <strong>Account</strong> identifies who owns the provider billing and quota boundary.</li>
-<li>A <strong>Deployment</strong> connects a Registration and Account to a provider endpoint.</li>
-<li>A <strong>Credential</strong> gives that Deployment an external secret reference.</li>
+<li>operations: <code>["embed"]</code></li>
+<li>require expected embedding space: <code>true</code></li>
+<li>lane: <code>kb_index</code> or <code>kb_query</code></li>
+<li>required embedding space: exactly the six-field space object above</li>
+<li>bound workload principal: the intended Knowledge Base workload</li>
 </ul>
-<p>This separation allows the same registered model to be deployed through
-different provider accounts, quota pools, regions, or endpoints without
-duplicating the model catalog entry or storing secrets in account metadata.</p>
-<h3 id="account-fields"><a class="header" href="#account-fields">Account Fields</a></h3>
+<p>Create one priority-zero Route from each Alias to the Nemotron Deployment. The
+command rejects missing, cross-host, environment-mismatched, protocol-mismatched,
+or embedding-space-incompatible references.</p>
+<h3 id="pricing"><a class="header" href="#pricing">Pricing</a></h3>
+<p>Create an <code>embed</code> Pricing record for the Deployment. Embedding pricing accepts
+an input rate and forbids an output rate. A zero demo rate is valid when that is
+the intended accounting contract.</p>
+<h2 id="network-zones"><a class="header" href="#network-zones">Network Zones</a></h2>
+<p>Network Zones are required only for private TLS or explicitly approved private
+plaintext endpoints. A public hosted NVIDIA Endpoint does not use a Network
+Zone. Empty Network Zones are normal and should not be deleted merely because
+the NVIDIA demo does not need one.</p>
+<h2 id="publish-and-test"><a class="header" href="#publish-and-test">Publish and test</a></h2>
+<p>Publish performs final validation across Accounts, Endpoints, Deployments,
+Credentials, Aliases, Routes, Pricing, and static model capabilities. A valid
+publication contains declared capabilities and secret references, never raw
+keys.</p>
+<p>After the gateway loads the snapshot, validate the live path with the documented
+curl-first embeddings request. This confirms DNS, TLS, authentication, provider
+protocol, model availability, response shape, dimension, and embedding-space
+expectations from the customer runtime.</p>
+<p>Follow <a href="../tasks/validate-llm-embeddings.html">Validate LLM Embeddings Through The Live Gateway</a>
+for the checked curl helper, optional Rust wrapper, safe evidence, and corrective
+workflow.</p>
+<h2 id="common-failures"><a class="header" href="#common-failures">Common failures</a></h2>
 <ul>
-<li><code>accountName</code> is the operator-friendly name for the account. It must be unique
-for the same <code>providerType</code> within a host.</li>
-<li><code>providerType</code> identifies the provider, such as the provider type used by the
-related Deployments.</li>
-<li><code>billingPrincipal</code> identifies the organization, project, subscription, cost
-center, or other principal responsible for provider charges. Enter an
-identifier or name, never a credential.</li>
-<li><code>quotaGroupId</code> identifies the provider capacity or quota pool shared by
-deployments. The Account is the authoritative owner of this value.</li>
-<li><code>capacityMetadata</code> is an optional JSON object for non-secret,
-provider-specific capacity information, such as a service tier or approved
-limits.</li>
-<li><code>lifecycleStatus</code> records the account’s administrative state: <code>DRAFT</code>,
-<code>ACTIVE</code>, <code>SUSPENDED</code>, or <code>RETIRED</code>.</li>
-</ul>
-<p>Required create fields are <code>accountName</code>, <code>providerType</code>, <code>billingPrincipal</code>,
-and <code>quotaGroupId</code>. For example, the JSON draft can contain:</p>
-<pre><code class="language-json">{
-  "hostId": "selected-host-id",
-  "accountName": "openai-production",
-  "providerType": "openai",
-  "billingPrincipal": "genai-platform-cost-center",
-  "quotaGroupId": "openai-production-capacity",
-  "capacityMetadata": {
-    "serviceTier": "production"
-  },
-  "lifecycleStatus": "DRAFT"
-}
-</code></pre>
-<h3 id="how-account-data-is-used"><a class="header" href="#how-account-data-is-used">How Account Data Is Used</a></h3>
-<p>When an Account is created, Portal assigns its stable <code>providerAccountId</code> and
-stores the row under the selected host. A Deployment must reference that ID;
-the database relationship prevents a deployment from referring to a missing
-account or an account owned by another host. The account name is also available
-as the display label when Portal loads Account reference data.</p>
-<p>At the gateway boundary, Portal joins the Deployment to its Account and copies
-the Account’s <code>quotaGroupId</code> into the immutable published deployment material.
-The gateway uses the provider identity and quota group to construct the
-provider-account runtime identity and to share quota/capacity state among
-deployments in the same quota group. Updating an Account does not by itself
-rewrite an already published gateway snapshot; the corresponding deployment
-publication must carry the intended values.</p>
-<p><code>billingPrincipal</code>, <code>accountName</code>, and <code>capacityMetadata</code> are currently retained
-as control-plane governance and audit metadata; the gateway does not use them
-to resolve credentials or select a route. Endpoints belong to Deployments, and
-secret references belong to Credentials. Route health and publication
-validation depend on active, conformant, priced, credentialed deployments, not
-on entering a secret or endpoint in the Accounts tab.</p>
-<p>As with the other tabs, <code>active</code> is backend-managed. Delete soft-deletes the
-Account; do not add or edit <code>active</code> in the JSON draft.</p>
-<p>For the NVIDIA demo, use Account Name and Quota Group Id
-<code>nvidia-free-embedding-demo</code>, Provider Type <code>nvidia</code>, and a non-secret Billing
-Principal such as <code>nvidia-build-api-demo</code>. See
-<a href="../forms/create-provider-account.html#nvidia-free-embedding-demo">Create Provider Account</a>
-for the complete object.</p>
-<h2 id="network-zones-tab"><a class="header" href="#network-zones-tab">Network Zones Tab</a></h2>
-<p>Network Zones are administrator-owned outbound allowlists for private provider
-networks. They define allowed DNS names, CIDRs, ports, and whether private TLS
-or explicitly acknowledged private plaintext transport is permitted. A public
-internet HTTPS endpoint does not need a Network Zone.</p>
-<p>For <code>https://integrate.api.nvidia.com/v1</code>, do not create or select a Network
-Zone. The NVIDIA Endpoint uses <code>PUBLIC_TLS</code>; <code>networkZoneId</code>, trust-bundle
-fields, and private-plaintext acknowledgement remain empty or false. Existing
-rows that show only lifecycle/version data are not placeholders to delete;
-only create a Zone when a private Endpoint needs one.</p>
-<p>See <a href="../forms/create-llm-network-zone.html">Create Network Zone</a> and
-<a href="../forms/update-llm-network-zone.html">Update Network Zone</a>.</p>
-<h2 id="provider-endpoints-tab"><a class="header" href="#provider-endpoints-tab">Provider Endpoints Tab</a></h2>
-<p>Provider Endpoints own the reusable transport and authentication profile for a
-Provider Account. Deployments reference an Endpoint and still carry the exact
-protocol and base URL for the current compatibility contract.</p>
-<p>For the NVIDIA hosted embedding endpoint, use:</p>
-<pre><code class="language-json">{
-  "endpointName": "nvidia-free-embeddings",
-  "providerProtocol": "openai_embeddings",
-  "baseUrl": "https://integrate.api.nvidia.com/v1",
-  "headers": {},
-  "endpointAuthMode": "BEARER",
-  "apiKeyHeader": null,
-  "networkProfileMode": "PUBLIC_TLS",
-  "networkTermination": "NATIVE",
-  "poolIdleTimeoutMs": 30000,
-  "clientRefreshIntervalMs": 300000,
-  "plaintextRiskAcknowledged": false,
-  "lifecycleStatus": "DRAFT"
-}
-</code></pre>
-<p>Select the <code>nvidia-free-embedding-demo</code> Account. <code>BEARER</code> must omit
-<code>apiKeyHeader</code>; only <code>API_KEY</code> authentication supplies lowercase
-<code>authorization</code> or <code>x-api-key</code>. Never put the NVIDIA key in Headers or any
-Endpoint field.</p>
-<p>See <a href="../forms/create-llm-provider-endpoint.html">Create Provider Endpoint</a> and
-<a href="../forms/update-llm-provider-endpoint.html">Update Provider Endpoint</a>.</p>
-<h2 id="deployments-tab"><a class="header" href="#deployments-tab">Deployments Tab</a></h2>
-<p>Use Deployments to define a callable provider endpoint for an approved LLM. A
-Deployment binds a host-scoped Registration and provider Account to the exact
-provider type, protocol, physical model, HTTPS endpoint, and optional region
-that Portal will govern. The referenced Account owns the quota group.</p>
-<h3 id="why-deployments-are-separate"><a class="header" href="#why-deployments-are-separate">Why Deployments Are Separate</a></h3>
-<p>The Registration answers <em>which catalog model is approved for an environment</em>.
-The Account answers <em>which billing and quota owner is responsible</em>. The
-Deployment answers <em>where and how that approved model can actually be called</em>.
-Keeping these records separate allows one Registration to use multiple
-provider endpoints, regions, accounts, or capacity pools without duplicating
-the catalog or approval records.</p>
-<p>A Deployment does not contain a raw provider secret. Credentials attach an
-external secret reference to the Deployment, Pricing attaches effective token
-prices, and Routes attach public aliases to eligible Deployments.</p>
-<h3 id="how-deployment-data-is-used"><a class="header" href="#how-deployment-data-is-used">How Deployment Data Is Used</a></h3>
-<ul>
-<li><code>modelRegistrationId</code> connects routing eligibility to the catalog model,
-environment, data classifications, and capability restrictions approved by
-the Registration.</li>
-<li><code>providerAccountId</code> identifies the provider Account. Portal derives its
-<code>quotaGroupId</code> through the Account foreign key when querying and publishing
-the Deployment.</li>
-<li><code>providerType</code>, <code>providerProtocol</code>, <code>physicalModelId</code>, <code>baseUrl</code>, and
-<code>providerEndpointId</code> identify the provider adapter, exact wire contract,
-upstream model, compatibility URL, and reusable Endpoint profile.</li>
-<li><code>deploymentRevisionId</code>, <code>physicalRuntimeId</code>, <code>capacityDomainId</code>,
-<code>runtimeCapacity</code>, and <code>readinessPolicy</code> form the runtime identity and bounded
-capacity contract used by protected workloads.</li>
-<li><code>region</code> and <code>transportBounds</code> retain control-plane placement and transport
-metadata. Arbitrary transport-bound properties are not automatically enforced
-by the current gateway configuration compiler.</li>
-<li>Conformance fields are retained for a future trusted provider-test runner,
-but they are not part of the current interactive deployment workflow.</li>
-</ul>
-<p>Alias Routes reference <code>providerDeploymentId</code>. Before a route is publishable,
-the Deployment must be active, have lifecycle status <code>ACTIVE</code>, and have an
-effective Credential and Pricing record. Conformance evidence is optional and
-informational because provider testing occurs on the tenant gateway. Publication
-materializes the approved deployment information for the
-gateway. The gateway resolves the external credential reference, constructs
-the provider client from the endpoint and provider format, calls the configured
-physical model, applies declared capabilities (and verified evidence when
-present), and shares runtime
-capacity within the published quota group.</p>
-<p>Changing a Deployment does not modify an already published gateway snapshot.
-The updated deployment must pass the required validation and publication flow
-before the gateway consumes the new materialized values.</p>
-<h3 id="create-and-update"><a class="header" href="#create-and-update">Create And Update</a></h3>
-<p>Choose <strong>Create provider deployment</strong> to open
-<code>/app/form/createProviderDeployment</code>. In addition to the Registration,
-Account, provider identity, exact protocol/model, and HTTPS base URL, the
-current create contract requires Provider Endpoint, deployment revision,
-physical runtime, capacity domain, runtime capacity, and readiness policy.
-Valid exact protocol values are <code>openai_chat</code>, <code>openai_responses</code>,
-<code>openai_embeddings</code>, and <code>anthropic_messages</code>.</p>
-<p>Choose a row’s edit action to open <code>/app/form/updateProviderDevelopment</code>. The
-update form retains read-only <code>hostId</code>, <code>providerDeploymentId</code>, and
-<code>aggregateVersion</code> values for host isolation and optimistic concurrency.</p>
-<p>See <a href="../forms/create-provider-deployment.html">Create Provider Deployment</a> and
-<a href="../forms/update-provider-development.html">Update Provider Deployment</a> for
-field-by-field examples.</p>
-<p>Conformance evidence is machine-owned. Do not manufacture a <code>PASS</code>, digest,
-validity time, or result in an administrative form. A trusted qualification
-runner must test the exact provider protocol, physical model, operation,
-embedding space, and current credential path before recording evidence used by
-production eligibility.</p>
-<p>To make a Deployment available, provision its external secret in the target
-gateway runtime, change the related Credential to <code>ACTIVE</code>, change the
-Deployment lifecycle to <code>ACTIVE</code>, add effective Pricing and an Alias Route,
-and publish the configuration. Provider connectivity is then tested through
-the tenant gateway. The backend conformance contract remains reserved for a
-future trusted runner.</p>
-<p>As with the other tabs, <code>active</code> is backend-managed. Create and update keep the
-row active; Delete soft-deletes it.</p>
-<p>For NVIDIA use Provider Type <code>nvidia</code>, Protocol <code>openai_embeddings</code>, Physical
-Model Id <code>nvidia/nemotron-3-embed-1b</code>, Base URL
-<code>https://integrate.api.nvidia.com/v1</code>, and the <code>nvidia-free-embeddings</code>
-Endpoint. Copy the protocol and URL exactly even though the Endpoint is also
-selected. See
-<a href="../forms/create-provider-deployment.html#nvidia-nemotron-embedding-example">Create Provider Deployment</a>.</p>
-<h2 id="credentials-tab"><a class="header" href="#credentials-tab">Credentials Tab</a></h2>
-<p>Use Credentials to tell Portal how a Provider Endpoint or sidecar runtime
-authenticates without putting an API key, token, password, or other secret
-value in the Portal database. Each row contains a purpose, owner reference,
-versioned external secret reference, and eligibility window.</p>
-<h3 id="why-credentials-are-separate"><a class="header" href="#why-credentials-are-separate">Why Credentials Are Separate</a></h3>
-<p>A Deployment identifies the provider endpoint and physical model, while a
-Credential identifies the external secret-manager location used to authenticate
-calls to that endpoint. Keeping these records separate allows operators to:</p>
-<ul>
-<li>rotate credentials without replacing the Deployment;</li>
-<li>schedule a new credential before retiring the previous version;</li>
-<li>revoke one credential version without deleting endpoint configuration;</li>
-<li>audit which external reference was eligible during a particular time window;</li>
-<li>keep raw secret material outside Portal and its event stream.</li>
-</ul>
-<p>An <code>ENDPOINT</code> credential selects <code>providerEndpointId</code>; a <code>SIDECAR_RUNTIME</code>
-credential selects <code>providerDeploymentId</code>. The current create command also
-expects the Deployment selector to be populated, so for an Endpoint credential
-select both the Endpoint and its corresponding Deployment. Create a new,
-incremented version for rotation instead of overwriting an older version.</p>
-<h3 id="how-credential-data-is-used"><a class="header" href="#how-credential-data-is-used">How Credential Data Is Used</a></h3>
-<p>Portal’s publication-candidate validation requires every healthy route to have
-at least one non-deleted Credential for its Deployment that:</p>
-<ul>
-<li>has lifecycle status <code>ACTIVE</code> or <code>ROTATING</code>;</li>
-<li>has reached <code>effectiveTs</code>; and</li>
-<li>has no <code>expiresTs</code>, or has an expiration later than the current time.</li>
-</ul>
-<p>If no such row exists, the route is not considered healthy and publication is
-rejected even when the Deployment, conformance, Pricing, and Alias Route are
-otherwise valid. The candidate check establishes eligibility; operators should
-avoid overlapping <code>ACTIVE</code> versions except during an intentional <code>ROTATING</code>
-window so the publication workflow has an unambiguous version to project.</p>
-<p>The published <code>llm-router.providers</code> property contains a credential reference, not the
-credential value. At runtime, the gateway passes that reference to its configured
-secret resolver and uses the resolved credential when calling the provider. The
-gateway must never receive the raw secret through this form or the Portal event
-contract.</p>
-<h3 id="credential-fields"><a class="header" href="#credential-fields">Credential Fields</a></h3>
-<ul>
-<li><code>credentialPurpose</code> is <code>ENDPOINT</code> for the central gateway’s provider call or
-<code>SIDECAR_RUNTIME</code> for a credential resolved inside a provider sidecar.</li>
-<li><code>providerEndpointId</code> is required for <code>ENDPOINT</code>.</li>
-<li><code>providerDeploymentId</code> is required for <code>SIDECAR_RUNTIME</code> and is also required
-by the current create-command compatibility path.</li>
-<li><code>credentialVersion</code> is a positive, monotonically increasing version for that
-Deployment, such as <code>1</code>, <code>2</code>, or <code>3</code>.</li>
-<li><code>secretReference</code> is normally <code>env:VARIABLE_NAME</code>.
-Vault may inject that environment variable. Other URI schemes require an
-explicitly configured gateway resolver.</li>
-<li><code>effectiveTs</code> is the ISO-8601 time at which the version becomes eligible.</li>
-<li><code>expiresTs</code> is an optional ISO-8601 cutoff and must be later than
-<code>effectiveTs</code>.</li>
-<li><code>lifecycleStatus</code> controls administrative eligibility: <code>PENDING</code>, <code>ACTIVE</code>,
-<code>ROTATING</code>, <code>REVOKED</code>, or <code>EXPIRED</code>.</li>
-</ul>
-<p>New records start as <code>PENDING</code>. After provisioning and testing the referenced
-secret, update the record to <code>ACTIVE</code>. During rotation, create the next version,
-activate it at the intended time, mark the outgoing version <code>ROTATING</code> while both
-are intentionally eligible, and then move the old version to <code>REVOKED</code> or
-<code>EXPIRED</code>.</p>
-<p>Choose <strong>Create provider credential</strong> to open
-<code>/app/form/createProviderCredential</code>, or choose a row’s edit action to open
-<code>/app/form/updateProviderCredential</code>. See
-<a href="../forms/create-provider-credential.html">Create Provider Credential</a> and
-<a href="../forms/update-provider-credential.html">Update Provider Credential</a> for
-field-by-field examples.</p>
-<p>Never enter the secret value itself. Fields resembling API keys, passwords,
-authorization headers, or tokens are rejected. As with the other tabs,
-<code>active</code> is backend-managed; Delete soft-deletes the Credential.</p>
-<p>For the NVIDIA hosted Endpoint select purpose <code>ENDPOINT</code>, Endpoint
-<code>nvidia-free-embeddings</code>, its Nemotron Deployment, version <code>1</code>, and
-<code>env:NVIDIA_API_KEY</code>. Keep the row <code>PENDING</code> until the variable is present and
-resolvable in the gateway container. See
-<a href="../forms/create-provider-credential.html#nvidia-endpoint-credential">Create Provider Credential</a>.</p>
-<h2 id="aliases-tab"><a class="header" href="#aliases-tab">Aliases Tab</a></h2>
-<p>Aliases give applications and agents a stable model name without exposing a
-provider deployment or physical model identifier. This separation allows an
-administrator to replace, reprioritize, or temporarily remove provider routes
-without requiring every client to change its configured model name.</p>
-<p>Each alias belongs to one environment and has a name that is unique in that
-environment. It also records the policy requirements that deployments must
-satisfy, including supported operations and capabilities, token and request
-limits, data classification, logging, and PII handling.</p>
-<p>The data is used as follows:</p>
-<ol>
-<li>The <strong>Routes</strong> tab connects the alias to one or more provider deployments.
-Route validation checks that the alias and registration environments match
-and that the model and registration can satisfy the alias’s required
-capabilities.</li>
-<li><strong>Preview routes</strong> evaluates the configured routes and explains why each
-deployment is eligible or ineligible. The preview excludes credential
-references and provider error material.</li>
-<li>Publication validation requires each active alias in the target environment
-to have a healthy, priced, and credentialed route before a gateway candidate
-can be published.</li>
-<li>The publication layer projects the Alias operation, embedding contract,
-limits, visibility/binding, audit, and PII policy into gateway routing.</li>
-<li>A <code>PUBLIC</code> Alias is available for normal discovery; <code>INTERNAL_LEGACY</code> binds
-one agent definition; <code>INTERNAL_WORKLOAD</code> binds the exact authenticated
-workload principal.</li>
-</ol>
-<p>Required create fields are <code>environment</code> and <code>aliasName</code>. The other fields are
-optional policy constraints:</p>
-<ul>
-<li><code>operations</code> lists <code>generate</code>, <code>embed</code>, or both.</li>
-<li><code>requiredCapabilities</code> describes capabilities that every eligible route must
-provide. An embedding Alias requires the exact six-field <code>embeddingSpace</code>.</li>
-<li><code>requireExpectedEmbeddingSpace</code> forces embedding callers to supply the
-expected space ID and revision.</li>
-<li><code>embeddingWorkloadLane</code> is <code>standard</code>, <code>kb_query</code>, or <code>kb_index</code>.</li>
-<li><code>maxInputTokens</code>, <code>maxOutputTokens</code>, and <code>maxRequestBytes</code> set alias-level
-request limits.</li>
-<li><code>dataClassification</code>, <code>loggingMode</code>, and <code>piiMode</code> describe data-handling
-policy.</li>
-<li><code>lifecycleStatus</code> controls whether the alias is draft, active, deprecated, or
-retired.</li>
-<li><code>replacementAliasId</code> records the intended successor for a deprecated or
-retiring alias. It cannot reference the alias itself. It is a governance and
-migration hint; it does not automatically redirect traffic.</li>
-<li><code>aliasVisibility</code> defaults to <code>PUBLIC</code>. Public Aliases leave both binding
-fields empty; <code>INTERNAL_LEGACY</code> selects <code>boundAgentDefId</code>; and
-<code>INTERNAL_WORKLOAD</code> supplies <code>boundWorkloadPrincipal</code>.</li>
-</ul>
-<p>See <a href="../forms/create-public-alias.html">Create Public Alias</a> and
-<a href="../forms/update-public-alias.html">Update Public Alias</a> for field descriptions
-and complete examples. The <code>active</code> column is managed by backend soft delete
-and is intentionally not shown in either form.</p>
-<h2 id="routes-tab"><a class="header" href="#routes-tab">Routes Tab</a></h2>
-<p>Routes connect each stable public Alias to the provider Deployments that can
-serve it. Keeping this relationship separate lets administrators change
-providers, priorities, or fallback targets without changing the model name
-used by applications and agents.</p>
-<p>The data is used as follows:</p>
-<ol>
-<li>When a Route is created or updated, the control plane verifies that the
-Alias and Deployment are active, belong to the same host, use the same
-environment, and have compatible model capabilities and registration
-restrictions.</li>
-<li>Routes for an Alias are ordered by <code>routePriority</code>, with lower numbers
-first. An alias/deployment pair can appear only once, and each priority must
-be unique within that alias.</li>
-<li><code>fallbackEnabled</code> marks a Deployment as a fallback target rather than the
-preferred route. The Alias route preview returns the priority, fallback
-flag, eligibility result, and reason for each active Route.</li>
-<li>Publication validation requires every active Alias to have at least one
-healthy, priced, and credentialed Route.</li>
-<li>Publication preparation uses the ordered Route records to construct the
-<code>llm-router.aliases</code> instance property consumed by the gateway snapshot. The gateway reads the
-resulting ordered deployment list and attempt policy; it does not query the
-Portal Route table directly.</li>
-</ol>
-<p>Required create fields are <code>publicAliasId</code>, <code>providerDeploymentId</code>, and
-<code>routePriority</code>. The other routing fields are:</p>
-<ul>
-<li><code>routeWeight</code> is fixed at <code>1</code> by the current MVP. Weighted traffic splitting
-is not yet supported.</li>
-<li><code>fallbackEnabled</code> identifies a fallback-only target. It does not by itself
-make an unhealthy Deployment eligible.</li>
-<li><code>canaryPercent</code> is fixed at <code>0</code> by the current MVP. Canary percentage routing
-is not yet supported by this record contract.</li>
-<li><code>residencyConditions</code> records a JSON or YAML object such as
-<code>{"regions":["ca-central-1"]}</code>. It is governance input for publication;
-enforcement requires a publication compiler and gateway version that
-understand the selected condition vocabulary. The current preview does not
-evaluate this object.</li>
-</ul>
-<p>See <a href="../forms/create-alias-route.html">Create Alias Route</a> and
-<a href="../forms/update-alias-route.html">Update Alias Route</a> for field descriptions and
-complete examples. The <code>active</code> column is managed by backend soft delete and
-is intentionally not shown in either form.</p>
-<h2 id="pricing-tab"><a class="header" href="#pricing-tab">Pricing Tab</a></h2>
-<p>Pricing records approved, effective-dated rates for each Provider Deployment.
-The tab exists because provider prices change independently of model identity,
-credentials, routes, and policies. Keeping rates in versioned records provides
-an auditable answer to which price was approved for a Deployment and time
-period without embedding mutable prices in an Alias or Route.</p>
-<p>Monetary values are integer micros per one million tokens. One US dollar is
-<code>1,000,000</code> micros, so a rate of <code>$2.50</code> per million input tokens is stored as
-<code>2500000</code>.</p>
-<p>The data is used as follows:</p>
-<ol>
-<li>Publication validation requires each active Alias to have a healthy Route
-to a Deployment with at least one active Pricing record whose effective time
-has started and whose expiration has not passed.</li>
-<li>Publication preparation selects the intended effective rates and includes
-them in the generated <code>llm-router.deployments</code> property. The gateway reads
-its immutable config snapshot; it does not query the Portal Pricing table
-during requests.</li>
-<li>The current gateway configuration consumes the input and output rates. It
-rejects a Deployment whose input or output price is unknown instead of
-silently treating an absent price as zero.</li>
-<li>Before provider dispatch, the gateway uses the projected rates, token
-limits, and maximum attempts to reserve a worst-case cost against the
-applicable budget. After the provider returns usage, the reservation is
-reconciled to the computed cost and the price snapshot version is retained
-in usage evidence.</li>
-<li><code>pricingVersion</code>, <code>source</code>, and <code>approvedBy</code> provide approval and audit
-lineage. <code>cachedInputMicrosPerMillion</code> is retained for richer pricing
-governance, but the current MVP gateway <code>llm-pricing</code> payload does not yet
-consume a separate cached-input rate.</li>
-</ol>
-<p>Required create fields are <code>providerDeploymentId</code>, <code>operation</code>,
-<code>pricingVersion</code>, <code>pricingBasis</code>, <code>inputMicrosPerMillion</code>, <code>effectiveTs</code>,
-<code>source</code>, and <code>approvedBy</code>. <code>outputMicrosPerMillion</code> is required for <code>generate</code>
-and must be omitted for <code>embed</code>. <code>cachedInputMicrosPerMillion</code> and <code>expiresTs</code>
-are optional.
-<code>expiresTs</code>, when supplied, must be later than <code>effectiveTs</code>.</p>
-<p>The pair of Deployment and <code>pricingVersion</code> must be unique. The database does
-not automatically expire an older record when a new one is created and does
-not prohibit overlapping effective windows. Administrators should use clear,
-non-overlapping windows and ensure publication selects the intended version.
-For a new rate period, create a new Pricing Version instead of rewriting the
-historical rate that was already used or published.</p>
-<p>See <a href="../forms/create-pricing-version.html">Create Pricing Version</a> and
-<a href="../forms/update-pricing-version.html">Update Pricing Version</a> for field
-descriptions and complete examples. The <code>active</code> column is managed by backend
-soft delete and is intentionally not shown in either form.</p>
-<p>For a free hosted NVIDIA demo, select operation <code>embed</code>, omit output pricing,
-and use <code>ZERO_MARGINAL</code> with zero input/cached-input rates only when your
-approved demo contract truly has no marginal charge. Otherwise use
-<code>EXTERNAL_PROVIDER</code> and enter the approved input rate. See
-<a href="../forms/create-pricing-version.html#nvidia-free-endpoint-example">Create Pricing Version</a>.</p>
-<h2 id="policies-tab"><a class="header" href="#policies-tab">Policies Tab</a></h2>
-<p>Policies define reusable governance intent for model access, spending, content
-handling, caching, PII, and provider-native extensions. The tab keeps these
-decisions separate from a particular Alias, Agent, Client, or Deployment so the
-same named policy can be reviewed once and assigned consistently to multiple
-subjects.</p>
-<p>Each Policy has a host-unique <code>policyName</code>, six JSON or YAML policy objects,
-and a lifecycle status:</p>
-<ul>
-<li><code>accessPolicy</code> describes who may use the governed model capability and which
-operations are intended to be available.</li>
-<li><code>budgetPolicy</code> records request or period spending limits and related budget
-intent.</li>
-<li><code>contentPolicy</code> records logging and prompt or response handling rules.</li>
-<li><code>cachePolicy</code> records whether and under what conditions response caching is
-intended.</li>
-<li><code>piiPolicy</code> records the desired handling of personally identifiable data.</li>
-<li><code>nativeExtensionPolicy</code> allowlists provider-specific request extensions that
-may pass beyond the portable model contract.</li>
-<li><code>lifecycleStatus</code> is <code>DRAFT</code>, <code>ACTIVE</code>, <code>SUSPENDED</code>, or <code>RETIRED</code>. A retired
-Policy is terminal, and a Policy cannot return to <code>DRAFT</code> after leaving it.</li>
-</ul>
-<p>The six policy values are extensible objects rather than a fixed field
-vocabulary. The command service verifies that each value is an object and
-rejects raw secret material, but it does not prove that arbitrary nested keys
-are supported by a publication compiler or gateway. Store secret references in
-the Credentials workflow; never enter API keys, passwords, bearer values, or
-other secret material in a Policy.</p>
-<h3 id="why-policies-are-separate"><a class="header" href="#why-policies-are-separate">Why Policies Are Separate</a></h3>
-<p>A Public Alias describes a stable callable contract, while a Route identifies
-eligible Deployments. A Policy describes the governance that applies to a
-consumer of that contract. Separating them avoids copying governance fields
-into every Alias or Agent, supports host-scoped reuse, and allows policy changes
-to follow their own review and lifecycle process.</p>
-<p>Bindings provide the assignment layer. They connect a Policy to an <code>AGENT</code>,
-<code>CLIENT</code>, <code>PRINCIPAL</code>, or <code>PRODUCT_PROFILE</code>, optionally scope the assignment to
-a Public Alias, and can mark the default Alias for an Agent. An Agent definition
-may select a <code>modelPolicyId</code>; its binding records must then resolve the intended
-Alias. Creating a Policy without a Binding does not assign it to anyone.</p>
-<h3 id="how-policy-data-is-used"><a class="header" href="#how-policy-data-is-used">How Policy Data Is Used</a></h3>
-<ol>
-<li>The Policy row stores the reusable control-plane intent and its lifecycle.</li>
-<li>Binding records select the subject and optional Alias to which the Policy
-applies. Agent default model resolution is primarily binding-based.</li>
-<li>During publication, an approved compiler must resolve applicable policy
-precedence and translate supported intent into immutable <code>llm-policy</code> and,
-where applicable, route material. The gateway reads those published
-resources; it does not query the Portal Policy table during a request.</li>
-<li>A Policy edit does not mutate an existing gateway snapshot. Validate and
-publish a new candidate before expecting supported runtime behavior to
-change.</li>
-</ol>
-<p>The current MVP gateway <code>llm-policy</code> payload accepts only its documented
-replica-local concurrency, streaming-channel, replay, and request-timeout
-bounds. It does not directly consume the six control-plane wrapper objects
-listed above, and it rejects unknown runtime policy fields. Therefore, storing
-an illustrative key such as <code>monthlyCostMicros</code> or <code>loggingMode</code> records
-governance intent but does not make that key enforceable by itself. Enforcement
-requires an approved compiler mapping and a gateway version that supports the
-resulting runtime field. Publication should include only intended <code>ACTIVE</code>
-Policies and supported mappings.</p>
-<p>Choose <strong>Create model policy</strong> to open <code>/app/form/createModelPolicy</code>. Choose a
-row’s edit action to open <code>/app/form/updateModelPolicy</code>; Host Id, Model Policy
-Id, and Aggregate Version are read-only on update. See
-<a href="../forms/create-model-policy.html">Create Model Policy</a> and
-<a href="../forms/update-model-policy.html">Update Model Policy</a> for field descriptions
-and examples. The <code>active</code> column is managed by backend soft delete and is
-intentionally not shown in either form.</p>
-<h2 id="bindings-tab"><a class="header" href="#bindings-tab">Bindings Tab</a></h2>
-<p>Bindings assign a reusable Model Policy to a concrete subject. The tab is the
-relationship layer between policy intent and the Agents, Clients, Principals,
-or Product Profiles to which that intent applies. Without a Binding, creating a
-Policy does not authorize a subject, scope the Policy to an Alias, or provide a
-default model for a policy-selected Agent.</p>
-<h3 id="why-bindings-are-separate"><a class="header" href="#why-bindings-are-separate">Why Bindings Are Separate</a></h3>
-<p>A Policy describes governance once, while a Binding answers <em>who receives that
-Policy and for which Alias</em>. Keeping assignments in normalized rows allows one
-Policy to apply to many subjects and Aliases without duplicating its access,
-budget, content, cache, PII, or native-extension objects. Assignments can change
-without changing the stable Policy identity.</p>
-<p>The supported subject types are:</p>
-<ul>
-<li><code>AGENT</code>: <code>subjectId</code> is the exact Agent Definition Id. This is the subject
-type used by the current policy-selected Agent model-resolution path.</li>
-<li><code>CLIENT</code>: <code>subjectId</code> is the exact client identity used by the approved
-policy compiler or authorization integration.</li>
-<li><code>PRINCIPAL</code>: <code>subjectId</code> is the exact authenticated principal identifier used
-by the integrating identity system.</li>
-<li><code>PRODUCT_PROFILE</code>: <code>subjectId</code> is the stable product-profile identifier used
-by the approved policy compiler.</li>
-</ul>
-<p><code>subjectId</code> is a bounded string rather than a foreign key because the four
-subject types belong to different identity namespaces. Portal cannot verify a
-Client, Principal, or Product Profile merely from this row; copy the canonical
-identifier from its owning system. The referenced Model Policy and optional
-Public Alias do have host-scoped foreign keys and must exist under the selected
-host.</p>
-<h3 id="how-binding-data-is-used"><a class="header" href="#how-binding-data-is-used">How Binding Data Is Used</a></h3>
-<ol>
-<li><code>modelPolicyId</code>, <code>subjectType</code>, and <code>subjectId</code> identify the Policy assignment.</li>
-<li>An optional <code>publicAliasId</code> scopes the assignment to a concrete callable
-Alias. An unscoped Binding records a subject-level Policy assignment but does
-not provide an Alias for Agent default resolution.</li>
-<li>For a policy-selected Agent, Portal and light-agent find active <code>AGENT</code>
-Bindings for the Agent Definition Id and active Aliases. Exactly one Binding
-must identify the selected default Alias with <code>agentDefault=true</code>; zero
-defaults produces <code>NO_DEFAULT</code>, and an ambiguous result fails resolution.</li>
-<li>The resolved Alias name is sent as the OpenAI-compatible <code>model</code>. The
-gateway does not receive a Policy Id in that field and does not query the
-Portal Binding table during the inference request.</li>
-<li><code>CLIENT</code>, <code>PRINCIPAL</code>, and <code>PRODUCT_PROFILE</code> Bindings are control-plane input
-for an approved policy compiler or authorization integration. A stored row
-does not make unsupported policy fields enforceable by itself.</li>
-</ol>
-<p><code>agentDefault</code> is meaningful only for an <code>AGENT</code> Binding and requires a Public
-Alias. The database permits at most one active default for the same host,
-Policy, subject type, and subject. A Policy that can authorize several Aliases
-may have several scoped Bindings for an Agent, but exactly one should be the
-default. The form enforces the required Alias and Agent subject type when the
-checkbox is selected.</p>
-<p>Binding changes do not rewrite an already published gateway snapshot. Before
-making an Alias the Agent default, ensure that the Alias and its Routes,
-Deployments, Credentials, and Pricing are eligible and present in the intended
-gateway publication. Agent resolution consults current active Binding data, so
-changing or deleting a default can affect subsequent model resolution even
-though gateway publication is a separate operation.</p>
-<p>Choose <strong>Create policy binding</strong> to open <code>/app/form/createPolicyBinding</code>.
-Choose a row’s edit action to open <code>/app/form/updatePolicyBinding</code>; Host Id,
-Model Policy Binding Id, and Aggregate Version are read-only on update. See
-<a href="../forms/create-policy-binding.html">Create Policy Binding</a> and
-<a href="../forms/update-policy-binding.html">Update Policy Binding</a> for every field and
-complete examples. The <code>active</code> column is managed by backend soft delete and is
-intentionally not shown in either form.</p>
-<h2 id="publication-tab"><a class="header" href="#publication-tab">Publication Tab</a></h2>
-<p>The other tabs are the authoring control plane. The Publication tab compiles
-their active records into typed <code>llm-router</code> config properties and applies one
-immutable revision to one explicitly selected Light Gateway instance. Editing
-a model record never changes a running gateway by itself.</p>
-<h3 id="what-the-tab-does"><a class="header" href="#what-the-tab-does">What The Tab Does</a></h3>
-<p>The tab provides:</p>
-<ul>
-<li>an <strong>Environment</strong> dropdown populated from the selected host’s configured
-environments;</li>
-<li>an <strong>LLM Gateway Instance</strong> dropdown listing active, writable instances whose
-product is <code>lg</code> and whose host and environment match the selection;</li>
-<li><strong>Generate from active records</strong>, which joins the ready Aliases, Routes,
-Deployments, Accounts, Credentials, Pricing, Policies, and Bindings into a
-deterministic, read-only property preview;</li>
-<li>source and property-set digests plus a difference count against the selected
-instance’s current managed properties;</li>
-<li><strong>Publish to instance</strong>, which asks the server to regenerate and verify the
-preview digest before atomically applying it; and</li>
-<li>instance-scoped history with <strong>Apply exact revision</strong> for canary promotion or
-rollback without recompiling mutable control-plane rows.</li>
-</ul>
-<p>The browser never submits arbitrary property IDs or an editable manifest. The
-server resolves the fixed <code>llm-router</code> metadata and owns only these properties:</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Property</th><th>Type</th><th>Purpose</th></tr>
-</thead>
-<tbody>
-<tr><td><code>llm-router.enabled</code></td><td>boolean</td><td>Enables the LLM router module.</td></tr>
-<tr><td><code>llm-router.developmentFixtures</code></td><td>boolean</td><td>Always published as <code>false</code>; production data does not use embedded fixtures.</td></tr>
-<tr><td><code>llm-router.providers</code></td><td>map</td><td>Provider format, base URL, external secret reference, headers, and quota-group identity.</td></tr>
-<tr><td><code>llm-router.deployments</code></td><td>map</td><td>Physical model, declared capabilities, concurrency, and effective pricing.</td></tr>
-<tr><td><code>llm-router.aliases</code></td><td>map</td><td>Public names, ordered deployments, retry/fallback bounds, and request limits.</td></tr>
-<tr><td><code>llm-router.openaiExtensionAllowlist</code></td><td>list</td><td>Explicit OpenAI-compatible extension fields allowed by the generated configuration.</td></tr>
-</tbody>
-</table>
-</div>
-<h3 id="why-publication-is-separate"><a class="header" href="#why-publication-is-separate">Why Publication Is Separate</a></h3>
-<p>A publication provides these guarantees:</p>
-<ol>
-<li><strong>Atomicity</strong>: all Portal-owned LLM instance properties and ownership rows
-change in the same event-projection transaction.</li>
-<li><strong>Immutability</strong>: a generated revision is stored once with canonical source
-and property digests. Corrections create another revision.</li>
-<li><strong>Target isolation</strong>: publication changes only the selected instance.
-Another production or canary instance is unaffected.</li>
-<li><strong>Exact promotion and rollback</strong>: the same stored property set can be
-applied to another instance without reading changed authoring rows.</li>
-<li><strong>Namespace ownership</strong>: the workflow cannot overwrite unrelated instance
-properties.</li>
-</ol>
-<h3 id="readiness-validation"><a class="header" href="#readiness-validation">Readiness Validation</a></h3>
-<p>Before generating a new revision, the backend requires at least one active
-Alias and at least one usable Route for every active Alias. A Route is usable
-when its Deployment:</p>
-<ul>
-<li>is active and has lifecycle status <code>ACTIVE</code>;</li>
-<li>has an effective, unexpired Credential with status <code>ACTIVE</code> or <code>ROTATING</code>;
-and</li>
-<li>has an effective, unexpired Pricing version.</li>
-</ul>
-<p>The target must also be an active, writable <code>lg</code> instance in the selected host
-and environment. Provider conformance is optional evidence. Portal does not
-possess tenant API keys and does not call the provider, so <code>PENDING</code> or missing
-conformance does not block publication or gateway startup. Structural and
-capability compatibility checks still use the declared model and registration
-capabilities. Users test provider connectivity through their own gateway after
-snapshot and restart.</p>
-<h3 id="publication-fields"><a class="header" href="#publication-fields">Publication Fields</a></h3>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Preview field</th><th>Meaning</th><th>Example</th></tr>
-</thead>
-<tbody>
-<tr><td><code>instanceId</code></td><td>Explicit config/snapshot target, not an individual replica.</td><td><code>50000000-0000-4000-8000-000000000001</code></td></tr>
-<tr><td><code>sourceDigest</code></td><td>Canonical digest of the active source records used by the compiler.</td><td><code>sha256:4f...</code></td></tr>
-<tr><td><code>propertySetDigest</code></td><td>Canonical digest of all generated typed properties.</td><td><code>sha256:91...</code></td></tr>
-<tr><td><code>configProperties</code></td><td>Read-only property metadata, types, structured values, and canonical JSON storage values.</td><td><code>[{"propertyName":"providers","valueType":"map",...}]</code></td></tr>
-<tr><td><code>differences</code></td><td>Managed properties whose generated value differs from the selected instance.</td><td><code>[{"propertyName":"aliases",...}]</code></td></tr>
-<tr><td><code>validationResult</code></td><td>Structural counts and validation status. It is not provider connectivity evidence.</td><td><code>{"valid":true,"aliasCount":2}</code></td></tr>
-</tbody>
-</table>
-</div>
-<h3 id="how-gateway-data-is-used"><a class="header" href="#how-gateway-data-is-used">How Gateway Data Is Used</a></h3>
-<p>After the instance-publication event is projected:</p>
-<ol>
-<li>Portal inserts or reuses an immutable revision in
-<code>llm_gateway_publication_t</code>.</li>
-<li>Portal appends an instance application in
-<code>llm_gateway_instance_publication_t</code>.</li>
-<li>The same transaction upserts the six managed values in
-<code>instance_property_t</code> and records their ownership. Existing rows are
-reactivated when necessary; an update-only event is not used for absent
-properties.</li>
-<li>The user creates and promotes a config snapshot for that instance through
-the existing configuration workflow. Publication does not do this
-automatically.</li>
-<li>The config server renders the typed map/list values into <code>values.yml</code>; the
-gateway’s <code>llm-router.yml</code> template consumes them at startup or explicit
-module reload.</li>
-<li>Credentials resolve locally from environment variables or the tenant’s
-secret-injection mechanism. Secret values never enter Portal properties,
-revisions, snapshots, UI payloads, or logs.</li>
-</ol>
-<h3 id="publishing-and-rollback"><a class="header" href="#publishing-and-rollback">Publishing And Rollback</a></h3>
-<p>To publish:</p>
-<ol>
-<li>Select the host, <strong>Environment</strong>, and <strong>LLM Gateway Instance</strong>.</li>
-<li>Choose <strong>Generate from active records</strong> and review the read-only properties,
-digest, and differences.</li>
-<li>Choose <strong>Publish to instance</strong>. If another author changed source records
-after preview, regenerate instead of publishing stale data.</li>
-<li>Create and promote a config snapshot for the same instance.</li>
-<li>Restart or reload the gateway and test the provider through that gateway.</li>
-<li>If testing fails, edit the control-plane records and repeat the cycle.</li>
-</ol>
-<p>For canary promotion or rollback, choose <strong>Apply exact revision</strong> in the
-instance history. Portal loads the stored property set and applies it as a new
-instance-publication action; it does not regenerate from current records or
-mutate history. Create and promote another snapshot after that application.</p>
-<h2 id="endpoint-authorization-and-403-responses"><a class="header" href="#endpoint-authorization-and-403-responses">Endpoint Authorization And 403 Responses</a></h2>
-<p>The browser uses two HTTP transport paths, but access control is registered
-against each versioned service endpoint:</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Operation</th><th>HTTP path</th><th>Endpoint identity</th><th>Scope</th></tr>
-</thead>
-<tbody>
-<tr><td>List and preview</td><td><code>/portal/query</code></td><td><code>lightapi.net/genai/&lt;queryAction&gt;/0.1.0</code></td><td><code>portal.r</code></td></tr>
-<tr><td>Create, update, delete, publish, rollback</td><td><code>/portal/command</code></td><td><code>lightapi.net/genai/&lt;commandAction&gt;/0.1.0</code></td><td><code>portal.w</code></td></tr>
-<tr><td>Reserved conformance runner callbacks</td><td><code>/portal/command</code></td><td><code>lightapi.net/genai/&lt;conformanceAction&gt;/0.1.0</code></td><td><code>portal.w</code></td></tr>
-</tbody>
-</table>
-</div>
-<p>Register and authorize these actions for the interactive page:</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Page or tab</th><th>Query action</th><th>Command actions</th></tr>
-</thead>
-<tbody>
-<tr><td>Models</td><td><code>getLlmModel</code></td><td><code>createLlmModel</code>, <code>updateLlmModel</code>, <code>deleteLlmModel</code></td></tr>
-<tr><td>Registrations</td><td><code>getLlmModelRegistration</code></td><td><code>createLlmModelRegistration</code>, <code>updateLlmModelRegistration</code>, <code>deleteLlmModelRegistration</code></td></tr>
-<tr><td>Accounts</td><td><code>getLlmProviderAccount</code></td><td><code>createLlmProviderAccount</code>, <code>updateLlmProviderAccount</code>, <code>deleteLlmProviderAccount</code></td></tr>
-<tr><td>Network Zones</td><td><code>getLlmNetworkZone</code></td><td><code>createLlmNetworkZone</code>, <code>updateLlmNetworkZone</code>, <code>deleteLlmNetworkZone</code></td></tr>
-<tr><td>Provider Endpoints</td><td><code>getLlmProviderEndpoint</code></td><td><code>createLlmProviderEndpoint</code>, <code>updateLlmProviderEndpoint</code>, <code>deleteLlmProviderEndpoint</code></td></tr>
-<tr><td>Deployments</td><td><code>getLlmProviderDeployment</code></td><td><code>createLlmProviderDeployment</code>, <code>updateLlmProviderDeployment</code>, <code>deleteLlmProviderDeployment</code></td></tr>
-<tr><td>Credentials</td><td><code>getLlmProviderCredential</code></td><td><code>createLlmProviderCredential</code>, <code>updateLlmProviderCredential</code>, <code>deleteLlmProviderCredential</code></td></tr>
-<tr><td>Aliases</td><td><code>getLlmPublicAlias</code>, <code>previewLlmAliasRoutes</code></td><td><code>createLlmPublicAlias</code>, <code>updateLlmPublicAlias</code>, <code>deleteLlmPublicAlias</code></td></tr>
-<tr><td>Routes</td><td><code>getLlmAliasRoute</code></td><td><code>createLlmAliasRoute</code>, <code>updateLlmAliasRoute</code>, <code>deleteLlmAliasRoute</code></td></tr>
-<tr><td>Pricing</td><td><code>getLlmPricingVersion</code></td><td><code>createLlmPricingVersion</code>, <code>updateLlmPricingVersion</code>, <code>deleteLlmPricingVersion</code></td></tr>
-<tr><td>Policies</td><td><code>getLlmModelPolicy</code></td><td><code>createLlmModelPolicy</code>, <code>updateLlmModelPolicy</code>, <code>deleteLlmModelPolicy</code></td></tr>
-<tr><td>Bindings</td><td><code>getLlmModelPolicyBinding</code></td><td><code>createLlmModelPolicyBinding</code>, <code>updateLlmModelPolicyBinding</code>, <code>deleteLlmModelPolicyBinding</code></td></tr>
-<tr><td>Publication</td><td><code>getEligibleLlmGatewayInstances</code>, <code>getLlmGatewayPublicationCandidate</code>, <code>getLlmGatewayInstancePublicationHistory</code></td><td><code>publishLlmGatewayConfiguration</code>, <code>rollbackLlmGatewayConfiguration</code></td></tr>
-</tbody>
-</table>
-</div>
-<p>For every endpoint, confirm that the API endpoint record, endpoint scope, rule
-association, and role permission are active. Model mutations require the global
-catalog permission; tenant operations use the selected host. A user who
-can list records may still receive <code>403</code> on Save because query and command
-actions have separate endpoint permissions.</p>
-<p>If authorization is correct but a tenant-resource update still fails, check
-that <code>hostId</code> matches the authenticated host. All updates must contain the
-current <code>aggregateVersion</code>. Those contract errors are distinct from a missing
-endpoint, role, rule, or scope.</p>
-<h2 id="common-errors"><a class="header" href="#common-errors">Common Errors</a></h2>
-<ul>
-<li><strong>Select a host</strong>: a host is unnecessary for the global catalog, but is
-required before using Registrations or any downstream operational tab.</li>
-<li><strong>403 on Save or Delete</strong>: authorize the exact command action, not only its
-corresponding query action.</li>
-<li><strong>JSON parse error</strong>: remove comments and trailing commas and use valid JSON.</li>
-<li><strong>Update conflict</strong>: reload the tab and retry with the latest
-<code>aggregateVersion</code>.</li>
-<li><strong>Referenced record not found</strong>: create the dependency first and verify that
-it belongs to the same host.</li>
-<li><strong>Invalid lifecycle transition</strong>: reload the current state and choose a
-forward transition; terminal states cannot return to draft.</li>
-<li><strong>Publication button disabled</strong>: select an eligible gateway instance and
-generate a property preview first.</li>
-<li><strong>Candidate generation failed</strong>: every active Alias in the selected
-environment needs at least one active Route whose Deployment is <code>ACTIVE</code>, has
-an effective <code>ACTIVE</code> or <code>ROTATING</code> Credential, and effective Pricing. The
-selected target must be an active writable <code>lg</code> instance in that environment.</li>
+<li><strong>Route references are incompatible:</strong> ensure Alias and Registration use the
+same environment, the Deployment uses <code>openai_embeddings</code>, and the complete
+embedding-space objects match.</li>
+<li><strong>No eligible Credential:</strong> check Endpoint purpose, effective/expiration
+timestamps, and the secret reference format.</li>
+<li><strong>Raw provider secrets rejected:</strong> use <code>env:NVIDIA_API_KEY</code>, never the key.</li>
+<li><strong>No active records:</strong> no non-deleted rows exist for that tab; create one only
+when the workflow requires it.</li>
+<li><strong>Publication rejected:</strong> correct the record named by the Publish validation
+result and publish a new candidate.</li>
 </ul>
 
                     </main>

@@ -35,10 +35,10 @@
             const path_to_root = "../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../searchindex-026fe4a5.js";
+            window.path_to_searchindex_js = "../../../searchindex-fe0fd90c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../toc-2b9a4022.js"></script>
+        <script src="../../../toc-d6423cc1.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -198,8 +198,7 @@ deployments, aliases, policies, and publication, see the
 </tbody>
 </table>
 </div>
-<p><code>Model Version</code> is optional, and <code>Lifecycle Status</code> defaults to <code>DRAFT</code>.
-<code>active</code> is backend-managed: create and update keep the model active, while the
+<p><code>Model Version</code> is optional. <code>active</code> is backend-managed: create and update keep the model active, while the
 delete command soft-deletes it.</p>
 <h2 id="structured-fields"><a class="header" href="#structured-fields">Structured Fields</a></h2>
 <p><code>Modalities</code>, <code>Operations</code>, and <code>Declared Capabilities</code> are stored as typed
@@ -246,7 +245,6 @@ cannot be assigned to a global model.</p>
 <tr><td>Physical Model Id</td><td><code>nvidia/nemotron-3-embed-1b</code></td></tr>
 <tr><td>Model Family</td><td><code>nemotron-3-embed</code></td></tr>
 <tr><td>Model Version</td><td>Leave empty unless the provider publishes a stable version identifier</td></tr>
-<tr><td>Lifecycle Status</td><td><code>DRAFT</code> initially</td></tr>
 <tr><td>Context Token Limit</td><td><code>4096</code></td></tr>
 <tr><td>Output Token Limit</td><td><code>1</code> because the current generic schema requires a positive value; embedding calls do not generate output tokens</td></tr>
 <tr><td>Modalities</td><td><code>["text"]</code></td></tr>
@@ -256,20 +254,29 @@ cannot be assigned to a global model.</p>
 </div>
 <p>Use this Declared Capabilities object:</p>
 <pre><code class="language-json">{
+  "operations": ["embed"],
   "embedding": {
-    "dimensions": [2048],
-    "defaultDimension": 2048,
-    "encodings": ["float"],
-    "normalization": "l2",
-    "distanceMetrics": ["cosine"],
-    "inputTypes": ["query", "passage"]
+    "maxBatchItems": 1,
+    "maxInputTokensPerItem": 4096,
+    "maxAggregateInputTokens": 4096,
+    "supportedDimensions": [2048],
+    "supportedEncodings": ["float"],
+    "maxResponseBytes": 16777216,
+    "space": {
+      "spaceId": "nvidia-nemotron-3-embed-1b-float-v1",
+      "revision": 1,
+      "dimension": 2048,
+      "normalization": "l2",
+      "distanceMetric": "cosine",
+      "documentInputTransformVersion": "document-v1"
+    }
   }
 }
 </code></pre>
 <p>NVIDIA currently documents only the native 2048-dimensional output for this
 hosted model. Document indexing must use passage semantics and retrieval must
 use query semantics. The catalog capability declaration records that contract;
-the qualified provider adapter must still send the correct provider request.
+the gateway provider adapter must still send the correct provider request.
 See the <a href="https://docs.nvidia.com/nim/nemo-retriever/text-embedding/latest/support-matrix.html">NVIDIA NIM support matrix</a>.</p>
 <h2 id="create-the-record"><a class="header" href="#create-the-record">Create the Record</a></h2>
 <p>Review the values and choose <strong>Create LLM Model</strong>. The form sends the

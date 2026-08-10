@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Create Runtime Instance - Light Portal Documentation</title>
+        <title>Validate LLM Embeddings - Light Portal Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -174,28 +174,223 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="create-runtime-instance"><a class="header" href="#create-runtime-instance">Create Runtime Instance</a></h1>
-<p>Use this form to create a runtime endpoint for a service.</p>
-<p>Runtime instances describe where a service is reachable and support operational
-workflows.</p>
-<p>Important fields:</p>
+                        <h1 id="validate-llm-embeddings-through-the-live-gateway"><a class="header" href="#validate-llm-embeddings-through-the-live-gateway">Validate LLM Embeddings Through The Live Gateway</a></h1>
+<p>Use this workflow after authoring the LLM records in Portal. Validation is an
+ordinary, authenticated request to the selected live <code>light-gateway</code> replica;
+it is not a provider test performed by Portal.</p>
+<p>The NVIDIA demo validates the public Aliases <code>kb-query</code> and <code>kb-index</code>, backed
+by <code>nvidia/nemotron-3-embed-1b</code>, against the declared 2048-dimensional
+embedding space.</p>
+<h2 id="what-this-validation-does"><a class="header" href="#what-this-validation-does">What This Validation Does</a></h2>
+<p>The checked helper sends curl requests to the gateway’s Alias discovery and
+embeddings APIs. The gateway selects the active Route, resolves its provider
+credential locally, calls the provider, and returns bounded response metadata.</p>
+<p>The validation:</p>
 <ul>
-<li><code>serviceId</code>: service identifier</li>
-<li><code>protocol</code>: runtime protocol</li>
-<li><code>ipAddress</code> and <code>portNumber</code>: endpoint location</li>
-<li><code>instanceStatus</code>: runtime status</li>
-<li><code>ownerPositionId</code>: optional position owner for team access</li>
+<li>does not ask Portal for a provider API key or gateway bearer token;</li>
+<li>does not send provider credentials through helper arguments;</li>
+<li>does not call a provider endpoint directly;</li>
+<li>does not store a vector, raw provider body, or gateway credential;</li>
+<li>does not mutate Portal authoring records, publications, Aliases, or
+Deployments; and</li>
+<li>does not claim that every Deployment behind an Alias is healthy.</li>
 </ul>
+<p>An Alias may succeed by using a fallback Route. A successful Alias probe proves
+only that one normal routed request completed with the expected embedding
+contract.</p>
+<h2 id="operator-workflow"><a class="header" href="#operator-workflow">Operator Workflow</a></h2>
+<h3 id="1-publish-the-configuration"><a class="header" href="#1-publish-the-configuration">1. Publish the configuration</a></h3>
+<p>In the LLM Model Control Plane <strong>Publication</strong> tab, select the environment and
+gateway instance. Choose <strong>Generate from active records</strong>, review the preview,
+and choose <strong>Publish to instance</strong>. Create and promote the corresponding config
+snapshot, then restart or explicitly reload the selected gateway as required by
+your deployment.</p>
+<p>Portal publication history confirms the configuration application to the
+selected instance. It is not proof that a particular running replica loaded the
+revision.</p>
+<h3 id="2-confirm-the-selected-replica-applied-it"><a class="header" href="#2-confirm-the-selected-replica-applied-it">2. Confirm the selected replica applied it</a></h3>
+<p>Before sending a billable model request, confirm that the replica reports an
+<code>ACKNOWLEDGED</code> row for the intended publication ID, sequence, and root digest.
+Operators with database access can use:</p>
+<pre><code class="language-sql">SELECT gateway_publication_id,
+       gateway_instance,
+       acknowledgement_state,
+       sequence_id,
+       root_digest,
+       material_generation,
+       applied_at
+  FROM llm_gateway_publication_ack_t
+ WHERE host_id = :host_id
+   AND environment = :environment
+   AND gateway_publication_id = :gateway_publication_id
+   AND gateway_instance = :gateway_instance;
+</code></pre>
+<p>Use the equivalent acknowledgement view provided by your operations platform
+when direct database access is unavailable. Stop if the row is absent or its
+state is <code>PENDING</code>, <code>FAILED</code>, or <code>DIVERGENT</code>. Alias discovery alone is not proof
+of the intended revision because an older snapshot can expose the same Alias.</p>
+<h3 id="3-provision-the-provider-key-only-on-the-gateway"><a class="header" href="#3-provision-the-provider-key-only-on-the-gateway">3. Provision the provider key only on the gateway</a></h3>
+<p>Provision the NVIDIA credential through the selected gateway deployment’s
+protected environment or secret-injection mechanism, then restart or reload
+that replica. The published credential record contains only the external secret
+reference.</p>
+<p>Do not enter the provider value into Portal, a helper argument, a request file,
+a ticket, or a validation report. For the local demo, follow the deployment
+instructions in <code>all-in-lt/llm-gateway-rust/NVIDIA-DEMO.md</code> from
+<code>portal-config-loc</code>.</p>
+<h3 id="4-prepare-the-gateway-client-credential"><a class="header" href="#4-prepare-the-gateway-client-credential">4. Prepare the gateway client credential</a></h3>
+<p>Run the helper from a network location authorized to call the gateway. Create
+a protected curl header file containing the caller’s normal gateway bearer
+token:</p>
+<pre><code class="language-bash">set -euo pipefail
+umask 077
+
+gateway_header_file=$(mktemp)
+trap 'rm -f -- "$gateway_header_file"' EXIT
+read -rsp 'Gateway client bearer token: ' gateway_client_token
+printf '\n'
+printf 'Authorization: Bearer %s\n' "$gateway_client_token" &gt;"$gateway_header_file"
+unset gateway_client_token
+chmod 600 "$gateway_header_file"
+</code></pre>
+<p>The token is not echoed and does not appear in curl’s process arguments. This
+is a gateway caller credential, not the NVIDIA provider credential.</p>
+<h3 id="5-run-the-checked-curl-helper"><a class="header" href="#5-run-the-checked-curl-helper">5. Run the checked curl helper</a></h3>
+<p>From <code>portal-config-loc/all-in-lt/llm-gateway-rust</code>, validate the query lane:</p>
+<pre><code class="language-bash">validation/validate-embedding.sh \
+  --gateway-url https://localhost:8444 \
+  --alias kb-query \
+  --header-file "$gateway_header_file" \
+  --ca-file config/ca.pem \
+  --expected-space-id nvidia-nemotron-3-embed-1b \
+  --expected-space-revision 1 \
+  --expected-dimension 2048 \
+  --timeout-seconds 30
+</code></pre>
+<p>Validate the indexing lane independently by changing only the Alias:</p>
+<pre><code class="language-bash">validation/validate-embedding.sh \
+  --gateway-url https://localhost:8444 \
+  --alias kb-index \
+  --header-file "$gateway_header_file" \
+  --ca-file config/ca.pem \
+  --expected-space-id nvidia-nemotron-3-embed-1b \
+  --expected-space-revision 1 \
+  --expected-dimension 2048 \
+  --timeout-seconds 30
+</code></pre>
+<p>For a publicly trusted production gateway, omit <code>--ca-file</code> and use the system
+trust store. Never disable certificate verification or follow redirects. The
+gateway URL must be the selected gateway origin, not a provider URL.</p>
+<p>A passing helper emits one bounded report:</p>
+<pre><code class="language-json">{
+  "schemaVersion": "lightapi.llm.embedding-validation/v1",
+  "status": "pass",
+  "category": "validated",
+  "alias": "kb-query",
+  "requestId": "example-request-id",
+  "httpStatus": 200,
+  "contract": {
+    "expected": {"spaceId": "nvidia-nemotron-3-embed-1b", "spaceRevision": 1, "dimension": 2048},
+    "actual": {"spaceId": "nvidia-nemotron-3-embed-1b", "spaceRevision": 1, "dimension": 2048}
+  },
+  "vectorCount": 1,
+  "configGeneration": 1,
+  "billedCostMicros": 0
+}
+</code></pre>
+<p>The real request ID and billed cost vary. The helper never prints the vector.
+The embeddings request traverses normal gateway authentication, authorization,
+audit, quota, routing, and billing. Treat it as a normally audited and
+potentially billable provider request.</p>
+<h2 id="optional-rust-validator"><a class="header" href="#optional-rust-validator">Optional Rust validator</a></h2>
+<p>When the <code>light-gateway</code> executable is available, its checked Rust wrapper can
+validate embeddings or a fixed, one-token generation request. It is a client of
+the already-running gateway; it does not load another snapshot or start another
+gateway server.</p>
+<p>The embedding command uses the same protected header file and contract as the
+shell helper:</p>
+<pre><code class="language-bash">light-gateway validate-llm-live \
+  --gateway-url https://localhost:8444 \
+  --operation embeddings \
+  --alias kb-query \
+  --header-file "$gateway_header_file" \
+  --ca-file config/ca.pem \
+  --timeout-seconds 30 \
+  --expected-space-id nvidia-nemotron-3-embed-1b \
+  --expected-space-revision 1 \
+  --expected-dimension 2048
+</code></pre>
+<p>To validate generation, select one public Alias and one supported operation:</p>
+<pre><code class="language-bash">light-gateway validate-llm-live \
+  --gateway-url https://localhost:8444 \
+  --operation chat-completions \
+  --alias public-chat-alias \
+  --header-file "$gateway_header_file" \
+  --ca-file config/ca.pem \
+  --timeout-seconds 30
+
+light-gateway validate-llm-live \
+  --gateway-url https://localhost:8444 \
+  --operation responses \
+  --alias public-responses-alias \
+  --header-file "$gateway_header_file" \
+  --ca-file config/ca.pem \
+  --timeout-seconds 30
+</code></pre>
+<p>Each generation validation sends exactly one ordinary, non-streaming Alias request
+with the fixed text <code>Reply with OK.</code> and a one-token output limit. The
+command does not accept arbitrary model input and does not enumerate Routes,
+probe fallback Deployments, disconnect streams, test capacity, or call a
+provider directly.</p>
+<p>JSON is the default output. Add <code>--output text</code> for a bounded rendering derived
+from the same report structure. Neither renderer includes generated text,
+embedding vectors, raw error bodies, or credentials. The request remains
+normally authorized, audited, quota-accounted, and potentially billable.</p>
+<p>The Rust command is additive. The curl workflow and shell helper remain the
+portable, required operator interfaces.</p>
+<h3 id="6-correct-republish-and-repeat"><a class="header" href="#6-correct-republish-and-repeat">6. Correct, republish, and repeat</a></h3>
+<p>Use the report’s <code>category</code>, <code>requestId</code>, and <code>configGeneration</code> to identify the
+corrective action below. Change the responsible Portal record or gateway-local
+state, publish a new revision when configuration changed, confirm the selected
+replica acknowledgement, and repeat the same probe.</p>
+<p>Retain only the bounded report when operational policy requires evidence. Do
+not retain the bearer header file, raw response, provider response, API key,
+request body, or embedding values.</p>
+<h2 id="troubleshooting"><a class="header" href="#troubleshooting">Troubleshooting</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Condition or report category</th><th>What it distinguishes</th><th>Corrective action</th></tr>
+</thead>
+<tbody>
+<tr><td>Publication acknowledgement absent, <code>PENDING</code>, <code>FAILED</code>, or <code>DIVERGENT</code></td><td><strong>Publication not applied</strong> to the selected replica. This is different from an Alias lookup failure.</td><td>Correct snapshot promotion, replica selection, digest divergence, or reload failure. Wait for <code>ACKNOWLEDGED</code> before probing.</td></tr>
+<tr><td><code>gatewayAuthorization</code></td><td><strong>Caller denied by gateway policy</strong> (<code>401</code> or <code>403</code>); this is not provider authentication.</td><td>Obtain a valid gateway caller token and confirm the caller is authorized for Alias discovery and <code>/v1/embeddings</code>. Use the request ID in gateway audit records.</td></tr>
+<tr><td><code>aliasNotVisible</code></td><td><strong>Alias missing from the active snapshot</strong>, although the replica is reachable.</td><td>Confirm the Alias and at least one compatible Route are active in the target environment, republish, promote the snapshot, reload, and confirm acknowledgement.</td></tr>
+<tr><td><code>gatewayError</code> with gateway <code>service_unavailable</code></td><td><strong>Gateway credential materialization failure, configuration failure, audit failure, or endpoint availability failure.</strong></td><td>Use the request ID and sanitized gateway diagnostics to identify the unavailable subsystem. Verify that external secret references match credentials injected into the gateway, then restart or reload when appropriate. Never copy the value into Portal.</td></tr>
+<tr><td><code>providerError</code> after credential materialization</td><td><strong>Provider rejection</strong>, including an invalid/revoked credential, physical model, base URL, or provider protocol.</td><td>Use the request ID and sanitized gateway diagnostics to identify the rejected setting. Correct the gateway credential or Portal endpoint/deployment record, republish if configuration changed, and retry.</td></tr>
+<tr><td><code>providerRateLimited</code></td><td><strong>Provider rate limit</strong>.</td><td>Wait for the provider retry window or correct account quota/capacity. Retry without changing Portal records unless the configured account or Route must change.</td></tr>
+<tr><td><code>providerTimeout</code> or <code>transport</code></td><td><strong>Provider/gateway timeout or network/TLS failure</strong>.</td><td>Check gateway reachability, trusted CA, DNS, egress policy, provider availability, and configured timeouts. Keep TLS verification enabled.</td></tr>
+<tr><td><code>embeddingContract</code> with different space ID, revision, or dimension</td><td><strong>Embedding-space mismatch</strong>. Mixing these vectors would corrupt retrieval behavior.</td><td>Stop indexing/querying. Align the Alias, Registration, Deployment, and knowledge-base embedding-space contract, republish, and create a new index generation when required.</td></tr>
+<tr><td><code>embeddingContract</code> with missing/malformed data or success headers</td><td><strong>Invalid provider response</strong> or incompatible adapter mapping.</td><td>Verify provider protocol and physical model, inspect sanitized gateway diagnostics by request ID, correct the Endpoint or Deployment, republish, and retry.</td></tr>
+<tr><td><code>gatewayError</code></td><td>Another bounded gateway failure that is not safely classified by the helper.</td><td>Look up the request ID in gateway logs/audit data, correct the reported local or configuration condition, and retry. Do not attach the raw response to a ticket.</td></tr>
+<tr><td><code>protectedHeaderFile</code>, <code>caFile</code>, or <code>localDependency</code></td><td>Local validation setup is incomplete or unsafe.</td><td>Install the named dependency or recreate the protected file with the documented ownership and mode. Do not weaken the file or TLS checks.</td></tr>
+</tbody>
+</table>
+</div>
+<p>If an Alias has multiple Routes, validate each physical Deployment separately
+only through an explicitly authorized operational procedure that can control
+routing. Repeating this ordinary Alias probe cannot establish that every
+fallback Deployment works.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../../../help/portal-view/forms/create-instance-app-api.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../../../help/portal-view/tasks/register-ai-agent.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../../../help/portal-view/forms/update-runtime-instance.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../../../help/portal-view/tasks/manage-instance.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -205,11 +400,11 @@ workflows.</p>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../../../help/portal-view/forms/create-instance-app-api.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../../../help/portal-view/tasks/register-ai-agent.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../../../help/portal-view/forms/update-runtime-instance.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../../../help/portal-view/tasks/manage-instance.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

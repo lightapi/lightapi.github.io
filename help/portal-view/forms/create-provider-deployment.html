@@ -35,10 +35,10 @@
             const path_to_root = "../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../searchindex-026fe4a5.js";
+            window.path_to_searchindex_js = "../../../searchindex-fe0fd90c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../toc-2b9a4022.js"></script>
+        <script src="../../../toc-d6423cc1.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -213,8 +213,6 @@ and base URL must describe the same provider path.</p>
 <tr><td>Expected Sidecar Identity</td><td>No</td><td>Sidecar profile/digest object only; leave empty for a native hosted Endpoint. Never include credentials.</td></tr>
 <tr><td>Region</td><td>No</td><td>Optional provider placement/residency label.</td></tr>
 <tr><td>Transport Bounds</td><td>No</td><td>Additional non-secret transport annotations; use <code>{}</code> when none are approved.</td></tr>
-<tr><td>Refresh Before Seconds</td><td>No</td><td>Lead time used by trusted refresh/qualification workflows.</td></tr>
-<tr><td>Lifecycle Status</td><td>Yes</td><td>New Deployments start as <code>DRAFT</code>.</td></tr>
 </tbody>
 </table>
 </div>
@@ -252,8 +250,7 @@ Transport Bounds.</p>
   "readinessPolicy": "IMMEDIATE",
   "expectedSidecar": null,
   "region": null,
-  "transportBounds": {},
-  "lifecycleStatus": "DRAFT"
+  "transportBounds": {}
 }
 </code></pre>
 <p>The form still requires Base URL and Provider Protocol even though the selected
@@ -261,22 +258,19 @@ Endpoint already stores them. Copy the exact values; a mismatch creates an
 internally inconsistent legacy/deployment record.</p>
 <h3 id="protected-knowledge-base-lanes"><a class="header" href="#protected-knowledge-base-lanes">Protected Knowledge Base lanes</a></h3>
 <p><code>kb-index</code> and <code>kb-query</code> are separate protected workload lanes. For a
-production-like qualification, create distinct index/query Deployments with
-different Deployment Revision and Capacity Domain identities, and use provider
+production deployment, create distinct index/query Deployments with different
+Deployment Revision and Capacity Domain identities, and use provider
 Accounts/quota that supply real capacity isolation. Merely giving two records
 different strings does not create physical isolation when both consume the
 same free external quota.</p>
 <p>For a functional local demo, one hosted Deployment can prove transport and
 embedding correctness, but it must not be represented as production lane
 isolation evidence.</p>
-<h2 id="qualification-and-activation"><a class="header" href="#qualification-and-activation">Qualification and activation</a></h2>
-<p>Conformance/qualification evidence is machine-owned and is not editable on
-this form. A trusted runner must test the exact protocol, physical model,
-operation, credential path, and embedding-space evidence. Do not manufacture a
-PASS result.</p>
-<p>After creation, provision the Credential, Pricing, Alias, and Route. Move the
-Deployment to <code>ACTIVE</code> only after the runtime path is ready, then publish a new
-gateway candidate. Portal generates Provider Deployment Id and Aggregate
+<p>Portal validates the declared protocol, model, endpoint, runtime bounds, and
+cross-record references. Test actual provider access through the published
+gateway, where the runtime secret is available.</p>
+<p>After creation, provision the Credential, Pricing, Alias, and Route, then
+publish a new gateway candidate. Portal generates Provider Deployment Id and Aggregate
 Version; <code>active</code> remains backend-managed.</p>
 <h2 id="common-problems"><a class="header" href="#common-problems">Common problems</a></h2>
 <ul>
