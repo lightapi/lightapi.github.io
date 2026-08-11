@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fe0fd90c.js";
+            window.path_to_searchindex_js = "searchindex-1fbb46e5.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-d6423cc1.js"></script>
@@ -36828,7 +36828,8 @@ runtime secret is available.</p>
 <li>Public Alias</li>
 <li>Alias Route</li>
 <li>Pricing</li>
-<li>Optional policy and policy binding</li>
+<li>Optional Policy and Policy Binding, only when a workload uses policy-based
+governance or Alias selection</li>
 <li>Publish, review, and create the gateway snapshot</li>
 </ol>
 <p>If Publish reports a problem, return to the named tab, correct that record, and
@@ -36906,6 +36907,52 @@ or embedding-space-incompatible references.</p>
 <p>Create an <code>embed</code> Pricing record for the Deployment. Embedding pricing accepts
 an input rate and forbids an output rate. A zero demo rate is valid when that is
 the intended accounting contract.</p>
+<h2 id="when-to-use-policies-and-bindings"><a class="header" href="#when-to-use-policies-and-bindings">When to use Policies and Bindings</a></h2>
+<p>Policies and Bindings are optional governance records. They are not required to
+create a Provider connection, make a Route eligible, publish an Alias, or test
+an embedding model through the live gateway.</p>
+<p>Use a <strong>Policy</strong> when the host needs reusable governance intent such as:</p>
+<ul>
+<li>which subject or operation classes should be allowed;</li>
+<li>request or period budget limits;</li>
+<li>content logging, cache, or PII handling intent; or</li>
+<li>a narrow allowlist of provider-specific request extensions.</li>
+</ul>
+<p>Policy objects are extensible authoring data. A key affects runtime behavior
+only when the publication mapping and target gateway support that key. Do not
+assume that storing an arbitrary JSON property automatically enforces it.</p>
+<p>Use a <strong>Binding</strong> to assign a Policy to a concrete subject. Supported subject
+namespaces are <code>AGENT</code>, <code>CLIENT</code>, <code>PRINCIPAL</code>, and <code>PRODUCT_PROFILE</code>. A Binding
+may also identify a Public Alias to limit the assignment to that Alias.</p>
+<p>Create them in this order:</p>
+<ol>
+<li>Create the Policy with a stable governance-oriented name.</li>
+<li>Create a Binding that selects the Policy and supplies the exact Subject Type
+and Subject Id used by the consuming system.</li>
+<li>Select a Public Alias when the assignment is Alias-specific.</li>
+<li>For an <code>AGENT</code> that resolves its default model through policy, set Agent
+Default on exactly one active Alias Binding for that Policy and Agent.</li>
+<li>Publish again and verify that the generated configuration contains only the
+policy behavior supported by the selected gateway version.</li>
+</ol>
+<p>Do not use a Policy or Binding to:</p>
+<ul>
+<li>store an API key or other provider secret;</li>
+<li>replace Provider Account, Endpoint, Credential, Deployment, Route, or Pricing
+configuration;</li>
+<li>replace an internal Alias’s workload-principal restriction; or</li>
+<li>make an otherwise incompatible Deployment eligible for an Alias.</li>
+</ul>
+<p>For the initial NVIDIA <code>kb-index</code> and <code>kb-query</code> demo, skip both tabs unless an
+Agent or another subject must select those Aliases through a Model Policy. The
+Aliases’ <code>INTERNAL_WORKLOAD</code> identity, embedding-space contract, Routes, and
+Pricing are sufficient for direct workload-based publication and live gateway
+testing. If policy-based selection is added later, create a dedicated embedding
+Policy using operation <code>embed</code>, then bind it to the exact subject and Alias;
+do not reuse a generation-only chat Policy.</p>
+<p>See <a href="#create-model-policy">Create Model Policy</a> and
+<a href="#create-policy-binding">Create Policy Binding</a> for field-level
+examples and Agent Default rules.</p>
 <h2 id="network-zones"><a class="header" href="#network-zones">Network Zones</a></h2>
 <p>Network Zones are required only for private TLS or explicitly approved private
 plaintext endpoints. A public hosted NVIDIA Endpoint does not use a Network
@@ -36933,6 +36980,9 @@ timestamps, and the secret reference format.</li>
 <li><strong>Raw provider secrets rejected:</strong> use <code>env:NVIDIA_API_KEY</code>, never the key.</li>
 <li><strong>No active records:</strong> no non-deleted rows exist for that tab; create one only
 when the workflow requires it.</li>
+<li><strong>Policy appears to have no effect:</strong> confirm that an active Binding selects
+the intended subject and optional Alias, and that the publication mapping and
+gateway version implement the authored policy keys.</li>
 <li><strong>Publication rejected:</strong> correct the record named by the Publish validation
 result and publish a new candidate.</li>
 </ul>
