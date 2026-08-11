@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-1fbb46e5.js";
+            window.path_to_searchindex_js = "searchindex-8bfb59c9.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-d6423cc1.js"></script>
+        <script src="toc-02438b07.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -36986,6 +36986,96 @@ gateway version implement the authored policy keys.</li>
 <li><strong>Publication rejected:</strong> correct the record named by the Publish validation
 result and publish a new candidate.</li>
 </ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="knowledge-bases"><a class="header" href="#knowledge-bases">Knowledge Bases</a></h1>
+<p>Use <code>/app/genai/KnowledgeBases</code> to create tenant Knowledge Bases, manage bounded
+ingestion policies, attach immutable Git/Markdown sources, and inspect indexing
+and access-control evidence.</p>
+<h2 id="ownership-and-ingestion-policies"><a class="header" href="#ownership-and-ingestion-policies">Ownership and ingestion policies</a></h2>
+<p>An ingestion policy is a reusable set of hard ceilings for a source build. The
+policy controls document, chunk, source-byte, stored-byte, embedding-token,
+spend, elapsed-time, and concurrency limits.</p>
+<p>The platform supports more than one policy:</p>
+<ul>
+<li>A <strong>global policy</strong> is owned by the light-portal installation and is visible
+to every tenant. A platform administrator creates and maintains it.</li>
+<li>A <strong>tenant policy</strong> is owned by one Portal host and is visible only to that
+tenant. Create one when that tenant needs limits different from the global
+choices.</li>
+</ul>
+<p>A tenant does not need to create its own policy when a suitable global policy
+exists. A typical installation publishes a small set of named global policies,
+such as standard documentation and large documentation, and adds tenant
+policies only for exceptions. The model is therefore not a single bootstrap
+singleton. Bootstrap may create a safe starter global policy, but the UI and
+services remain the source of truth for managing multiple policies.</p>
+<p>Do not generate or type a random ingestion policy UUID. Create the policy on
+the Knowledge Bases page; the service generates its UUID. The Add source dialog
+then lists the active global and current-tenant policies by name.</p>
+<p>Deactivating a policy prevents new source selections. Portal refuses to
+deactivate it while a non-deleted source still refers to it; migrate or remove
+those sources first. Inactive policies remain visible in the management list
+and can be reviewed and reactivated with an update.</p>
+<h2 id="add-a-gitmarkdown-source"><a class="header" href="#add-a-gitmarkdown-source">Add a Git/Markdown source</a></h2>
+<p>Open a Knowledge Base, select <strong>Sources</strong>, and choose <strong>Add Git/Markdown
+source</strong>.</p>
+<p>Fill the form as follows:</p>
+<ul>
+<li><strong>Display name:</strong> a short label such as <code>light-fabric documentation</code>.</li>
+<li><strong>Approved repository URI:</strong> the public HTTPS clone URI. For light-fabric,
+use <code>https://github.com/networknt/light-fabric.git</code>.</li>
+<li><strong>Immutable commit:</strong> the complete 40- or 64-character commit SHA that was
+reviewed. Do not enter <code>main</code>, <code>master</code>, a tag, or another movable ref.</li>
+<li><strong>Ingestion policy:</strong> select an existing global or current-tenant policy.</li>
+</ul>
+<p>The light-fabric repository may be used even though it contains both source
+code and documents. The Phase 1a connector ignores non-Markdown files and
+symlinks, does not execute repository hooks, and rejects repositories containing
+Git submodules. In the current pilot it
+scans every Markdown file in the checked-out commit, not only <code>docs/</code>.
+Repository include/exclude controls are not yet enforced by the worker, so
+README files and other Markdown outside <code>docs/</code> may also be indexed. Use a
+documentation-only repository or reviewed commit when that broader Markdown
+set is not acceptable.</p>
+<h3 id="why-branches-are-rejected"><a class="header" href="#why-branches-are-rejected">Why branches are rejected</a></h3>
+<p>A branch name can point to different content between approval and ingestion.
+Pinning the source to a full commit makes the checkout reproducible, gives the
+worker an exact content identity, and prevents an unreviewed branch update from
+silently entering the index. To ingest a newer revision, update the source to a
+new reviewed commit and start another sync.</p>
+<h2 id="runtime-enforcement-boundary"><a class="header" href="#runtime-enforcement-boundary">Runtime enforcement boundary</a></h2>
+<p>Portal stores the selected policy and validates that it is either global or
+owned by the Knowledge Base tenant. The Phase 1a worker still obtains its
+effective source limits from the deployed worker configuration. Until the
+worker resolves the selected policy at job start, administrators must keep the
+worker limits at least as restrictive as the selected Portal policy. A stored
+policy must not be treated as runtime-enforced merely because its UUID appears
+on a source.</p>
+<h2 id="authentication-and-error-messages"><a class="header" href="#authentication-and-error-messages">Authentication and error messages</a></h2>
+<p>Knowledge query actions require <code>portal.r</code>; mutation actions require <code>portal.w</code>.
+The light-portal contract does not use <code>portal.knowledge.r</code> or
+<code>portal.knowledge.w</code>.</p>
+<p>JWT security runs before the query or command handler. When a valid token lacks
+the action scope, security returns a structured <code>403</code> response such as
+<code>AUTH_TOKEN_SCOPE_MISMATCH</code>. Portal displays the backend message so an
+administrator can distinguish insufficient scope from a failed Knowledge Base
+operation. This does not expose the token or its claims.</p>
+<p>If the page shows <strong>Knowledge Base operation failed</strong>, inspect the gateway and
+service response. Common causes are a missing access-control route, a token
+without <code>portal.r</code> or <code>portal.w</code>, an unavailable GenAI query/command service, or
+an object that is not visible to the selected tenant.</p>
+<h2 id="recommended-setup"><a class="header" href="#recommended-setup">Recommended setup</a></h2>
+<ol>
+<li>A platform administrator creates at least one conservative global ingestion
+policy, or the installation bootstraps a starter global policy.</li>
+<li>A tenant administrator creates a tenant Knowledge Base.</li>
+<li>Create a tenant policy only when the global choices are unsuitable.</li>
+<li>Add an HTTPS Git source pinned to a reviewed full commit SHA.</li>
+<li>Select the policy by name and create the source.</li>
+<li>Confirm the deployed worker configuration enforces equal or tighter limits.</li>
+<li>Run the source sync and review documents, generations, access evidence, and
+quality evidence before promotion.</li>
+</ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="create-llm-model"><a class="header" href="#create-llm-model">Create LLM Model</a></h1>
 <p>Use the <strong>Create LLM Model</strong> form to add a physical provider model to the LLM
