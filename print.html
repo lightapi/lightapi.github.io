@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-8bfb59c9.js";
+            window.path_to_searchindex_js = "searchindex-db9c0a3d.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-02438b07.js"></script>
@@ -36988,94 +36988,148 @@ result and publish a new candidate.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="knowledge-bases"><a class="header" href="#knowledge-bases">Knowledge Bases</a></h1>
-<p>Use <code>/app/genai/KnowledgeBases</code> to create tenant Knowledge Bases, manage bounded
-ingestion policies, attach immutable Git/Markdown sources, and inspect indexing
-and access-control evidence.</p>
-<h2 id="ownership-and-ingestion-policies"><a class="header" href="#ownership-and-ingestion-policies">Ownership and ingestion policies</a></h2>
-<p>An ingestion policy is a reusable set of hard ceilings for a source build. The
-policy controls document, chunk, source-byte, stored-byte, embedding-token,
-spend, elapsed-time, and concurrency limits.</p>
-<p>The platform supports more than one policy:</p>
-<ul>
-<li>A <strong>global policy</strong> is owned by the light-portal installation and is visible
-to every tenant. A platform administrator creates and maintains it.</li>
-<li>A <strong>tenant policy</strong> is owned by one Portal host and is visible only to that
-tenant. Create one when that tenant needs limits different from the global
-choices.</li>
-</ul>
-<p>A tenant does not need to create its own policy when a suitable global policy
-exists. A typical installation publishes a small set of named global policies,
-such as standard documentation and large documentation, and adds tenant
-policies only for exceptions. The model is therefore not a single bootstrap
-singleton. Bootstrap may create a safe starter global policy, but the UI and
-services remain the source of truth for managing multiple policies.</p>
-<p>Do not generate or type a random ingestion policy UUID. Create the policy on
-the Knowledge Bases page; the service generates its UUID. The Add source dialog
-then lists the active global and current-tenant policies by name.</p>
-<p>Deactivating a policy prevents new source selections. Portal refuses to
-deactivate it while a non-deleted source still refers to it; migrate or remove
-those sources first. Inactive policies remain visible in the management list
-and can be reviewed and reactivated with an update.</p>
-<h2 id="add-a-gitmarkdown-source"><a class="header" href="#add-a-gitmarkdown-source">Add a Git/Markdown source</a></h2>
-<p>Open a Knowledge Base, select <strong>Sources</strong>, and choose <strong>Add Git/Markdown
-source</strong>.</p>
-<p>Fill the form as follows:</p>
-<ul>
-<li><strong>Display name:</strong> a short label such as <code>light-fabric documentation</code>.</li>
-<li><strong>Approved repository URI:</strong> the public HTTPS clone URI. For light-fabric,
-use <code>https://github.com/networknt/light-fabric.git</code>.</li>
-<li><strong>Immutable commit:</strong> the complete 40- or 64-character commit SHA that was
-reviewed. Do not enter <code>main</code>, <code>master</code>, a tag, or another movable ref.</li>
-<li><strong>Ingestion policy:</strong> select an existing global or current-tenant policy.</li>
-</ul>
-<p>The light-fabric repository may be used even though it contains both source
-code and documents. The Phase 1a connector ignores non-Markdown files and
-symlinks, does not execute repository hooks, and rejects repositories containing
-Git submodules. In the current pilot it
-scans every Markdown file in the checked-out commit, not only <code>docs/</code>.
-Repository include/exclude controls are not yet enforced by the worker, so
-README files and other Markdown outside <code>docs/</code> may also be indexed. Use a
-documentation-only repository or reviewed commit when that broader Markdown
-set is not acceptable.</p>
-<h3 id="why-branches-are-rejected"><a class="header" href="#why-branches-are-rejected">Why branches are rejected</a></h3>
-<p>A branch name can point to different content between approval and ingestion.
-Pinning the source to a full commit makes the checkout reproducible, gives the
-worker an exact content identity, and prevents an unreviewed branch update from
-silently entering the index. To ingest a newer revision, update the source to a
-new reviewed commit and start another sync.</p>
-<h2 id="runtime-enforcement-boundary"><a class="header" href="#runtime-enforcement-boundary">Runtime enforcement boundary</a></h2>
-<p>Portal stores the selected policy and validates that it is either global or
-owned by the Knowledge Base tenant. The Phase 1a worker still obtains its
-effective source limits from the deployed worker configuration. Until the
-worker resolves the selected policy at job start, administrators must keep the
-worker limits at least as restrictive as the selected Portal policy. A stored
-policy must not be treated as runtime-enforced merely because its UUID appears
-on a source.</p>
-<h2 id="authentication-and-error-messages"><a class="header" href="#authentication-and-error-messages">Authentication and error messages</a></h2>
-<p>Knowledge query actions require <code>portal.r</code>; mutation actions require <code>portal.w</code>.
-The light-portal contract does not use <code>portal.knowledge.r</code> or
-<code>portal.knowledge.w</code>.</p>
-<p>JWT security runs before the query or command handler. When a valid token lacks
-the action scope, security returns a structured <code>403</code> response such as
-<code>AUTH_TOKEN_SCOPE_MISMATCH</code>. Portal displays the backend message so an
-administrator can distinguish insufficient scope from a failed Knowledge Base
-operation. This does not expose the token or its claims.</p>
-<p>If the page shows <strong>Knowledge Base operation failed</strong>, inspect the gateway and
-service response. Common causes are a missing access-control route, a token
-without <code>portal.r</code> or <code>portal.w</code>, an unavailable GenAI query/command service, or
-an object that is not visible to the selected tenant.</p>
-<h2 id="recommended-setup"><a class="header" href="#recommended-setup">Recommended setup</a></h2>
+<p>Use <code>/app/genai/KnowledgeBases</code> to configure governed retrieval from approved
+content. The page separates build limits, retrieval behavior, and embedding
+identity because they have different owners and lifecycles.</p>
+<h2 id="recommended-setup-sequence"><a class="header" href="#recommended-setup-sequence">Recommended setup sequence</a></h2>
 <ol>
-<li>A platform administrator creates at least one conservative global ingestion
-policy, or the installation bootstraps a starter global policy.</li>
-<li>A tenant administrator creates a tenant Knowledge Base.</li>
-<li>Create a tenant policy only when the global choices are unsuitable.</li>
-<li>Add an HTTPS Git source pinned to a reviewed full commit SHA.</li>
-<li>Select the policy by name and create the source.</li>
-<li>Confirm the deployed worker configuration enforces equal or tighter limits.</li>
-<li>Run the source sync and review documents, generations, access evidence, and
-quality evidence before promotion.</li>
+<li>Select the target environment and create or choose an ingestion policy.</li>
+<li>Create or choose a retrieval profile.</li>
+<li>A platform administrator publishes an eligible embedding Alias and creates
+its immutable embedding profile.</li>
+<li>Create the tenant Knowledge Base and assign the embedding profile.</li>
+<li>Open the Knowledge Base, add sources pinned to reviewed commits, and sync.</li>
+<li>Inspect the completed run and documents, then promote a READY generation.</li>
+<li>Bind an Agent and select the retrieval profile that should govern searches.</li>
+<li>Test the authorized <code>light-knowledge</code> REST or MCP endpoint. The Portal
+Retrieval Playground is not released yet.</li>
 </ol>
+<h2 id="knowledge-bases-section"><a class="header" href="#knowledge-bases-section">Knowledge Bases section</a></h2>
+<p>This table lists the logical collections of content. <strong>Desired state</strong> is the
+administrator’s requested lifecycle state. <strong>Effective state</strong> is the worker
+projection. <strong>Active BASE</strong> is the immutable generation currently visible to
+retrieval; a newly built READY candidate is not searchable until promotion.</p>
+<p>Choose <strong>Create tenant KB</strong>, give it a stable name and description, and select
+an active embedding profile or assign one later under <strong>Settings</strong>. Opening the
+name enters the workspace for sources, builds, bindings, and diagnostics.</p>
+<h2 id="ingestion-policies-section"><a class="header" href="#ingestion-policies-section">Ingestion policies section</a></h2>
+<p>An ingestion policy supplies hard ceilings for source processing: documents,
+chunks, source and stored bytes, embedding tokens, billed cost, wall time, and
+concurrency. A zero spend ceiling is valid for a genuinely free embedding
+route; the gateway still rejects any request whose calculated billed cost is
+greater than zero.</p>
+<ul>
+<li>A <strong>global policy</strong> is reusable by every tenant and is maintained by a
+platform Knowledge Base administrator.</li>
+<li>A <strong>tenant policy</strong> belongs to the selected host and is visible only there.</li>
+</ul>
+<p>Use <strong>Create policy</strong> for a new limit set. Portal generates the UUID; sources
+select policies by name. You may maintain several policies for different
+corpus sizes. Deactivation is refused while a non-deleted source refers to the
+policy. An inactive policy remains visible and can be edited to reactivate it.</p>
+<h2 id="retrieval-profiles-section"><a class="header" href="#retrieval-profiles-section">Retrieval profiles section</a></h2>
+<p>A retrieval profile defines bounded query behavior independently of how the
+index was built. Agent bindings select one active profile. Global profiles are
+reusable defaults; tenant profiles support tenant-specific behavior.</p>
+<p>The fields mean:</p>
+<ul>
+<li><strong>Strategy:</strong> lexical, vector, hybrid, or graph-assisted retrieval.</li>
+<li><strong>Lexical/vector candidates:</strong> maximum candidate pools gathered before
+fusion. <strong>Top K</strong> limits the final results.</li>
+<li><strong>Token budget:</strong> maximum retrieved context supplied downstream.</li>
+<li><strong>Failure policy:</strong> fail the request, or return safe partial results when an
+optional retrieval component fails.</li>
+<li><strong>Maximum Knowledge Bases:</strong> upper bound for multi-base retrieval, from one
+through four.</li>
+<li><strong>Lexical evidence required:</strong> requires lexical support in the result set.</li>
+<li><strong>Segment candidate multiplier:</strong> bounds candidate expansion across immutable
+BASE and DELTA segments.</li>
+<li><strong>Context expansion before/after:</strong> includes bounded neighboring passages.</li>
+</ul>
+<p>RRF is the fixed fusion method. Use <strong>Create retrieval profile</strong>, select tenant
+or global ownership, and start with <strong>Balanced hybrid</strong> unless the use case
+requires different bounds. Portal generates the UUID. Deactivation is refused
+while an active Agent binding uses the profile.</p>
+<h2 id="embedding-profiles-section"><a class="header" href="#embedding-profiles-section">Embedding profiles section</a></h2>
+<p>An embedding profile freezes the vector-space identity used to build and query
+an index: protected public Alias, space ID and revision, dimension,
+normalization, distance metric, and input transforms. It does not duplicate
+live model conformance or lifecycle status.</p>
+<p>Only a platform administrator creates these global profiles. In <strong>Create global
+embedding profile</strong>, select an eligible public Alias; Portal derives the Alias
+owner, public Alias ID, expected space, and qualification digest. Do not invent
+the digest or UUID. Assign the profile when creating a Knowledge Base or later
+under <strong>Settings</strong>.</p>
+<h2 id="knowledge-base-workspace"><a class="header" href="#knowledge-base-workspace">Knowledge Base workspace</a></h2>
+<h3 id="overview-6"><a class="header" href="#overview-6">Overview</a></h3>
+<p>Shows desired/effective state, active generation, pointer version, source
+count, and document count. Use it as a quick readiness summary.</p>
+<h3 id="sources"><a class="header" href="#sources">Sources</a></h3>
+<p>Creates and syncs approved content inputs. For Git/Markdown:</p>
+<ul>
+<li><strong>Display name:</strong> a short operator-facing label.</li>
+<li><strong>Approved repository URI:</strong> an HTTPS clone URI, for example
+<code>https://github.com/networknt/light-fabric.git</code>.</li>
+<li><strong>Immutable commit:</strong> the full 40- or 64-character commit SHA. Branches and
+tags move, so they are not reproducible source identities.</li>
+<li><strong>Ingestion policy:</strong> an active global or tenant policy selected by name.</li>
+</ul>
+<p>A mixed source-and-documentation repository is allowed. The connector applies
+the configured Markdown include/exclude policy, ignores other file types and
+symlinks, does not execute hooks, and rejects submodules. The default Portal
+form includes <code>**/*.md</code> and an empty exclude list. Click <strong>Sync</strong> after creating
+or updating a source. The worker resolves all active source and policy records
+from the database and builds one complete BASE for the Knowledge Base.</p>
+<h3 id="documents"><a class="header" href="#documents">Documents</a></h3>
+<p>Lists immutable document versions written by successful builds. An empty-state
+message before the first completed build is expected.</p>
+<h3 id="sync-runs"><a class="header" href="#sync-runs">Sync Runs</a></h3>
+<p>Tracks accepted, running, succeeded, failed, paused-budget, and cancelled runs.
+The page polls while a run is non-terminal. For a failure, use the displayed
+error code and message rather than clicking Sync repeatedly; fix the underlying
+configuration and submit a new sync.</p>
+<h3 id="index-generations"><a class="header" href="#index-generations">Index Generations</a></h3>
+<p>Shows immutable generations and operational evidence. A successful build
+creates a READY candidate. Review it, then choose <strong>Promote for retrieval</strong> to
+atomically update the active pointer. Rebuild, compaction, embedding migration,
+rollback, and retention controls also appear here when applicable.</p>
+<h3 id="incremental"><a class="header" href="#incremental">Incremental</a></h3>
+<p>Displays upload, classified-change, stable-passage-anchor, compaction, and
+anti-entropy diagnostics. These records explain how later DELTA work relates
+to the BASE without exposing source text.</p>
+<h3 id="agent-bindings"><a class="header" href="#agent-bindings">Agent Bindings</a></h3>
+<p>Connects an Agent to this Knowledge Base. Enter the Agent UUID, choose an active
+retrieval profile by name, and decide whether missing Knowledge evidence must
+fail the turn. The service validates tenant ownership and profile activity; a
+foreign or inactive profile cannot be bound.</p>
+<h3 id="access-policy"><a class="header" href="#access-policy">Access Policy</a></h3>
+<p>Shows source trust, ACL reconciliation, freshness, transition, and connector
+evidence. Use <strong>Simulate access</strong> with a normalized USER, GROUP, or ORGANIZATION
+subject before relying on mirrored source permissions. Retrieval fails closed
+when permission evidence is stale, incomplete, ambiguous, or unresolved.</p>
+<h3 id="retrieval-playground-1"><a class="header" href="#retrieval-playground-1">Retrieval Playground</a></h3>
+<p>The Portal retrieval-test workflow is currently not released, so the question
+field is intentionally disabled. Test the promoted generation through the
+authorized <code>light-knowledge</code> REST <code>/v1/knowledge/retrieve</code> endpoint or MCP
+<code>knowledge.search</code> tool and review its audit evidence.</p>
+<h3 id="quality"><a class="header" href="#quality">Quality</a></h3>
+<p>Collects generation and production evidence used to judge promotion,
+migration, rollback, backup, anti-entropy, and purge behavior. Provider latency
+and retrieval-quality qualification remain explicit operational gates.</p>
+<h3 id="settings"><a class="header" href="#settings">Settings</a></h3>
+<p>Assigns the desired immutable embedding profile and manages Knowledge Base
+lifecycle. Changing embedding space requires a governed migration rather than
+silently rebuilding into an incompatible vector space. Physical purge is not
+released; deactivation remains available.</p>
+<h2 id="authentication-and-errors"><a class="header" href="#authentication-and-errors">Authentication and errors</a></h2>
+<p>Knowledge queries require <code>portal.r</code>; mutations require <code>portal.w</code>. The Portal
+does not use <code>portal.knowledge.r</code> or <code>portal.knowledge.w</code>. JWT security runs
+before handlers, so a valid token without the action scope produces a
+structured <code>AUTH_TOKEN_SCOPE_MISMATCH</code> response that the UI displays.</p>
+<p>For <strong>Knowledge Base operation failed</strong>, inspect the returned code and the
+gateway/service logs. Common causes are a missing access-control route, an old
+GenAI command/query deployment that lacks a new handler, an unapplied database
+patch, an unavailable service, or an object outside the selected tenant.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="create-llm-model"><a class="header" href="#create-llm-model">Create LLM Model</a></h1>
 <p>Use the <strong>Create LLM Model</strong> form to add a physical provider model to the LLM
@@ -41567,7 +41621,7 @@ deletion.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="login-view-1"><a class="header" href="#login-view-1">Login View</a></h1>
 <p>The <code>login-view</code> is a Single Page Application (SPA) built with React and Vite. It serves as the user interface for the OAuth 2.0 Authorization Code flow within the LightAPI ecosystem.</p>
-<h2 id="overview-6"><a class="header" href="#overview-6">Overview</a></h2>
+<h2 id="overview-7"><a class="header" href="#overview-7">Overview</a></h2>
 <p>This application acts as the front-end for the Authorization Server. When a user attempts to access a protected resource on a client application (the “Portal”), they are redirected to this application to authenticate and grant consent.</p>
 <p>It handles:</p>
 <ul>
@@ -41966,7 +42020,7 @@ deletion.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="oauth-20-state-verification"><a class="header" href="#oauth-20-state-verification">OAuth 2.0 State Verification</a></h1>
 <p>This document describes the implementation of CSRF protection for the OAuth 2.0 authorization code flow in the portal-view application.</p>
-<h2 id="overview-7"><a class="header" href="#overview-7">Overview</a></h2>
+<h2 id="overview-8"><a class="header" href="#overview-8">Overview</a></h2>
 <p>To prevent Cross-Site Request Forgery (CSRF) attacks during the OAuth 2.0 authentication process, we implement a state parameter check. A random state string is generated before the authentication request and verified upon the callback.</p>
 <h2 id="implementation-details-2"><a class="header" href="#implementation-details-2">Implementation Details</a></h2>
 <h3 id="state-generation"><a class="header" href="#state-generation">State Generation</a></h3>
