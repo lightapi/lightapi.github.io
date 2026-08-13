@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-db9c0a3d.js";
+            window.path_to_searchindex_js = "searchindex-3573f11f.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-02438b07.js"></script>
+        <script src="toc-5b825fe4.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -13013,12 +13013,851 @@ design provides the strongest default governance model, aligns with the current
 database, and still supports different models and Policies through the existing
 Alias, Route, Deployment, Policy, and Binding abstractions.</p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="local-model-provider-transport-for-llm-gateway"><a class="header" href="#local-model-provider-transport-for-llm-gateway">Local Model Provider Transport For LLM Gateway</a></h1>
+<h1 id="control-plane-policy-publication-through-config-server"><a class="header" href="#control-plane-policy-publication-through-config-server">Control-Plane Policy Publication Through Config Server</a></h1>
 <h2 id="status-3"><a class="header" href="#status-3">Status</a></h2>
+<p>Proposed target architecture.</p>
+<p>This document defines how Light Portal publishes immutable policy and runtime
+configuration to independently operated workloads such as Agent and Gateway.
+It also defines how publication identity is shared with the internal Workflow
+and Knowledge services without pretending that those services are external
+Config Server clients.</p>
+<h2 id="decision-summary-3"><a class="header" href="#decision-summary-3">Decision Summary</a></h2>
+<p>Light Portal is the policy authoring and publication control plane. Agent,
+Gateway, and other independently operated application runtimes are external
+policy consumers. They receive configuration only from Config Server and have
+no Light Portal database credentials.</p>
+<p>Workflow and Knowledge are internal platform services. In the current
+architecture they consume Portal events and read the event-backed projections
+needed to admit and pin work. They also write their own operational tables.
+Those accesses use dedicated least-privilege database roles; neither service
+may insert or update event-backed authoring projections directly. Moving their
+internal policy views to Config Server is an optional future decoupling step,
+not a requirement of this external publication contract.</p>
+<p>Config Server renders the immutable configuration snapshot selected as current
+for an authenticated external workload instance. The caller has read-only
+access to its own audience-specific <code>values.yml</code> document.</p>
+<p>Publishing a policy consists of:</p>
+<ol>
+<li>resolving and validating the effective policy in Light Portal;</li>
+<li>creating a separate least-privilege projection for each publication target;</li>
+<li>emitting events that create or update the target instance properties;</li>
+<li>waiting until those events and required internal views have been projected
+completely;</li>
+<li>creating an immutable configuration snapshot for every external target
+instance;</li>
+<li>validating and digesting the snapshots; and</li>
+<li>moving the target instances’ current pointers to the new snapshots as one
+coordinated release.</li>
+</ol>
+<p><code>instance_property_t</code> is mutable desired configuration. It is not a publication
+staging artifact or runtime contract. An immutable publication manifest records
+the exact intended property set before property events are emitted.
+<code>config_snapshot_t</code> and its snapshot content are immutable deployable artifacts.
+The <code>current</code> flag is a projected pointer to one of those immutable artifacts.</p>
+<h2 id="context-3"><a class="header" href="#context-3">Context</a></h2>
+<p>Agent configuration is authored in Light Portal from multiple control-plane
+resources. Depending on the Agent and its capabilities, the effective policy may
+include:</p>
+<ul>
+<li>Agent definition and product profile;</li>
+<li>prompt and model selection;</li>
+<li>tool and skill grants;</li>
+<li>execution, token, cost, and concurrency limits;</li>
+<li>memory and data-boundary rules;</li>
+<li>Knowledge Base bindings and retrieval profiles;</li>
+<li>Gateway routing and delegation constraints; and</li>
+<li>tenant, environment, and instance ownership.</li>
+</ul>
+<p>The resolved policy must be immutable for an execution or session. At the same
+time, runtime deployment configuration must support controlled rollout,
+rollback, and forward activation.</p>
+<p>The existing configuration subsystem already provides useful foundations:</p>
+<ul>
+<li>instance-level properties are stored in <code>instance_property_t</code>;</li>
+<li>snapshot creation copies instance overrides and produces merged effective
+values in <code>config_snapshot_property_t</code>;</li>
+<li>snapshot files and other scoped overrides are copied into snapshot tables;</li>
+<li><code>config_snapshot_t.current</code> identifies the selected snapshot; and</li>
+<li>a partial unique index permits only one current snapshot for a
+<code>(host_id, instance_id)</code> pair.</li>
+</ul>
+<p>Config Server already resolves effective values from the selected current
+snapshot by host, environment, service ID, configuration phase, and property
+type. This design extends that mechanism into the only supported policy delivery
+path for external runtime services.</p>
+<h2 id="terminology-1"><a class="header" href="#terminology-1">Terminology</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Term</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td>Control-plane policy</td><td>Mutable authoring resources and rules managed in Light Portal.</td></tr>
+<tr><td>Effective policy</td><td>The fully resolved policy after defaults, bindings, ownership, and limits have been applied.</td></tr>
+<tr><td>Domain policy snapshot</td><td>An immutable semantic policy for an Agent or another governed subject. It is pinned to sessions and requests.</td></tr>
+<tr><td>Audience projection</td><td>The least-privilege subset of an effective policy needed by one runtime service.</td></tr>
+<tr><td>Instance property</td><td>Mutable desired configuration for one registered service instance.</td></tr>
+<tr><td>Configuration snapshot</td><td>An immutable, deployable <code>values.yml</code> configuration for one instance.</td></tr>
+<tr><td>Publication</td><td>One attempt to compile, stage, validate, and activate policy projections.</td></tr>
+<tr><td>Release</td><td>A coordinated set of audience-specific configuration snapshots sharing one publication identity.</td></tr>
+<tr><td>Current pointer</td><td>The mutable selection of the configuration snapshot served to an instance by Config Server.</td></tr>
+<tr><td>Last known good</td><td>The most recent snapshot a runtime successfully validated and applied.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="goals-18"><a class="header" href="#goals-18">Goals</a></h2>
+<ul>
+<li>Prevent external runtimes from using Light Portal database tables as a
+control-plane policy source.</li>
+<li>Define safe internal database boundaries for Workflow and Knowledge while
+preserving event sourcing for authoring state.</li>
+<li>Publish only the policy fields required by each runtime audience.</li>
+<li>Preserve an immutable policy identity for every session and request.</li>
+<li>Reuse the existing instance-property and configuration-snapshot model.</li>
+<li>Support deterministic rollback and forward activation by moving a current
+pointer rather than rewriting historical configuration.</li>
+<li>Prevent partially projected policy changes from becoming current.</li>
+<li>Coordinate compatible policy generations across multiple independently
+operated services.</li>
+<li>Let a runtime retain and enforce its last known good configuration when a new
+snapshot is invalid or temporarily unavailable.</li>
+<li>Provide sufficient identifiers and digests for audit, diagnosis, and
+cross-service consistency checks.</li>
+</ul>
+<h2 id="non-goals-21"><a class="header" href="#non-goals-21">Non-Goals</a></h2>
+<ul>
+<li>Config Server does not make policy decisions for a runtime request.</li>
+<li>Light Portal does not become the runtime session, retrieval, or Gateway data
+store.</li>
+<li>A service token does not replace the end-user or delegated request identity.</li>
+<li>This design does not require simultaneous process restarts for publication.</li>
+<li>This design does not distribute provider credentials as ordinary policy
+values. Production secrets remain references resolved through the appropriate
+secret provider.</li>
+<li>This design does not require all audiences to receive identical policy
+documents.</li>
+<li>This design does not require Knowledge and Workflow operational state to move
+out of the shared PostgreSQL deployment immediately.</li>
+</ul>
+<h2 id="trust-boundary"><a class="header" href="#trust-boundary">Trust Boundary</a></h2>
+<h3 id="light-portal-control-plane"><a class="header" href="#light-portal-control-plane">Light Portal control plane</a></h3>
+<p>Light Portal owns:</p>
+<ul>
+<li>mutable authoring resources;</li>
+<li>validation and effective-policy resolution;</li>
+<li>domain policy snapshots and publication history;</li>
+<li>audience projection;</li>
+<li>instance-property events and their projections;</li>
+<li>configuration snapshot creation;</li>
+<li>release activation and rollback; and</li>
+<li>publication audit and operator-facing status.</li>
+</ul>
+<p>Portal command, query, projection, and Config Server components may access the
+Portal database according to their narrowly assigned roles.</p>
+<h3 id="config-server"><a class="header" href="#config-server">Config Server</a></h3>
+<p>Config Server is the read-only delivery boundary. It may read Portal-owned
+configuration snapshots, but a runtime caller may retrieve only configuration
+bound to its authenticated host, environment, service ID, instance ID, and
+audience.</p>
+<p>Config Server must never resolve policy from live authoring tables on behalf of
+a runtime. It serves immutable snapshot content only.</p>
+<h3 id="external-runtime-services"><a class="header" href="#external-runtime-services">External runtime services</a></h3>
+<p>Agent, Gateway, and other independently operated application runtimes:</p>
+<ul>
+<li>load configuration from Config Server;</li>
+<li>validate the delivered identity, schema, and digest;</li>
+<li>cache the last known good configuration;</li>
+<li>enforce their local audience projection; and</li>
+<li>store runtime state only in service-owned storage.</li>
+</ul>
+<p>They have no Light Portal database credentials and use their own storage where
+persistence is required.</p>
+<h3 id="internal-workflow-and-knowledge-services"><a class="header" href="#internal-workflow-and-knowledge-services">Internal Workflow and Knowledge services</a></h3>
+<p>Knowledge and Workflow are platform services, not external applications. They
+currently use the same physical PostgreSQL deployment as Light Portal and may
+read the event-backed projections necessary to resolve and pin internal work.</p>
+<p>Knowledge may use its database role for Knowledge-owned operational data such
+as ingestion jobs, sync runs, documents, chunks, index generations, and runtime
+evidence. Workflow may use its database role for Workflow-owned operational data
+such as workflow instances, tasks, attempts, leases, artifacts, and execution
+history.</p>
+<p>These reads are read-only and must select an immutable definition, version, and
+digest at admission. All authoring mutations still enter through commands and
+events; Workflow and Knowledge never insert or update event-backed projection
+rows. Direct writes are limited to explicitly operational state owned by the
+service.</p>
+<p>The shared database roles must be least-privilege roles restricted to the exact
+projection reads and operational writes each service needs. They must not be
+database superusers. A future physical database split may deliver the same
+internal policy views through events or Config Server without changing their
+semantic contracts.</p>
+<h2 id="required-invariants-1"><a class="header" href="#required-invariants-1">Required Invariants</a></h2>
+<ol>
+<li>An external runtime never queries a Light Portal domain or projection table
+to resolve control-plane policy. Internal Workflow and Knowledge may read
+explicitly granted event-backed projections and write explicitly granted
+operational tables.</li>
+<li>Config Server never renders runtime configuration from mutable authoring
+state.</li>
+<li>Configuration snapshot bytes and their integrity/publication metadata are
+immutable after creation. Only separately stored descriptive labels and the
+event-projected current pointer may change.</li>
+<li>At most one configuration snapshot is current for a host and instance.</li>
+<li>Every published snapshot identifies the source publication and the event
+watermark from which it was built.</li>
+<li>Snapshot creation begins only after all property events for the publication
+have reached their required projections and every inherited input version
+plus the projected property-set digest equals the immutable staged manifest.</li>
+<li>Each audience receives only its explicitly compiled projection.</li>
+<li>Every audience projection has a canonical digest and is bound to its host,
+environment, service, instance, and schema version.</li>
+<li>A runtime applies a new snapshot only after complete validation. Failure
+preserves the last known good snapshot.</li>
+<li>A session or long-running operation remains pinned to its domain policy
+snapshot unless that policy is explicitly revoked.</li>
+<li>Moving a current pointer affects new work; it does not silently change the
+policy already pinned to in-flight work.</li>
+<li>Cross-service requests identify the policy publication and digest under
+which they were authorized.</li>
+<li>Rollback selects an existing immutable snapshot. It does not edit that
+snapshot or reverse authoring events.</li>
+<li>An unavailable Config Server does not cause an external runtime to accept
+unknown or unvalidated policy.</li>
+<li>Workflow and Knowledge never mutate event-backed authoring projections
+directly; operational writes are not authoring shortcuts.</li>
+</ol>
+<h2 id="architecture-1"><a class="header" href="#architecture-1">Architecture</a></h2>
+<pre><code class="language-text">Light Portal policy authoring
+            |
+            v
+Effective-policy resolver and validator
+            |
+            v
+Immutable domain policy snapshot
+            |
+            v
+Publication target compiler
+      /-------------------------\
+      v                          v
+External workload         Internal service view
+projection                (Workflow/Knowledge)
+      |                          |
+      v                          v
+immutable publication      event-backed projection
+manifest                   + immutable work pin
+      |
+      v
+instance-property events
+      |
+      v
+immutable configuration snapshots
+      |
+      v
+coordinated release activation event
+      |
+      v
+Config Server read-only API
+      |
+      v
+Agent / Gateway / application runtimes
+local last-known-good cache
+</code></pre>
+<h2 id="two-immutable-snapshot-layers"><a class="header" href="#two-immutable-snapshot-layers">Two Immutable Snapshot Layers</a></h2>
+<p>The domain policy snapshot and configuration snapshot solve different problems
+and must have different identities.</p>
+<h3 id="domain-policy-snapshot"><a class="header" href="#domain-policy-snapshot">Domain policy snapshot</a></h3>
+<p>The domain policy snapshot captures the semantic authority for an Agent or
+another governed subject. It includes stable component digests and the resolved
+policy document. A session or request records this identity so its authority can
+be reproduced later.</p>
+<p>Updating an Agent definition produces a new domain policy snapshot. It does not
+mutate the snapshot used by existing sessions.</p>
+<h3 id="instance-configuration-snapshot"><a class="header" href="#instance-configuration-snapshot">Instance configuration snapshot</a></h3>
+<p>The configuration snapshot captures everything one external service instance
+needs to start or reload, including its audience projection and ordinary
+runtime settings. It is the artifact rendered as <code>values.yml</code> by Config Server.</p>
+<p>Several external instance snapshots and internal pinned policy views may be
+derived from the same domain policy snapshot. They share the same
+<code>publicationId</code> and <code>policySnapshotId</code>, even though the internal views do not
+have to be transported through Config Server.</p>
+<h2 id="publication-targets-and-internal-policy-views"><a class="header" href="#publication-targets-and-internal-policy-views">Publication Targets And Internal Policy Views</a></h2>
+<p>Projection is a compile-time allowlist. It must not be implemented as a runtime
+filter over a shared complete policy document.</p>
+<h3 id="agent-projection"><a class="header" href="#agent-projection">Agent projection</a></h3>
+<p>The Agent projection may contain:</p>
+<ul>
+<li>definition and product-profile identity;</li>
+<li>prompt, model Alias, and model-action limits;</li>
+<li>tool and skill grants with schema digests;</li>
+<li>execution placement and approval requirements;</li>
+<li>memory and data-boundary policy;</li>
+<li>channel configuration;</li>
+<li>Knowledge binding identifiers and retrieval contract digests;</li>
+<li>Gateway delegation constraints; and</li>
+<li>session lifetime and concurrency limits.</li>
+</ul>
+<p>It must not contain Knowledge repository credentials, Knowledge index internals,
+Gateway provider credentials, or unrelated tenants’ bindings.</p>
+<h3 id="gateway-projection"><a class="header" href="#gateway-projection">Gateway projection</a></h3>
+<p>The Gateway projection may contain:</p>
+<ul>
+<li>Agent and subject bindings relevant to Gateway enforcement;</li>
+<li>permitted model and tool Aliases;</li>
+<li>routing, delegation, budget, and rate-limit constraints;</li>
+<li>accepted issuers, audiences, claim requirements, and signing-key references;</li>
+<li>policy and catalog digests; and</li>
+<li>compatibility rules for accepted publication generations.</li>
+</ul>
+<p>It must not contain Agent prompts, memory content, Knowledge documents, or
+provider secret material.</p>
+<h3 id="internal-knowledge-policy-view"><a class="header" href="#internal-knowledge-policy-view">Internal Knowledge policy view</a></h3>
+<p>The internal Knowledge policy view may contain:</p>
+<ul>
+<li>Agent-to-Knowledge-Base authorization bindings;</li>
+<li>tenant, environment, and ownership constraints;</li>
+<li>retrieval-profile identity and immutable digest;</li>
+<li>permitted released index generations;</li>
+<li>query limits, graph behavior, and result constraints;</li>
+<li>applicable ingestion or retrieval ceilings; and</li>
+<li>accepted Agent and publication identities.</li>
+</ul>
+<p>It must not contain Agent prompts, unrelated tool grants, or Gateway routing
+internals.</p>
+<h3 id="internal-workflow-policy-view"><a class="header" href="#internal-workflow-policy-view">Internal Workflow policy view</a></h3>
+<p>The internal Workflow policy view may contain:</p>
+<ul>
+<li>immutable workflow definition and execution-policy identity;</li>
+<li>allowed Agent, tool, runner, and sandbox bindings;</li>
+<li>task, retry, timeout, concurrency, and cost ceilings;</li>
+<li>approval and human-task requirements;</li>
+<li>data-boundary and artifact-retention rules;</li>
+<li>accepted publication and delegation identities; and</li>
+<li>compatibility requirements for Workflow runtime components.</li>
+</ul>
+<p>It must not contain unrelated Agent prompts, Knowledge document content,
+Gateway provider credentials, or authoring-only Portal metadata. Workflow pins
+the exact definition, binding, endpoint target set, and policy digests accepted
+for an invocation so a later projection update cannot change in-flight work.</p>
+<p>These internal views are still explicit, least-privilege projections. Their
+current delivery mechanism is the shared event/projection boundary. They may be
+published through Config Server later if Workflow or Knowledge is separated
+from the Portal trust domain.</p>
+<h2 id="publication-data-contract"><a class="header" href="#publication-data-contract">Publication Data Contract</a></h2>
+<p>Each external audience projection must carry a common envelope. Internal views
+must retain the equivalent publication and policy identity with the work they
+admit. The field names below are normative even if the transport representation
+evolves.</p>
+<pre><code class="language-yaml">runtimePolicy:
+  publicationId: "019f..."
+  releaseVersion: 12
+  policySnapshotId: "019f..."
+  policyVersion: 7
+  policyDigest: "sha256:..."
+  contentDigest: "sha256:..."
+  audience: "gateway"
+  hostId: "0196..."
+  environment: "dev"
+  serviceId: "com.networknt.light-gateway-1.0.0"
+  instanceId: "019f..."
+  sourceEventSequence: 4812
+  schemaVersion: 1
+  createdAt: "2026-08-13T14:00:00Z"
+  validFrom: "2026-08-13T14:00:00Z"
+  refreshAfter: "2026-08-13T14:05:00Z"
+  expiresAt: "2026-08-13T14:15:00Z"
+  revocationEpoch: 4
+  compatibilityGeneration: 3
+</code></pre>
+<p>Audience-specific configuration follows this envelope under a dedicated
+namespace, for example <code>gatewayPolicy</code>.</p>
+<p>Digest inputs are non-self-referential and normative:</p>
+<ul>
+<li><code>policyDigest</code> is SHA-256 over the RFC 8785 canonical JSON bytes of the
+immutable domain policy object;</li>
+<li><code>contentDigest</code> is SHA-256 over the RFC 8785 canonical JSON bytes of the
+audience-specific namespace only; it excludes <code>runtimePolicy</code>, signatures,
+delivery metadata, and every digest field; and</li>
+<li><code>artifactDigest</code> is SHA-256 over the exact UTF-8 <code>values.yml</code> bytes returned
+by Config Server. It is stored in snapshot metadata and returned in HTTP
+headers, not embedded in the bytes it hashes.</li>
+</ul>
+<p>The compiler rejects data outside the supported canonical-JSON subset. Time is
+normalized to UTC RFC 3339, object members use their exact schema names, and no
+volatile delivery timestamp participates in a semantic digest.</p>
+<h2 id="publication-lifecycle"><a class="header" href="#publication-lifecycle">Publication Lifecycle</a></h2>
+<h3 id="1-resolve"><a class="header" href="#1-resolve">1. Resolve</a></h3>
+<p>The publisher reads Portal-owned authoring projections and resolves defaults,
+bindings, ownership, environment, and limits into one complete effective
+policy. Resolution is deterministic for a declared source event watermark.</p>
+<h3 id="2-validate"><a class="header" href="#2-validate">2. Validate</a></h3>
+<p>Validation confirms:</p>
+<ul>
+<li>every reference exists and is visible to the owning host;</li>
+<li>required runtime instances are registered;</li>
+<li>every audience has a supported schema version;</li>
+<li>no projection exceeds platform ceilings;</li>
+<li>policy and configuration ownership agree; and</li>
+<li>the proposed release is compatible with the runtime versions receiving it.</li>
+</ul>
+<p>Failure terminates publication without changing any current pointer.</p>
+<h3 id="3-freeze-the-domain-policy"><a class="header" href="#3-freeze-the-domain-policy">3. Freeze the domain policy</a></h3>
+<p>The canonical effective policy is persisted with a new <code>policySnapshotId</code> and
+digest. An existing snapshot with the same digest may be reused if its ownership
+and revocation state match exactly.</p>
+<h3 id="4-compile-audience-projections"><a class="header" href="#4-compile-audience-projections">4. Compile audience projections</a></h3>
+<p>The publisher generates external Agent/Gateway projections and coordinated
+internal Workflow/Knowledge views from explicit schemas and field allowlists.
+Each target is canonicalized and digested independently.</p>
+<h3 id="5-stage-instance-properties"><a class="header" href="#5-stage-instance-properties">5. Stage instance properties</a></h3>
+<p>For every external target instance, the publisher first persists an immutable
+staged target manifest containing:</p>
+<ul>
+<li><code>publicationId</code>, target identity, audience, and source watermark;</li>
+<li>the observed versions and digests of every inherited environment, product,
+product-version, instance, file, and certificate input;</li>
+<li>the complete resolved target configuration and desired instance-property
+change set, including removals;</li>
+<li>a canonical property-set digest; and</li>
+<li>the expected audience content digest and compatibility generation.</li>
+</ul>
+<p>The publisher then emits idempotent create, update, and deactivate events for
+that exact property set. All events carry the same publication and staged-target
+identity. Concurrent authoring or instance-property changes do not become part
+of this publication merely because they project before snapshot creation.</p>
+<p>Property events may be projected asynchronously. Before creating a snapshot,
+the publisher verifies both the projection watermark and that every input
+version plus the projected instance property-set digest equals the immutable
+staged manifest. A time delay is not sufficient. A mismatch marks the target
+<code>STALE</code>; the publisher must resolve and compile a new publication instead of
+snapshotting mixed state.</p>
+<h3 id="6-create-configuration-snapshots"><a class="header" href="#6-create-configuration-snapshots">6. Create configuration snapshots</a></h3>
+<p>Once the exact staged target is projected, snapshot creation copies from the
+immutable staged artifact in one transaction and creates the merged effective
+<code>config_snapshot_property_t</code> rows. It must not reread an unconstrained mutable
+<code>instance_property_t</code> state that may include another publication. New snapshots
+start as staged and are not served as current.</p>
+<p>Snapshot metadata must retain:</p>
+<ul>
+<li>publication and release identity;</li>
+<li>audience;</li>
+<li>content digest;</li>
+<li>exact rendered artifact digest;</li>
+<li>staged property-set digest and inherited input versions/digests;</li>
+<li>source event sequence;</li>
+<li>schema and compatibility versions; and</li>
+<li>validation state.</li>
+</ul>
+<p>These fields may be added to <code>config_snapshot_t</code> or stored in a publication
+manifest linked to each <code>snapshot_id</code>.</p>
+<h3 id="7-validate-deployable-artifacts"><a class="header" href="#7-validate-deployable-artifacts">7. Validate deployable artifacts</a></h3>
+<p>Validation renders the exact <code>values.yml</code> that Config Server will serve and
+checks:</p>
+<ul>
+<li>schema and type correctness;</li>
+<li>required keys and files;</li>
+<li>canonical digest agreement;</li>
+<li>instance and audience binding;</li>
+<li>runtime-version compatibility; and</li>
+<li>absence of fields forbidden for the audience.</li>
+</ul>
+<p>The validated UTF-8 bytes, media type, renderer profile/version, and
+<code>artifactDigest</code> are stored as one immutable snapshot artifact. Config Server
+serves those stored bytes; it does not rerender the workload response from
+mutable properties at request time.</p>
+<h3 id="8-activate-the-release"><a class="header" href="#8-activate-the-release">8. Activate the release</a></h3>
+<p>After every required target snapshot is ready, Portal emits one
+<code>PolicyPublicationActivatedEvent</code> containing the publication ID, expected prior
+release, and the complete target-to-snapshot mapping. One projection transaction
+validates every target and updates all current flags plus release state. There
+is no handler-side or operator-side direct pointer mutation.</p>
+<p>Database transactions can make the Portal-side pointer changes atomic, but
+independently operated services will observe them at different times. The
+release therefore requires either backward-compatible adjacent generations or
+a staged protocol in which runtimes prefetch before activation.</p>
+<p>Rollback emits the analogous <code>PolicyPublicationRolledBackEvent</code> with an exact
+previous target mapping and is projected through the same all-target operation.</p>
+<h3 id="9-acknowledge-runtime-application"><a class="header" href="#9-acknowledge-runtime-application">9. Acknowledge runtime application</a></h3>
+<p>Each external runtime reports or exposes:</p>
+<ul>
+<li>current configuration snapshot ID;</li>
+<li>publication ID;</li>
+<li>content and policy digests;</li>
+<li>load timestamp;</li>
+<li>last validation result; and</li>
+<li>last known good snapshot ID.</li>
+</ul>
+<p>Acknowledgement is operational evidence. It does not make an invalid snapshot
+valid and does not grant authority beyond the snapshot itself.</p>
+<h2 id="config-server-contract"><a class="header" href="#config-server-contract">Config Server Contract</a></h2>
+<p>The workload API is versioned separately from the existing operator and legacy
+configuration endpoints:</p>
+<ul>
+<li><code>GET /v2/runtime-config/current</code> returns the authenticated instance’s current
+immutable YAML artifact;</li>
+<li><code>GET /v2/runtime-config/snapshots/{snapshotId}</code> returns one authorized
+historical artifact; and</li>
+<li><code>POST /v2/runtime-config/acknowledgements</code> records load or rejection evidence
+for the authenticated instance.</li>
+</ul>
+<p>The current and historical responses use <code>Content-Type: application/yaml</code> and
+return <code>ETag</code>, RFC 9530 <code>Repr-Digest</code>, <code>X-Config-Snapshot-Id</code>,
+<code>X-Policy-Publication-Id</code>, <code>X-Policy-Digest</code>, <code>X-Content-Digest</code>,
+<code>X-Artifact-Digest</code>, validity-window headers, <code>X-Manifest-Key-Id</code>, and
+<code>X-Manifest-Signature</code>. The signature covers workload target identity,
+publication/snapshot identity, all digests, compatibility generation,
+revocation epoch, and the validity window. <code>If-None-Match</code> is supported. The
+acknowledgement request contains identifiers, digests, timestamp, and a bounded
+stable result code; it never contains the rendered document or secrets.</p>
+<p>The legacy <code>/configs</code> API remains a migration path for existing clients. An
+external workload must not select live configuration by supplying
+<code>productId</code>, <code>productVersion</code>, host, environment, service, audience, or instance
+query parameters.</p>
+<h3 id="current-configuration"><a class="header" href="#current-configuration">Current configuration</a></h3>
+<p>An external runtime requests current configuration using a workload JWT and,
+where required by the deployment, mTLS. Config Server derives:</p>
+<ul>
+<li>host;</li>
+<li>environment;</li>
+<li>service ID;</li>
+<li>instance ID;</li>
+<li>audience; and</li>
+<li>permitted configuration phase.</li>
+</ul>
+<p>The token or certificate contract must expose stable host, environment, service
+ID, instance ID, and audience claims. Caller-controlled query values cannot
+override or widen them. Config Server returns the exact immutable snapshot
+selected as current; its ETag is the quoted <code>artifactDigest</code>.</p>
+<h3 id="historical-configuration"><a class="header" href="#historical-configuration">Historical configuration</a></h3>
+<p>Config Server should also support retrieval by an explicit <code>snapshotId</code> for:</p>
+<ul>
+<li>session resume under a pinned policy;</li>
+<li>rollback preparation;</li>
+<li>audit and diagnosis; and</li>
+<li>recovery of a runtime that did not persist an older pinned policy locally.</li>
+</ul>
+<p>Historical access is subject to the same host, service, instance, and audience
+checks as current access. An arbitrary service cannot read another instance’s
+history.</p>
+<h3 id="read-only-semantics"><a class="header" href="#read-only-semantics">Read-only semantics</a></h3>
+<p>Runtime credentials authorize only configuration reads and optional delivery
+acknowledgement through a separate, narrowly scoped endpoint. They do not
+authorize property editing, snapshot creation, current-pointer changes, or
+policy publication.</p>
+<p>Config Server access logs record identifiers and response size only. Trace,
+debug, error, and acknowledgement paths must never log the rendered YAML body.</p>
+<h2 id="runtime-loading-and-enforcement"><a class="header" href="#runtime-loading-and-enforcement">Runtime Loading And Enforcement</a></h2>
+<p>At startup, an external runtime:</p>
+<ol>
+<li>authenticates to Config Server using its workload identity;</li>
+<li>requests the current configuration for its bound instance;</li>
+<li>verifies the response identity, audience, schema, signature, digests, and
+validity window;</li>
+<li>compiles the audience policy into its local enforcement representation;</li>
+<li>stores the immutable policy in service-owned storage when necessary;</li>
+<li>atomically replaces its in-memory current configuration; and</li>
+<li>records acknowledgement and health evidence.</li>
+</ol>
+<p>During operation, the runtime polls, watches, or refreshes Config Server with a
+conditional request. A candidate is fully parsed and validated before it
+replaces the current in-memory object.</p>
+<p>If Config Server is unavailable, the runtime may use its cryptographically
+validated last known good snapshot only while <code>now &lt; expiresAt</code>, allowing a
+bounded clock-skew tolerance. It begins refreshing no later than <code>refreshAfter</code>
+and must not apply a candidate before <code>validFrom</code>. It must not invent defaults
+that broaden access. Once the lease expires, protected operations fail closed.
+Emergency revocation while disconnected is therefore bounded by the published
+lease; deployments needing a shorter revocation objective configure a shorter
+lease or an authenticated push channel.</p>
+<h2 id="session-and-request-pinning"><a class="header" href="#session-and-request-pinning">Session And Request Pinning</a></h2>
+<p>The current configuration selects the default policy for new work. It does not
+rewrite the authority of existing work.</p>
+<p>An Agent session records at least:</p>
+<ul>
+<li><code>policySnapshotId</code>;</li>
+<li><code>policyDigest</code>;</li>
+<li><code>publicationId</code>; and</li>
+<li>relevant data-boundary and execution digests.</li>
+</ul>
+<p>Each downstream call to Gateway or Knowledge carries the applicable policy and
+publication identity in trusted request metadata. The receiving service checks
+that it recognizes a compatible projection and then applies the authenticated
+end-user or delegated principal to the locally loaded rules.</p>
+<p>The workload credential authenticates the calling service. The end-user or
+delegated identity remains request-specific and must not be stored as a static
+instance configuration value.</p>
+<h2 id="rollback-and-forward-activation"><a class="header" href="#rollback-and-forward-activation">Rollback And Forward Activation</a></h2>
+<p>Rollback changes current pointers to a previously validated release. It does
+not:</p>
+<ul>
+<li>edit the historical snapshot;</li>
+<li>overwrite current instance properties with old values;</li>
+<li>reverse domain events; or</li>
+<li>silently change sessions pinned to another policy.</li>
+</ul>
+<p>Before rollback, Portal verifies that every target snapshot still exists, is
+not revoked, is compatible with the running service version, and belongs to the
+same host, environment, instance, and audience.</p>
+<p>Forward activation uses the same event/projection operation to point current
+back to a newer validated release. Every pointer movement records actor, reason,
+timestamp, previous snapshot, next snapshot, and publication ID.</p>
+<p>Emergency revocation is separate from rollback. A revoked domain policy may
+terminate or deny already pinned work according to explicit policy; merely
+publishing a newer version does not revoke the older one.</p>
+<h2 id="coordinated-multi-service-releases"><a class="header" href="#coordinated-multi-service-releases">Coordinated Multi-Service Releases</a></h2>
+<p>External Agent/Gateway runtimes cannot be assumed to refresh at the same
+instant, and internal Workflow/Knowledge projections may advance on a different
+checkpoint. The publication protocol therefore uses a shared release manifest
+containing:</p>
+<ul>
+<li>publication ID and release version;</li>
+<li>domain policy snapshot and digest;</li>
+<li>required audience targets;</li>
+<li>external target instance and configuration snapshot IDs;</li>
+<li>internal view identifiers and projection checkpoints where they participate;</li>
+<li>each audience content digest;</li>
+<li>compatibility generation;</li>
+<li>source event watermark;</li>
+<li>staged, active, failed, or rolled-back state; and</li>
+<li>validation and acknowledgement evidence.</li>
+</ul>
+<p>Adjacent releases should normally support an overlap window:</p>
+<ul>
+<li>an old Agent may call a new Gateway or internal Knowledge view;</li>
+<li>a new Agent may call an old Gateway or internal Knowledge view; and</li>
+<li>the receiver can distinguish compatible transition traffic from an unknown
+or forged publication.</li>
+</ul>
+<p>If overlap is impossible, activation requires a two-phase rollout: prefetch and
+validate all external targets, verify required internal views are pinable, then
+activate traffic only after every required external audience acknowledges
+readiness.</p>
+<h2 id="security-requirements-1"><a class="header" href="#security-requirements-1">Security Requirements</a></h2>
+<ul>
+<li>Bind every response to the authenticated workload’s host, service, instance,
+environment, and audience.</li>
+<li>Use TLS with normal CA and hostname verification in production. Local
+development may use explicitly configured local CA material and disabled
+hostname verification, but that exception must remain deployment-scoped.</li>
+<li>Sign every workload snapshot manifest; deployments crossing company trust
+boundaries use a key and verification policy independent of transport TLS.</li>
+<li>Calculate digests from canonical bytes and verify them after transport.</li>
+<li>Reject unknown schema versions and unknown mandatory fields.</li>
+<li>Prevent rollback to a revoked or ownership-incompatible snapshot.</li>
+<li>Never include provider API keys, private signing keys, or unrelated tenant
+policy in an audience projection.</li>
+<li>Treat secret references and ordinary configuration values differently.</li>
+<li>Audit publication, validation, activation, rollback, runtime load, and
+rejection.</li>
+<li>Do not use a long-lived workload token as evidence of end-user authority.</li>
+</ul>
+<h2 id="failure-handling-2"><a class="header" href="#failure-handling-2">Failure Handling</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Failure</th><th>Required behavior</th></tr>
+</thead>
+<tbody>
+<tr><td>Effective policy cannot be resolved</td><td>Fail publication; do not stage or activate.</td></tr>
+<tr><td>One required publication target fails</td><td>Fail the release; do not activate the other targets.</td></tr>
+<tr><td>Property projection is behind</td><td>Keep waiting or time out; never snapshot partial state.</td></tr>
+<tr><td>Snapshot rendering or validation fails</td><td>Mark the target and release failed; retain current pointers.</td></tr>
+<tr><td>One runtime rejects a staged snapshot</td><td>Retain the old release and expose the reason.</td></tr>
+<tr><td>Config Server is temporarily unavailable</td><td>Use last known good within policy; otherwise fail closed.</td></tr>
+<tr><td>Current pointer references no readable snapshot</td><td>Report a control-plane incident; never fall back to mutable properties.</td></tr>
+<tr><td>Multiple snapshots are current</td><td>Reject as a cardinality violation. The database uniqueness invariant should prevent this.</td></tr>
+<tr><td>Cross-service publication is unknown</td><td>Reject or use an explicitly declared overlap rule; never infer compatibility.</td></tr>
+<tr><td>Snapshot is revoked</td><td>Stop admitting new work and apply the declared policy to pinned work.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="observability-and-audit"><a class="header" href="#observability-and-audit">Observability And Audit</a></h2>
+<p>The Portal UI should show one publication timeline with per-audience status:</p>
+<pre><code class="language-text">Publication 12
+  effective policy        VALIDATED
+  Agent snapshot          APPLIED      digest sha256:...
+  Gateway snapshot        APPLIED      digest sha256:...
+  Workflow internal view  PINNABLE     digest sha256:...
+  Knowledge internal view PINNABLE     digest sha256:...
+  release                 CURRENT
+  previous release        Publication 11
+</code></pre>
+<p>Required operational signals include:</p>
+<ul>
+<li>publication duration and failures by phase;</li>
+<li>projection watermark lag;</li>
+<li>staged and current snapshot identity per instance;</li>
+<li>snapshot validation failures by audience;</li>
+<li>runtime current and last-known-good identity;</li>
+<li>acknowledgement lag and digest divergence;</li>
+<li>rejected cross-service publication identities; and</li>
+<li>rollback and revocation counts.</li>
+</ul>
+<p>Logs and traces should carry <code>publicationId</code>, <code>policySnapshotId</code>,
+<code>configSnapshotId</code>, <code>policyDigest</code>, host, environment, service ID, and instance
+ID where applicable.</p>
+<h2 id="current-implementation-gaps"><a class="header" href="#current-implementation-gaps">Current Implementation Gaps</a></h2>
+<p>The current external delivery path is not yet the workload contract in this
+design:</p>
+<ul>
+<li><code>light-config-server</code> exposes <code>/configs</code>; when <code>productId</code> and
+<code>productVersion</code> are supplied it deliberately reads live instance data rather
+than the current immutable snapshot;</li>
+<li>its request authorization binds host, service ID, and environment, but the
+endpoint has no normative instance/audience claim binding, publication
+envelope, artifact digest/ETag, validity lease, or acknowledgement contract;</li>
+<li><code>ConfigsGetHandler</code> trace logging can emit the entire rendered YAML result;
+that must be removed before policy or secret references use this path; and</li>
+<li><code>config-query</code> can read a historical snapshot by <code>hostId</code> and <code>snapshotId</code>,
+but that Portal query operation is not an external workload-identity API.</li>
+</ul>
+<p>The current snapshot schema also lacks an immutable staged publication target,
+coordinated release manifest, property-set/content/artifact digests, source
+event watermark, audience, validation state, validity lease, and compatibility
+generation. Snapshot creation from mutable instance rows is vulnerable to
+mixing a concurrent change into a publication unless the staged target and
+projected digest are checked.</p>
+<h3 id="current-workflow-database-access"><a class="header" href="#current-workflow-database-access">Current Workflow database access</a></h3>
+<p><code>light-workflow</code> currently creates one SQLx PostgreSQL pool from <code>DATABASE_URL</code>
+and shares it across admission, execution, event consumption, and reconcilers.
+The local composition points it at the same <code>configserver</code> database as Portal;
+the development credential is a database superuser and is not an acceptable
+production role.</p>
+<p>Its access falls into three categories:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Category</th><th>Current tables/path</th><th>Target boundary</th></tr>
+</thead>
+<tbody>
+<tr><td>Portal event consumption</td><td><code>outbox_message_t</code>, <code>consumer_offsets</code>, notification/counter state</td><td>Read event outbox and write only Workflow consumer checkpoint/quarantine state.</td></tr>
+<tr><td>Admission projection reads</td><td><code>workflow_tool_binding_t</code>, <code>wf_definition_t</code>, <code>tool_t</code>, dependency/approval projections</td><td>Read-only; validate versions/digests and copy the accepted immutable definition, binding, policy, and endpoint set into invocation-owned state.</td></tr>
+<tr><td>Workflow operational state</td><td><code>process_info_t</code>, <code>task_info_t</code>, <code>workflow_invocation_t</code>, budgets, leases, audit outbox, bounded encrypted invocation credentials</td><td>Workflow-owned writes with explicit grants and retention.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Definition execution is normally pinned through
+<code>process_info_t.definition_snapshot</code>; the legacy fallback that rereads mutable
+<code>wf_definition_t</code> must be removed after migration. Endpoint dispatch currently
+reads <code>workflow_endpoint_target_t</code> live by host and endpoint reference. Although
+<code>workflow_invocation_t</code> pins a binding and definition/policy digests, the live
+endpoint lookup can change an in-flight invocation. Admission must therefore
+copy the binding-scoped endpoint target set into immutable invocation-owned
+operational rows and dispatch only from that copy.</p>
+<p>These Workflow projection reads are accepted internal service access, not a
+reason to publish Workflow through Config Server now. The required fixes are
+least-privilege roles, immutable admission pinning, removal of the legacy live
+definition fallback, and an explicit inventory/test of every grant. Knowledge
+requires the same read-projection/write-operational classification before its
+role is narrowed.</p>
+<h2 id="migration-plan-1"><a class="header" href="#migration-plan-1">Migration Plan</a></h2>
+<h3 id="phase-1-publication-contract"><a class="header" href="#phase-1-publication-contract">Phase 1: Publication contract</a></h3>
+<ul>
+<li>Define the common policy envelope, external Agent/Gateway schemas, and the
+coordinated identity carried by internal Workflow/Knowledge views.</li>
+<li>Define canonical serialization and digest rules.</li>
+<li>Add immutable staged target manifests, publication/release metadata, and
+target snapshot linkage.</li>
+<li>Add source-event watermark and validation state to the snapshot contract.</li>
+</ul>
+<h3 id="phase-2-portal-compiler-and-staging"><a class="header" href="#phase-2-portal-compiler-and-staging">Phase 2: Portal compiler and staging</a></h3>
+<ul>
+<li>Implement deterministic effective-policy resolution.</li>
+<li>Compile audience projections through explicit allowlists.</li>
+<li>Freeze each external target’s complete resolved configuration, desired
+property changes, and every inherited input version/digest.</li>
+<li>Emit correlated, idempotent instance-property events.</li>
+<li>Verify projection checkpoints and exact property-set digests before snapshot
+creation; mark mismatches stale rather than snapshotting live rows.</li>
+<li>Render and validate staged <code>values.yml</code> artifacts.</li>
+</ul>
+<h3 id="phase-3-config-server-delivery"><a class="header" href="#phase-3-config-server-delivery">Phase 3: Config Server delivery</a></h3>
+<ul>
+<li>Implement the versioned <code>/v2/runtime-config</code> workload endpoints.</li>
+<li>Bind current and historical reads to host, environment, service, instance,
+and audience workload claims.</li>
+<li>Return snapshot and publication metadata with content.</li>
+<li>Add artifact-digest ETag/conditional retrieval and canonical digest
+verification.</li>
+<li>Remove rendered-body trace logging and add bounded acknowledgement.</li>
+<li>Enforce signed validity windows and fail-closed last-known-good behavior.</li>
+</ul>
+<h3 id="phase-4-runtime-consumers"><a class="header" href="#phase-4-runtime-consumers">Phase 4: Runtime consumers</a></h3>
+<ul>
+<li>Add typed Config Server policy loaders to external Agent and Gateway
+runtimes.</li>
+<li>Persist immutable pinned policies in service-owned storage where needed.</li>
+<li>Inventory Workflow and Knowledge database access; grant read-only projection
+access and service-owned operational writes through separate roles.</li>
+<li>Pin their internal policy views at work admission and remove mutable fallback
+reads during execution.</li>
+<li>Carry publication and policy identity on cross-service calls.</li>
+<li>Add runtime acknowledgement and divergence metrics.</li>
+</ul>
+<h3 id="phase-5-coordinated-activation"><a class="header" href="#phase-5-coordinated-activation">Phase 5: Coordinated activation</a></h3>
+<ul>
+<li>Stage all target snapshots under one publication.</li>
+<li>Validate compatibility and optionally prefetch.</li>
+<li>Activate and roll back all target pointers through one audited release event
+and one projection transaction.</li>
+<li>Add Portal status, failure details, and operator controls.</li>
+</ul>
+<h3 id="phase-6-boundary-enforcement"><a class="header" href="#phase-6-boundary-enforcement">Phase 6: Boundary enforcement</a></h3>
+<ul>
+<li>Remove Portal database credentials from Agent and Gateway deployments.</li>
+<li>Replace the local Workflow superuser credential with a dedicated role and
+restrict Workflow/Knowledge to enumerated projection reads and operational
+writes. Deny direct authoring-projection mutation.</li>
+<li>Add network and database policy enforcing these differentiated boundaries.</li>
+<li>Prove configuration delivery across independently operated environments.</li>
+<li>Run rollback, partial outage, stale snapshot, and mixed-generation exercises.</li>
+</ul>
+<h2 id="acceptance-criteria-2"><a class="header" href="#acceptance-criteria-2">Acceptance Criteria</a></h2>
+<p>The design is complete when:</p>
+<ol>
+<li>Agent and Gateway start and serve authorized traffic without Portal database
+credentials. Knowledge and Workflow use only enumerated read-only projections
+and service-owned operational tables through non-superuser roles.</li>
+<li>Each external workload can retrieve only its own audience projection from
+Config Server; query parameters cannot override workload identity.</li>
+<li>A publication produces immutable snapshots for all required target
+instances from one declared event watermark.</li>
+<li>No current pointer changes when any required projection or validation fails.</li>
+<li>A successful release exposes matching publication identity across external
+snapshots and participating internal policy views.</li>
+<li>Existing sessions remain pinned to their original domain policy snapshot
+after a new release.</li>
+<li>Rollback and forward activation work by pointer movement without modifying
+historical snapshot content.</li>
+<li>Config Server unavailability preserves last known good behavior only until
+the signed <code>expiresAt</code> lease and fails closed afterward.</li>
+<li>An external runtime rejects a snapshot with the wrong host, audience,
+instance, schema, digest, signature, or validity window.</li>
+<li>External runtime database access is denied. Workflow and Knowledge prove
+least-privilege projection reads, immutable work pinning, operational-only
+writes, and denial of direct authoring-projection mutation.</li>
+<li>Concurrent inherited- or instance-configuration changes cannot contaminate
+a staged publication, and activation/rollback changes all target pointers
+through one event-backed transaction.</li>
+</ol>
+<h2 id="design-consequences"><a class="header" href="#design-consequences">Design Consequences</a></h2>
+<p>This architecture adds a publication compiler and coordinated release state,
+but it establishes a clean company and security boundary. Light Portal owns
+authoring and immutable publication. Config Server owns read-only delivery.
+External Agent/Gateway workloads own enforcement and runtime state without
+Portal database access. Internal Workflow/Knowledge services own operational
+state and consume narrowly scoped event-backed projections.</p>
+<p>The result is independently deployable services, reproducible authorization,
+safe rollback, and no external runtime dependency on Light Portal database
+tables for control-plane policy. The accepted Workflow/Knowledge shared-database
+topology remains an explicit internal contract that can later be replaced by
+event or Config Server delivery without changing pinned policy identities.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="local-model-provider-transport-for-llm-gateway"><a class="header" href="#local-model-provider-transport-for-llm-gateway">Local Model Provider Transport For LLM Gateway</a></h1>
+<h2 id="status-4"><a class="header" href="#status-4">Status</a></h2>
 <p>Proposed design for implementation and qualification.</p>
 <p>This design extends the completed OpenAI-compatible LLM gateway and the
 Embedding Space Contract. It does not change the public <code>/v1</code> client contract.</p>
-<h2 id="decision-summary-3"><a class="header" href="#decision-summary-3">Decision Summary</a></h2>
+<h2 id="decision-summary-4"><a class="header" href="#decision-summary-4">Decision Summary</a></h2>
 <p>The LLM gateway must support self-hosted model servers running on the same
 machine, in the same Kubernetes cluster, or elsewhere on an organization’s
 private network. Self-hosted models are a first-class production deployment,
@@ -13068,7 +13907,7 @@ model-serving deployment.</p>
 production compiler and Portal control plane impose the stronger policy. This
 design replaces that single policy with explicit trust profiles rather than
 using <code>developmentFixtures</code> or adding an unrestricted <code>allowHttp</code> flag.</p>
-<h2 id="terminology-1"><a class="header" href="#terminology-1">Terminology</a></h2>
+<h2 id="terminology-2"><a class="header" href="#terminology-2">Terminology</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -13090,7 +13929,7 @@ using <code>developmentFixtures</code> or adding an unrestricted <code>allowHttp
 </tbody>
 </table>
 </div>
-<h2 id="goals-18"><a class="header" href="#goals-18">Goals</a></h2>
+<h2 id="goals-19"><a class="header" href="#goals-19">Goals</a></h2>
 <ul>
 <li>Make Ollama, llama.cpp, vLLM, and other OpenAI-compatible self-hosted servers
 production-capable Provider Deployments.</li>
@@ -13110,7 +13949,7 @@ verification. Leave mTLS as an optional later enhancement.</li>
 keep protected query, indexing, and standard traffic out of shared capacity
 domains when isolation is required.</li>
 </ul>
-<h2 id="non-goals-21"><a class="header" href="#non-goals-21">Non-Goals</a></h2>
+<h2 id="non-goals-22"><a class="header" href="#non-goals-22">Non-Goals</a></h2>
 <ul>
 <li>This design does not let callers submit provider URLs.</li>
 <li>It does not make <code>light-gateway</code> an Alias router or LLM protocol translator.</li>
@@ -14117,7 +14956,7 @@ embedding.</li>
 <li>Promote a KB index only after the Embedding Space Contract is verified through
 every eligible local deployment.</li>
 </ul>
-<h2 id="acceptance-criteria-2"><a class="header" href="#acceptance-criteria-2">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-3"><a class="header" href="#acceptance-criteria-3">Acceptance Criteria</a></h2>
 <ol>
 <li>An Ollama deployment may use an HTTPS Light Gateway sidecar or an explicitly
 approved, credential-free <code>private_plaintext</code> connection.</li>
@@ -14206,9 +15045,9 @@ and the gateway verifies producer authenticity and endpoint binding.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="global-and-tenant-entity-scope"><a class="header" href="#global-and-tenant-entity-scope">Global And Tenant Entity Scope</a></h1>
-<h2 id="status-4"><a class="header" href="#status-4">Status</a></h2>
+<h2 id="status-5"><a class="header" href="#status-5">Status</a></h2>
 <p>Proposed design for discussion.</p>
-<h2 id="decision-summary-4"><a class="header" href="#decision-summary-4">Decision Summary</a></h2>
+<h2 id="decision-summary-5"><a class="header" href="#decision-summary-5">Decision Summary</a></h2>
 <p>Use <code>host_id IS NULL</code> as the storage representation for a global row when one
 table intentionally contains both global and host-scoped definitions. Use a
 non-null <code>host_id</code> for a host-owned row. Do not add a second <code>common</code> flag to
@@ -14235,7 +15074,7 @@ workflow template/version catalog and install or fork a selected template
 into <code>wf_definition_t</code>. This preserves the existing workflow runtime foreign
 keys and prevents a global edit from changing tenant execution behavior.</li>
 </ul>
-<h2 id="context-3"><a class="header" href="#context-3">Context</a></h2>
+<h2 id="context-4"><a class="header" href="#context-4">Context</a></h2>
 <p>Light Portal currently contains two apparent patterns for shared entities:</p>
 <ol>
 <li>a populated <code>host_id</code> plus <code>common = 'Y'</code>, represented by rules;</li>
@@ -14249,7 +15088,7 @@ pattern uses the row scope itself as the source of truth.</p>
 uniqueness, soft deletion, snapshot export, authorization, foreign keys, and
 effective catalog queries. Choosing a convention based only on the shape of one
 DDL table would leave those contracts ambiguous.</p>
-<h2 id="terminology-2"><a class="header" href="#terminology-2">Terminology</a></h2>
+<h2 id="terminology-3"><a class="header" href="#terminology-3">Terminology</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -14796,9 +15635,9 @@ structure is intentional: it makes cross-tenant impact explicit and auditable.</
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="global-and-tenant-knowledge-bases-for-shared-agent-retrieval"><a class="header" href="#global-and-tenant-knowledge-bases-for-shared-agent-retrieval">Global And Tenant Knowledge Bases For Shared Agent Retrieval</a></h1>
-<h2 id="status-5"><a class="header" href="#status-5">Status</a></h2>
+<h2 id="status-6"><a class="header" href="#status-6">Status</a></h2>
 <p>Proposed design for discussion.</p>
-<h2 id="decision-summary-5"><a class="header" href="#decision-summary-5">Decision Summary</a></h2>
+<h2 id="decision-summary-6"><a class="header" href="#decision-summary-6">Decision Summary</a></h2>
 <p>Add Knowledge Bases as a Light Portal resource with two ownership scopes:</p>
 <ul>
 <li>knowledge_base_t.host_id IS NULL represents a platform-owned global
@@ -14879,7 +15718,7 @@ gateway workload-lane machinery shared platform components. Knowledge Base,
 Hindsight, and tool-description embedding remain separate consumers with their
 own declared spaces, policies, quotas, and lifecycle; they must not implement
 three drifting copies of the compatibility contract.</p>
-<h2 id="context-4"><a class="header" href="#context-4">Context</a></h2>
+<h2 id="context-5"><a class="header" href="#context-5">Context</a></h2>
 <p>The current <a href="#agent-memory-event-refactor">Agent Memory Event Refactor</a>
 implements a bank-first Hindsight workspace and the following runtime-oriented
 data:</p>
@@ -14909,7 +15748,7 @@ Agent’s perspective.</li>
 <p>The workflow schema already has a data-store concept for RAG. Knowledge Bases
 should become the concrete Light Portal resource referenced by that concept
 rather than creating workflow-local copies of documents.</p>
-<h2 id="goals-19"><a class="header" href="#goals-19">Goals</a></h2>
+<h2 id="goals-20"><a class="header" href="#goals-20">Goals</a></h2>
 <ul>
 <li>Let each tenant create and administer multiple Knowledge Bases.</li>
 <li>Let platform administrators create global Knowledge Bases that every tenant
@@ -14938,7 +15777,7 @@ API.</li>
 inputs or contracts changed, while keeping deletion, permission, metadata,
 citation, and retrieval behavior transactionally consistent.</li>
 </ul>
-<h2 id="non-goals-22"><a class="header" href="#non-goals-22">Non-Goals</a></h2>
+<h2 id="non-goals-23"><a class="header" href="#non-goals-23">Non-Goals</a></h2>
 <ul>
 <li>A Knowledge Base is not conversational memory or session history.</li>
 <li>It is not a general file-authoring or content-management system.</li>
@@ -14965,7 +15804,7 @@ or permission to mutate platform-owned sources.</li>
 or spreadsheet-specific semantic extraction. Unsupported or scanned-only
 content is reported explicitly rather than silently indexed as empty text.</li>
 </ul>
-<h2 id="terminology-3"><a class="header" href="#terminology-3">Terminology</a></h2>
+<h2 id="terminology-4"><a class="header" href="#terminology-4">Terminology</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -15012,7 +15851,7 @@ binding: P0 is contract qualification, P1a is the documentation pilot, P1b is
 incremental and multi-KB retrieval, P2 is enterprise ACLs, P3 is production
 migration and scale, and P4 is optional graph-assisted retrieval. A later-phase
 tag does not weaken an earlier authorization invariant.</p>
-<h2 id="required-invariants-1"><a class="header" href="#required-invariants-1">Required Invariants</a></h2>
+<h2 id="required-invariants-2"><a class="header" href="#required-invariants-2">Required Invariants</a></h2>
 <ol>
 <li><strong>[P1a]</strong> A Knowledge Base has exactly one immutable owner scope:
 host_id IS NULL for platform-global ownership or a non-null host_id for
@@ -17804,7 +18643,7 @@ disconnected seeds, graph-budget exhaustion, and planner timeout.</li>
 <li>Promote GraphRAG only for tenants and Knowledge Bases where the evidence
 supports it.</li>
 </ul>
-<h2 id="acceptance-criteria-3"><a class="header" href="#acceptance-criteria-3">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-4"><a class="header" href="#acceptance-criteria-4">Acceptance Criteria</a></h2>
 <p>Each criterion is tagged with the earliest delivery gate that must enforce it.
 Phase 1a is complete when every P1a criterion passes; later phases add their own
 criteria without postponing the core trust boundary:</p>
@@ -18273,7 +19112,7 @@ Platform defaults or SLOs</li>
 <li><code>role_permission_t</code></li>
 </ul>
 <p>The <code>role_user_t</code> table has a foreign key to <code>(host_id, role_id)</code> in <code>role_t</code>, so role rows must exist before the user-role assignments are inserted.</p>
-<h2 id="goals-20"><a class="header" href="#goals-20">Goals</a></h2>
+<h2 id="goals-21"><a class="header" href="#goals-21">Goals</a></h2>
 <ol>
 <li>A claimed organization must be immediately usable by the selected organization owner and host owner.</li>
 <li>The default host must receive deterministic administrative roles.</li>
@@ -18281,7 +19120,7 @@ Platform defaults or SLOs</li>
 <li>The event stream and projections must remain replayable and idempotent.</li>
 <li>The implementation must use the canonical role IDs already used by the portal data: <code>org-admin</code> and <code>host-admin</code>.</li>
 </ol>
-<h2 id="non-goals-23"><a class="header" href="#non-goals-23">Non-Goals</a></h2>
+<h2 id="non-goals-24"><a class="header" href="#non-goals-24">Non-Goals</a></h2>
 <p>This design does not introduce a new global organization-role table. Existing roles are host-scoped through <code>role_t.host_id</code>, so the organization administrator role for a claimed organization is represented as a role on the default host.</p>
 <p>This design also does not merge organization and host administration into one broad role. Organization ownership and host ownership are separate responsibilities, and the system should grant both roles only when the same user is selected for both owner fields.</p>
 <h2 id="role-model-1"><a class="header" href="#role-model-1">Role Model</a></h2>
@@ -18418,7 +19257,7 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 <p>The new tenant host does not and should not have duplicate OAuth provider/client rows. The FK therefore rejects login with:</p>
 <pre><code class="language-text">auth_session_t_host_id_client_id_provider_id_fkey
 </code></pre>
-<h2 id="goals-21"><a class="header" href="#goals-21">Goals</a></h2>
+<h2 id="goals-22"><a class="header" href="#goals-22">Goals</a></h2>
 <ol>
 <li>Keep <code>dev.lightapi.net</code> as the single master OAuth host for the instance.</li>
 <li>Allow users whose current host is a tenant host to log in through the master host’s provider/client.</li>
@@ -18427,11 +19266,11 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 <li>Allow Claim Org to switch the host owner to the new host and require logout/login for fresh claims.</li>
 <li>Keep session, auth-code, refresh-token, and audit lifecycle behavior deterministic and queryable.</li>
 </ol>
-<h2 id="non-goals-24"><a class="header" href="#non-goals-24">Non-Goals</a></h2>
+<h2 id="non-goals-25"><a class="header" href="#non-goals-25">Non-Goals</a></h2>
 <p>This design does not introduce tenant-specific OAuth provider IDs, client IDs, redirect URIs, or BFF configuration.</p>
 <p>This design does not change the portal UI or BFF to select a different OAuth provider per tenant host.</p>
 <p>This design does not remove database referential integrity. The provider-client relationship should remain enforced, but it should be enforced against the master OAuth host instead of the tenant host.</p>
-<h2 id="terminology-4"><a class="header" href="#terminology-4">Terminology</a></h2>
+<h2 id="terminology-5"><a class="header" href="#terminology-5">Terminology</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -18814,7 +19653,7 @@ service yet. The main gaps are:</p>
 <li>tests for schema CRUD, tenant/global lookup, versioning, and config
 validation are incomplete</li>
 </ul>
-<h2 id="goals-22"><a class="header" href="#goals-22">Goals</a></h2>
+<h2 id="goals-23"><a class="header" href="#goals-23">Goals</a></h2>
 <ul>
 <li>Store JSON Schema documents with clear tenant/global ownership.</li>
 <li>Support immutable published schema versions.</li>
@@ -18831,7 +19670,7 @@ and loading schema bodies lazily.</li>
 JSON path.</li>
 <li>Categorize and tag schemas for easier discovery and filtering.</li>
 </ul>
-<h2 id="non-goals-25"><a class="header" href="#non-goals-25">Non-Goals</a></h2>
+<h2 id="non-goals-26"><a class="header" href="#non-goals-26">Non-Goals</a></h2>
 <ul>
 <li>Do not build a full schema compatibility engine in the first release.</li>
 <li>Do not require every config property to have a schema.</li>
@@ -20437,7 +21276,7 @@ model conversations, read state, participant visibility, or per-user delete.</li
 messages page should load its own data from the query API.</li>
 <li>The existing private-message tests are disabled stubs.</li>
 </ul>
-<h2 id="goals-23"><a class="header" href="#goals-23">Goals</a></h2>
+<h2 id="goals-24"><a class="header" href="#goals-24">Goals</a></h2>
 <ul>
 <li>Let one logged-in user send a message to another portal user without knowing
 or seeing the recipient email.</li>
@@ -20452,7 +21291,7 @@ recipient email internally.</li>
 <li>Provide a path from the existing <code>message_t</code> skeleton to a conversation-based
 model without breaking existing UI routes immediately.</li>
 </ul>
-<h2 id="non-goals-26"><a class="header" href="#non-goals-26">Non-Goals</a></h2>
+<h2 id="non-goals-27"><a class="header" href="#non-goals-27">Non-Goals</a></h2>
 <ul>
 <li>Do not build group chat in the first phase.</li>
 <li>Do not expose email addresses in message APIs, events, UI state, or task
@@ -20704,7 +21543,7 @@ confusing recipient identity with the current user.</li>
 </ul>
 <p>The first UI can be an inbox plus conversation thread. Real-time typing,
 presence, attachments, and rich-text editing are later enhancements.</p>
-<h2 id="migration-plan-1"><a class="header" href="#migration-plan-1">Migration Plan</a></h2>
+<h2 id="migration-plan-2"><a class="header" href="#migration-plan-2">Migration Plan</a></h2>
 <h3 id="phase-0-stop-the-broken-behavior"><a class="header" href="#phase-0-stop-the-broken-behavior">Phase 0: Stop the Broken Behavior</a></h3>
 <ul>
 <li>Make <code>GetPrivateMessage</code> return valid JSON even before the new model is
@@ -20771,7 +21610,7 @@ portal message was received?</li>
 permission?</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="config-server"><a class="header" href="#config-server">Config Server</a></h1>
+<h1 id="config-server-1"><a class="header" href="#config-server-1">Config Server</a></h1>
 <h3 id="default-config-properties"><a class="header" href="#default-config-properties">Default Config Properties</a></h3>
 <p>For each config class in light-4j modules, we use annotations to generate schemas for the config files with default values, comments and validation rules.</p>
 <p>As one time step, we also generate events to input all the properties into the light-portal. These events will create a base-line of the config properties with default values. All events in this first time population doesn’t have a version.</p>
@@ -22709,7 +23548,7 @@ should not be forced to match <code>sid</code> until the product-level authoriza
 is explicitly designed.</p>
 <p>The same exception does not apply to controller registry registration because
 <code>service/register</code> always carries a requested <code>serviceId</code>.</p>
-<h2 id="goals-24"><a class="header" href="#goals-24">Goals</a></h2>
+<h2 id="goals-25"><a class="header" href="#goals-25">Goals</a></h2>
 <ul>
 <li>Prevent one service token from downloading another service’s config, certs,
 or files.</li>
@@ -22755,7 +23594,7 @@ helper.</p>
 <p>The focused implementation tests cover missing and mismatched <code>host</code>, missing
 and mismatched <code>sid</code>, missing and mismatched <code>env</code> when <code>envTag</code> is requested,
 blank values, whitespace trimming, and case-sensitive identifier comparison.</p>
-<h2 id="non-goals-27"><a class="header" href="#non-goals-27">Non-Goals</a></h2>
+<h2 id="non-goals-28"><a class="header" href="#non-goals-28">Non-Goals</a></h2>
 <ul>
 <li>Do not replace JWT verification middleware.</li>
 <li>Do not redesign OAuth token issuance.</li>
@@ -23150,7 +23989,7 @@ mvn -q -Dtest=ServiceIdAuthorizationUtilTest test
 <p>No open questions for SID, host, and environment binding in this phase.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="instance-clone"><a class="header" href="#instance-clone">Instance Clone</a></h1>
-<h2 id="context-5"><a class="header" href="#context-5">Context</a></h2>
+<h2 id="context-6"><a class="header" href="#context-6">Context</a></h2>
 <p>One portal database can serve several runtime environments. For example, the
 <code>portal-bff</code> service can have separate instances for these environment tags:</p>
 <div class="table-wrapper">
@@ -23172,7 +24011,7 @@ copies the current active state of this graph and lets the administrator change
 the target identity and environment-specific configuration.</p>
 <p>This is a same-host operation. Cross-host or cross-database copying remains an
 event-promotion/import concern.</p>
-<h2 id="goals-25"><a class="header" href="#goals-25">Goals</a></h2>
+<h2 id="goals-26"><a class="header" href="#goals-26">Goals</a></h2>
 <ul>
 <li>Clone an active instance and its selected active children with one command.</li>
 <li>Require a target instance name and environment tag while allowing other
@@ -23189,7 +24028,7 @@ omit it without exposing values unnecessarily.</li>
 transaction when requested.</li>
 <li>Report durable projection and snapshot status after command acceptance.</li>
 </ul>
-<h2 id="non-goals-28"><a class="header" href="#non-goals-28">Non-goals</a></h2>
+<h2 id="non-goals-29"><a class="header" href="#non-goals-29">Non-goals</a></h2>
 <ul>
 <li>Copy raw historical events or preserve source aggregate versions.</li>
 <li>Copy an existing configuration snapshot, runtime registration, deployment
@@ -23588,7 +24427,7 @@ plan contains only properties whose parents remain selected.</p>
 <p>The immediate response is <code>ACCEPTED</code>, not completed. It contains the clone
 request ID, target instance ID, transaction ID, terminal event ID, event counts,
 and status URL/action.</p>
-<h3 id="status-6"><a class="header" href="#status-6">Status</a></h3>
+<h3 id="status-7"><a class="header" href="#status-7">Status</a></h3>
 <p><code>getInstanceCloneStatus</code> accepts <code>hostId</code> and <code>cloneRequestId</code> in a POST query
 and returns one of:</p>
 <ul>
@@ -24768,7 +25607,7 @@ public class UuidUtil {
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="entity-creation-uniqueness"><a class="header" href="#entity-creation-uniqueness">Entity Creation Uniqueness</a></h1>
-<h2 id="status-7"><a class="header" href="#status-7">Status</a></h2>
+<h2 id="status-8"><a class="header" href="#status-8">Status</a></h2>
 <p>Implemented through Phase 5 for Role/Rule stream births and Category/Tag semantic
 identity, client retries, lifecycle alignment, verified historical materialization,
 snapshot/import guards, and policy-aware retry-ledger cleanup. Later aggregate
@@ -24832,7 +25671,7 @@ the second event reaches a projection unique constraint.</li>
 </ul>
 <p>The failure is not specific to role or rule. It is a missing write-side creation
 contract shared by many command services.</p>
-<h2 id="goals-26"><a class="header" href="#goals-26">Goals</a></h2>
+<h2 id="goals-27"><a class="header" href="#goals-27">Goals</a></h2>
 <ul>
 <li>Reject a second create for an existing aggregate without changing its event
 stream.</li>
@@ -24844,7 +25683,7 @@ stream.</li>
 <li>Provide one reusable implementation rather than handler-specific query checks.</li>
 <li>Return an actionable conflict to the UI without exposing another tenant’s data.</li>
 </ul>
-<h2 id="non-goals-29"><a class="header" href="#non-goals-29">Non-goals</a></h2>
+<h2 id="non-goals-30"><a class="header" href="#non-goals-30">Non-goals</a></h2>
 <ul>
 <li>Treating all equal request payloads as the same entity.</li>
 <li>Preventing valid multiplicity for events such as audit records, workflow runs,
@@ -24854,7 +25693,7 @@ messages, or orders.</li>
 <li>Turning create into an upsert or silently changing an existing entity.</li>
 <li>Automatically allowing an identity to be reused after delete or rename.</li>
 </ul>
-<h2 id="terminology-5"><a class="header" href="#terminology-5">Terminology</a></h2>
+<h2 id="terminology-6"><a class="header" href="#terminology-6">Terminology</a></h2>
 <h3 id="aggregate-id"><a class="header" href="#aggregate-id">Aggregate ID</a></h3>
 <p>The event-stream subject. It may be a natural composite ID such as
 <code>hostId|roleId</code>, or a generated UUID.</p>
@@ -24888,7 +25727,7 @@ of the same request?” It does not answer “Is this the same business entity?�
 <p>The one event that establishes an aggregate stream, normally a registered
 <code>*CreatedEvent</code>. A restore or reactivation is a lifecycle mutation, not another
 birth event.</p>
-<h2 id="required-invariants-2"><a class="header" href="#required-invariants-2">Required Invariants</a></h2>
+<h2 id="required-invariants-3"><a class="header" href="#required-invariants-3">Required Invariants</a></h2>
 <h3 id="one-birth-event-per-aggregate"><a class="header" href="#one-birth-event-per-aggregate">One Birth Event Per Aggregate</a></h3>
 <p>For a normal command append:</p>
 <ul>
@@ -26096,7 +26935,7 @@ unprotected append path, importer problem, or policy drift.</p>
 create commands.</li>
 <li>Require elevated, audited authorization for identity release and legacy repair.</li>
 </ul>
-<h2 id="acceptance-criteria-4"><a class="header" href="#acceptance-criteria-4">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-5"><a class="header" href="#acceptance-criteria-5">Acceptance Criteria</a></h2>
 <p>These are program-wide criteria for issue 691. Phase 5 satisfies them only for
 the scoped Role/Rule stream and Category/Tag semantic-identity rollout described
 in Status; criteria involving the remaining 114 <code>REVIEW_PENDING</code> birth events
@@ -30105,7 +30944,7 @@ unchanged products and to the new <code>productVersionId</code> for rebuilt prod
 </tbody>
 </table>
 </div>
-<h2 id="goals-27"><a class="header" href="#goals-27">Goals</a></h2>
+<h2 id="goals-28"><a class="header" href="#goals-28">Goals</a></h2>
 <ul>
 <li>Auto-populate config mappings for every new Java or Rust product release.</li>
 <li>Preserve event replay, auditability, and projection rebuild behavior.</li>
@@ -30118,7 +30957,7 @@ event amplification.</li>
 <li>Detect missing config and property definitions before a release appears
 complete.</li>
 </ul>
-<h2 id="non-goals-30"><a class="header" href="#non-goals-30">Non-Goals</a></h2>
+<h2 id="non-goals-31"><a class="header" href="#non-goals-31">Non-Goals</a></h2>
 <ul>
 <li>Do not change the config override hierarchy.</li>
 <li>Do not write directly to config mapping projection tables.</li>
@@ -30754,7 +31593,7 @@ event-sourced product release model without duplicating standard mappings for
 every tenant.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="release-workflow"><a class="header" href="#release-workflow">Release Workflow</a></h1>
-<h2 id="status-8"><a class="header" href="#status-8">Status</a></h2>
+<h2 id="status-9"><a class="header" href="#status-9">Status</a></h2>
 <p>Proposed design.</p>
 <p>Light Portal should use <code>light-workflow</code> as the durable release orchestrator
 for Java and Rust releases. The workflow should coordinate repository checkout,
@@ -30783,7 +31622,7 @@ and who approved publication.</li>
 <p>The release workflow should be flexible enough to call existing command-line
 tools, but controlled enough that it does not become an unrestricted shell
 inside Light Portal.</p>
-<h2 id="goals-28"><a class="header" href="#goals-28">Goals</a></h2>
+<h2 id="goals-29"><a class="header" href="#goals-29">Goals</a></h2>
 <ul>
 <li>Replace the current Java <code>light-bot</code> release path with <code>light-workflow</code> once
 parity is proven.</li>
@@ -30801,7 +31640,7 @@ reporting into the release gate.</li>
 behind explicit approval.</li>
 <li>Preserve release auditability and reproducibility.</li>
 </ul>
-<h2 id="non-goals-31"><a class="header" href="#non-goals-31">Non-Goals</a></h2>
+<h2 id="non-goals-32"><a class="header" href="#non-goals-32">Non-Goals</a></h2>
 <ul>
 <li>Do not run arbitrary release commands in the Light Portal service process.</li>
 <li>Do not replace Maven, Cargo, Docker, GitHub CLI, or existing release scripts
@@ -31169,7 +32008,7 @@ branching and AI diagnosis do not depend on raw console parsing.</p>
 </code></pre>
 <p>The workflow context should store references and summaries, not unbounded logs.
 Full logs belong in artifact storage with retention and access policy.</p>
-<h2 id="security-requirements-1"><a class="header" href="#security-requirements-1">Security Requirements</a></h2>
+<h2 id="security-requirements-2"><a class="header" href="#security-requirements-2">Security Requirements</a></h2>
 <p>Release automation needs stricter controls than normal background tasks.</p>
 <ul>
 <li>Commands must come from approved workflow definitions or approved templates.</li>
@@ -32013,7 +32852,7 @@ END $$;
 <h1 id="distributed-scheduler-design"><a class="header" href="#distributed-scheduler-design">Distributed Scheduler Design</a></h1>
 <h2 id="introduction-1"><a class="header" href="#introduction-1">Introduction</a></h2>
 <p>The Distributed Scheduler is a robust, highly available component of the light-portal architecture that manages the periodic execution of tasks across a cluster of application instances. It ensures that scheduled tasks are executed exactly as defined, even in a distributed environment, by using a database-backed leader election and locking mechanism.</p>
-<h2 id="architecture-1"><a class="header" href="#architecture-1">Architecture</a></h2>
+<h2 id="architecture-2"><a class="header" href="#architecture-2">Architecture</a></h2>
 <p>The scheduler follows a <strong>Leader-Follower</strong> pattern to prevent redundant executions and ensure consistency.</p>
 <ol>
 <li><strong>Leader Election</strong>: All scheduler instances compete for a global lock in the <code>scheduler_lock_t</code> table.</li>
@@ -32088,7 +32927,7 @@ LIMIT ?;
 <h1 id="postgresql-pubsub-design"><a class="header" href="#postgresql-pubsub-design">PostgreSQL Pub/Sub Design</a></h1>
 <h2 id="introduction-2"><a class="header" href="#introduction-2">Introduction</a></h2>
 <p>The PostgreSQL Pub/Sub mechanism provides an alternative to Kafka for event distribution within the light-portal architecture. It is designed for smaller deployments or environments where Kafka is not available, offering a reliable, low-latency, and strictly ordered event delivery system using native PostgreSQL features.</p>
-<h2 id="architecture-2"><a class="header" href="#architecture-2">Architecture</a></h2>
+<h2 id="architecture-3"><a class="header" href="#architecture-3">Architecture</a></h2>
 <p>The system utilizes a hybrid <strong>Polling + LISTEN/NOTIFY</strong> approach to achieve both high reliability and low latency.</p>
 <h3 id="1-logical-partitioning"><a class="header" href="#1-logical-partitioning">1. Logical Partitioning</a></h3>
 <p>To support horizontal scalability and ensure ordered processing for multi-tenant environments, the system uses logical partitioning based on the <code>host_id</code>.</p>
@@ -32330,7 +33169,7 @@ waitPeriodMs: ${db-event-consumer.waitPeriodMs:1000}
 <h1 id="kafka-event-processor"><a class="header" href="#kafka-event-processor">Kafka Event Processor</a></h1>
 <h2 id="overview-2"><a class="header" href="#overview-2">Overview</a></h2>
 <p>The Kafka Event Processor (<code>PortalEventConsumerStartupHook</code>) consumes events from Kafka topics that are populated by Debezium CDC from the <code>outbox_message_t</code> table. It provides robust event processing with transaction-level granularity and Dead Letter Queue (DLQ) support.</p>
-<h2 id="architecture-3"><a class="header" href="#architecture-3">Architecture</a></h2>
+<h2 id="architecture-4"><a class="header" href="#architecture-4">Architecture</a></h2>
 <p>The processor uses a <strong>two-phase processing strategy</strong> with automatic fallback to ensure both performance and reliability:</p>
 <ol>
 <li><strong>Optimistic Batch Processing</strong>: Attempts to process all transactions in a single database transaction for maximum throughput</li>
@@ -32516,7 +33355,7 @@ waitPeriod: 1000  # ms to wait between polls when no records
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="event-replay"><a class="header" href="#event-replay">Event Replay</a></h1>
-<h2 id="status-9"><a class="header" href="#status-9">Status</a></h2>
+<h2 id="status-10"><a class="header" href="#status-10">Status</a></h2>
 <p>This document defines the revised target design for event replay during the
 early development stage of light-portal. The implementation still contains
 legacy-backfill, staged-rollout, feature-gate, mandatory-encryption, and
@@ -32556,7 +33395,7 @@ transactions first;</li>
 <p>Event replay therefore operates on complete canonical failure transactions,
 not individual notification or DLQ rows. It invokes the same projection
 executor as live processing without rewinding PostgreSQL or Kafka offsets.</p>
-<h2 id="goals-29"><a class="header" href="#goals-29">Goals</a></h2>
+<h2 id="goals-30"><a class="header" href="#goals-30">Goals</a></h2>
 <ul>
 <li>Capture every new failed projection transaction in a replayable canonical
 form.</li>
@@ -32581,7 +33420,7 @@ schema is present.</li>
 <li>Keep configuration small enough that a developer can understand the entire
 replay setup from one screen.</li>
 </ul>
-<h2 id="non-goals-32"><a class="header" href="#non-goals-32">Non-Goals</a></h2>
+<h2 id="non-goals-33"><a class="header" href="#non-goals-33">Non-Goals</a></h2>
 <ul>
 <li>Historical or legacy <code>dead_letter_queue</code> rows are not imported. They remain
 diagnostic history only.</li>
@@ -33502,7 +34341,7 @@ field value is included in the event.</p>
 references are never returned to the browser. A repair endpoint may return only
 the explicitly authorized and redacted business fields declared by the repair
 schema.</p>
-<h2 id="failure-handling-2"><a class="header" href="#failure-handling-2">Failure Handling</a></h2>
+<h2 id="failure-handling-3"><a class="header" href="#failure-handling-3">Failure Handling</a></h2>
 <ul>
 <li><strong>Invalid command-side transaction:</strong> reject the command before event-store
 or outbox commit.</li>
@@ -34260,7 +35099,7 @@ Location: https://portal.lightapi.net/authorization?code=auth_code_abc&amp;state
 </ul>
 </li>
 </ol>
-<h2 id="security-requirements-2"><a class="header" href="#security-requirements-2">Security Requirements</a></h2>
+<h2 id="security-requirements-3"><a class="header" href="#security-requirements-3">Security Requirements</a></h2>
 <ul>
 <li><strong>Uniqueness</strong>: The <code>state</code> must be unique per authentication request.</li>
 <li><strong>Entropy</strong>: It must be a cryptographically random string (high entropy) to be unguessable.</li>
@@ -34493,7 +35332,7 @@ should not include the clear secret, but it should notify the client owner and,
 where appropriate, host or organization admins that a credential was rotated.
 This gives the owner a chance to detect unexpected rotations or client takeover
 attempts.</p>
-<h2 id="security-requirements-3"><a class="header" href="#security-requirements-3">Security Requirements</a></h2>
+<h2 id="security-requirements-4"><a class="header" href="#security-requirements-4">Security Requirements</a></h2>
 <ul>
 <li>Generate the secret with the same or stronger entropy as create-client.</li>
 <li>Store only a verifier generated by <code>HashUtil.generateStrongPasswordHash</code>.</li>
@@ -35565,7 +36404,7 @@ local policy.</li>
 <li>A compromised deployer must not be able to receive commands for another
 tenant.</li>
 </ul>
-<h2 id="failure-handling-3"><a class="header" href="#failure-handling-3">Failure Handling</a></h2>
+<h2 id="failure-handling-4"><a class="header" href="#failure-handling-4">Failure Handling</a></h2>
 <p>The deployer should classify failures:</p>
 <ul>
 <li>template repository fetch failure</li>
@@ -35791,7 +36630,7 @@ the provider <code>jwk</code> from <code>auth_provider_t</code>. The implementat
 that the JWT header <code>kid</code> is present in the returned JWKS for the same provider.
 That guarantee matters more once external AWS services cache the discovery and
 JWKS responses.</p>
-<h2 id="goals-30"><a class="header" href="#goals-30">Goals</a></h2>
+<h2 id="goals-31"><a class="header" href="#goals-31">Goals</a></h2>
 <ul>
 <li>Let AWS AgentCore use Rust <code>light-oauth</code> or Java <code>oauth-kafka</code> as a JWT
 bearer token issuer.</li>
@@ -35803,7 +36642,7 @@ claims working.</li>
 <li>Keep issuer, audience, and discovery URLs deterministic across environments.</li>
 <li>Add tests that prove discovery, JWKS, and signed token claims line up.</li>
 </ul>
-<h2 id="non-goals-33"><a class="header" href="#non-goals-33">Non-Goals</a></h2>
+<h2 id="non-goals-34"><a class="header" href="#non-goals-34">Non-Goals</a></h2>
 <ul>
 <li>Do not implement full OIDC identity-provider behavior in the first phase.</li>
 <li>Do not add dynamic client registration.</li>
@@ -42269,6 +43108,816 @@ steps:
 <li>Integrate Testcontainers into the primary CI/CD pipeline.</li>
 <li>Select an AI testing tool/framework (e.g., CodiumAI, Postman Postbot, or a custom LLM script) and seed it with our initial Gherkin business flows.</li>
 </ol>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="tutorial"><a class="header" href="#tutorial">Tutorial</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="light-gateway-2"><a class="header" href="#light-gateway-2">light-gateway</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="create-the-workflow-mcp-smoke-tool-from-the-portal"><a class="header" href="#create-the-workflow-mcp-smoke-tool-from-the-portal">Create the workflow MCP smoke tool from the portal</a></h1>
+<p>This tutorial creates the <code>workflow-mcp-smoke</code> workflow and exposes it as the
+<code>workflow_mcp_smoke</code> MCP tool. Create both resources through the portal UI. Do
+not insert rows into <code>wf_definition_t</code>, <code>tool_t</code>, or
+<code>workflow_tool_binding_t</code>.</p>
+<p>Light Portal uses event sourcing. The command services append domain events,
+and the query-side projector derives the database read models from those
+events:</p>
+<pre><code class="language-text">Create Workflow Definition
+  -&gt; WorkflowDefinitionCreatedEvent
+  -&gt; wf_definition_t
+
+Create Tool with Execution Placement = workflow
+  -&gt; ToolCreatedEvent
+  -&gt; tool_t
+  -&gt; workflow_tool_binding_t
+</code></pre>
+<p>The workflow binding is part of the tool creation contract. There is no
+separate <strong>Create Workflow Tool Binding</strong> page.</p>
+<h2 id="prerequisites"><a class="header" href="#prerequisites">Prerequisites</a></h2>
+<ul>
+<li>Sign in to the portal and select the host where the smoke tool will run.</li>
+<li>Use an account that can administer workflow definitions and GenAI tools.</li>
+<li>Make sure <code>light-workflow</code>, the portal command service, the portal query
+service, PostgreSQL, and the event projector are running.</li>
+<li>Download the versioned
+<a href="tutorial/light-gateway/examples/workflow-mcp-smoke.yaml">workflow-mcp-smoke definition</a>.</li>
+</ul>
+<p>The host must not already contain an active workflow with this identity:</p>
+<pre><code class="language-text">namespace: light-demo
+name: workflow-mcp-smoke
+version: 1.0.0
+</code></pre>
+<p>It must also not contain an active tool named <code>workflow_mcp_smoke</code> that was
+inserted by an older SQL fixture. A projection-only record has no aggregate
+history and cannot safely be replaced with the normal Create command. Start
+with a clean database or have an administrator quarantine/remove the legacy
+fixture before following this tutorial. Do not use the normal Update or Delete
+buttons to repair projection-only data.</p>
+<h2 id="workflow-definition-1"><a class="header" href="#workflow-definition-1">Workflow definition</a></h2>
+<p>The importable YAML is maintained with this tutorial and is included below so
+the rendered mdBook and downloadable asset cannot drift apart:</p>
+<pre><code class="language-yaml">document:
+  dsl: "1.0.3"
+  namespace: light-demo
+  name: workflow-mcp-smoke
+  version: "1.0.0"
+  title: Workflow MCP Smoke Test
+  summary: Deterministic read-only workflow used to qualify the gateway-to-workflow MCP path.
+  tags:
+    testType: local
+    dependencies: none
+evaluate:
+  language: cel
+input:
+  schema:
+    format: json
+    document:
+      type: object
+      additionalProperties: false
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          minLength: 1
+          maxLength: 256
+output:
+  schema:
+    format: json
+    document:
+      type: object
+      additionalProperties: false
+      required:
+        - message
+        - executedBy
+      properties:
+        message:
+          type: string
+        executedBy:
+          type: string
+do:
+  - finish:
+      set:
+        message: "${{ message }}"
+        executedBy: light-workflow
+</code></pre>
+<h2 id="1-create-the-workflow-definition"><a class="header" href="#1-create-the-workflow-definition">1. Create the workflow definition</a></h2>
+<ol>
+<li>
+<p>In the portal sidebar, expand <strong>Workflow Admin</strong> and select
+<strong>Wf Definition</strong>.</p>
+</li>
+<li>
+<p>Select <strong>Create New WfDefinition</strong>.</p>
+</li>
+<li>
+<p>In <strong>Workflow Editor</strong>, select <strong>Import</strong> and open
+<code>workflow-mcp-smoke.yaml</code>.</p>
+</li>
+<li>
+<p>Confirm the editor populated these values:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>Namespace</td><td><code>light-demo</code></td></tr>
+<tr><td>Name</td><td><code>workflow-mcp-smoke</code></td></tr>
+<tr><td>Version</td><td><code>1.0.0</code></td></tr>
+<tr><td>Publish in Workflow Catalog</td><td>Enabled</td></tr>
+</tbody>
+</table>
+</div>
+<p>The Host ID comes from the signed-in user’s selected host. Leave the
+Workflow Definition ID empty; the command service generates it.</p>
+</li>
+<li>
+<p>Select <strong>Validate</strong> and resolve any reported errors.</p>
+</li>
+<li>
+<p>Select <strong>Save</strong> once. A successful save displays <strong>Workflow definition
+saved</strong> and assigns a Workflow Definition ID.</p>
+</li>
+<li>
+<p>Record the generated Workflow Definition ID as <code>&lt;wfDefId&gt;</code>. You will use it
+when creating the tool.</p>
+</li>
+<li>
+<p>Return to <strong>Wf Definition</strong>, refresh the table, and use <strong>Update</strong> to confirm
+that the saved definition can be loaded. This also confirms that the event
+and projection have reached the same aggregate version.</p>
+</li>
+</ol>
+<p>Do not immediately submit the same Create form again while waiting for the
+projection. Refresh the list instead.</p>
+<h2 id="2-create-the-workflow-backed-tool-and-binding"><a class="header" href="#2-create-the-workflow-backed-tool-and-binding">2. Create the workflow-backed tool and binding</a></h2>
+<ol>
+<li>
+<p>In the sidebar, expand <strong>GenAI Admin</strong> and select <strong>Tool</strong>.</p>
+</li>
+<li>
+<p>Select <strong>Create New Tool</strong>.</p>
+</li>
+<li>
+<p>Enter the following tool values. Fields not listed here can remain empty.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>Name</td><td><code>workflow_mcp_smoke</code></td></tr>
+<tr><td>Description</td><td><code>Run a deterministic read-only workflow and return the supplied message.</code></td></tr>
+<tr><td>Routing Domain</td><td><code>Workflow</code></td></tr>
+<tr><td>Semantic Namespace</td><td><code>workflow-smoke</code></td></tr>
+<tr><td>Semantic Description</td><td><code>Qualify workflow-backed MCP execution.</code></td></tr>
+<tr><td>Lifecycle Status</td><td><code>active</code></td></tr>
+<tr><td>Read Only</td><td>Enabled</td></tr>
+<tr><td>Idempotent</td><td>Enabled</td></tr>
+<tr><td>Destructive</td><td>Disabled</td></tr>
+<tr><td>Human Approval Required</td><td>Disabled</td></tr>
+<tr><td>Version</td><td><code>1.0.0</code></td></tr>
+<tr><td>Execution Placement</td><td><code>workflow</code></td></tr>
+<tr><td>Schema Digest</td><td><code>sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</code></td></tr>
+</tbody>
+</table>
+</div>
+<p><code>Implementation Type</code> is not required for a workflow-placed tool. The
+workflow binding, rather than a Java class, REST endpoint, script, or MCP
+server, identifies its execution target.</p>
+</li>
+<li>
+<p>After selecting <code>workflow</code>, the <strong>Workflow Binding</strong> structured-data field
+appears. Enter the following JSON, replacing <code>&lt;wfDefId&gt;</code> with the ID from
+step 1:</p>
+<pre><code class="language-json">{
+  "wfDefId": "&lt;wfDefId&gt;",
+  "workflowVersion": "1.0.0",
+  "definitionDigest": "sha256:5197cc8e1ef611ef736c6d033ffdbab19137318bbadf61ea16b906d114ad81c8",
+  "schemaDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "invocationMode": "sync",
+  "syncWaitMs": 20000,
+  "totalDeadlineMs": 30000,
+  "executionClass": "interactive",
+  "resultTextMode": "compact-json",
+  "idempotencyPolicy": {
+    "kind": "derived",
+    "inFlightDedupMs": 30000,
+    "resultReplayMs": 0
+  },
+  "delegationPolicy": {
+    "maximumDelegationDepth": 0
+  },
+  "responsePolicyDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "runtimeBounds": {
+    "maximumTaskAttempts": 4,
+    "maximumNestedCalls": 1,
+    "maximumParallelism": 1,
+    "maximumRequestBytes": 65536,
+    "maximumIntermediateBytes": 262144,
+    "maximumResultBytes": 131072,
+    "maximumCostUnits": 0
+  },
+  "policyDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+}
+</code></pre>
+</li>
+<li>
+<p>If the structured-data editor shows an <strong>Apply</strong> action, select it before
+submitting the form. A tab marked with <code>*</code> still has unapplied edits and the
+portal will refuse to submit it.</p>
+</li>
+<li>
+<p>Submit <strong>Create Tool Form</strong> once.</p>
+</li>
+<li>
+<p>Record the generated Tool ID as <code>&lt;toolId&gt;</code>. The command service uses this as
+the stable tool reference unless one was explicitly supplied. It also
+generates the binding ID because <code>bindingId</code> was omitted from the JSON.</p>
+</li>
+<li>
+<p>Return to <strong>Tool</strong>, refresh the table, and open <strong>Update Tool</strong> for
+<code>workflow_mcp_smoke</code>. Confirm that:</p>
+<ul>
+<li>Execution Placement is <code>workflow</code>.</li>
+<li>Stable Tool Reference equals <code>&lt;toolId&gt;</code>.</li>
+<li>Workflow Binding contains <code>&lt;wfDefId&gt;</code> and a generated <code>bindingId</code>.</li>
+<li>The tool is active.</li>
+</ul>
+</li>
+</ol>
+<p>The four digest values above are the pinned values used by this smoke fixture
+and its shipped light-gateway configuration. They are contract identifiers,
+not a suggestion to use repeated placeholder digests for production tools. If
+the workflow, schemas, or policies change, generate and deploy new matching
+digests instead of reusing these values.</p>
+<p>For a synchronous binding, the portal requires a read-only, non-destructive,
+headless tool: <strong>Read Only</strong> must be enabled while <strong>Destructive</strong> and
+<strong>Human Approval Required</strong> remain disabled. The Workflow Binding Schema
+Digest must exactly match the top-level Schema Digest.</p>
+<h2 id="3-point-light-gateway-at-the-generated-identities"><a class="header" href="#3-point-light-gateway-at-the-generated-identities">3. Point light-gateway at the generated identities</a></h2>
+<p>The database identities are generated by the event-sourced Create commands,
+so do not keep the fixed <code>22000000-...</code> IDs from the old SQL fixture.</p>
+<p>Open
+<code>portal-config-loc/all-in-lt/light-gateway-rust/config/mcp-router.yml</code> and find
+the <code>workflow_mcp_smoke</code> entry. Update only these identity fields:</p>
+<pre><code class="language-yaml">workflowBinding:
+  stableToolRef: &lt;toolId&gt;
+  workflowDefinitionId: &lt;wfDefId&gt;
+</code></pre>
+<p>Keep the workflow version, schemas, digests, timeouts, result mode, and budget
+aligned with the values entered in the portal. Reload or restart light-gateway
+after changing its configuration.</p>
+<p>The light-gateway file is runtime configuration, not a light-portal
+projection. Updating it does not replace the requirement to create the portal
+entities through commands/events.</p>
+<h2 id="4-verify-the-smoke-path"><a class="header" href="#4-verify-the-smoke-path">4. Verify the smoke path</a></h2>
+<ol>
+<li>
+<p>In <strong>Workflow Admin &gt; Wf Definition</strong>, confirm that
+<code>workflow-mcp-smoke</code> has exactly one active row and that <strong>Update</strong> opens it
+without an aggregate-version error.</p>
+</li>
+<li>
+<p>In <strong>GenAI Admin &gt; Tool</strong>, confirm that <code>workflow_mcp_smoke</code> has exactly one
+active row and that <strong>Update Tool</strong> shows the workflow binding.</p>
+</li>
+<li>
+<p>From a terminal on the Docker host, set a valid portal authorization value.
+Keep the <code>Bearer </code> prefix:</p>
+<pre><code class="language-bash">export LIGHT_PORTAL_AUTHORIZATION='Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6IkFacDAyVzZqZGNxWHpxTkk2MVlaelEifQ.eyJpc3MiOiJ1cm46Y29tOm5ldHdvcmtudDpvYXV0aDI6djEiLCJhdWQiOiJ1cm46Y29tLm5ldHdvcmtudCIsInN1YiI6IjAxOTY0YjA1LTU1MzItN2M3OS04Y2RlLTE5MWRjYmQ0MjFiOCIsImV4cCI6MTc4NjYyMjU0MywianRpIjoiRkMxM0ZmYzNUMm0zLXlMT1RHc3NHQSIsImlhdCI6MTc4NjYyMTk0MywibmJmIjoxNzg2NjIxODIzLCJ2ZXIiOiIxLjAiLCJjaWQiOiJmN2Q0MjM0OC1jNjQ3LTRlZmItYTUyZC00YzU3ODc0MjFlNzIiLCJzY3AiOlsicG9ydGFsLnIiLCJwb3J0YWwudyJdLCJjbGllbnRfaWQiOiJmN2Q0MjM0OC1jNjQ3LTRlZmItYTUyZC00YzU3ODc0MjFlNzIiLCJzY29wZSI6InBvcnRhbC5yIHBvcnRhbC53IiwiY3NyZiI6IjNFS3lmUkxpVFBtTFM2QXVIMEZNcGciLCJlaWQiOiJzaDM1IiwiZW1sIjoic3RldmUuaHVAbGlnaHRhcGkubmV0IiwiaG9zdCI6IjAxOTY0YjA1LTU1MmEtN2M0Yi05MTg0LTY4NTdlN2YzZGM1ZiIsInJvbGUiOiJhY2NvdW50LW1hbmFnZXIgYWRtaW4gZ2l0aHViLXJlYWRlciBob3N0LWFkbWluIG1jcC1yZWFkZXIgdXNlciIsInVpZCI6IjAxOTY0YjA1LTU1MzItN2M3OS04Y2RlLTE5MWRjYmQ0MjFiOCIsInV0eSI6IkUifQ.D47-XR66YEdm_KLr8sgNyKxmuXeLtqjMv0h4AIhf8w5ph0T-l4Cgyc2GIP76finZjy04OguEeAfN_qqAqQu2sLb-OOTo3-WekSmmKQAX5yJLKZJup8DbShNydhTES4GklgLVltF86Cj5npJBtj8VF3Kptd67gdrZ8TF-7o9DvLjD8Umv2kz1vjijCX0J5xyjjX8HFC7cOGsHd8gKieGTZfVykTcJlZMjbzU3zlYIIjYlkmpLrQDai56eJF7wKr-CoXV3Gg3fXjUK7wsLfo1nbBLr0I20qMdXAJLYnfoXszaN3ZYGKl27W-Hh6X5iITFrTD92XavAVU24QEltjJzk7A'
+</code></pre>
+<p>Then query light-gateway directly through its published HTTPS port with MCP
+<code>tools/list</code>:</p>
+<pre><code class="language-bash">curl -skS --max-time 40 \
+  -H "Authorization: $LIGHT_PORTAL_AUTHORIZATION" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "MCP-Protocol-Version: 2026-07-28" \
+  -H "MCP-Method: tools/list" \
+  --data-binary '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"workflow-smoke","version":"1"},"io.modelcontextprotocol/clientCapabilities":{}}}}' \
+  https://localhost/mcp
+</code></pre>
+<p>Confirm that the response advertises a tool whose <code>name</code> is
+<code>workflow_mcp_smoke</code>.</p>
+</li>
+<li>
+<p>Invoke the advertised tool with a <code>tools/call</code> request:</p>
+<pre><code class="language-bash">curl -skS --max-time 40 \
+  -H "Authorization: $LIGHT_PORTAL_AUTHORIZATION" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "MCP-Protocol-Version: 2026-07-28" \
+  -H "MCP-Method: tools/call" \
+  -H "MCP-Name: workflow_mcp_smoke" \
+  --data-binary '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"workflow_mcp_smoke","arguments":{"message":"hello from workflow MCP"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"workflow-smoke","version":"1"},"io.modelcontextprotocol/clientCapabilities":{}}}}' \
+  https://localhost/mcp
+</code></pre>
+</li>
+<li>
+<p>Confirm that the response has <code>isError: false</code>, contains the supplied
+message, and includes:</p>
+<pre><code class="language-json">{
+  "executedBy": "light-workflow"
+}
+</code></pre>
+</li>
+</ol>
+<p>For repeatable regression coverage against <code>portal-config-loc</code> or a
+development <code>light-portal-install</code> deployment, run the corresponding
+<code>light-portal-test</code> lane:</p>
+<pre><code class="language-bash">cd /home/steve/workspace/light-portal-test
+make workflow-mcp
+</code></pre>
+<h2 id="troubleshooting-2"><a class="header" href="#troubleshooting-2">Troubleshooting</a></h2>
+<h3 id="the-workflow-create-event-goes-to-the-dlq"><a class="header" href="#the-workflow-create-event-goes-to-the-dlq">The workflow Create event goes to the DLQ</a></h3>
+<p>Check for an older projection-only row with the same host, namespace, name,
+and version. Do not edit the new event payload. Remove or quarantine the
+invalid legacy fixture, then use the supported event replay flow so the valid
+<code>WorkflowDefinitionCreatedEvent</code> builds the projection.</p>
+<h3 id="the-tool-create-event-goes-to-the-dlq"><a class="header" href="#the-tool-create-event-goes-to-the-dlq">The tool Create event goes to the DLQ</a></h3>
+<p>Check for an older projection-only <code>workflow_mcp_smoke</code> tool or binding before
+retrying. Also confirm that <code>&lt;wfDefId&gt;</code> identifies an active workflow at
+version <code>1.0.0</code>; the projector rejects a workflow binding whose referenced
+definition/version is unavailable.</p>
+<h3 id="the-create-tool-form-rejects-the-binding"><a class="header" href="#the-create-tool-form-rejects-the-binding">The Create Tool form rejects the binding</a></h3>
+<p>Verify all of the following:</p>
+<ul>
+<li><code>wfDefId</code> is a UUID.</li>
+<li>All four digests start with <code>sha256:</code> and contain 64 lowercase hexadecimal
+characters.</li>
+<li>The binding and top-level Schema Digest values are identical.</li>
+<li><code>invocationMode</code> is <code>sync</code> and <code>executionClass</code> is <code>interactive</code>.</li>
+<li>The tool is read-only, non-destructive, and does not require human approval.</li>
+<li>Structured-data edits were applied before the form was submitted.</li>
+</ul>
+<h3 id="toolslist-still-shows-the-old-ids"><a class="header" href="#toolslist-still-shows-the-old-ids"><code>tools/list</code> still shows the old IDs</a></h3>
+<p>Update the light-gateway <code>mcp-router.yml</code> entry with the IDs generated by the
+portal and restart or reload light-gateway. Do not change projection-table IDs
+to match the old configuration.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="build-a-customer-360-workflow-backed-mcp-tool"><a class="header" href="#build-a-customer-360-workflow-backed-mcp-tool">Build a Customer 360 workflow-backed MCP tool</a></h1>
+<p>This tutorial exposes three existing REST reads as one <code>customer_360</code> MCP
+tool. A Serverless Workflow definition runs the calls in parallel and appends
+their responses into one ordered result array:</p>
+<pre><code class="language-text">customer_360({customerId, channel})
+  -&gt; light-gateway /mcp
+  -&gt; light-workflow
+       |-- GET /customers/{customerId}
+       |-- GET /customers/{customerId}/preferences?channel={channel}
+       `-- GET /customers/{customerId}/policies
+  -&gt; [{profile}, {preferences}, {policies}]
+</code></pre>
+<p>The demo reuses <code>demo-customer-profile-api</code>; it does not deploy an MCP wrapper
+for the REST API.</p>
+<p>Create the workflow definition and tool through the Portal UI. Do not insert
+rows into <code>wf_definition_t</code>, <code>tool_t</code>, <code>workflow_tool_binding_t</code>, or
+<code>workflow_endpoint_target_t</code>. Light Portal is event sourced:</p>
+<pre><code class="language-text">Create Workflow Definition
+  -&gt; WorkflowDefinitionCreatedEvent
+  -&gt; wf_definition_t
+
+Create Tool with a workflow binding and endpoints
+  -&gt; ToolCreatedEvent
+  -&gt; tool_t
+  -&gt; workflow_tool_binding_t
+  -&gt; workflow_endpoint_target_t
+</code></pre>
+<p>The workflow binding and its registered endpoint targets are part of the
+Create Tool command. There is no separate binding or endpoint-target Create
+page.</p>
+<h2 id="what-this-simplified-demo-covers"><a class="header" href="#what-this-simplified-demo-covers">What this simplified demo covers</a></h2>
+<ul>
+<li>REST API aggregation without an MCP wrapper service.</li>
+<li>Parallel orchestration with a workflow <code>fork</code>.</li>
+<li>A simple append transformation into one MCP response.</li>
+<li>Portal command/event creation of the workflow, tool, binding, and endpoint
+registrations.</li>
+<li>Static <code>mcp-router.yml</code> publication for a local Light-Fabric instance.</li>
+</ul>
+<p>This is an incremental demo, not the final transformer-tool implementation.
+The current workflow HTTP executor calls the internal demo endpoints directly
+and does not forward the MCP caller’s JWT. In addition, the current
+non-competing fork fails the invocation when any branch fails; it does not yet
+return the required partial response. Original-JWT propagation, gateway-routed
+API destinations, UI-side transformation validation, config-server
+publication, and partial-error append behavior remain follow-up work.</p>
+<h2 id="prerequisites-1"><a class="header" href="#prerequisites-1">Prerequisites</a></h2>
+<ul>
+<li>Start the <code>portal-config-loc/all-in-lt</code> Rust stack.</li>
+<li>Confirm <code>light-gateway</code>, <code>light-workflow</code>, <code>hybrid-command</code>, <code>hybrid-query</code>,
+PostgreSQL, and <code>demo-customer-profile-api</code> are healthy.</li>
+<li>Sign in to Light Portal and select the target host.</li>
+<li>Use an account that can administer workflow definitions and GenAI tools.</li>
+<li>Download the versioned
+<a href="tutorial/light-gateway/examples/customer-360-mcp.yaml">customer-360-mcp definition</a>.</li>
+<li>Confirm that the host does not already have an active workflow named
+<code>customer-360-mcp</code> at <code>1.0.0</code> or an active tool named <code>customer_360</code>.</li>
+</ul>
+<p>The included demo data uses customer <code>CUST-1001</code> and channel <code>portal</code>.</p>
+<h2 id="workflow-definition-2"><a class="header" href="#workflow-definition-2">Workflow definition</a></h2>
+<p>The importable YAML is maintained with this tutorial and is included below so
+the rendered mdBook and downloadable asset cannot drift apart:</p>
+<pre><code class="language-yaml">document:
+  dsl: "1.0.3"
+  namespace: light-demo
+  name: customer-360-mcp
+  version: "1.0.0"
+  title: Customer 360 Workflow MCP Demo
+  summary: Read a customer profile, preferences, and policies in parallel and append the API responses.
+  tags:
+    demo: workflow-mcp
+    capability: aggregation
+evaluate:
+  language: cel
+input:
+  schema:
+    format: json
+    document:
+      type: object
+      additionalProperties: false
+      required:
+        - customerId
+        - channel
+      properties:
+        customerId:
+          type: string
+          minLength: 1
+          maxLength: 64
+        channel:
+          type: string
+          minLength: 1
+          maxLength: 32
+output:
+  schema:
+    format: json
+    document:
+      type: object
+      additionalProperties: false
+      required:
+        - customerId
+        - results
+      properties:
+        customerId:
+          type: string
+        results:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - source
+              - status
+              - data
+            properties:
+              source:
+                type: string
+              status:
+                type: string
+                const: success
+              data:
+                type: object
+do:
+  - loadCustomerContext:
+      fork:
+        branches:
+          - profile:
+              call: http
+              with:
+                method: GET
+                endpoint:
+                  uri: http://demo-customer-profile-api:8085/customers/${{ customerId }}
+                output: content
+              metadata:
+                endpointRef: customer-360.profile
+          - preferences:
+              call: http
+              with:
+                method: GET
+                endpoint:
+                  uri: http://demo-customer-profile-api:8085/customers/${{ customerId }}/preferences?channel=${{ channel }}
+                output: content
+              metadata:
+                endpointRef: customer-360.preferences
+          - policies:
+              call: http
+              with:
+                method: GET
+                endpoint:
+                  uri: http://demo-customer-profile-api:8085/customers/${{ customerId }}/policies
+                output: content
+              metadata:
+                endpointRef: customer-360.policies
+        compete: false
+      export:
+        as:
+          responses: .output
+  - appendResponses:
+      set:
+        customerId: "${{ customerId }}"
+        results:
+          - source: profile
+            status: success
+            data: "${{ responses.profile }}"
+          - source: preferences
+            status: success
+            data: "${{ responses.preferences }}"
+          - source: policies
+            status: success
+            data: "${{ responses.policies }}"
+      end: true
+</code></pre>
+<h2 id="1-review-the-workflow"><a class="header" href="#1-review-the-workflow">1. Review the workflow</a></h2>
+<p>The workflow has one non-competing fork with three GET branches. Each HTTP
+task declares <code>metadata.endpointRef</code>; a workflow-backed invocation is allowed
+to call only an active endpoint registered by the tool binding with the same
+reference and method.</p>
+<p>After the fork joins, <code>appendResponses</code> produces this response shape:</p>
+<pre><code class="language-json">{
+  "customerId": "CUST-1001",
+  "results": [
+    {"source": "profile", "status": "success", "data": {}},
+    {"source": "preferences", "status": "success", "data": {}},
+    {"source": "policies", "status": "success", "data": {}}
+  ]
+}
+</code></pre>
+<p>The fixed order makes the append transformation predictable even though the
+three calls execute concurrently.</p>
+<h2 id="2-create-the-workflow-definition"><a class="header" href="#2-create-the-workflow-definition">2. Create the workflow definition</a></h2>
+<ol>
+<li>
+<p>In the Portal sidebar, expand <strong>Workflow Admin</strong> and select
+<strong>Wf Definition</strong>.</p>
+</li>
+<li>
+<p>Select <strong>Create New WfDefinition</strong>.</p>
+</li>
+<li>
+<p>In <strong>Workflow Editor</strong>, select <strong>Import</strong> and open
+<code>customer-360-mcp.yaml</code>.</p>
+</li>
+<li>
+<p>Confirm these values:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>Namespace</td><td><code>light-demo</code></td></tr>
+<tr><td>Name</td><td><code>customer-360-mcp</code></td></tr>
+<tr><td>Version</td><td><code>1.0.0</code></td></tr>
+<tr><td>Publish in Workflow Catalog</td><td>Enabled</td></tr>
+</tbody>
+</table>
+</div>
+<p>The selected host supplies Host ID. Leave Workflow Definition ID empty so
+the command handler generates it.</p>
+</li>
+<li>
+<p>Select <strong>Validate</strong> and resolve any error.</p>
+</li>
+<li>
+<p>Select <strong>Save</strong> once. Wait for <strong>Workflow definition saved</strong>.</p>
+</li>
+<li>
+<p>Return to <strong>Wf Definition</strong>, refresh the list, and open the new row with
+<strong>Update</strong>. Record its generated Workflow Definition ID as <code>&lt;wfDefId&gt;</code>.</p>
+</li>
+</ol>
+<p>Opening the Update page confirms that the event and projection are both
+available. Do not submit Create repeatedly while waiting for projection.</p>
+<p>The normalized definition digest for the supplied file is:</p>
+<pre><code class="language-text">sha256:a7c1c07164110840222fd2528122d75ced9f69d4e7b7b2944ea15dddd14e10ae
+</code></pre>
+<p>Changing the workflow changes this digest. If you edit the definition, compute
+and use the new value consistently in the tool binding and router config.</p>
+<h2 id="3-create-the-tool-binding-and-endpoint-registrations"><a class="header" href="#3-create-the-tool-binding-and-endpoint-registrations">3. Create the tool, binding, and endpoint registrations</a></h2>
+<ol>
+<li>
+<p>In the sidebar, expand <strong>GenAI Admin</strong> and select <strong>Tool</strong>.</p>
+</li>
+<li>
+<p>Select <strong>Create New Tool</strong>.</p>
+</li>
+<li>
+<p>Enter these values. Unlisted optional fields can remain empty.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>Name</td><td><code>customer_360</code></td></tr>
+<tr><td>Description</td><td><code>Read a customer profile, preferences, and policies in parallel and append the API responses.</code></td></tr>
+<tr><td>Routing Domain</td><td><code>Customer</code></td></tr>
+<tr><td>Semantic Namespace</td><td><code>customer-360</code></td></tr>
+<tr><td>Semantic Description</td><td><code>Aggregate customer context for an agent in one read-only call.</code></td></tr>
+<tr><td>Lifecycle Status</td><td><code>active</code></td></tr>
+<tr><td>Read Only</td><td>Enabled</td></tr>
+<tr><td>Idempotent</td><td>Enabled</td></tr>
+<tr><td>Destructive</td><td>Disabled</td></tr>
+<tr><td>Human Approval Required</td><td>Disabled</td></tr>
+<tr><td>Version</td><td><code>1.0.0</code></td></tr>
+<tr><td>Execution Placement</td><td><code>workflow</code></td></tr>
+<tr><td>Schema Digest</td><td><code>sha256:56cb21e48069caa1c9998ba58a3983a68b42d038b364c82b3a3620b85c3718ca</code></td></tr>
+</tbody>
+</table>
+</div>
+<p><code>Implementation Type</code> is not required for a workflow-placed tool.</p>
+</li>
+<li>
+<p>After selecting <code>workflow</code>, enter the following JSON in <strong>Workflow
+Binding</strong>. Replace <code>&lt;wfDefId&gt;</code> with the generated ID from step 2.</p>
+<pre><code class="language-json">{
+  "wfDefId": "&lt;wfDefId&gt;",
+  "workflowVersion": "1.0.0",
+  "definitionDigest": "sha256:a7c1c07164110840222fd2528122d75ced9f69d4e7b7b2944ea15dddd14e10ae",
+  "schemaDigest": "sha256:56cb21e48069caa1c9998ba58a3983a68b42d038b364c82b3a3620b85c3718ca",
+  "invocationMode": "sync",
+  "syncWaitMs": 20000,
+  "totalDeadlineMs": 30000,
+  "executionClass": "interactive",
+  "resultTextMode": "compact-json",
+  "idempotencyPolicy": {
+    "kind": "derived",
+    "inFlightDedupMs": 30000,
+    "resultReplayMs": 0
+  },
+  "delegationPolicy": {
+    "maximumDelegationDepth": 0
+  },
+  "responsePolicyDigest": "sha256:36c9bb0c09a5e06a4871f9c7ad985792269eb798334c2e9715f25d441796174e",
+  "runtimeBounds": {
+    "maximumTaskAttempts": 8,
+    "maximumNestedCalls": 1,
+    "maximumParallelism": 3,
+    "maximumRequestBytes": 65536,
+    "maximumIntermediateBytes": 524288,
+    "maximumResultBytes": 262144,
+    "maximumCostUnits": 0
+  },
+  "policyDigest": "sha256:b5838a4852ba9937839f228e9d3e30607a58b69652e5c373fb2cb61108e87180",
+  "endpoints": [
+    {
+      "endpointRef": "customer-360.profile",
+      "endpointUri": "http://demo-customer-profile-api:8085/customers/${{ customerId }}",
+      "allowedMethods": ["GET"],
+      "authorizationPolicyDigest": "sha256:b5838a4852ba9937839f228e9d3e30607a58b69652e5c373fb2cb61108e87180"
+    },
+    {
+      "endpointRef": "customer-360.preferences",
+      "endpointUri": "http://demo-customer-profile-api:8085/customers/${{ customerId }}/preferences?channel=${{ channel }}",
+      "allowedMethods": ["GET"],
+      "authorizationPolicyDigest": "sha256:b5838a4852ba9937839f228e9d3e30607a58b69652e5c373fb2cb61108e87180"
+    },
+    {
+      "endpointRef": "customer-360.policies",
+      "endpointUri": "http://demo-customer-profile-api:8085/customers/${{ customerId }}/policies",
+      "allowedMethods": ["GET"],
+      "authorizationPolicyDigest": "sha256:b5838a4852ba9937839f228e9d3e30607a58b69652e5c373fb2cb61108e87180"
+    }
+  ]
+}
+</code></pre>
+</li>
+<li>
+<p>If the structured editor marks the JSON tab with <code>*</code>, select <strong>Apply</strong>.</p>
+</li>
+<li>
+<p>Submit <strong>Create Tool Form</strong> once.</p>
+</li>
+<li>
+<p>Return to <strong>Tool</strong>, refresh the list, and open <code>customer_360</code> with
+<strong>Update Tool</strong>. Record the generated Tool ID as <code>&lt;toolId&gt;</code> and confirm:</p>
+<ul>
+<li>Execution Placement is <code>workflow</code>.</li>
+<li>Stable Tool Reference equals <code>&lt;toolId&gt;</code>.</li>
+<li>The binding contains <code>&lt;wfDefId&gt;</code> and a generated <code>bindingId</code>.</li>
+<li>All three endpoint entries are present.</li>
+</ul>
+</li>
+</ol>
+<p>The command handler generates the Tool ID and binding ID. The event projector
+creates all four read-model types from the one <code>ToolCreatedEvent</code>; do not fill
+in any missing projection row manually.</p>
+<p><code>maximumParallelism</code> must be at least <code>3</code>, because the definition has three
+fork branches. The binding Schema Digest must exactly match the top-level Tool
+Schema Digest. A synchronous gateway binding also requires <code>syncWaitMs</code> no
+greater than <code>20000</code> and <code>totalDeadlineMs</code> no greater than <code>30000</code>.</p>
+<h2 id="4-enable-the-static-light-gateway-entry"><a class="header" href="#4-enable-the-static-light-gateway-entry">4. Enable the static light-gateway entry</a></h2>
+<p>Open
+<code>portal-config-loc/all-in-lt/light-gateway-rust/config/mcp-router.yml</code>. The
+local demo configuration includes a complete <code>customer_360</code> entry after the
+smoke tool.</p>
+<ol>
+<li>
+<p>Set <code>workflowBinding.stableToolRef</code> and
+<code>workflowBinding.workflowDefinitionId</code> to the IDs generated by your Portal
+commands. The IDs shipped in a developer checkout are valid only for the
+database in which those Create events were produced.</p>
+</li>
+<li>
+<p>Keep the <code>- name: customer_360</code> entry aligned under <code>tools:</code>.</p>
+</li>
+<li>
+<p>Do not change the schemas, digests, timeouts, or budget unless you also
+update the Portal binding to match.</p>
+</li>
+<li>
+<p>Confirm <code>light-gateway-rust/config/access-control.yml</code> contains
+<code>customer_360</code> under <code>skipPathPrefixes</code> for this local demo.</p>
+</li>
+<li>
+<p>Restart light-gateway from <code>portal-config-loc/all-in-lt</code>:</p>
+<pre><code class="language-bash">docker compose -f docker-compose.yml -f docker-compose-rust.yml restart light-gateway
+</code></pre>
+</li>
+</ol>
+<p>Editing <code>mcp-router.yml</code> publishes runtime configuration; it does not create a
+Portal entity and is not a substitute for the event-sourced steps above.</p>
+<h2 id="5-verify-from-the-desktop"><a class="header" href="#5-verify-from-the-desktop">5. Verify from the desktop</a></h2>
+<p>Set a current access token, including the <code>Bearer </code> prefix. Do not copy a
+token from this tutorial:</p>
+<pre><code class="language-bash">export LIGHT_PORTAL_AUTHORIZATION='Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6IkFacDAyVzZqZGNxWHpxTkk2MVlaelEifQ.eyJpc3MiOiJ1cm46Y29tOm5ldHdvcmtudDpvYXV0aDI6djEiLCJhdWQiOiJ1cm46Y29tLm5ldHdvcmtudCIsInN1YiI6IjAxOTY0YjA1LTU1MzItN2M3OS04Y2RlLTE5MWRjYmQ0MjFiOCIsImV4cCI6MTc4NjYyMjU0MywianRpIjoiRkMxM0ZmYzNUMm0zLXlMT1RHc3NHQSIsImlhdCI6MTc4NjYyMTk0MywibmJmIjoxNzg2NjIxODIzLCJ2ZXIiOiIxLjAiLCJjaWQiOiJmN2Q0MjM0OC1jNjQ3LTRlZmItYTUyZC00YzU3ODc0MjFlNzIiLCJzY3AiOlsicG9ydGFsLnIiLCJwb3J0YWwudyJdLCJjbGllbnRfaWQiOiJmN2Q0MjM0OC1jNjQ3LTRlZmItYTUyZC00YzU3ODc0MjFlNzIiLCJzY29wZSI6InBvcnRhbC5yIHBvcnRhbC53IiwiY3NyZiI6IjNFS3lmUkxpVFBtTFM2QXVIMEZNcGciLCJlaWQiOiJzaDM1IiwiZW1sIjoic3RldmUuaHVAbGlnaHRhcGkubmV0IiwiaG9zdCI6IjAxOTY0YjA1LTU1MmEtN2M0Yi05MTg0LTY4NTdlN2YzZGM1ZiIsInJvbGUiOiJhY2NvdW50LW1hbmFnZXIgYWRtaW4gZ2l0aHViLXJlYWRlciBob3N0LWFkbWluIG1jcC1yZWFkZXIgdXNlciIsInVpZCI6IjAxOTY0YjA1LTU1MzItN2M3OS04Y2RlLTE5MWRjYmQ0MjFiOCIsInV0eSI6IkUifQ.D47-XR66YEdm_KLr8sgNyKxmuXeLtqjMv0h4AIhf8w5ph0T-l4Cgyc2GIP76finZjy04OguEeAfN_qqAqQu2sLb-OOTo3-WekSmmKQAX5yJLKZJup8DbShNydhTES4GklgLVltF86Cj5npJBtj8VF3Kptd67gdrZ8TF-7o9DvLjD8Umv2kz1vjijCX0J5xyjjX8HFC7cOGsHd8gKieGTZfVykTcJlZMjbzU3zlYIIjYlkmpLrQDai56eJF7wKr-CoXV3Gg3fXjUK7wsLfo1nbBLr0I20qMdXAJLYnfoXszaN3ZYGKl27W-Hh6X5iITFrTD92XavAVU24QEltjJzk7A'
+</code></pre>
+<p>List tools through light-gateway’s published HTTPS port:</p>
+<pre><code class="language-bash">curl -skS --max-time 45 \
+  -H "Authorization: $LIGHT_PORTAL_AUTHORIZATION" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H 'MCP-Protocol-Version: 2026-07-28' \
+  -H 'MCP-Method: tools/list' \
+  --data-binary '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"customer-360-demo","version":"1"},"io.modelcontextprotocol/clientCapabilities":{}}}}' \
+  https://localhost/mcp | jq
+</code></pre>
+<p>Confirm that <code>result.tools</code> contains <code>customer_360</code>, then invoke it:</p>
+<pre><code class="language-bash">curl -skS --max-time 45 \
+  -H "Authorization: $LIGHT_PORTAL_AUTHORIZATION" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H 'MCP-Protocol-Version: 2026-07-28' \
+  -H 'MCP-Method: tools/call' \
+  -H 'MCP-Name: customer_360' \
+  --data-binary '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"customer_360","arguments":{"customerId":"CUST-1001","channel":"portal"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"customer-360-demo","version":"1"},"io.modelcontextprotocol/clientCapabilities":{}}}}' \
+  https://localhost/mcp | jq
+</code></pre>
+<p>Confirm that <code>isError</code> is <code>false</code> and that the appended result contains:</p>
+<ul>
+<li>Profile: <code>Avery Chen</code>.</li>
+<li>Preferences: category <code>travel</code> and channel <code>portal</code>.</li>
+<li>Policy: <code>POL-AUTO-1001</code>.</li>
+</ul>
+<p>The request goes directly from the desktop to <code>https://localhost/mcp</code>; no
+<code>docker exec</code> is required.</p>
+<p>To run the repeatable Hurl assertions from <code>light-portal-test</code> against
+<code>portal-config-loc</code> or a development <code>light-portal-install</code> deployment:</p>
+<pre><code class="language-bash">cd /home/steve/workspace/light-portal-test
+make workflow-mcp
+</code></pre>
+<h2 id="troubleshooting-3"><a class="header" href="#troubleshooting-3">Troubleshooting</a></h2>
+<h3 id="the-create-event-goes-to-the-dlq"><a class="header" href="#the-create-event-goes-to-the-dlq">The Create event goes to the DLQ</a></h3>
+<p>Check for an older active resource with the same workflow identity or tool
+name. Also confirm the tool event references the active workflow ID and exact
+version. Repair the bad event or legacy fixture through the supported event
+replay/cleanup flow; do not insert or update projection rows.</p>
+<h3 id="the-tool-form-rejects-the-binding"><a class="header" href="#the-tool-form-rejects-the-binding">The tool form rejects the binding</a></h3>
+<p>Confirm that:</p>
+<ul>
+<li><code>&lt;wfDefId&gt;</code> is a UUID belonging to the active <code>customer-360-mcp</code> definition.</li>
+<li>Every digest starts with <code>sha256:</code> followed by 64 lowercase hexadecimal
+characters.</li>
+<li>The top-level and binding Schema Digest values match.</li>
+<li>The tool is read-only, non-destructive, and headless for synchronous use.</li>
+<li>Every endpoint has <code>endpointRef</code>, <code>endpointUri</code>, and a non-empty
+<code>allowedMethods</code> array.</li>
+<li>The structured editor changes were applied before submission.</li>
+</ul>
+<h3 id="the-invocation-says-the-endpoint-is-not-registered"><a class="header" href="#the-invocation-says-the-endpoint-is-not-registered">The invocation says the endpoint is not registered</a></h3>
+<p>Compare each workflow <code>metadata.endpointRef</code> with its binding endpoint entry.
+The values are case-sensitive. Also verify that <code>GET</code> is in <code>allowedMethods</code>
+and that the endpoint is active on the same host and binding.</p>
+<h3 id="the-invocation-says-the-definition-or-policy-does-not-match"><a class="header" href="#the-invocation-says-the-definition-or-policy-does-not-match">The invocation says the definition or policy does not match</a></h3>
+<p>Keep the workflow version and all four digests identical between the Portal
+binding and <code>mcp-router.yml</code>. Use the supplied definition without edits for
+the documented digest.</p>
+<h3 id="the-fork-exceeds-the-runtime-budget"><a class="header" href="#the-fork-exceeds-the-runtime-budget">The fork exceeds the runtime budget</a></h3>
+<p>Set <code>maximumParallelism</code> to at least <code>3</code> in both the Portal binding and static
+router entry.</p>
+<h3 id="one-rest-call-fails"><a class="header" href="#one-rest-call-fails">One REST call fails</a></h3>
+<p>The current non-competing fork fails the entire invocation. That is a known
+limit of this simplified demo. Do not present it as the customer’s required
+partial-response behavior; that needs the planned try/error-capture extension
+before failed branches can be appended beside successful responses.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="light-knowledge"><a class="header" href="#light-knowledge">light-knowledge</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="light-fabric-document-ingest"><a class="header" href="#light-fabric-document-ingest">light-fabric-document-ingest</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="light-fabric-rag-search"><a class="header" href="#light-fabric-rag-search">light-fabric-rag-search</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="license"><a class="header" href="#license">License</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
