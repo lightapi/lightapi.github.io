@@ -35,10 +35,10 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-3573f11f.js";
+            window.path_to_searchindex_js = "../../searchindex-774c0611.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../toc-5b825fe4.js"></script>
+        <script src="../../toc-228f8296.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -419,7 +419,7 @@ and use the new value consistently in the tool binding and router config.</p>
 <p>In the sidebar, expand <strong>GenAI Admin</strong> and select <strong>Tool</strong>.</p>
 </li>
 <li>
-<p>Select <strong>Create New Tool</strong>.</p>
+<p>Select <strong>Create Workflow-backed Tool</strong>.</p>
 </li>
 <li>
 <p>Enter these values. Unlisted optional fields can remain empty.</p>
@@ -441,69 +441,17 @@ and use the new value consistently in the tool binding and router config.</p>
 <tr><td>Human Approval Required</td><td>Disabled</td></tr>
 <tr><td>Version</td><td><code>1.0.0</code></td></tr>
 <tr><td>Execution Placement</td><td><code>workflow</code></td></tr>
-<tr><td>Schema Digest</td><td><code>sha256:56cb21e48069caa1c9998ba58a3983a68b42d038b364c82b3a3620b85c3718ca</code></td></tr>
+<tr><td>Workflow Definition</td><td><code>light-demo/customer-360-mcp @ 1.0.0</code></td></tr>
 </tbody>
 </table>
 </div>
 <p><code>Implementation Type</code> is not required for a workflow-placed tool.</p>
 </li>
 <li>
-<p>After selecting <code>workflow</code>, enter the following JSON in <strong>Workflow
-Binding</strong>. Replace <code>&lt;wfDefId&gt;</code> with the generated ID from step 2.</p>
-<pre><code class="language-json">{
-  "wfDefId": "&lt;wfDefId&gt;",
-  "workflowVersion": "1.0.0",
-  "definitionDigest": "sha256:a7c1c07164110840222fd2528122d75ced9f69d4e7b7b2944ea15dddd14e10ae",
-  "schemaDigest": "sha256:56cb21e48069caa1c9998ba58a3983a68b42d038b364c82b3a3620b85c3718ca",
-  "invocationMode": "sync",
-  "syncWaitMs": 20000,
-  "totalDeadlineMs": 30000,
-  "executionClass": "interactive",
-  "resultTextMode": "compact-json",
-  "idempotencyPolicy": {
-    "kind": "derived",
-    "inFlightDedupMs": 30000,
-    "resultReplayMs": 0
-  },
-  "delegationPolicy": {
-    "maximumDelegationDepth": 0
-  },
-  "responsePolicyDigest": "sha256:36c9bb0c09a5e06a4871f9c7ad985792269eb798334c2e9715f25d441796174e",
-  "runtimeBounds": {
-    "maximumTaskAttempts": 8,
-    "maximumNestedCalls": 1,
-    "maximumParallelism": 3,
-    "maximumRequestBytes": 65536,
-    "maximumIntermediateBytes": 524288,
-    "maximumResultBytes": 262144,
-    "maximumCostUnits": 0
-  },
-  "policyDigest": "sha256:b5838a4852ba9937839f228e9d3e30607a58b69652e5c373fb2cb61108e87180",
-  "endpoints": [
-    {
-      "endpointRef": "customer-360.profile",
-      "endpointUri": "http://demo-customer-profile-api:8085/customers/${{ customerId }}",
-      "allowedMethods": ["GET"],
-      "authorizationPolicyDigest": "sha256:b5838a4852ba9937839f228e9d3e30607a58b69652e5c373fb2cb61108e87180"
-    },
-    {
-      "endpointRef": "customer-360.preferences",
-      "endpointUri": "http://demo-customer-profile-api:8085/customers/${{ customerId }}/preferences?channel=${{ channel }}",
-      "allowedMethods": ["GET"],
-      "authorizationPolicyDigest": "sha256:b5838a4852ba9937839f228e9d3e30607a58b69652e5c373fb2cb61108e87180"
-    },
-    {
-      "endpointRef": "customer-360.policies",
-      "endpointUri": "http://demo-customer-profile-api:8085/customers/${{ customerId }}/policies",
-      "allowedMethods": ["GET"],
-      "authorizationPolicyDigest": "sha256:b5838a4852ba9937839f228e9d3e30607a58b69652e5c373fb2cb61108e87180"
-    }
-  ]
-}
-</code></pre>
-</li>
-<li>
-<p>If the structured editor marks the JSON tab with <code>*</code>, select <strong>Apply</strong>.</p>
+<p>Portal loads the immutable workflow definition and derives the internal
+definition, schema, and policy digests. These implementation fields are not
+entered by the user. The reviewed workflow-tool runtime profile supplies
+execution limits and resolves cataloged endpoint references.</p>
 </li>
 <li>
 <p>Submit <strong>Create Tool Form</strong> once.</p>
@@ -514,7 +462,7 @@ Binding</strong>. Replace <code>&lt;wfDefId&gt;</code> with the generated ID fro
 <ul>
 <li>Execution Placement is <code>workflow</code>.</li>
 <li>Stable Tool Reference equals <code>&lt;toolId&gt;</code>.</li>
-<li>The binding contains <code>&lt;wfDefId&gt;</code> and a generated <code>bindingId</code>.</li>
+<li>The binding contains the selected Workflow Definition ID and a generated <code>bindingId</code>.</li>
 <li>All three endpoint entries are present.</li>
 </ul>
 </li>
@@ -522,10 +470,9 @@ Binding</strong>. Replace <code>&lt;wfDefId&gt;</code> with the generated ID fro
 <p>The command handler generates the Tool ID and binding ID. The event projector
 creates all four read-model types from the one <code>ToolCreatedEvent</code>; do not fill
 in any missing projection row manually.</p>
-<p><code>maximumParallelism</code> must be at least <code>3</code>, because the definition has three
-fork branches. The binding Schema Digest must exactly match the top-level Tool
-Schema Digest. A synchronous gateway binding also requires <code>syncWaitMs</code> no
-greater than <code>20000</code> and <code>totalDeadlineMs</code> no greater than <code>30000</code>.</p>
+<p>The reviewed runtime profile must permit at least three parallel branches for
+this workflow. Confirm that limit when reviewing the generated binding; Portal
+does not currently validate workflow structure against runtime-profile limits.</p>
 <h2 id="4-enable-the-static-light-gateway-entry"><a class="header" href="#4-enable-the-static-light-gateway-entry">4. Enable the static light-gateway entry</a></h2>
 <p>Open
 <code>portal-config-loc/all-in-lt/light-gateway-rust/config/mcp-router.yml</code>. The

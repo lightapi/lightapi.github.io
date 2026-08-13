@@ -1,0 +1,886 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Rust Event Importer - Light Portal Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-e96d0476.css">
+        <link rel="stylesheet" href="../css/chrome-d279d366.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex-774c0611.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc-228f8296.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Light Portal Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="rust-event-importer-design"><a class="header" href="#rust-event-importer-design">Rust Event Importer Design</a></h1>
+<h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
+<p>The <code>importer</code> repository is the Rust replacement for the current Java
+<code>event-importer</code> CLI. It must preserve the operational workflows that are
+already used for portal migrations:</p>
+<ol>
+<li>Import a JSON array of CloudEvents into <code>event_store_t</code>, <code>outbox_message_t</code>,
+and pending <code>notification_t</code> records.</li>
+<li>Convert a global snapshot JSON file into an ordered JSON array of
+CreatedEvents that can be imported by the same event import path.</li>
+</ol>
+<p>The Rust version should be a standalone command-line tool. It should not start a
+service, and it should not depend on Java runtime configuration. It should
+connect directly to PostgreSQL and use the same event-store contract as
+<code>light-portal</code>.</p>
+<h2 id="existing-java-behavior-to-preserve"><a class="header" href="#existing-java-behavior-to-preserve">Existing Java Behavior To Preserve</a></h2>
+<p>The Java <code>event-importer</code> exposes two modes.</p>
+<h3 id="import-mode"><a class="header" href="#import-mode">Import Mode</a></h3>
+<p>Default mode:</p>
+<pre><code class="language-bash">event-importer --filename events.json
+</code></pre>
+<p>Supported flags:</p>
+<ul>
+<li><code>--filename</code>, <code>-f</code>: JSON array of CloudEvents.</li>
+<li><code>--replacement</code>, <code>-r</code>: JSON array of replacement rules.</li>
+<li><code>--enrichment</code>, <code>-e</code>: JSON array of enrichment rules.</li>
+</ul>
+<p>Per event, the current importer:</p>
+<ol>
+<li>Parses the input event as JSON.</li>
+<li>Applies replacement and enrichment rules with <code>EventMutator</code>.</li>
+<li>Deserializes the mutated JSON as a CloudEvent.</li>
+<li>Reads or defaults <code>aggregateversion</code>.</li>
+<li>Adds missing <code>aggregatetype</code> from event type.</li>
+<li>Recomputes <code>subject</code> from event data when the subject is missing or
+replacement rules were applied.</li>
+<li>Skips duplicate <code>(subject, aggregateversion)</code> pairs inside the input batch.</li>
+<li>Skips events when the target database already has the same or a higher
+aggregate version for that subject.</li>
+<li>Reserves a fresh nonce from <code>user_t</code> for the event user.</li>
+<li>Inserts one event at a time so one bad event does not abort the whole file.</li>
+</ol>
+<p>The insert path writes the event to:</p>
+<ul>
+<li><code>event_store_t</code></li>
+<li><code>outbox_message_t</code></li>
+<li><code>notification_t</code> with <code>PENDING</code> status</li>
+</ul>
+<h3 id="snapshot-conversion-mode"><a class="header" href="#snapshot-conversion-mode">Snapshot Conversion Mode</a></h3>
+<p>Conversion mode:</p>
+<pre><code class="language-bash">event-importer --convert \
+  --filename snapshot.json \
+  --targetHostId 01964b05-552a-7c4b-9184-6857e7f3dc5f \
+  --adminUserId 01964b05-5532-7c79-8cde-191dcbd421b8 \
+  --output events.json
+</code></pre>
+<p>The current converter:</p>
+<ol>
+<li>Reads snapshot JSON with a top-level <code>tables</code> object.</li>
+<li>Sorts snapshot tables topologically from database FK metadata.</li>
+<li>Skips runtime/projection-owned tables.</li>
+<li>Maps each table to a CreatedEvent type.</li>
+<li>Merges projection-owned child data into parent event payloads where required:
+<ul>
+<li><code>auth_provider_key_t</code> into <code>auth_provider_t</code></li>
+<li><code>auth_client_owner_t</code> into <code>auth_client_t</code></li>
+<li><code>user_host_t</code>, <code>customer_t</code>, and <code>employee_t</code> into <code>user_t</code></li>
+<li><code>api_endpoint_t</code> and endpoint scopes into <code>api_version_t</code></li>
+</ul>
+</li>
+<li>Rewrites the source host id to the target host id recursively.</li>
+<li>Emits CloudEvent-compatible JSON with:
+<ul>
+<li>new event id</li>
+<li>target host</li>
+<li>admin user</li>
+<li><code>nonce</code> placeholder</li>
+<li><code>subject</code> derived from event type and data</li>
+<li><code>aggregatetype</code></li>
+<li><code>aggregateversion</code> set to <code>1</code></li>
+</ul>
+</li>
+</ol>
+<p>The generated JSON is then imported through import mode.</p>
+<h2 id="goals"><a class="header" href="#goals">Goals</a></h2>
+<ul>
+<li>Preserve Java CLI compatibility for existing scripts and runbooks.</li>
+<li>Preserve event-store, outbox, notification, nonce, offset, and transaction
+semantics.</li>
+<li>Keep migration behavior deterministic and testable with golden files.</li>
+<li>Make the Rust implementation easier to deploy as a single static binary.</li>
+<li>Keep snapshot conversion and import logic in one repository, but isolate them
+into testable modules.</li>
+<li>Support large migration workflows with stdin/stdout piping, bounded-memory
+conversion options, aggregate-version caching, and configurable batch imports.</li>
+</ul>
+<h2 id="non-goals"><a class="header" href="#non-goals">Non-Goals</a></h2>
+<ul>
+<li>No online REST service in the first version.</li>
+<li>No schema migration management.</li>
+<li>No reconciliation or diff-based promotion logic.</li>
+<li>No attempt to replay projections directly. Import writes events and outbox
+rows; existing consumers rebuild projections.</li>
+</ul>
+<h2 id="command-line-interface"><a class="header" href="#command-line-interface">Command Line Interface</a></h2>
+<p>Use <code>clap</code> with two subcommands while also accepting Java-compatible flags.</p>
+<p>Preferred Rust CLI:</p>
+<pre><code class="language-bash">importer import --filename events.json
+importer convert --filename snapshot.json --target-host-id ... --admin-user-id ... --output events.json
+importer convert --filename snapshot.json --target-host-id ... --admin-user-id ... --output - \
+  | importer import --filename -
+</code></pre>
+<p>Compatibility CLI:</p>
+<pre><code class="language-bash">importer --filename events.json
+importer --convert --filename snapshot.json --targetHostId ... --adminUserId ... --output events.json
+</code></pre>
+<h3 id="import-options"><a class="header" href="#import-options">Import Options</a></h3>
+<ul>
+<li><code>--filename</code>, <code>-f</code>: required event list JSON file.</li>
+<li><code>--filename -</code>: read event JSON from stdin.</li>
+<li><code>--replacement</code>, <code>-r</code>: JSON string or <code>@file</code> containing replacement rules.</li>
+<li><code>--enrichment</code>, <code>-e</code>: JSON string or <code>@file</code> containing enrichment rules.</li>
+<li><code>--dry-run</code>: parse, mutate, validate, and report without writing.</li>
+<li><code>--fail-fast</code>: stop on the first failed event. Default is continue.</li>
+<li><code>--batch-size</code>: number of events per transaction. Default is <code>1</code> for Java
+compatibility. Snapshot imports should use a larger value, such as <code>500</code>,
+after validation passes.</li>
+<li><code>--summary-json</code>: print machine-readable summary.</li>
+</ul>
+<h3 id="convert-options"><a class="header" href="#convert-options">Convert Options</a></h3>
+<ul>
+<li><code>--convert</code>, <code>-c</code>: compatibility flag for conversion mode.</li>
+<li><code>--filename</code>, <code>-f</code>: required snapshot JSON file.</li>
+<li><code>--targetHostId</code>, <code>--target-host-id</code>, <code>-t</code>: required target host id.</li>
+<li><code>--adminUserId</code>, <code>--admin-user-id</code>, <code>-u</code>: required user id stamped on events.</li>
+<li><code>--output</code>, <code>-o</code>: optional output file. If absent or <code>-</code>, write JSON to stdout
+and diagnostics to stderr.</li>
+<li><code>--schema-source embedded|database</code>: default <code>embedded</code>. Embedded mode uses a
+checked-in dependency graph generated from portal DDL. Database mode uses
+PostgreSQL metadata and is useful for parity checks and dependency-graph
+refresh validation.</li>
+</ul>
+<h3 id="configuration"><a class="header" href="#configuration">Configuration</a></h3>
+<p>Use environment-first configuration:</p>
+<pre><code class="language-bash">DATABASE_URL=postgres://postgres:secret@localhost:5432/configserver importer import -f events.json
+</code></pre>
+<p>Optional config file support can mirror local compose usage:</p>
+<pre><code class="language-yaml">database:
+  url: postgres://postgres:secret@localhost:5432/configserver
+  max_connections: 3
+</code></pre>
+<p>Precedence:</p>
+<ol>
+<li>CLI flags</li>
+<li>Environment variables</li>
+<li>Config file</li>
+<li>Defaults</li>
+</ol>
+<p>Use a config resolver such as <code>figment</code> or <code>config</code> so this precedence is
+centralized and testable instead of open-coded through the CLI.</p>
+<h3 id="rust-crates-and-observability"><a class="header" href="#rust-crates-and-observability">Rust Crates And Observability</a></h3>
+<p>Recommended crates:</p>
+<ul>
+<li><code>clap</code>: CLI parsing for subcommands and compatibility flags.</li>
+<li><code>serde</code> and <code>serde_json</code>: strongly typed rule/config parsing plus flexible
+event payload handling.</li>
+<li><code>sqlx</code>: PostgreSQL access with explicit SQL.</li>
+<li><code>tracing</code> and <code>tracing-subscriber</code>: structured logs with event indexes,
+aggregate ids, table names, and transaction ids attached as fields.</li>
+<li><code>anyhow</code> for internal error propagation and <code>miette</code> for user-facing
+validation/conversion diagnostics.</li>
+<li><code>figment</code> or <code>config</code>: CLI/env/file/default configuration merging.</li>
+<li><code>uuid</code>, <code>time</code>, and <code>indexmap</code>: deterministic IDs, timestamps, and stable
+output ordering where needed.</li>
+</ul>
+<p>Logs must go to stderr when stdout is used for generated JSON. Long-running
+imports should log periodic progress with totals for imported, skipped, and
+failed events.</p>
+<h2 id="module-design"><a class="header" href="#module-design">Module Design</a></h2>
+<p>Proposed Rust modules:</p>
+<pre><code class="language-text">src/
+  main.rs
+  cli.rs
+  config.rs
+  db.rs
+  event/
+    mod.rs
+    cloud_event.rs
+    event_type.rs
+    mutator.rs
+    normalize.rs
+  import/
+    mod.rs
+    aggregate_cache.rs
+    batch.rs
+    importer.rs
+    report.rs
+  snapshot/
+    mod.rs
+    converter.rs
+    dependency_graph.rs
+    stream.rs
+    table_rules.rs
+    topology.rs
+    row_merge.rs
+  sql/
+    mod.rs
+    event_store.rs
+    nonce.rs
+    offset.rs
+    notification.rs
+</code></pre>
+<h3 id="cli"><a class="header" href="#cli"><code>cli</code></a></h3>
+<p>Parses both the new subcommand form and the legacy Java flags. The CLI layer
+should only validate argument presence and resolve files. It should not contain
+event mutation, conversion, or SQL logic.</p>
+<h3 id="db"><a class="header" href="#db"><code>db</code></a></h3>
+<p>Owns the connection pool and transaction helper. Use <code>sqlx</code> with PostgreSQL.
+Queries should be explicit SQL, not generated dynamically except for metadata
+inspection in snapshot conversion.</p>
+<h3 id="eventcloud_event"><a class="header" href="#eventcloud_event"><code>event::cloud_event</code></a></h3>
+<p>Represents CloudEvents as structured JSON plus typed helpers for required
+fields and extensions. The implementation may use a Rust CloudEvents SDK if it
+matches the portal payload exactly. If not, use a <code>serde_json::Value</code> backed
+model so the serialized payload stays byte-compatible with existing Java
+CloudEvents.</p>
+<p>Required fields/extensions:</p>
+<ul>
+<li><code>id</code></li>
+<li><code>source</code></li>
+<li><code>type</code></li>
+<li><code>time</code></li>
+<li><code>subject</code></li>
+<li><code>specversion</code></li>
+<li><code>datacontenttype</code></li>
+<li><code>data</code></li>
+<li><code>host</code></li>
+<li><code>user</code></li>
+<li><code>nonce</code></li>
+<li><code>aggregatetype</code></li>
+<li><code>aggregateversion</code></li>
+</ul>
+<p>The importer must preserve unknown CloudEvent extensions in the stored payload
+and metadata. The metadata JSON should exclude the core portal extensions just
+like Java <code>EventPersistenceImpl</code> excludes <code>host</code>, <code>user</code>, <code>nonce</code>,
+<code>aggregatetype</code>, and <code>aggregateversion</code>.</p>
+<h3 id="eventevent_type"><a class="header" href="#eventevent_type"><code>event::event_type</code></a></h3>
+<p>Rust parity for <code>EventTypeUtil</code>.</p>
+<p>Responsibilities:</p>
+<ul>
+<li>Derive aggregate type from event type suffixes.</li>
+<li>Derive aggregate id from event type and event <code>data</code>.</li>
+<li>Keep table-to-event overrides aligned with <code>GlobalSnapshotPersistenceImpl</code>.</li>
+</ul>
+<p>This module is a high-risk drift point. Every new portal event type that can be
+exported or imported must have a test case here.</p>
+<h3 id="eventmutator"><a class="header" href="#eventmutator"><code>event::mutator</code></a></h3>
+<p>Rust parity for <code>EventMutator</code>.</p>
+<p>Rules should be parsed into strongly typed <code>serde</code> structs during startup. Bad
+rule JSON should fail before the importer opens the input event file or starts a
+long-running import.</p>
+<p>Replacement rules:</p>
+<pre><code class="language-json">[
+  {"field":"hostId","from":"OLD_HOST_UUID","to":"NEW_HOST_UUID"}
+]
+</code></pre>
+<p>Behavior:</p>
+<ul>
+<li>If <code>from</code> and <code>to</code> are UUID-looking strings, recursively replace string
+occurrences anywhere in the event JSON.</li>
+<li>If <code>field</code> is present, recursively replace exact field values matching
+<code>from</code>.</li>
+<li>Accept legacy aliases <code>fieldName</code>, <code>fromValue</code>, and <code>toValue</code>.</li>
+</ul>
+<p>Enrichment rules:</p>
+<pre><code class="language-json">[
+  {"field":"id","action":"generateUUID"},
+  {"field":"originalUserId","action":"mapGenerate","sourceField":"userId"}
+]
+</code></pre>
+<p>Behavior:</p>
+<ul>
+<li><code>generateUUID</code>: generate a new UUID for the target field.</li>
+<li><code>mapGenerate</code>: use a stable in-memory map keyed by <code>field + source value</code>.</li>
+<li>Accept Java README-style aliases <code>field</code> and <code>mapAndGenerate</code> in addition to
+Java implementation names <code>fieldName</code> and <code>mapGenerate</code>. This keeps old
+scripts and docs working even though the Java implementation is stricter than
+the README examples.</li>
+</ul>
+<p>The first Rust release should accept unversioned Java-compatible arrays and
+versioned rule documents. The normalized internal representation should always
+include a schema version so future rule changes are explicit.</p>
+<p>Versioned rule document example:</p>
+<pre><code class="language-json">{
+  "schemaVersion": 1,
+  "replacement": [
+    {"field":"hostId","from":"OLD_HOST_UUID","to":"NEW_HOST_UUID"}
+  ],
+  "enrichment": [
+    {"field":"id","action":"generateUUID"}
+  ]
+}
+</code></pre>
+<h2 id="import-flow"><a class="header" href="#import-flow">Import Flow</a></h2>
+<pre><code class="language-text">read file
+  -&gt; parse JSON array from file or stdin
+  -&gt; for each raw event:
+       mutate JSON
+       normalize CloudEvent
+       derive/default aggregate version
+       derive missing aggregate type
+       recompute subject if needed
+       skip duplicate input aggregate version
+       skip existing target aggregate version using cache-backed lookup
+       reserve nonce
+       insert event + outbox + pending notification in one transaction
+       update summary
+</code></pre>
+<h3 id="aggregate-version-rules"><a class="header" href="#aggregate-version-rules">Aggregate Version Rules</a></h3>
+<p>Input may contain either <code>aggregateversion</code> as a CloudEvent extension or
+<code>aggregateVersion</code> as a raw compatibility field. Normalize to
+<code>aggregateversion</code>.</p>
+<p>Default is <code>1</code> when missing.</p>
+<p>Skip rules:</p>
+<ul>
+<li>Skip duplicate <code>(subject, aggregateversion)</code> inside the input file.</li>
+<li>Cache target max versions in memory by <code>aggregate_id</code>.</li>
+<li>On first sight of an aggregate id, query target <code>MAX(aggregate_version)</code> and
+populate the cache.</li>
+<li>After a successful insert, update the cached max version.</li>
+<li>Skip if target max version is greater than or equal to the event version.</li>
+</ul>
+<p>This avoids an N-query import path for aggregates with many events in the same
+file. The cache is scoped to one importer run and is safe because the importer
+still relies on database constraints as the final authority.</p>
+<h3 id="nonce-rules"><a class="header" href="#nonce-rules">Nonce Rules</a></h3>
+<p>Nonce must be reserved from <code>user_t</code> in the same transaction as the event insert:</p>
+<pre><code class="language-sql">UPDATE user_t
+SET nonce = nonce + 1
+WHERE user_id = $1
+RETURNING nonce
+</code></pre>
+<p>Do not trust imported nonce values. They are placeholders only.</p>
+<h3 id="offset-and-transaction-rules"><a class="header" href="#offset-and-transaction-rules">Offset And Transaction Rules</a></h3>
+<p>For each transaction, reserve outbox offsets from <code>log_counter</code>:</p>
+<pre><code class="language-sql">UPDATE log_counter
+SET next_offset = next_offset + $1
+WHERE id = 1
+RETURNING next_offset - $1
+</code></pre>
+<p>For import mode, keep Java’s isolation behavior by default: one event per
+transaction and one <code>transaction_id</code> per event. When <code>--batch-size</code> is greater
+than <code>1</code>, reserve enough offsets for the batch and write the batch in one
+transaction with one <code>transaction_id</code>.</p>
+<p>If a batched transaction fails because of a validation or constraint error, roll
+back the batch and retry its events one at a time unless <code>--fail-fast</code> is set.
+This keeps fast-path imports efficient without losing the Java tool’s ability to
+identify the bad event and continue later events.</p>
+<h3 id="insert-sql"><a class="header" href="#insert-sql">Insert SQL</a></h3>
+<p>Write both event rows in one transaction:</p>
+<pre><code class="language-sql">INSERT INTO event_store_t
+  (id, host_id, user_id, nonce, aggregate_id, aggregate_version,
+   aggregate_type, event_type, event_ts, payload, metadata)
+VALUES
+  ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb)
+</code></pre>
+<pre><code class="language-sql">INSERT INTO outbox_message_t
+  (id, host_id, user_id, nonce, aggregate_id, aggregate_version,
+   aggregate_type, event_type, event_ts, payload, metadata, c_offset,
+   transaction_id)
+VALUES
+  ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13)
+</code></pre>
+<p>Also insert a pending notification row:</p>
+<pre><code class="language-sql">INSERT INTO notification_t
+  (id, host_id, user_id, nonce, event_class, event_json, event_ts, process_ts,
+   status, error, aggregate_id, aggregate_type, aggregate_version,
+   event_partition, event_offset, transaction_id)
+VALUES
+  ($1, $2, $3, $4, $5, $6::jsonb, $7, now(), 'PENDING', NULL,
+   $8, $9, $10, NULL, NULL, $11)
+ON CONFLICT (host_id, id) DO NOTHING
+</code></pre>
+<p>The pending notification keeps admin visibility consistent with Java imports and
+the event processor cleanup flow.</p>
+<h3 id="constraint-collisions-and-idempotency"><a class="header" href="#constraint-collisions-and-idempotency">Constraint Collisions And Idempotency</a></h3>
+<p>Do not add <code>ON CONFLICT DO NOTHING</code> to <code>event_store_t</code> or <code>outbox_message_t</code>.
+Their primary keys and unique constraints are part of the import safety model.
+The importer should catch PostgreSQL unique-violation errors, inspect the
+existing row, and categorize the result:</p>
+<ul>
+<li>Exact duplicate event id and aggregate version with equivalent payload:
+report as skipped exact duplicate.</li>
+<li>Existing aggregate id/version with different payload, event type, or metadata:
+report as failed conflict.</li>
+<li>Event id collision pointing at a different aggregate: report as failed
+conflict.</li>
+<li>Outbox insert collision: roll back the transaction and report as failed
+conflict unless the corresponding event-store row proves this was an exact
+duplicate import.</li>
+</ul>
+<p>The <code>notification_t</code> insert is different. It may use <code>ON CONFLICT DO NOTHING</code>
+because it is a derived admin visibility record and should not make an otherwise
+valid idempotent event import fail.</p>
+<h2 id="snapshot-conversion-flow"><a class="header" href="#snapshot-conversion-flow">Snapshot Conversion Flow</a></h2>
+<pre><code class="language-text">read snapshot
+  -&gt; parse top-level object from file or stdin
+  -&gt; read tables map
+  -&gt; compute table order
+  -&gt; build child-row lookup maps
+  -&gt; for each table in order:
+       skip runtime/projection-owned tables
+       derive CreatedEvent type
+       merge child row payloads when needed
+       recursively replace source host with target host
+       set aggregateVersion/newAggregateVersion compatibility fields
+       derive subject
+       emit CloudEvent JSON
+  -&gt; write array to output or stdout
+</code></pre>
+<h3 id="memory-strategy"><a class="header" href="#memory-strategy">Memory Strategy</a></h3>
+<p>The simple implementation can parse the full snapshot into <code>serde_json::Value</code>
+when the input is known to fit comfortably in memory. This is easiest for parity
+work and golden tests, but it should be documented as roughly multiple times the
+JSON file size because parsed JSON objects, strings, and maps add overhead.</p>
+<p>For production-sized global snapshots, implement a streaming converter:</p>
+<ol>
+<li>Stream the <code>tables</code> object from the input file.</li>
+<li>Materialize only rows required for child merge rules, such as
+<code>auth_client_owner_t</code>, <code>auth_provider_key_t</code>, <code>user_host_t</code>, <code>customer_t</code>,
+<code>employee_t</code>, <code>api_endpoint_t</code>, and <code>api_endpoint_scope_t</code>.</li>
+<li>Stream parent table rows in dependency order and write output events
+incrementally.</li>
+<li>Preserve JSON array syntax by writing <code>[</code> once, then comma-separated events,
+then <code>]</code>.</li>
+</ol>
+<p>If strict dependency ordering requires parent rows after later child tables, the
+converter may use temporary spill files under a configured work directory. The
+default design should avoid holding gigabyte-scale snapshots as a single JSON
+tree.</p>
+<h3 id="snapshot-format"><a class="header" href="#snapshot-format">Snapshot Format</a></h3>
+<p>Expected top-level fields:</p>
+<ul>
+<li><code>exportVersion</code></li>
+<li><code>sourceHostId</code></li>
+<li><code>exportScope</code></li>
+<li><code>exportTs</code></li>
+<li><code>tables</code></li>
+</ul>
+<p>Each table entry contains <code>rows</code>, where row keys are already camelCase.</p>
+<h3 id="table-ordering"><a class="header" href="#table-ordering">Table Ordering</a></h3>
+<p>Embedded mode should use a checked-in table dependency graph generated from the
+portal DDL. Database mode should query PostgreSQL metadata and perform the same
+Kahn topological sort used by Java:</p>
+<ul>
+<li>parent tables before child tables</li>
+<li>only dependencies between tables present in the snapshot matter</li>
+<li>if a cycle is found, append remaining tables deterministically and warn</li>
+</ul>
+<p>The embedded graph should be the default so CI, offline conversion, and local
+testing do not require a running PostgreSQL instance. Add a validation command
+or test that compares the embedded graph with database metadata to catch DDL
+drift.</p>
+<h3 id="table-skip-rules"><a class="header" href="#table-skip-rules">Table Skip Rules</a></h3>
+<p>Keep these sets centralized in <code>snapshot::table_rules</code>.</p>
+<p>Auth runtime state skipped in both export/conversion logic:</p>
+<pre><code class="language-text">auth_session_audit_t
+auth_session_t
+auth_refresh_token_t
+auth_code_t
+auth_ref_token_t
+auth_client_token_t
+</code></pre>
+<p>Projection-owned/runtime tables skipped in conversion:</p>
+<pre><code class="language-text">employee_t
+customer_t
+notification_t
+user_host_t
+user_crypto_wallet_t
+auth_provider_key_t
+auth_client_owner_t
+api_endpoint_t
+api_endpoint_scope_t
+private_conversation_t
+private_message_t
+private_message_state_t
+agent_memory_*
+agent_session_history_t
+snapshot_*
+</code></pre>
+<p>The exact skip sets must stay aligned with <code>GlobalSnapshotPersistenceImpl</code>. A
+test should compare the Rust list against a fixture extracted from the Java
+source until the Java importer is retired.</p>
+<h3 id="table-to-event-overrides"><a class="header" href="#table-to-event-overrides">Table-To-Event Overrides</a></h3>
+<p>Most tables map from snake case to PascalCase plus <code>CreatedEvent</code>, but several
+tables require explicit overrides:</p>
+<pre><code class="language-text">environment_property_t             -&gt; ConfigEnvironmentCreatedEvent
+instance_api_property_t            -&gt; ConfigInstanceApiCreatedEvent
+instance_app_property_t            -&gt; ConfigInstanceAppCreatedEvent
+instance_app_api_property_t        -&gt; ConfigInstanceAppApiCreatedEvent
+instance_file_t                    -&gt; ConfigInstanceFileCreatedEvent
+deployment_instance_property_t     -&gt; ConfigDeploymentInstanceCreatedEvent
+instance_property_t                -&gt; ConfigInstanceCreatedEvent
+product_property_t                 -&gt; ConfigProductCreatedEvent
+product_version_property_t         -&gt; ConfigProductVersionCreatedEvent
+value_locale_t                     -&gt; RefLocaleCreatedEvent
+relation_type_t                    -&gt; RefRelationTypeCreatedEvent
+relation_t                         -&gt; RefRelationCreatedEvent
+auth_client_t                      -&gt; ClientCreatedEvent
+wf_definition_t                    -&gt; WorkflowDefinitionCreatedEvent
+</code></pre>
+<h3 id="child-row-merge-rules"><a class="header" href="#child-row-merge-rules">Child Row Merge Rules</a></h3>
+<p>Some tables are not standalone aggregates. Their rows must be embedded into the
+parent event payload.</p>
+<p>Required merge rules:</p>
+<ul>
+<li><code>auth_provider_key_t</code>: group by <code>providerId</code>; attach key payloads to the
+matching <code>auth_provider_t</code> row.</li>
+<li><code>auth_client_owner_t</code>: group by <code>ownerId</code>; merge owner data into the matching
+<code>auth_client_t</code> row so <code>ClientCreatedEvent</code> has the replay contract it needs.</li>
+<li><code>user_host_t</code>, <code>customer_t</code>, <code>employee_t</code>: group by <code>userId</code>; merge dependent
+user state into <code>UserCreatedEvent</code>.</li>
+<li><code>api_endpoint_t</code> and <code>api_endpoint_scope_t</code>: group endpoint payloads by
+<code>apiVersionId</code>; attach to <code>ApiVersionCreatedEvent</code>.</li>
+</ul>
+<p>This is the most important conversion parity area. Missing merge logic can
+produce an apparently valid event list that later fails replay or silently loses
+projection state.</p>
+<h3 id="host-rewrite"><a class="header" href="#host-rewrite">Host Rewrite</a></h3>
+<p>When <code>sourceHostId</code> exists, recursively replace all exact string occurrences of
+the source host id with <code>targetHostId</code> before deriving <code>subject</code>.</p>
+<p>This order is required. If the subject is derived before replacement, old-host
+aggregate ids survive and can collide on <code>(aggregate_id, aggregate_version)</code>.</p>
+<h2 id="reports-and-exit-codes"><a class="header" href="#reports-and-exit-codes">Reports And Exit Codes</a></h2>
+<p>Import summary should include:</p>
+<pre><code class="language-json">{
+  "file": "events.json",
+  "total": 100,
+  "imported": 97,
+  "skippedDuplicateInput": 1,
+  "skippedExistingTarget": 1,
+  "failed": 1
+}
+</code></pre>
+<p>Exit code policy:</p>
+<ul>
+<li><code>0</code>: completed; no failed events</li>
+<li><code>2</code>: completed with skipped events only</li>
+<li><code>3</code>: completed with failed events and <code>--fail-fast</code> was not set</li>
+<li><code>4</code>: validation/config/connection error</li>
+<li><code>5</code>: conversion failed</li>
+</ul>
+<p>The Java tool currently exits successfully after per-event failures because it
+logs and continues. The Rust tool should preserve continue behavior by default,
+but explicit exit codes make automation safer.</p>
+<h2 id="testing-strategy"><a class="header" href="#testing-strategy">Testing Strategy</a></h2>
+<h3 id="unit-tests"><a class="header" href="#unit-tests">Unit Tests</a></h3>
+<ul>
+<li>CLI parsing for new and compatibility forms.</li>
+<li>Replacement and enrichment rules, including alias support.</li>
+<li>Versioned rule document parsing and fail-fast validation.</li>
+<li>CloudEvent normalization and metadata extraction.</li>
+<li>Aggregate type and aggregate id derivation.</li>
+<li>Aggregate max-version cache behavior.</li>
+<li>Table skip rules.</li>
+<li>Table-to-event override mapping.</li>
+<li>Child row merge rules.</li>
+</ul>
+<h3 id="golden-file-tests"><a class="header" href="#golden-file-tests">Golden File Tests</a></h3>
+<p>Use committed fixtures from <code>event-importer</code>:</p>
+<ul>
+<li><code>events/bootstrap/*.json</code></li>
+<li><code>events/local/*.json</code></li>
+<li>representative snapshot JSON files</li>
+</ul>
+<p>Golden assertions:</p>
+<ul>
+<li>Java-converted snapshot and Rust-converted snapshot produce equivalent event
+arrays after ignoring nondeterministic fields (<code>id</code>, <code>time</code>).</li>
+<li>Rust import dry-run summary matches expected counts.</li>
+<li><code>convert --output - | import --filename -</code> works without an intermediate
+events file.</li>
+<li>Host rewrite happens before subject derivation.</li>
+<li><code>auth_client_t</code> conversion includes owner payload.</li>
+<li>PII token tables convert only when event/replay support exists.</li>
+</ul>
+<h3 id="database-integration-tests"><a class="header" href="#database-integration-tests">Database Integration Tests</a></h3>
+<p>Use disposable PostgreSQL. H2 is not recommended for Rust because the runtime
+target is PostgreSQL-specific SQL and JSONB.</p>
+<p>Test cases:</p>
+<ol>
+<li>Import one event and verify <code>event_store_t</code>, <code>outbox_message_t</code>, and
+<code>notification_t</code>.</li>
+<li>Import duplicate input aggregate version and verify skip count.</li>
+<li>Import when target already has equal/higher aggregate version and verify skip.</li>
+<li>Verify nonce increments from <code>user_t</code>.</li>
+<li>Verify outbox offsets are gapless for successful inserts.</li>
+<li>Verify failed event rolls back without blocking later events.</li>
+<li>Verify unique-constraint collisions are categorized as exact duplicate or
+failed conflict.</li>
+<li>Verify <code>--batch-size</code> imports multiple events in one transaction and falls
+back to one-event isolation when a batch fails.</li>
+<li>Convert a snapshot and import the resulting event list into an empty DB.</li>
+<li>Compare embedded table dependency order against live PostgreSQL metadata.</li>
+</ol>
+<h2 id="rollout-plan"><a class="header" href="#rollout-plan">Rollout Plan</a></h2>
+<h3 id="phase-1-rust-project-skeleton"><a class="header" href="#phase-1-rust-project-skeleton">Phase 1: Rust Project Skeleton</a></h3>
+<ul>
+<li>Add Cargo project in <code>importer</code>.</li>
+<li>Add CLI, config loading, logging, and database connection.</li>
+<li>Add dry-run import that parses and normalizes events.</li>
+</ul>
+<h3 id="phase-2-import-parity"><a class="header" href="#phase-2-import-parity">Phase 2: Import Parity</a></h3>
+<ul>
+<li>Implement mutator and aggregate utilities.</li>
+<li>Implement event-store/outbox/notification transaction.</li>
+<li>Add duplicate/existing skip logic and aggregate max-version cache.</li>
+<li>Add <code>--batch-size</code> with failed-batch fallback to one-event isolation.</li>
+<li>Validate against existing <code>events/bootstrap</code> and <code>events/local</code> files.</li>
+</ul>
+<h3 id="phase-3-snapshot-conversion-parity"><a class="header" href="#phase-3-snapshot-conversion-parity">Phase 3: Snapshot Conversion Parity</a></h3>
+<ul>
+<li>Port table ordering, skip rules, event overrides, and merge rules.</li>
+<li>Add embedded table dependency graph generated from portal DDL.</li>
+<li>Generate ordered CloudEvent JSON.</li>
+<li>Support <code>--filename -</code> and <code>--output -</code> so conversion can pipe directly into
+import.</li>
+<li>Compare Rust output with Java output using golden fixtures.</li>
+<li>Add streaming conversion or bounded-memory spill-file support before using the
+tool for multi-gigabyte snapshots.</li>
+</ul>
+<h3 id="phase-4-operational-hardening"><a class="header" href="#phase-4-operational-hardening">Phase 4: Operational Hardening</a></h3>
+<ul>
+<li>Add release build and static binary packaging.</li>
+<li>Add wrapper scripts equivalent to <code>importer.sh</code> and <code>converter.sh</code>.</li>
+<li>Add README migration notes.</li>
+<li>Deprecate Java <code>event-importer</code> after the Rust importer passes the same
+snapshot conversion and import scenarios.</li>
+</ul>
+<h2 id="design-decisions"><a class="header" href="#design-decisions">Design Decisions</a></h2>
+<ul>
+<li>Include an embedded table dependency graph in the first release and keep
+database metadata mode as a validation/refresh path.</li>
+<li>Implement <code>--batch-size</code> during import parity work. Default to <code>1</code> for Java
+behavior, but support larger batches for initial snapshot imports.</li>
+<li>Support stdin/stdout in both modes so operators can run
+<code>importer convert ... --output - | importer import --filename -</code>.</li>
+<li>Formalize replacement/enrichment as versioned <code>serde</code> schemas while accepting
+Java-compatible unversioned arrays for migration compatibility.</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../design/kafka-event-processor.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../design/event-replay.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../design/kafka-event-processor.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../design/event-replay.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-09f2665d.js"></script>
+
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-609e4cb8.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../mermaid-3a6b472a.min.js"></script>
+        <script src="../mermaid-init-025d9952.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

@@ -35,10 +35,10 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-3573f11f.js";
+            window.path_to_searchindex_js = "../../searchindex-774c0611.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../toc-5b825fe4.js"></script>
+        <script src="../../toc-228f8296.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -317,7 +317,7 @@ projection. Refresh the list instead.</p>
 <p>In the sidebar, expand <strong>GenAI Admin</strong> and select <strong>Tool</strong>.</p>
 </li>
 <li>
-<p>Select <strong>Create New Tool</strong>.</p>
+<p>Select <strong>Create Workflow-backed Tool</strong>.</p>
 </li>
 <li>
 <p>Enter the following tool values. Fields not listed here can remain empty.</p>
@@ -339,7 +339,7 @@ projection. Refresh the list instead.</p>
 <tr><td>Human Approval Required</td><td>Disabled</td></tr>
 <tr><td>Version</td><td><code>1.0.0</code></td></tr>
 <tr><td>Execution Placement</td><td><code>workflow</code></td></tr>
-<tr><td>Schema Digest</td><td><code>sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</code></td></tr>
+<tr><td>Workflow Definition</td><td><code>light-demo/workflow-mcp-smoke @ 1.0.0</code></td></tr>
 </tbody>
 </table>
 </div>
@@ -348,45 +348,10 @@ workflow binding, rather than a Java class, REST endpoint, script, or MCP
 server, identifies its execution target.</p>
 </li>
 <li>
-<p>After selecting <code>workflow</code>, the <strong>Workflow Binding</strong> structured-data field
-appears. Enter the following JSON, replacing <code>&lt;wfDefId&gt;</code> with the ID from
-step 1:</p>
-<pre><code class="language-json">{
-  "wfDefId": "&lt;wfDefId&gt;",
-  "workflowVersion": "1.0.0",
-  "definitionDigest": "sha256:5197cc8e1ef611ef736c6d033ffdbab19137318bbadf61ea16b906d114ad81c8",
-  "schemaDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "invocationMode": "sync",
-  "syncWaitMs": 20000,
-  "totalDeadlineMs": 30000,
-  "executionClass": "interactive",
-  "resultTextMode": "compact-json",
-  "idempotencyPolicy": {
-    "kind": "derived",
-    "inFlightDedupMs": 30000,
-    "resultReplayMs": 0
-  },
-  "delegationPolicy": {
-    "maximumDelegationDepth": 0
-  },
-  "responsePolicyDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-  "runtimeBounds": {
-    "maximumTaskAttempts": 4,
-    "maximumNestedCalls": 1,
-    "maximumParallelism": 1,
-    "maximumRequestBytes": 65536,
-    "maximumIntermediateBytes": 262144,
-    "maximumResultBytes": 131072,
-    "maximumCostUnits": 0
-  },
-  "policyDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-}
-</code></pre>
-</li>
-<li>
-<p>If the structured-data editor shows an <strong>Apply</strong> action, select it before
-submitting the form. A tab marked with <code>*</code> still has unapplied edits and the
-portal will refuse to submit it.</p>
+<p>Portal loads the immutable workflow definition and derives the internal
+definition, schema, and policy digests. These implementation fields are not
+entered by the user. The reviewed workflow-tool runtime profile supplies
+the binding defaults.</p>
 </li>
 <li>
 <p>Submit <strong>Create Tool Form</strong> once.</p>
@@ -402,20 +367,15 @@ generates the binding ID because <code>bindingId</code> was omitted from the JSO
 <ul>
 <li>Execution Placement is <code>workflow</code>.</li>
 <li>Stable Tool Reference equals <code>&lt;toolId&gt;</code>.</li>
-<li>Workflow Binding contains <code>&lt;wfDefId&gt;</code> and a generated <code>bindingId</code>.</li>
+<li>Workflow Binding contains the selected Workflow Definition ID and a generated <code>bindingId</code>.</li>
 <li>The tool is active.</li>
 </ul>
 </li>
 </ol>
-<p>The four digest values above are the pinned values used by this smoke fixture
-and its shipped light-gateway configuration. They are contract identifiers,
-not a suggestion to use repeated placeholder digests for production tools. If
-the workflow, schemas, or policies change, generate and deploy new matching
-digests instead of reusing these values.</p>
 <p>For a synchronous binding, the portal requires a read-only, non-destructive,
 headless tool: <strong>Read Only</strong> must be enabled while <strong>Destructive</strong> and
-<strong>Human Approval Required</strong> remain disabled. The Workflow Binding Schema
-Digest must exactly match the top-level Schema Digest.</p>
+<strong>Human Approval Required</strong> remain disabled. The server derives the binding
+integrity fields from the selected published workflow version and tool schemas.</p>
 <h2 id="3-point-light-gateway-at-the-generated-identities"><a class="header" href="#3-point-light-gateway-at-the-generated-identities">3. Point light-gateway at the generated identities</a></h2>
 <p>The database identities are generated by the event-sourced Create commands,
 so do not keep the fixed <code>22000000-...</code> IDs from the old SQL fixture.</p>

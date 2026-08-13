@@ -35,10 +35,10 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-3573f11f.js";
+            window.path_to_searchindex_js = "../../searchindex-774c0611.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../toc-5b825fe4.js"></script>
+        <script src="../../toc-228f8296.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -215,6 +215,18 @@ staging artifact or runtime contract. An immutable publication manifest records
 the exact intended property set before property events are emitted.
 <code>config_snapshot_t</code> and its snapshot content are immutable deployable artifacts.
 The <code>current</code> flag is a projected pointer to one of those immutable artifacts.</p>
+<p>For Gateway tools, publication is an explicit Instance Admin action after tool
+authoring is complete. A single-tool or batch publication pins each current tool
+revision, including its published workflow-version binding, and stages the
+corresponding <code>mcp-router.yml</code> entries for the selected Gateway instance. The
+Instance Admin then creates a configuration snapshot and moves the current
+pointer to activate it. Changing a tool or selecting another workflow version
+requires another publication; it never mutates an existing snapshot.</p>
+<p>Configuration snapshots replace user-managed digest fields, not integrity
+checks. End users neither enter nor see schema, definition, or policy digests on
+the tool form. Portal derives those values from canonical server-side content
+where an internal admission or audit contract still requires them. Config
+Server separately computes the snapshot and artifact digests described below.</p>
 <h2 id="context"><a class="header" href="#context">Context</a></h2>
 <p>Agent configuration is authored in Light Portal from multiple control-plane
 resources. Depending on the Agent and its capabilities, the effective policy may
@@ -347,6 +359,13 @@ digest at admission. All authoring mutations still enter through commands and
 events; Workflow and Knowledge never insert or update event-backed projection
 rows. Direct writes are limited to explicitly operational state owned by the
 service.</p>
+<p>Workflow versions use one stable <code>wfDefId</code> for their complete history. A user
+may save a <code>DRAFT</code> version repeatedly. Publishing that version freezes its YAML;
+the next edit must create a new version under the same <code>wfDefId</code>. Tools bind to
+the pair <code>(wfDefId, workflowVersion)</code> and only published versions are selectable.
+This permits an operator to roll a tool back to a previously published workflow
+version without inventing a second workflow identity. Portal provides a
+side-by-side, normalized YAML comparison between versions.</p>
 <p>The shared database roles must be least-privilege roles restricted to the exact
 projection reads and operational writes each service needs. They must not be
 database superusers. A future physical database split may deliver the same
@@ -386,6 +405,9 @@ snapshot or reverse authoring events.</li>
 unknown or unvalidated policy.</li>
 <li>Workflow and Knowledge never mutate event-backed authoring projections
 directly; operational writes are not authoring shortcuts.</li>
+<li>A tool may bind only to a published workflow version. A published workflow
+version is immutable and remains addressable by its stable <code>wfDefId</code> and
+version string.</li>
 </ol>
 <h2 id="architecture"><a class="header" href="#architecture">Architecture</a></h2>
 <pre><code class="language-text">Light Portal policy authoring
@@ -1021,7 +1043,7 @@ event or Config Server delivery without changing pinned policy identities.</p>
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../../design/light-gateway/local-model-provider-transport.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../../design/light-portal/global-tenant-entity-scope.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -1035,7 +1057,7 @@ event or Config Server delivery without changing pinned policy identities.</p>
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../../design/light-gateway/local-model-provider-transport.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../../design/light-portal/global-tenant-entity-scope.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
