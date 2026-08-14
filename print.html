@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-774c0611.js";
+            window.path_to_searchindex_js = "searchindex-53ed54b1.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-228f8296.js"></script>
@@ -13056,7 +13056,7 @@ staging artifact or runtime contract. An immutable publication manifest records
 the exact intended property set before property events are emitted.
 <code>config_snapshot_t</code> and its snapshot content are immutable deployable artifacts.
 The <code>current</code> flag is a projected pointer to one of those immutable artifacts.</p>
-<p>For Gateway tools, publication is an explicit Instance Admin action after tool
+<p>For Gateway tools, publication is an explicit Tool-catalog action after tool
 authoring is complete. A single-tool or batch publication pins each current tool
 revision, including its published workflow-version binding, and stages the
 corresponding <code>mcp-router.yml</code> entries for the selected Gateway instance. The
@@ -13068,6 +13068,41 @@ checks. End users neither enter nor see schema, definition, or policy digests on
 the tool form. Portal derives those values from canonical server-side content
 where an internal admission or audit contract still requires them. Config
 Server separately computes the snapshot and artifact digests described below.</p>
+<h3 id="implemented-gateway-tool-publication-slice"><a class="header" href="#implemented-gateway-tool-publication-slice">Implemented Gateway Tool publication slice</a></h3>
+<p>Gateway Tool publication has one authoring path: the Tool catalog at
+<code>/app/genai/Tool</code>. The old Instance API MCP Tool route is a compatibility
+redirect to that catalog. Opening the catalog from an Instance API applies the
+API-version filter; the operator may then select one or more endpoint and/or
+workflow-backed Tools and choose an active <code>gtw</code> instance.</p>
+<p>Portal produces a server-side preview and never asks the operator to enter or
+inspect a digest. A selection containing only endpoints from one API version
+uses <code>REPLACE_API_SCOPE</code>: it replaces that API version’s endpoint Tools while
+preserving Tools from other APIs and all workflow Tools. Mixed selections and
+workflow Tools use <code>ADD_OR_UPDATE</code>, which preserves every unselected Tool.</p>
+<p><code>GatewayToolPublicationUpdatedEvent</code> stores the exact compiled
+<code>mcp-router.tools</code> array and its exact source-binding records. Consequently,
+event replay projects the event payload and does not re-resolve mutable Tool,
+API, Instance API, or Workflow records. Publications share the ordered
+<code>hostId + instanceId</code> event stream, so a competing stale publication is rejected
+at append instead of becoming a projection failure. Synchronous projection:</p>
+<ul>
+<li>records the immutable attempt in <code>gateway_tool_publication_t</code>;</li>
+<li>writes the complete desired array to the instance-level
+<code>instance_property_t</code> row for <code>mcp-router.tools</code>;</li>
+<li>records the endpoint or published Workflow version pin for each Tool in
+<code>gateway_tool_binding_t</code>; and</li>
+<li>deactivates legacy <code>instance_api_property_t</code> rows for the same property so
+the Gateway has one configuration source.</li>
+</ul>
+<p>On the first Tool-catalog publication, Portal folds the active legacy
+per-Instance-API Tool arrays into the new instance-level array before those
+legacy rows are deactivated. Existing API Tools are therefore preserved during
+the one-path migration.</p>
+<p>The publication response is <code>STAGED</code>. It deliberately does not create or
+activate a snapshot. An Instance Admin creates the immutable config snapshot
+and moves the instance’s current snapshot pointer in the existing snapshot
+workflow. A later Tool or Workflow change has no effect on the live Gateway
+until another Tool publication is staged and another snapshot is activated.</p>
 <h2 id="context-3"><a class="header" href="#context-3">Context</a></h2>
 <p>Agent configuration is authored in Light Portal from multiple control-plane
 resources. Depending on the Agent and its capabilities, the effective policy may
