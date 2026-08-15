@@ -35,10 +35,10 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-643a4123.js";
+            window.path_to_searchindex_js = "../../searchindex-e8668a02.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../toc-bef4070b.js"></script>
+        <script src="../../toc-4c3602da.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -186,7 +186,7 @@ publish, validate, delete, and publish again</strong>. Do not begin with Delete.
 <code>assistant-dev</code>. If they call a physical model ID directly, change them to an
 Alias before retiring the model.</p>
 <h2 id="what-retirement-means"><a class="header" href="#what-retirement-means">What retirement means</a></h2>
-<p>Retirement is a soft deletion from the active LLM control-plane projection. It
+<p>Retirement is a soft deletion from the active LLM control-plane configuration. It
 preserves event history for audit and replay, but excludes the retired records
 from new publications.</p>
 <p>Deleting a global Model also soft-deletes its active dependent records:</p>
@@ -302,7 +302,8 @@ the selected <code>llm-gateway</code> instance. Check that:</p>
 <li><code>assistant-dev</code> resolves to the replacement Deployment first;</li>
 <li>the retiring Deployment is no longer referenced by an active route;</li>
 <li>provider, credential, pricing, and capability validation succeeds; and</li>
-<li>the target gateway applies or acknowledges the new publication.</li>
+<li>the target gateway starts from the promoted snapshot or successfully reloads
+<code>llm-router</code>.</li>
 </ul>
 <p>Call <code>/v1/models</code> and <code>/v1/chat/completions</code> through <code>llm-gateway</code> with the
 stable Alias. Repeat the agent tool-calling tests. Keep this routed state for a
@@ -340,7 +341,7 @@ model.</p>
 <h2 id="8-preserve-the-local-baseline"><a class="header" href="#8-preserve-the-local-baseline">8. Preserve the local baseline</a></h2>
 <p>Portal control-plane changes are authored and validated only in the local
 <code>portal-config-loc/all-in-lt</code> database. Import the reviewed retirement event
-file there, verify the projections and live gateway behavior, and then export a
+file there, verify the read models and live gateway behavior, and then export a
 new global snapshot to recreate the canonical <code>events.json</code>.</p>
 <p>Use that exported <code>events.json</code> to recreate the databases for
 <code>portal-config-dev</code> and <code>light-portal-install</code>. Do not maintain a separate
@@ -369,7 +370,7 @@ publication IDs match the control-plane derivation contract;</li>
 <li>the publication contains neither the retired Deployment nor a stale Alias
 route to it.</li>
 </ul>
-<p>Generate the file from current local projections immediately before the
+<p>Generate the file from current local read models immediately before the
 change. A previously generated retirement file becomes stale as soon as one of
 its aggregates or the publication version changes.</p>
 <h2 id="rollback-after-deletion"><a class="header" href="#rollback-after-deletion">Rollback after deletion</a></h2>

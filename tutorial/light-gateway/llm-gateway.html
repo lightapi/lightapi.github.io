@@ -35,10 +35,10 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-643a4123.js";
+            window.path_to_searchindex_js = "../../searchindex-e8668a02.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../toc-bef4070b.js"></script>
+        <script src="../../toc-4c3602da.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -270,7 +270,7 @@ the current control plane performs percentage-based canary routing.</p>
     C --&gt; U[Publication]
     P --&gt; U
     T --&gt; U
-    U --&gt; G[Gateway snapshot and acknowledgement]
+    U --&gt; G[Config snapshot and module reload]
     G --&gt; V[Authenticated live validation]
 </pre>
 
@@ -290,7 +290,7 @@ the current control plane performs percentage-based canary routing.</p>
 <tr><td>Public Alias</td><td>Stable client-facing model name and required policy/capability contract</td></tr>
 <tr><td>Alias Route</td><td>Ordered connection from an Alias to a compatible Deployment</td></tr>
 <tr><td>Pricing</td><td>Effective-dated rates for the Deployment operation</td></tr>
-<tr><td>Publication</td><td>Immutable projection delivered to one selected gateway instance</td></tr>
+<tr><td>Publication</td><td>Typed <code>llm-router.*</code> properties applied to one selected gateway instance</td></tr>
 </tbody>
 </table>
 </div>
@@ -682,7 +682,7 @@ records with these differences:</p>
 <p>Use the same conservative generation capability object as Qwen except set
 <code>images: false</code>. Keep <code>parallelTools: false</code> until a workload-specific
 parallel test passes through the full gateway path.</p>
-<h2 id="12-generate-and-publish-the-gateway-projection"><a class="header" href="#12-generate-and-publish-the-gateway-projection">12. Generate and publish the gateway projection</a></h2>
+<h2 id="12-generate-and-publish-the-gateway-configuration"><a class="header" href="#12-generate-and-publish-the-gateway-configuration">12. Generate and publish the gateway configuration</a></h2>
 <p>Open <strong>Publication</strong> in the LLM Model Control Plane:</p>
 <ol>
 <li>Select the target <strong>Instance Env Tag</strong>.</li>
@@ -690,27 +690,21 @@ parallel test passes through the full gateway path.</p>
 <li>Confirm that the displayed <strong>LLM environment</strong> matches the Registration and
 Alias environment.</li>
 <li>Choose <strong>Generate from active records</strong>.</li>
-<li>Review the read-only V3 projection. It must contain the exact model ID,
+<li>Review the read-only typed properties. They must contain the exact model ID,
 <code>openai_chat</code>, the Groq base URL, declared capabilities, Alias Route,
 effective Pricing, and only the credential reference.</li>
 <li>Confirm that no raw provider key appears anywhere in the preview.</li>
 <li>Choose <strong>Publish to instance</strong>.</li>
 <li>Create and promote the corresponding configuration snapshot, then reload or
 restart the selected gateway as required by the deployment.</li>
-<li>Confirm that the intended running replica has an <code>ACKNOWLEDGED</code> publication
-with the expected publication ID and root digest. Do not send an upstream
-validation request while acknowledgement is absent, <code>PENDING</code>, <code>FAILED</code>, or
-<code>DIVERGENT</code>.</li>
+<li>If you used reload, confirm that the <code>llm-router</code> module reload succeeded. If
+you restarted, confirm the gateway loaded the promoted snapshot and reports
+the LLM module as available before sending an upstream validation request.</li>
 </ol>
-<p>Publication proves that the configuration is internally consistent and was
-delivered. It does not prove that Groq accepted a request or that the model
-meets the workload’s quality requirements.</p>
-<p>The Portal V3 publication path requires a frozen replica inventory and
-acknowledgement. A development Compose repository may instead provide a
-reviewed, importable instance-publication event and a scoped snapshot-refresh
-script. Use that repository’s supported workflow only for the exact host,
-environment, service, and instance; the normal operator path remains the
-Portal UI.</p>
+<p>Publication applies instance properties. Snapshot promotion plus a successful
+startup or explicit <code>llm-router</code> reload proves that the configuration was
+loaded. It does not prove that Groq accepted a request or that the model meets
+the workload’s quality requirements.</p>
 <h2 id="13-validate-through-the-live-gateway"><a class="header" href="#13-validate-through-the-live-gateway">13. Validate through the live gateway</a></h2>
 <p>Prepare a protected header file containing the gateway caller token. This is
 not <code>GROQ_API_KEY</code>:</p>
@@ -833,8 +827,8 @@ fallback, or remove it if it can no longer serve traffic.</li>
 <li>A fallback is optional for a non-production demo. If continuity matters,
 use another currently served and tested model rather than the
 soon-to-be-decommissioned Llama model.</li>
-<li>Generate a fresh projection, inspect the route order, publish, promote the
-snapshot, and confirm replica acknowledgement.</li>
+<li>Generate fresh typed properties, inspect the route order, publish, promote
+the snapshot, and confirm startup or the explicit <code>llm-router</code> reload.</li>
 <li>Run the same smoke request through the unchanged stable Alias.</li>
 <li>Retain the old records for audit until the rollback window closes; do not
 rewrite the Qwen Deployment to represent another physical model.</li>
@@ -896,8 +890,8 @@ Pricing exactly as above.</p>
 <tr><td>Publish reports no eligible Credential</td><td>Check purpose, Endpoint/Deployment references, version, database-clock effective time, and expiration.</td></tr>
 <tr><td>Publish reports no effective Pricing</td><td>Create a <code>generate</code> price for a chat/responses/messages Deployment and make its effective window current.</td></tr>
 <tr><td>Route is incompatible</td><td>Align host, logical environment, provider type, physical model, protocol operation, Registration restrictions, and required capabilities.</td></tr>
-<tr><td>Gateway returns Alias not found</td><td>Confirm the caller can see the Alias and the intended acknowledged snapshot is active on that replica.</td></tr>
-<tr><td>Gateway returns 503 after publication</td><td>Inspect the complete projection and gateway logs. One malformed Deployment capability/protocol/pricing contract can invalidate configuration beyond the new Alias.</td></tr>
+<tr><td>Gateway returns Alias not found</td><td>Confirm the caller can see the Alias and the intended config snapshot was loaded by startup or a successful <code>llm-router</code> reload.</td></tr>
+<tr><td>Gateway returns 503 after publication</td><td>Inspect the complete <code>llm-router</code> properties and gateway logs. One malformed Deployment capability/protocol/pricing contract can invalidate configuration beyond the new Alias.</td></tr>
 <tr><td>Gateway reports <code>LLM_CONFIG_INVALID</code></td><td>Inspect every provider in the published snapshot. A missing environment variable such as an unused provider’s secret reference can invalidate the complete router; omit that provider from the snapshot or inject its secret.</td></tr>
 <tr><td>Qwen returns a provider 400 for tool choice</td><td>Use the portable string form <code>"tool_choice":"auto"</code> or <code>"required"</code>; the checked Groq Qwen path rejected a named-function object.</td></tr>
 <tr><td>Qwen exhausts a small output budget or returns <code>&lt;think&gt;</code> text</td><td>Reasoning can consume completion tokens and may appear in message content. Allow a bounded larger completion budget and make the application handle or reject visible reasoning explicitly.</td></tr>

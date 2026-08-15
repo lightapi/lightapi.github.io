@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-643a4123.js";
+            window.path_to_searchindex_js = "searchindex-e8668a02.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-bef4070b.js"></script>
+        <script src="toc-4c3602da.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -12659,579 +12659,149 @@ clearest ownership model.</li>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-portal-1"><a class="header" href="#light-portal-1">Light Portal</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="llm-gateway-topology-per-host-and-environment"><a class="header" href="#llm-gateway-topology-per-host-and-environment">LLM Gateway Topology Per Host And Environment</a></h1>
-<h2 id="status-2"><a class="header" href="#status-2">Status</a></h2>
-<p>Proposed design for discussion.</p>
-<h2 id="decision-summary-2"><a class="header" href="#decision-summary-2">Decision Summary</a></h2>
-<p>Use exactly one <strong>logical LLM gateway configuration</strong> for each Light Portal
-<code>(host, environment)</code> pair. Run that logical gateway as multiple stateless
-replicas for availability and capacity.</p>
-<p>Allow many MCP, Agent, API, or other AI-oriented microgateways in the same host
-and environment, but do not give those microgateways direct LLM provider access.
-They must invoke the logical LLM gateway through an authenticated internal
-contract.</p>
-<p>Do not add multiple independently configured LLM gateway targets to the initial
-control-plane schema. Revisit that decision only when a concrete regulatory,
-network-isolation, ownership, or independent-change-boundary requirement cannot
-be represented by Aliases, Policy Bindings, Routes, Deployments, quotas, and
-normal replica scaling.</p>
-<p>This decision means <strong>one configuration authority</strong>, not one process, pod,
-machine, region, or availability zone.</p>
-<h2 id="context-2"><a class="header" href="#context-2">Context</a></h2>
-<p>The LLM control plane already separates the major concerns:</p>
-<ul>
-<li>Models describe the shared model catalog.</li>
-<li>Registrations approve models for a host and environment.</li>
-<li>Provider Accounts and Deployments describe quota ownership and callable
-provider endpoints.</li>
-<li>Credentials reference external secrets.</li>
-<li>Public Aliases provide stable model names.</li>
-<li>Routes connect Aliases to eligible Deployments.</li>
-<li>Pricing records effective rates.</li>
-<li>Policies describe governance intent.</li>
-<li>Bindings assign Policies to Agents, Clients, Principals, or Product Profiles.</li>
-<li>Publications create immutable gateway projection roots.</li>
-</ul>
-<p>This structure can expose different models and policies to different subjects
-without requiring a different LLM gateway configuration for every Agent, team,
-product, or MCP server.</p>
-<p>The current implementation also already assumes one publication stream per
-host and environment:</p>
-<ul>
-<li><code>llm_projection_resource_t</code> keys resources and sequence numbers by
-<code>host_id + environment</code>.</li>
-<li><code>llm_gateway_publication_t</code> keys publication versions and manifest digests by
-<code>host_id + environment</code>.</li>
-<li>the latest-publication query accepts only Host Id and Environment.</li>
-<li>candidate validation selects the active Alias surface for the environment.</li>
-<li>the publication command has no gateway target identifier.</li>
-<li>runtime <code>gatewayInstance</code> identifies a replica acknowledgement; it does not
-select a different model or policy configuration.</li>
-</ul>
-<p>Relevant current sources are:</p>
-<pre><code class="language-text">portal-db/postgres/ddl.sql
-light-portal/db-provider/.../LlmModelPersistenceImpl.java
-genai-command/src/main/resources/spec.yaml
-light-fabric/crates/llm-gateway/src/config.rs
-light-fabric/crates/llm-gateway/src/projection.rs
+<h1 id="llm-gateway-configuration-topology"><a class="header" href="#llm-gateway-configuration-topology">LLM Gateway Configuration Topology</a></h1>
+<h2 id="decision-1"><a class="header" href="#decision-1">Decision</a></h2>
+<p>Light Portal is the authoring control plane for LLM providers, deployments,
+aliases, pricing, and policy. The standard Portal configuration system is the
+only delivery channel to <code>light-gateway</code>.</p>
+<p>For each selected gateway instance, Portal compiles the active GenAI records
+into typed <code>llm-router.*</code> instance properties. The user creates and promotes a
+normal immutable config snapshot. Config server exposes that snapshot as
+<code>values.yml</code>, and the gateway consumes it only during startup or an explicit
+module reload.</p>
+<p>The former LLM-specific filesystem projection, continuous polling worker,
+sequence/checkpoint protocol, and per-replica publication acknowledgement are
+not part of this architecture.</p>
+<h2 id="source-of-truth-1"><a class="header" href="#source-of-truth-1">Source of Truth</a></h2>
+<pre><code class="language-text">GenAI control-plane records
+          |
+          | deterministic compilation and instance publication
+          v
+Typed llm-router.* instance properties
+          |
+          | normal snapshot creation and promotion
+          v
+Immutable config snapshot / values.yml
+          |
+          +---- startup -------------------------+
+          |                                      |
+          +---- selected llm-router reload ------+
+                                                 v
+                                      compiled immutable LLM runtime
 </code></pre>
-<h2 id="terminology"><a class="header" href="#terminology">Terminology</a></h2>
+<p>The config snapshot is the runtime authority. Control-plane tables remain the
+authoring authority, but changing them alone cannot alter a running gateway.
+Publishing properties alone also cannot alter a running gateway: the intended
+snapshot must be promoted and then consumed by startup or an explicit reload.</p>
+<h2 id="gateway-instances-and-replicas"><a class="header" href="#gateway-instances-and-replicas">Gateway Instances and Replicas</a></h2>
+<p>An LLM gateway instance is a Portal instance with its own properties and
+current config snapshot. A host and environment may have a normal production
+instance plus separate test or canary instances. Applying one immutable
+configuration revision to multiple instances supports canary qualification and
+exact promotion without regenerating mutable control-plane state.</p>
+<p>Replicas of one instance share the same current snapshot. Replica identity is
+useful for runtime health, audit, and diagnostics, but it is not a separate
+configuration partition and does not require an LLM publication ACK protocol.</p>
+<h2 id="startup"><a class="header" href="#startup">Startup</a></h2>
+<p>At startup:</p>
+<ol>
+<li><code>startup.yml</code> identifies config server and the target instance context.</li>
+<li>The runtime downloads the current immutable <code>values.yml</code> snapshot.</li>
+<li>The config loader resolves <code>llm-router.yml</code> from that values document.</li>
+<li><code>LlmCompiler</code> validates and compiles the complete provider, deployment,
+alias, pricing, policy-derived, and runtime-material graph.</li>
+<li>The gateway atomically publishes one immutable LLM runtime snapshot.</li>
+</ol>
+<p>If the enabled LLM configuration is invalid, the gateway starts with LLM
+routing unavailable and reports the configuration error. It does not assemble a
+second candidate from local projection files.</p>
+<h2 id="explicit-module-reload"><a class="header" href="#explicit-module-reload">Explicit Module Reload</a></h2>
+<p>The control plane uses the existing module reload operation. It may request one
+or more modules. The runtime downloads the current <code>values.yml</code> once for that
+operation, creates a fresh reload context, and invokes only the requested
+reloaders.</p>
+<p>When <code>llm-router</code> is selected, <code>LlmRouterReloader</code> compiles a candidate from the
+fresh context. The candidate replaces the active LLM runtime only after the
+entire graph validates. A failed compile leaves the previous runtime active.
+Requests already in flight continue using the immutable snapshot they captured.</p>
+<p>Reloading an unrelated module cannot change LLM routing.</p>
+<h2 id="configuration-contract"><a class="header" href="#configuration-contract">Configuration Contract</a></h2>
+<p>Portal-owned typed properties include:</p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Term</th><th>Meaning</th></tr>
+<tr><th>Property</th><th>Meaning</th></tr>
 </thead>
 <tbody>
-<tr><td>Host</td><td>Portal tenant boundary represented by <code>host_id</code>.</td></tr>
-<tr><td>Environment</td><td>Deployment stage such as <code>dev</code>, <code>test</code>, or <code>prod</code>.</td></tr>
-<tr><td>Logical LLM gateway</td><td>The single model-access and policy-enforcement authority for one host and environment.</td></tr>
-<tr><td>LLM gateway replica</td><td>One process or pod serving the same immutable LLM projection as its peers.</td></tr>
-<tr><td>AI microgateway</td><td>A gateway close to an MCP server, Agent, workflow, API, or execution domain. It handles that domain’s routing and security but has no direct provider credential or LLM model access.</td></tr>
-<tr><td>Publication</td><td>One immutable desired-state root containing supported LLM Deployments, Routes, Policies, and Pricing.</td></tr>
-<tr><td>Gateway instance</td><td>Operational identity of an individual replica, used for acknowledgements, audit, and diagnostics. It is not a configuration partition.</td></tr>
+<tr><td><code>llm-router.enabled</code></td><td>Enables the module when valid topology is present.</td></tr>
+<tr><td><code>llm-router.developmentFixtures</code></td><td>Explicit development-only validation mode.</td></tr>
+<tr><td><code>llm-router.providers</code></td><td>Provider endpoints, auth references, headers, network profiles, and quota ownership.</td></tr>
+<tr><td><code>llm-router.deployments</code></td><td>Physical model IDs, capabilities, runtime capacity, prices, and provider references.</td></tr>
+<tr><td><code>llm-router.aliases</code></td><td>Public/internal aliases, ordered routes, limits, audit, PII, and required capabilities.</td></tr>
+<tr><td><code>llm-router.openaiExtensionAllowlist</code></td><td>Explicit request-extension policy.</td></tr>
+<tr><td><code>llm-router.runtimeMaterial</code></td><td>Non-secret credential mappings, trust-bundle mappings, evidence keys, and reasoning-seal references.</td></tr>
 </tbody>
 </table>
 </div>
-<h2 id="goals-17"><a class="header" href="#goals-17">Goals</a></h2>
-<ul>
-<li>Provide one unambiguous model-governance authority per host and environment.</li>
-<li>Scale request capacity and availability with replicas.</li>
-<li>Keep provider credentials and model egress out of microgateways.</li>
-<li>Support different models, budgets, data rules, and capabilities for different
-Agents and subjects through control-plane resources.</li>
-<li>Preserve immutable, versioned publication and rollback semantics.</li>
-<li>Make authorization decisions resistant to caller-controlled gateway choice.</li>
-<li>Keep operational ownership, delivery status, and incident response clear.</li>
-<li>Leave an explicit migration path if multiple isolated LLM gateway realms are
-later justified.</li>
-</ul>
-<h2 id="non-goals-20"><a class="header" href="#non-goals-20">Non-Goals</a></h2>
-<ul>
-<li>This design does not limit the number of gateway processes or pods.</li>
-<li>It does not require all subjects to use the same model or Policy.</li>
-<li>It does not prohibit regionally distributed replicas.</li>
-<li>It does not make every MCP or Agent request pass through one physical host.</li>
-<li>It does not define provider-specific policy-object vocabulary.</li>
-<li>It does not treat an application microgateway as an LLM provider proxy.</li>
-</ul>
-<h2 id="required-invariants"><a class="header" href="#required-invariants">Required Invariants</a></h2>
+<p>Maps and lists must remain typed YAML nodes in <code>values.yml</code>; they must not be
+double-encoded as quoted JSON. Publication must be deterministic, bounded, and
+must reject dangling or cross-host references.</p>
+<h2 id="secret-boundary"><a class="header" href="#secret-boundary">Secret Boundary</a></h2>
+<p>Portal, instance properties, config snapshots, and <code>values.yml</code> contain only
+credential references. Raw provider keys and reasoning-seal key bytes are
+injected into the gateway environment or another locally supported secret
+materialization mechanism.</p>
+<p><code>runtimeMaterial.credentialEnvironment</code> may map an opaque <code>credential://</code>
+reference to an allowed environment-variable name. Direct <code>env:NAME</code>
+references are also supported. Trust bundles use approved references plus local
+paths and digests. The compiler fails closed if required material cannot be
+resolved and never logs resolved values.</p>
+<h2 id="publication-workflow"><a class="header" href="#publication-workflow">Publication Workflow</a></h2>
 <ol>
-<li>There is one desired LLM publication sequence for each <code>(host, environment)</code>.</li>
-<li>Every LLM gateway replica for that pair applies the same immutable
-publication root, subject to bounded rollout convergence.</li>
-<li><code>gatewayInstance</code> identifies a replica but never changes the authorized
-model, Alias, Route, Policy, or Credential set.</li>
-<li>Only the logical LLM gateway resolves provider credential references and
-opens provider inference connections.</li>
-<li>AI microgateways cannot read LLM projection roots, resolve provider secrets,
-or call approved model providers directly.</li>
-<li>A caller selects an authorized Public Alias, not a gateway instance or
-provider Deployment.</li>
-<li>Host and environment are derived from trusted request and deployment
-context; clients cannot override them to reach another publication.</li>
-<li>Policy and Alias selection is determined by trusted bindings and claims, not
-by a caller-selected route to a less restrictive gateway.</li>
-<li>Every served request records the publication sequence or root digest used by
-the handling replica.</li>
-<li>A failed candidate or replica acknowledgement never mutates the last valid
-published root.</li>
+<li>Select the logical environment and target LLM gateway instance.</li>
+<li>Generate a read-only preview from active control-plane records.</li>
+<li>Verify exact model IDs, route order, capabilities, pricing, and credential
+references; verify no secret value appears.</li>
+<li>Publish the canonical typed property set to that instance.</li>
+<li>Create and promote a config snapshot through the normal Config workflow.</li>
+<li>Restart the gateway, or request an explicit reload containing
+<code>light-pingora/llm-router</code>.</li>
+<li>Confirm startup/module-reload success, then test provider behavior through
+the gateway.</li>
 </ol>
-<h2 id="option-a-one-logical-llm-gateway-per-host-and-environment"><a class="header" href="#option-a-one-logical-llm-gateway-per-host-and-environment">Option A: One Logical LLM Gateway Per Host And Environment</a></h2>
-<h3 id="topology"><a class="header" href="#topology">Topology</a></h3>
-<pre><code class="language-text">Host A / prod
-│
-├── MCP microgateway 1 ─┐
-├── MCP microgateway 2 ─┤
-├── Agent service ──────┼──&gt; logical LLM gateway endpoint
-└── Workflow service ───┘       ├── replica 1
-                                ├── replica 2
-                                └── replica 3
-                                      │
-                                      ├── Provider Deployment A
-                                      ├── Provider Deployment B
-                                      └── Provider Deployment C
-
-One Portal publication root defines the models, routes, policies, and pricing
-used by all three replicas.
-</code></pre>
-<h3 id="how-different-model-needs-are-represented"><a class="header" href="#how-different-model-needs-are-represented">How Different Model Needs Are Represented</a></h3>
-<p>Different requirements remain data and policy decisions inside the one logical
-configuration:</p>
+<p>Publication and snapshot loading prove configuration consistency and
+application. They do not prove provider reachability, credential validity,
+quota availability, or model quality.</p>
+<h2 id="canary-and-rollback"><a class="header" href="#canary-and-rollback">Canary and Rollback</a></h2>
+<p>For canary promotion, apply the same immutable property revision and digest to
+the production instance; do not regenerate from mutable records after the
+canary test. Create/promote the production instance snapshot and perform its
+normal restart or reload.</p>
+<p>Rollback applies an earlier immutable property revision to the affected
+instance, creates/promotes a new snapshot, and restarts or reloads. Historical
+revisions and snapshots are never mutated.</p>
+<h2 id="operational-guarantees"><a class="header" href="#operational-guarantees">Operational Guarantees</a></h2>
 <ul>
-<li>Public Aliases expose different approved model contracts.</li>
-<li>Alias Routes select different Deployments, regions, priorities, and fallbacks.</li>
-<li>Policy Bindings assign different Policies and default Aliases to Agents or
-other subjects.</li>
-<li>Provider Accounts and quota groups separate capacity and billing ownership.</li>
-<li>Registration and Alias environment fields prevent cross-environment use.</li>
-<li>Credentials remain Deployment-specific.</li>
+<li>One config-server snapshot supplies every selected module in a reload.</li>
+<li>Configuration changes only at startup or explicit reload.</li>
+<li>Only requested modules reload.</li>
+<li>LLM publication has no independent file poller or ACK state machine.</li>
+<li>Invalid LLM reloads retain the last-known-good runtime.</li>
+<li>In-flight requests remain pinned to one immutable compiled generation.</li>
+<li>Secrets remain outside Portal and config-server artifacts.</li>
+<li>Local, dev, and install environments use the same exported event baseline and
+standard snapshot workflow.</li>
 </ul>
-<p>For example, a support Agent can resolve <code>support-chat</code>, a coding Agent can
-resolve <code>code-assistant</code>, and a document workflow can resolve
-<code>document-summarizer</code>. They can use different providers and Policies while the
-same logical LLM gateway enforces the resulting publication.</p>
-<h3 id="advantages"><a class="header" href="#advantages">Advantages</a></h3>
-<ul>
-<li><strong>One security choke point.</strong> Provider credentials, outbound provider access,
-PII controls, budgets, audit, and policy enforcement have one authority.</li>
-<li><strong>No gateway shopping.</strong> A caller cannot choose a different gateway with a
-larger model set or weaker Policy.</li>
-<li><strong>Matches the current schema.</strong> Publication versions, projection sequences,
-validation, rollback, and latest-root lookup already use Host and Environment.</li>
-<li><strong>Clear semantics.</strong> An Alias has one meaning and one effective publication
-in the environment.</li>
-<li><strong>Simpler operations.</strong> One dashboard, desired-state sequence, rollback line,
-conformance gate, and incident owner exist per host and environment.</li>
-<li><strong>Efficient resource sharing.</strong> Provider clients, connection pools, model
-metadata, rate data, and compiled policy structures can be reused across
-workloads.</li>
-<li><strong>Capacity scales horizontally.</strong> Replicas add throughput without multiplying
-configuration authorities.</li>
-<li><strong>Consistent audit.</strong> Usage, cost, policy decision, and projection evidence
-share a common root digest and sequence.</li>
-<li><strong>Safer policy evolution.</strong> A new publication can be validated as a complete
-environment-wide graph before it replaces the previous root.</li>
-<li><strong>Smaller Portal surface.</strong> No target registry, target assignment matrix,
-target-specific validation, or gateway selector is required.</li>
-</ul>
-<h3 id="disadvantages"><a class="header" href="#disadvantages">Disadvantages</a></h3>
-<ul>
-<li><strong>Larger logical blast radius.</strong> A bad publication can affect every workload
-in the host and environment, even though the last valid root is retained on
-validation failure.</li>
-<li><strong>Shared change cadence.</strong> Teams cannot independently publish unrelated
-gateway roots without coordination.</li>
-<li><strong>Shared capacity plane.</strong> Noisy-neighbor protection must be enforced with
-subject, Alias, quota-group, and provider limits rather than separate gateway
-configurations.</li>
-<li><strong>More demanding availability design.</strong> The logical service must be deployed
-across enough replicas, failure domains, and capacity pools.</li>
-<li><strong>Strict backward compatibility.</strong> Every replica version participating in a
-rollout must understand the published schema and enabled features.</li>
-<li><strong>Hard isolation requires infrastructure controls.</strong> A Policy alone is not a
-substitute for legally required network, credential, or administrative
-separation.</li>
-</ul>
-<h3 id="mitigations"><a class="header" href="#mitigations">Mitigations</a></h3>
-<ul>
-<li>Deploy replicas across availability zones and, where allowed, regions.</li>
-<li>Apply per-subject, per-Alias, per-quota-group, and global concurrency limits.</li>
-<li>Use multiple provider Deployments and explicit fallback Routes.</li>
-<li>Validate the complete candidate before publication and retain the last valid
-root on compiler or delivery failure.</li>
-<li>Require a pre-production environment before production publication.</li>
-<li>Record per-replica acknowledgements and alert on version or root divergence.</li>
-<li>Use admission fairness and bounded queues so one Agent cannot exhaust the
-shared service.</li>
-<li>Keep request handling snapshot-based so each request observes exactly one
-immutable root even during rollout.</li>
-<li>Separate operational duties for Policy approval, Credential management, and
-publication approval.</li>
-</ul>
-<h2 id="option-b-multiple-logical-llm-gateways-per-host-and-environment"><a class="header" href="#option-b-multiple-logical-llm-gateways-per-host-and-environment">Option B: Multiple Logical LLM Gateways Per Host And Environment</a></h2>
-<p>Under this option, one host and environment contains multiple gateway targets
-or realms, each with its own publication sequence and model/policy graph.</p>
-<pre><code class="language-text">Host A / prod
-├── gateway realm regulated
-│   ├── replicas
-│   └── restricted models and policies
-└── gateway realm general
-    ├── replicas
-    └── general models and policies
-</code></pre>
-<h3 id="advantages-1"><a class="header" href="#advantages-1">Advantages</a></h3>
-<ul>
-<li><strong>Smaller configuration blast radius.</strong> A publication affects only one realm.</li>
-<li><strong>Independent change cadence.</strong> Separate teams can publish and roll back
-without coordinating one environment-wide root.</li>
-<li><strong>Harder infrastructure isolation.</strong> Realms can use different networks,
-regions, provider accounts, credentials, keys, or administrative owners.</li>
-<li><strong>Independent capacity and SLOs.</strong> Critical and best-effort workloads do not
-have to share a compiled root or replica pool.</li>
-<li><strong>Targeted feature rollout.</strong> A realm can adopt a new gateway version or
-projection feature before other realms.</li>
-<li><strong>Regulatory separation.</strong> A realm can form a provable boundary when policy
-filtering inside one process is insufficient.</li>
-</ul>
-<h3 id="disadvantages-1"><a class="header" href="#disadvantages-1">Disadvantages</a></h3>
-<ul>
-<li><strong>Gateway selection becomes authorization.</strong> Every Agent, Client, Principal,
-and Product Profile needs an authoritative gateway-realm assignment. The
-caller must never choose it directly.</li>
-<li><strong>Gateway-shopping risk.</strong> If selection is ambiguous or user-controlled, a
-caller can bypass a restrictive realm by reaching a more permissive one.</li>
-<li><strong>Alias ambiguity.</strong> The same Alias may mean different models or Policies in
-the same environment, complicating discovery, caching, audit, and support.</li>
-<li><strong>Policy precedence becomes two-dimensional.</strong> Effective policy depends on
-both subject bindings and gateway realm, increasing conflict and fallback
-rules.</li>
-<li><strong>Substantial schema expansion.</strong> Publications, resources, sequences,
-rollbacks, validation, delivery evidence, commands, and queries need a target
-key.</li>
-<li><strong>More complex distribution.</strong> Each replica must receive exactly the root for
-its assigned realm and prove that assignment during acknowledgement.</li>
-<li><strong>Duplicated configuration.</strong> Common models, Pricing, Policies, and Routes may
-be copied or require a new shared-resource plus publication-membership model.</li>
-<li><strong>Fragmented capacity.</strong> Idle capacity in one realm cannot automatically serve
-another, and provider quota coordination becomes harder.</li>
-<li><strong>Cross-realm fallback is dangerous.</strong> Falling back to a model in another
-realm can violate the isolation reason for having realms.</li>
-<li><strong>Higher operational cost.</strong> Each realm needs ownership, monitoring,
-qualification, deployment, rollback, on-call, and disaster recovery.</li>
-<li><strong>Harder incident reconstruction.</strong> Support must identify both environment
-and realm before determining the active root and applicable Policy.</li>
-</ul>
-<h3 id="schema-and-runtime-work-required"><a class="header" href="#schema-and-runtime-work-required">Schema And Runtime Work Required</a></h3>
-<p>A safe multiple-realm design would require at least:</p>
-<ol>
-<li>A host-scoped gateway-realm table, such as
-<code>llm_gateway_realm_t(host_id, environment, gateway_realm_id, realm_name, ...)</code>.</li>
-<li><code>gateway_realm_id</code> in publication and projection primary keys, uniqueness,
-sequence, rollback, validation, and latest-root queries.</li>
-<li>An authoritative subject-to-realm assignment that is evaluated before
-routing and cannot be overridden by request input.</li>
-<li>Explicit Alias ownership or availability per realm.</li>
-<li>Target-scoped candidate validation that follows only the realm’s Aliases,
-Routes, Deployments, Pricing, Credentials, Policies, and Bindings.</li>
-<li>A separate <code>gatewayRealmId</code> deployment setting and a distinct
-<code>gatewayInstance</code> replica identity.</li>
-<li>Realm-specific distribution roots and checkpoints.</li>
-<li>Per-publication, per-replica acknowledgement records.</li>
-<li>Rules for Alias-name uniqueness, cross-realm discovery, migration, and
-whether cross-realm fallback is forbidden.</li>
-<li>Portal forms, permissions, audit views, and operational dashboards for
-realm administration.</li>
-</ol>
-<p>Adding only <code>gateway_id</code> to the publication table would not be sufficient.
-Selection, authorization, validation, delivery, and audit all need the same
-realm boundary.</p>
-<h2 id="comparison"><a class="header" href="#comparison">Comparison</a></h2>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Criterion</th><th>One logical gateway per host and environment</th><th>Multiple gateway realms per host and environment</th></tr>
-</thead>
-<tbody>
-<tr><td>Security authority</td><td>One unambiguous enforcement point</td><td>Strong isolation possible, but selection becomes a new authorization boundary</td></tr>
-<tr><td>Caller behavior</td><td>Caller selects an authorized Alias</td><td>Caller needs a trusted realm assignment plus an authorized Alias</td></tr>
-<tr><td>Model and Policy variation</td><td>Expressed through Aliases, Routes, Policies, and Bindings</td><td>Expressed through those resources plus realm membership</td></tr>
-<tr><td>Schema fit</td><td>Matches the current database</td><td>Requires cross-stack schema and contract changes</td></tr>
-<tr><td>Horizontal scaling</td><td>Add replicas</td><td>Add replicas independently per realm</td></tr>
-<tr><td>Publication blast radius</td><td>Entire host/environment graph</td><td>One realm</td></tr>
-<tr><td>Operational complexity</td><td>Lower</td><td>Significantly higher</td></tr>
-<tr><td>Resource utilization</td><td>Shared pools are efficient</td><td>Capacity and connections are fragmented</td></tr>
-<tr><td>Independent team cadence</td><td>Requires coordination</td><td>Strong</td></tr>
-<tr><td>Hard network or credential isolation</td><td>Requires infrastructure controls around one logical service</td><td>Natural boundary between realms</td></tr>
-<tr><td>Alias semantics</td><td>One meaning per environment</td><td>Potentially ambiguous without realm-qualified discovery</td></tr>
-<tr><td>Audit and cost attribution</td><td>One sequence/root namespace</td><td>Must include realm in every record and report</td></tr>
-<tr><td>Current implementation effort</td><td>Small; improve replica delivery tracking</td><td>Large migration across DB, commands, queries, Portal, distribution, and runtime</td></tr>
-</tbody>
-</table>
-</div>
-<h2 id="recommendation-9"><a class="header" href="#recommendation-9">Recommendation</a></h2>
-<p>Adopt Option A for the initial production design:</p>
-<blockquote>
-<p>Each host and environment owns one logical LLM gateway configuration and one
-publication sequence. The gateway is deployed with multiple replicas. All
-direct LLM model access goes through that logical service.</p>
-</blockquote>
-<p>This is the better default because the primary variations discussed so far are
-model choice, Agent choice, provider route, quota, Policy, region, and
-capability. Those are already control-plane dimensions and do not require
-multiple configuration authorities.</p>
-<p>The one-gateway design also makes the security rule easy to state and audit:</p>
-<pre><code class="language-text">One host + one environment -&gt; one authoritative LLM policy and routing graph.
-</code></pre>
-<p>Multiple replicas solve availability and throughput. Multiple Aliases, Routes,
-Deployments, Policies, and Bindings solve workload variation. AI microgateways
-solve domain-local ingress and tool routing without becoming alternate paths to
-model providers.</p>
-<h2 id="ai-microgateway-boundary"><a class="header" href="#ai-microgateway-boundary">AI Microgateway Boundary</a></h2>
-<p>AI microgateways may provide:</p>
-<ul>
-<li>MCP session and tool routing;</li>
-<li>Agent or workflow ingress;</li>
-<li>API authentication and local authorization;</li>
-<li>protocol translation unrelated to provider inference;</li>
-<li>request-size, rate, and connection controls for their owned domain;</li>
-<li>service discovery and telemetry for MCP servers or Agents.</li>
-</ul>
-<p>They must not provide:</p>
-<ul>
-<li>direct OpenAI-compatible model dispatch;</li>
-<li>provider-specific model clients;</li>
-<li>provider API keys or Credential resolution;</li>
-<li>access to the LLM projection distribution directory;</li>
-<li>a locally configured model that bypasses Public Alias authorization;</li>
-<li>fallback directly to a provider when the LLM gateway is unavailable.</li>
-</ul>
-<p>Enforce the boundary with both application and infrastructure controls:</p>
-<ul>
-<li>only LLM gateway workloads receive provider Credential references;</li>
-<li>provider egress allowlists permit the LLM gateway identity, not
-microgateway identities;</li>
-<li>service authorization permits microgateways to call the logical LLM gateway
-but not provider endpoints;</li>
-<li>the central gateway derives Host and Environment from trusted identity and
-routing context;</li>
-<li>audit alerts detect provider-domain traffic from any unauthorized workload.</li>
-</ul>
-<h2 id="request-flow"><a class="header" href="#request-flow">Request Flow</a></h2>
-<pre><code class="language-text">Caller
-  -&gt; Agent, workflow, API, or MCP microgateway
-  -&gt; authenticated internal LLM request
-  -&gt; logical LLM gateway service for host/environment
-  -&gt; authorize subject and Alias
-  -&gt; apply compiled Policy and budgets
-  -&gt; select eligible Route and Deployment
-  -&gt; resolve external Credential reference
-  -&gt; call provider
-  -&gt; record usage, cost, Policy, Alias, Deployment, and publication digest
-</code></pre>
-<p>The microgateway may forward an Alias requested by its application, but the
-central LLM gateway remains responsible for determining whether the authenticated
-subject may use that Alias. It must never trust a forwarded provider Deployment,
-Policy result, price, or Credential.</p>
-<h2 id="publication-and-replica-delivery"><a class="header" href="#publication-and-replica-delivery">Publication And Replica Delivery</a></h2>
-<p>One logical configuration still needs replica-aware operations.</p>
-<p>The existing runtime writes one acknowledgement per <code>gatewayInstance</code>, but the
-Portal publication row currently has one aggregate <code>deliveryState</code> and one
-<code>deliveryEvidence</code> object. Production hardening should normalize replica
-delivery without introducing multiple configuration realms.</p>
-<p>A future table can use this shape:</p>
-<pre><code class="language-text">llm_gateway_publication_ack_t
-  host_id
-  environment
-  gateway_publication_id
-  gateway_instance
-  applied_sequence
-  root_digest
-  gateway_version
-  applied_ts
-  state
-  evidence
-</code></pre>
-<p>Recommended delivery semantics:</p>
-<ol>
-<li>Validate the complete immutable candidate.</li>
-<li>Make the new projection root available to replicas.</li>
-<li>Each replica validates and atomically swaps its local root.</li>
-<li>Each replica writes an acknowledgement containing its instance identity,
-sequence, root digest, and gateway version.</li>
-<li>Portal shows desired replicas, acknowledged replicas, divergent replicas,
-and rollout age.</li>
-<li>Deployment automation determines success using an explicit quorum or
-all-required-replicas rule.</li>
-<li>A failed replica retains its last valid root and is removed from readiness
-until it converges or is deliberately rolled back.</li>
-</ol>
-<p>This per-replica evidence solves the operational need without allowing replicas
-to have intentionally different model or Policy configurations.</p>
-<h2 id="availability-and-scaling"><a class="header" href="#availability-and-scaling">Availability And Scaling</a></h2>
-<p>The logical gateway must not be a physical single point of failure.</p>
-<ul>
-<li>Run at least two replicas in production and spread them across failure zones.</li>
-<li>Use a stable internal service identity and health-aware load balancing.</li>
-<li>Keep request execution stateless apart from bounded local caches and immutable
-compiled snapshots.</li>
-<li>Coordinate provider quotas through the published Account quota group rather
-than per-replica counters alone.</li>
-<li>Bound global and per-subject concurrency, streaming concurrency, queue depth,
-replay bytes, and timeouts.</li>
-<li>Do not route traffic to a replica that has not applied an acceptable root or
-whose required Credential material cannot be resolved.</li>
-<li>Preserve the prior root for bounded rollback and restart recovery.</li>
-</ul>
-<p>Regional replicas may still share one logical publication. Region and residency
-decisions should be expressed through supported Routes, Deployments, claims,
-and compiled policy. If a legal boundary requires separate administrators,
-keys, networks, and publications, that is evidence for a future realm rather
-than an ordinary replica.</p>
-<h2 id="failure-modes"><a class="header" href="#failure-modes">Failure Modes</a></h2>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Failure</th><th>Required behavior</th></tr>
-</thead>
-<tbody>
-<tr><td>Candidate validation fails</td><td>Keep the current publication; do not distribute the candidate.</td></tr>
-<tr><td>One replica rejects the new root</td><td>Keep its last valid root, remove it from readiness if necessary, and surface divergent delivery.</td></tr>
-<tr><td>Provider Deployment fails</td><td>Use only eligible configured fallback Routes; never bypass Policy or Credential controls.</td></tr>
-<tr><td>Logical gateway unavailable</td><td>Fail closed or use a bounded application-specific retry; microgateways must not call providers directly.</td></tr>
-<tr><td>Policy cannot resolve one Agent default</td><td>Reject model resolution rather than selecting an arbitrary Alias.</td></tr>
-<tr><td>Publication and Credential rotation overlap</td><td>Reload the external secret through the approved mechanism while retaining the immutable topology root.</td></tr>
-<tr><td>Microgateway attempts provider egress</td><td>Deny at network and identity policy and emit a security alert.</td></tr>
-<tr><td>Replicas report different digests at one sequence</td><td>Treat as a severe consistency incident and stop routing to divergent replicas.</td></tr>
-</tbody>
-</table>
-</div>
-<h2 id="when-to-revisit-multiple-gateway-realms"><a class="header" href="#when-to-revisit-multiple-gateway-realms">When To Revisit Multiple Gateway Realms</a></h2>
-<p>Do not introduce a second logical LLM gateway merely because a team wants a
-different model, provider, budget, Alias, Agent default, or release preference.
-Those belong in the existing control plane.</p>
-<p>Revisit Option B only when at least one of these is demonstrated:</p>
-<ul>
-<li>a regulatory requirement mandates separate network or administrative
-boundaries inside the same host and environment;</li>
-<li>provider Credentials must be inaccessible to the operators or runtime of the
-other realm;</li>
-<li>residency rules require physically isolated egress that cannot safely be
-represented by supported routing policy;</li>
-<li>separate business units require independent SLOs and publication authority,
-and shared Policy governance is explicitly not acceptable;</li>
-<li>the shared logical service cannot meet measured scaling or failure-isolation
-requirements after horizontal scaling and quota isolation are exhausted;</li>
-<li>a merger, sovereign deployment, or high-assurance workload requires an
-independently audited model-access boundary.</li>
-</ul>
-<p>Before approving multiple realms, require an architecture review that defines:</p>
-<ul>
-<li>the trusted subject-to-realm selector;</li>
-<li>why the caller cannot influence that selector;</li>
-<li>Alias naming and discovery rules;</li>
-<li>whether any cross-realm fallback is permitted;</li>
-<li>separate Credential, network, audit, and operational ownership;</li>
-<li>migration and rollback behavior;</li>
-<li>the additional Portal and runtime contracts.</li>
-</ul>
-<h2 id="future-compatible-naming"><a class="header" href="#future-compatible-naming">Future-Compatible Naming</a></h2>
-<p>Use <strong>logical LLM gateway</strong> for the current <code>(host, environment)</code> authority and
-<strong>gateway instance</strong> for a replica. Avoid calling an instance a gateway target.</p>
-<p>If multiple isolated configurations are later required, introduce the explicit
-term <strong>LLM gateway realm</strong>. Do not overload <code>gatewayInstance</code>, Environment, Alias
-names, or synthetic Host records to represent the realm. That keeps a future
-additive migration understandable:</p>
-<pre><code class="language-text">(host_id, environment)
-</code></pre>
-<p>can become:</p>
-<pre><code class="language-text">(host_id, environment, gateway_realm_id)
-</code></pre>
-<p>with the existing data migrated into a generated <code>default</code> realm.</p>
-<h2 id="implementation-guidance"><a class="header" href="#implementation-guidance">Implementation Guidance</a></h2>
-<h3 id="phase-1-confirm-the-single-logical-gateway-contract"><a class="header" href="#phase-1-confirm-the-single-logical-gateway-contract">Phase 1: Confirm The Single-Logical-Gateway Contract</a></h3>
-<ul>
-<li>Document the one-publication-stream invariant in database and API contracts.</li>
-<li>Treat duplicate independently managed LLM gateways for one host/environment
-as a deployment error.</li>
-<li>Ensure every LLM replica has a unique, stable <code>gatewayInstance</code>.</li>
-<li>Ensure all replicas receive the same root and use a common readiness policy.</li>
-<li>Block model-provider egress and Credential distribution for microgateways.</li>
-</ul>
-<h3 id="phase-2-harden-delivery-and-operations"><a class="header" href="#phase-2-harden-delivery-and-operations">Phase 2: Harden Delivery And Operations</a></h3>
-<ul>
-<li>Add normalized per-replica publication acknowledgements.</li>
-<li>Add Portal views for replica convergence, version compatibility, and stale
-roots.</li>
-<li>Add alerts for digest divergence, missing acknowledgements, unauthorized
-provider egress, and capacity saturation.</li>
-<li>Test replica replacement, partial rollout, rollback, Credential rotation, and
-provider failover.</li>
-</ul>
-<h3 id="phase-3-prove-workload-isolation-inside-one-configuration"><a class="header" href="#phase-3-prove-workload-isolation-inside-one-configuration">Phase 3: Prove Workload Isolation Inside One Configuration</a></h3>
-<ul>
-<li>Verify per-subject and per-Alias admission fairness.</li>
-<li>Verify Policy Binding and default-Alias behavior.</li>
-<li>Verify quota-group sharing across replicas.</li>
-<li>Verify residency and classification handling supported by the publication
-compiler and gateway version.</li>
-<li>Demonstrate that MCP and Agent microgateways cannot bypass the central path.</li>
-</ul>
-<h3 id="phase-4-optional-realm-adr"><a class="header" href="#phase-4-optional-realm-adr">Phase 4: Optional Realm ADR</a></h3>
-<p>Only start this phase when the revisit criteria are met. Produce a separate ADR
-and threat model before changing the current primary keys or publication API.</p>
-<h2 id="acceptance-criteria-1"><a class="header" href="#acceptance-criteria-1">Acceptance Criteria</a></h2>
-<ul>
-<li>A host/environment has one current desired publication version and root
-digest.</li>
-<li>All ready replicas report that root digest and an allowed gateway version.</li>
-<li>Different Agents can resolve different Aliases and Policies without separate
-gateway configurations.</li>
-<li>Provider Credentials are available only to the logical LLM gateway workload.</li>
-<li>Microgateways can invoke approved Aliases but cannot call model providers.</li>
-<li>Removing the logical LLM gateway causes model requests to fail closed.</li>
-<li>A bad publication leaves the last valid root serving.</li>
-<li>Portal can identify every replica that has or has not applied a publication.</li>
-<li>Audit records identify Host, Environment, subject, Alias, Policy decision,
-Deployment, cost, publication sequence/root digest, and gateway instance.</li>
-</ul>
-<h2 id="open-questions-2"><a class="header" href="#open-questions-2">Open Questions</a></h2>
-<ul>
-<li>Should production delivery require acknowledgement from every desired replica
-or a configurable quorum before Portal marks the publication delivered?</li>
-<li>Which service owns the authoritative desired-replica inventory used to judge
-acknowledgement completeness?</li>
-<li>Should a replica that is one valid root behind remain ready during a bounded
-rollout window?</li>
-<li>Which internal identity and claims bind a microgateway request to Host and
-Environment?</li>
-<li>Which network-policy mechanism will prove that microgateways cannot reach
-provider endpoints?</li>
-<li>Which supported policy fields provide per-subject fairness before production?</li>
-<li>Are regional replicas allowed to serve the same Alias when the current
-compiler cannot enforce a requested residency condition?</li>
-<li>What measured requirement would trigger a gateway-realm architecture review?</li>
-</ul>
-<h2 id="final-recommendation"><a class="header" href="#final-recommendation">Final Recommendation</a></h2>
-<p>Keep the current cardinality and make it explicit:</p>
-<pre><code class="language-text">one host + one environment
-  = one logical LLM gateway configuration
-  = one immutable publication sequence
-  = many interchangeable replicas
-</code></pre>
-<p>Allow many AI microgateways, but keep them outside the LLM trust boundary. This
-design provides the strongest default governance model, aligns with the current
-database, and still supports different models and Policies through the existing
-Alias, Route, Deployment, Policy, and Binding abstractions.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="control-plane-policy-publication-through-config-server"><a class="header" href="#control-plane-policy-publication-through-config-server">Control-Plane Policy Publication Through Config Server</a></h1>
-<h2 id="status-3"><a class="header" href="#status-3">Status</a></h2>
+<h2 id="status-2"><a class="header" href="#status-2">Status</a></h2>
 <p>Proposed target architecture.</p>
 <p>This document defines how Light Portal publishes immutable policy and runtime
 configuration to independently operated workloads such as Agent and Gateway.
 It also defines how publication identity is shared with the internal Workflow
 and Knowledge services without pretending that those services are external
 Config Server clients.</p>
-<h2 id="decision-summary-3"><a class="header" href="#decision-summary-3">Decision Summary</a></h2>
+<h2 id="decision-summary-2"><a class="header" href="#decision-summary-2">Decision Summary</a></h2>
 <p>Light Portal is the policy authoring and publication control plane. Agent,
 Gateway, and other independently operated application runtimes are external
 policy consumers. They receive configuration only from Config Server and have
@@ -13316,7 +12886,7 @@ activate a snapshot. An Instance Admin creates the immutable config snapshot
 and moves the instance’s current snapshot pointer in the existing snapshot
 workflow. A later Tool or Workflow change has no effect on the live Gateway
 until another Tool publication is staged and another snapshot is activated.</p>
-<h2 id="context-3"><a class="header" href="#context-3">Context</a></h2>
+<h2 id="context-2"><a class="header" href="#context-2">Context</a></h2>
 <p>Agent configuration is authored in Light Portal from multiple control-plane
 resources. Depending on the Agent and its capabilities, the effective policy may
 include:</p>
@@ -13347,7 +12917,7 @@ values in <code>config_snapshot_property_t</code>;</li>
 snapshot by host, environment, service ID, configuration phase, and property
 type. This design extends that mechanism into the only supported policy delivery
 path for external runtime services.</p>
-<h2 id="terminology-1"><a class="header" href="#terminology-1">Terminology</a></h2>
+<h2 id="terminology"><a class="header" href="#terminology">Terminology</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -13367,7 +12937,7 @@ path for external runtime services.</p>
 </tbody>
 </table>
 </div>
-<h2 id="goals-18"><a class="header" href="#goals-18">Goals</a></h2>
+<h2 id="goals-17"><a class="header" href="#goals-17">Goals</a></h2>
 <ul>
 <li>Prevent external runtimes from using Light Portal database tables as a
 control-plane policy source.</li>
@@ -13386,7 +12956,7 @@ snapshot is invalid or temporarily unavailable.</li>
 <li>Provide sufficient identifiers and digests for audit, diagnosis, and
 cross-service consistency checks.</li>
 </ul>
-<h2 id="non-goals-21"><a class="header" href="#non-goals-21">Non-Goals</a></h2>
+<h2 id="non-goals-20"><a class="header" href="#non-goals-20">Non-Goals</a></h2>
 <ul>
 <li>Config Server does not make policy decisions for a runtime request.</li>
 <li>Light Portal does not become the runtime session, retrieval, or Gateway data
@@ -13460,7 +13030,7 @@ projection reads and operational writes each service needs. They must not be
 database superusers. A future physical database split may deliver the same
 internal policy views through events or Config Server without changing their
 semantic contracts.</p>
-<h2 id="required-invariants-1"><a class="header" href="#required-invariants-1">Required Invariants</a></h2>
+<h2 id="required-invariants"><a class="header" href="#required-invariants">Required Invariants</a></h2>
 <ol>
 <li>An external runtime never queries a Light Portal domain or projection table
 to resolve control-plane policy. Internal Workflow and Knowledge may read
@@ -14083,7 +13653,7 @@ writes. Deny direct authoring-projection mutation.</li>
 <li>Prove configuration delivery across independently operated environments.</li>
 <li>Run rollback, partial outage, stale snapshot, and mixed-generation exercises.</li>
 </ul>
-<h2 id="acceptance-criteria-2"><a class="header" href="#acceptance-criteria-2">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-1"><a class="header" href="#acceptance-criteria-1">Acceptance Criteria</a></h2>
 <p>The design is complete when:</p>
 <ol>
 <li>Agent and Gateway start and serve authorized traffic without Portal database
@@ -14125,9 +13695,9 @@ topology remains an explicit internal contract that can later be replaced by
 event or Config Server delivery without changing pinned policy identities.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="global-and-tenant-entity-scope"><a class="header" href="#global-and-tenant-entity-scope">Global And Tenant Entity Scope</a></h1>
-<h2 id="status-4"><a class="header" href="#status-4">Status</a></h2>
+<h2 id="status-3"><a class="header" href="#status-3">Status</a></h2>
 <p>Proposed design for discussion.</p>
-<h2 id="decision-summary-4"><a class="header" href="#decision-summary-4">Decision Summary</a></h2>
+<h2 id="decision-summary-3"><a class="header" href="#decision-summary-3">Decision Summary</a></h2>
 <p>Use <code>host_id IS NULL</code> as the storage representation for a global row when one
 table intentionally contains both global and host-scoped definitions. Use a
 non-null <code>host_id</code> for a host-owned row. Do not add a second <code>common</code> flag to
@@ -14154,7 +13724,7 @@ workflow template/version catalog and install or fork a selected template
 into <code>wf_definition_t</code>. This preserves the existing workflow runtime foreign
 keys and prevents a global edit from changing tenant execution behavior.</li>
 </ul>
-<h2 id="context-4"><a class="header" href="#context-4">Context</a></h2>
+<h2 id="context-3"><a class="header" href="#context-3">Context</a></h2>
 <p>Light Portal currently contains two apparent patterns for shared entities:</p>
 <ol>
 <li>a populated <code>host_id</code> plus <code>common = 'Y'</code>, represented by rules;</li>
@@ -14168,7 +13738,7 @@ pattern uses the row scope itself as the source of truth.</p>
 uniqueness, soft deletion, snapshot export, authorization, foreign keys, and
 effective catalog queries. Choosing a convention based only on the shape of one
 DDL table would leave those contracts ambiguous.</p>
-<h2 id="terminology-2"><a class="header" href="#terminology-2">Terminology</a></h2>
+<h2 id="terminology-1"><a class="header" href="#terminology-1">Terminology</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -14292,14 +13862,14 @@ executions without an explicit adoption decision.</p>
 <h3 id="option-a-host-owned-row-with-common--yn"><a class="header" href="#option-a-host-owned-row-with-common--yn">Option A: Host-owned Row With <code>common = Y/N</code></a></h3>
 <p>The row always has an owner host. <code>common = 'Y'</code> makes it visible to other
 hosts.</p>
-<h4 id="advantages-2"><a class="header" href="#advantages-2">Advantages</a></h4>
+<h4 id="advantages"><a class="header" href="#advantages">Advantages</a></h4>
 <ul>
 <li>Preserves the original author or owning tenant.</li>
 <li>Allows tenant-authored content to be published without copying its body.</li>
 <li>Can support a marketplace submission model when publishing is moderated.</li>
 <li>Keeps a concrete owner for support, attribution, and update responsibility.</li>
 </ul>
-<h4 id="disadvantages-2"><a class="header" href="#disadvantages-2">Disadvantages</a></h4>
+<h4 id="disadvantages"><a class="header" href="#disadvantages">Disadvantages</a></h4>
 <ul>
 <li>It does not represent a platform-global entity; it represents a tenant-owned
 public entity.</li>
@@ -14326,7 +13896,7 @@ Do not call the published row global and do not reuse <code>common</code> as its
 authorization policy.</p>
 <h3 id="option-b-nullable-host_id"><a class="header" href="#option-b-nullable-host_id">Option B: Nullable <code>host_id</code></a></h3>
 <p>Null means a platform-global definition; a value means a host definition.</p>
-<h4 id="advantages-1-1"><a class="header" href="#advantages-1-1">Advantages</a></h4>
+<h4 id="advantages-1"><a class="header" href="#advantages-1">Advantages</a></h4>
 <ul>
 <li>One authoritative column defines scope.</li>
 <li>Aligns naturally with partial unique indexes and scoped semantic identity.</li>
@@ -14339,7 +13909,7 @@ conventions.</li>
 <li>Host-specific and global definitions can reuse a semantic name when the
 effective-catalog policy allows it.</li>
 </ul>
-<h4 id="disadvantages-1-1"><a class="header" href="#disadvantages-1-1">Disadvantages</a></h4>
+<h4 id="disadvantages-1"><a class="header" href="#disadvantages-1">Disadvantages</a></h4>
 <ul>
 <li>Null must be treated deliberately in keys, joins, predicates, ORM mappings,
 and test fixtures.</li>
@@ -14361,7 +13931,7 @@ surrogate IDs. It is especially suitable for taxonomy and reference data.</p>
 <h3 id="option-c-separate-global-definition-and-host-adoption-tables"><a class="header" href="#option-c-separate-global-definition-and-host-adoption-tables">Option C: Separate Global Definition And Host Adoption Tables</a></h3>
 <p>The definition is global. A registration, installation, or binding records the
 host’s decision to use it.</p>
-<h4 id="advantages-2-1"><a class="header" href="#advantages-2-1">Advantages</a></h4>
+<h4 id="advantages-2"><a class="header" href="#advantages-2">Advantages</a></h4>
 <ul>
 <li>Separates shared knowledge from tenant authorization and lifecycle.</li>
 <li>Supports host- and environment-specific restrictions without duplicating the
@@ -14372,7 +13942,7 @@ rollout, and audit fields.</li>
 <li>Makes global retirement different from deleting a tenant adoption.</li>
 <li>Works well for runtime-sensitive entities.</li>
 </ul>
-<h4 id="disadvantages-2-1"><a class="header" href="#disadvantages-2-1">Disadvantages</a></h4>
+<h4 id="disadvantages-2"><a class="header" href="#disadvantages-2">Disadvantages</a></h4>
 <ul>
 <li>Adds a table and lifecycle operations.</li>
 <li>Queries must join definition and adoption state.</li>
@@ -14384,7 +13954,7 @@ changes must not propagate immediately.</li>
 <p>Use this for global definitions whose availability or behavior must be approved
 per host or environment. LLM registrations are this pattern. Workflow template
 installation is a safer variation for executable workflow behavior.</p>
-<h2 id="comparison-1"><a class="header" href="#comparison-1">Comparison</a></h2>
+<h2 id="comparison"><a class="header" href="#comparison">Comparison</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -14404,7 +13974,7 @@ installation is a safer variation for executable workflow behavior.</p>
 </tbody>
 </table>
 </div>
-<h2 id="recommendation-10"><a class="header" href="#recommendation-10">Recommendation</a></h2>
+<h2 id="recommendation-9"><a class="header" href="#recommendation-9">Recommendation</a></h2>
 <h3 id="general-rule"><a class="header" href="#general-rule">General Rule</a></h3>
 <p>Choose scope from domain ownership, not from UI visibility:</p>
 <div class="table-wrapper">
@@ -14711,13 +14281,13 @@ structure is intentional: it makes cross-tenant impact explicit and auditable.</
 <li><a href="#portal-catalog-scope">Portal Catalog Scope</a></li>
 <li><a href="#entity-creation-uniqueness">Entity Creation Uniqueness</a></li>
 <li><a href="#multi-tenant">Multi-Tenant</a></li>
-<li><a href="#llm-gateway-topology-per-host-and-environment">LLM Gateway Topology Per Host And Environment</a></li>
+<li><a href="#llm-gateway-configuration-topology">LLM Gateway Topology Per Host And Environment</a></li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="global-and-tenant-knowledge-bases-for-shared-agent-retrieval"><a class="header" href="#global-and-tenant-knowledge-bases-for-shared-agent-retrieval">Global And Tenant Knowledge Bases For Shared Agent Retrieval</a></h1>
-<h2 id="status-5"><a class="header" href="#status-5">Status</a></h2>
+<h2 id="status-4"><a class="header" href="#status-4">Status</a></h2>
 <p>Proposed design for discussion.</p>
-<h2 id="decision-summary-5"><a class="header" href="#decision-summary-5">Decision Summary</a></h2>
+<h2 id="decision-summary-4"><a class="header" href="#decision-summary-4">Decision Summary</a></h2>
 <p>Add Knowledge Bases as a Light Portal resource with two ownership scopes:</p>
 <ul>
 <li>knowledge_base_t.host_id IS NULL represents a platform-owned global
@@ -14798,7 +14368,7 @@ gateway workload-lane machinery shared platform components. Knowledge Base,
 Hindsight, and tool-description embedding remain separate consumers with their
 own declared spaces, policies, quotas, and lifecycle; they must not implement
 three drifting copies of the compatibility contract.</p>
-<h2 id="context-5"><a class="header" href="#context-5">Context</a></h2>
+<h2 id="context-4"><a class="header" href="#context-4">Context</a></h2>
 <p>The current <a href="#agent-memory-event-refactor">Agent Memory Event Refactor</a>
 implements a bank-first Hindsight workspace and the following runtime-oriented
 data:</p>
@@ -14828,7 +14398,7 @@ Agent’s perspective.</li>
 <p>The workflow schema already has a data-store concept for RAG. Knowledge Bases
 should become the concrete Light Portal resource referenced by that concept
 rather than creating workflow-local copies of documents.</p>
-<h2 id="goals-19"><a class="header" href="#goals-19">Goals</a></h2>
+<h2 id="goals-18"><a class="header" href="#goals-18">Goals</a></h2>
 <ul>
 <li>Let each tenant create and administer multiple Knowledge Bases.</li>
 <li>Let platform administrators create global Knowledge Bases that every tenant
@@ -14857,7 +14427,7 @@ API.</li>
 inputs or contracts changed, while keeping deletion, permission, metadata,
 citation, and retrieval behavior transactionally consistent.</li>
 </ul>
-<h2 id="non-goals-22"><a class="header" href="#non-goals-22">Non-Goals</a></h2>
+<h2 id="non-goals-21"><a class="header" href="#non-goals-21">Non-Goals</a></h2>
 <ul>
 <li>A Knowledge Base is not conversational memory or session history.</li>
 <li>It is not a general file-authoring or content-management system.</li>
@@ -14884,7 +14454,7 @@ or permission to mutate platform-owned sources.</li>
 or spreadsheet-specific semantic extraction. Unsupported or scanned-only
 content is reported explicitly rather than silently indexed as empty text.</li>
 </ul>
-<h2 id="terminology-3"><a class="header" href="#terminology-3">Terminology</a></h2>
+<h2 id="terminology-2"><a class="header" href="#terminology-2">Terminology</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -14931,7 +14501,7 @@ binding: P0 is contract qualification, P1a is the documentation pilot, P1b is
 incremental and multi-KB retrieval, P2 is enterprise ACLs, P3 is production
 migration and scale, and P4 is optional graph-assisted retrieval. A later-phase
 tag does not weaken an earlier authorization invariant.</p>
-<h2 id="required-invariants-2"><a class="header" href="#required-invariants-2">Required Invariants</a></h2>
+<h2 id="required-invariants-1"><a class="header" href="#required-invariants-1">Required Invariants</a></h2>
 <ol>
 <li><strong>[P1a]</strong> A Knowledge Base has exactly one immutable owner scope:
 host_id IS NULL for platform-global ownership or a non-null host_id for
@@ -17723,7 +17293,7 @@ disconnected seeds, graph-budget exhaustion, and planner timeout.</li>
 <li>Promote GraphRAG only for tenants and Knowledge Bases where the evidence
 supports it.</li>
 </ul>
-<h2 id="acceptance-criteria-3"><a class="header" href="#acceptance-criteria-3">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-2"><a class="header" href="#acceptance-criteria-2">Acceptance Criteria</a></h2>
 <p>Each criterion is tagged with the earliest delivery gate that must enforce it.
 Phase 1a is complete when every P1a criterion passes; later phases add their own
 criteria without postponing the core trust boundary:</p>
@@ -18132,7 +17702,7 @@ omitted by policy.</li>
 <li><a href="#portal-event">Portal Event</a></li>
 <li><a href="#light-portal-fine-grained-authorization">Light Portal Fine-Grained Authorization</a></li>
 <li><a href="#global-and-tenant-entity-scope">Global And Tenant Entity Scope</a></li>
-<li><a href="#llm-gateway-topology-per-host-and-environment">LLM Gateway Topology Per Host And Environment</a></li>
+<li><a href="#llm-gateway-configuration-topology">LLM Gateway Topology Per Host And Environment</a></li>
 </ul>
 <p>External implementation references:</p>
 <ul>
@@ -18162,7 +17732,7 @@ Platform defaults or SLOs</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="workflow-version-and-publication"><a class="header" href="#workflow-version-and-publication">Workflow Version and Publication</a></h1>
-<h2 id="status-6"><a class="header" href="#status-6">Status</a></h2>
+<h2 id="status-5"><a class="header" href="#status-5">Status</a></h2>
 <p>Accepted design.</p>
 <p>The workflow draft, publish, immutable-version, published-version selection,
 and comparison flows are implemented. Publishing one or more tools to a
@@ -18183,7 +17753,7 @@ entry;</li>
 <li>how the selected tool and workflow revisions eventually become Gateway
 configuration through Config Server snapshots.</li>
 </ul>
-<h2 id="decision-summary-6"><a class="header" href="#decision-summary-6">Decision Summary</a></h2>
+<h2 id="decision-summary-5"><a class="header" href="#decision-summary-5">Decision Summary</a></h2>
 <ol>
 <li>A workflow has one stable <code>wfDefId</code> for its complete version history.</li>
 <li><code>(hostId, wfDefId, version)</code> identifies one workflow version.</li>
@@ -18200,7 +17770,7 @@ them on the Tool form.</li>
 <li>A Gateway change becomes live only after Instance Admin creates a new
 configuration snapshot and selects it as current.</li>
 </ol>
-<h2 id="goals-20"><a class="header" href="#goals-20">Goals</a></h2>
+<h2 id="goals-19"><a class="header" href="#goals-19">Goals</a></h2>
 <ul>
 <li>Let an author iterate frequently without creating duplicate workflow
 identities.</li>
@@ -18216,7 +17786,7 @@ workflow.</li>
 <li>Reuse Config Server snapshots for deployment activation and configuration
 drift prevention.</li>
 </ul>
-<h2 id="non-goals-23"><a class="header" href="#non-goals-23">Non-Goals</a></h2>
+<h2 id="non-goals-22"><a class="header" href="#non-goals-22">Non-Goals</a></h2>
 <ul>
 <li>Publishing a workflow does not deploy it to a Gateway.</li>
 <li>Saving a tool does not change a live Gateway.</li>
@@ -18226,7 +17796,7 @@ drift prevention.</li>
 snapshots.</li>
 <li>A configuration snapshot does not replace workflow-version immutability.</li>
 </ul>
-<h2 id="terminology-4"><a class="header" href="#terminology-4">Terminology</a></h2>
+<h2 id="terminology-3"><a class="header" href="#terminology-3">Terminology</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -18614,7 +18184,7 @@ latency, activation failures, and last-known-good fallback events.</p>
 <li>Require explicit current-pointer activation.</li>
 <li>Add removal, retry, failure recovery, and rollback tests.</li>
 </ul>
-<h2 id="acceptance-criteria-4"><a class="header" href="#acceptance-criteria-4">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-3"><a class="header" href="#acceptance-criteria-3">Acceptance Criteria</a></h2>
 <ul>
 <li>Multiple versions share one <code>wfDefId</code> and appear as one workflow history.</li>
 <li>A draft can be saved repeatedly without changing its version.</li>
@@ -18637,7 +18207,7 @@ configuration snapshot.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="endpoint-tools-and-workflow-access"><a class="header" href="#endpoint-tools-and-workflow-access">Endpoint Tools and Workflow Access</a></h1>
-<h2 id="status-7"><a class="header" href="#status-7">Status</a></h2>
+<h2 id="status-6"><a class="header" href="#status-6">Status</a></h2>
 <p>Implemented for the REST/HTTP first slice; MCP and JSON-RPC palette builders
 remain later protocol extensions of the same identity and grant model.</p>
 <h2 id="purpose-2"><a class="header" href="#purpose-2">Purpose</a></h2>
@@ -18655,7 +18225,7 @@ metadata, and testing information needed by agents and workflow authors.</p>
 <p>The related designs are <a href="#agent-skill-and-api-endpoint-discovery">Agent Skill And API Endpoint Discovery</a>,
 <a href="#workflow-editor">Workflow Editor</a>, and
 <a href="#workflow-version-and-publication">Workflow Version and Publication</a>.</p>
-<h2 id="decision-summary-7"><a class="header" href="#decision-summary-7">Decision Summary</a></h2>
+<h2 id="decision-summary-6"><a class="header" href="#decision-summary-6">Decision Summary</a></h2>
 <ol>
 <li><code>api_endpoint_t.endpoint_id</code> remains the internal UUID identity used by
 database relationships.</li>
@@ -18937,7 +18507,7 @@ request is sent.</p>
 <p>The workflow identity authorizes use of the Tool. The initiating agent or user
 remains in the execution and audit context so endpoint policies can apply any
 required caller-specific restrictions.</p>
-<h2 id="acceptance-criteria-5"><a class="header" href="#acceptance-criteria-5">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-4"><a class="header" href="#acceptance-criteria-4">Acceptance Criteria</a></h2>
 <ul>
 <li>The database enforces one canonical endpoint key per host and API version.</li>
 <li>REST, MCP, and hybrid endpoint producers generate deterministic keys.</li>
@@ -18956,6 +18526,647 @@ version.</li>
 downstream effect.</li>
 <li>Agent-, user-, scheduler-, API-, and workflow-started executions enforce the
 same workflow Tool grant.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="api-version-publication-to-gateway"><a class="header" href="#api-version-publication-to-gateway">API Version Publication To Gateway</a></h1>
+<h2 id="status-7"><a class="header" href="#status-7">Status</a></h2>
+<p>Proposed design.</p>
+<p>This document defines the Portal workflow for publishing one API version to a
+Light Gateway instance and, when requested, replacing older versions of the
+same API on that instance. Publication stages desired Gateway configuration in
+the Portal projections. Runtime activation remains an explicit configuration
+snapshot operation.</p>
+<h2 id="purpose-3"><a class="header" href="#purpose-3">Purpose</a></h2>
+<p>Today, an administrator who adds an API endpoint must move through API Detail,
+Service Endpoint, Access Overview, Instance Admin, Instance API, and Instance
+API Config. The final <strong>Sync Config From API</strong> action pulls access-control data
+into an already existing Instance API association. The operator may also have
+to remove old <code>ruleBodies</code> and <code>endpointRules</code> properties before synchronizing.</p>
+<p>That workflow separates related decisions across too many pages and does not
+model an API-version upgrade as one operation. It also makes Instance Admin the
+starting point even though the API version is the source being published.</p>
+<p>This design adds <strong>Publish to Gateway</strong> to each API-version row on API Detail.
+The action lets an authorized operator:</p>
+<ul>
+<li>select a Gateway instance;</li>
+<li>see versions of the same API already associated with that Gateway;</li>
+<li>choose whether those versions remain active or are retired;</li>
+<li>preview the API-derived configuration being staged; and</li>
+<li>publish the new version and any selected retirements as one auditable
+command.</li>
+</ul>
+<p>The design is related to
+<a href="#control-plane-policy-publication-through-config-server">Control-Plane Policy Publication Through Config Server</a>.
+API-version publication stages the desired instance configuration described
+here. A configuration snapshot and current-pointer change remain the immutable
+runtime publication boundary described there.</p>
+<h2 id="decision-summary-7"><a class="header" href="#decision-summary-7">Decision Summary</a></h2>
+<ol>
+<li><strong>Publish to Gateway</strong> is a row action for a specific API version on
+<code>/app/apiDetail</code>.</li>
+<li>Access Overview remains the place to edit and review endpoint access. It
+does not publish Gateway configuration.</li>
+<li>After a Gateway is selected, Portal shows active and inactive versions of
+the same <code>apiId</code> associated with that Gateway.</li>
+<li>The operator explicitly selects <strong>Keep Existing Versions</strong> or <strong>Replace
+Selected Versions</strong>. Portal does not infer replacement from a version
+string.</li>
+<li>Portal creates or reactivates the new <code>instance_api_t</code> association when
+necessary and reconciles its complete selected property sections.</li>
+<li>The first publication section is access control, which owns
+<code>rule.endpointRules</code> and <code>rule.ruleBodies</code>. The contract supports additional
+API-derived sections later.</li>
+<li>Replacement publishes and validates the new desired state before retiring
+the selected old versions.</li>
+<li>Retirement is event-backed soft deactivation. It includes the old Instance
+API association and its dependent active records; it is not a direct SQL
+delete.</li>
+<li>Publication records are immutable audit evidence. Mutable
+<code>instance_api_property_t</code> rows remain desired-state projections rather than
+publication history.</li>
+<li>A successful publication is <code>STAGED</code>. It does not prove that a running
+Gateway has loaded the change.</li>
+<li>Instance Admin retains the snapshot creation, comparison, activation, and
+rollback workflow.</li>
+<li>The existing <strong>Sync Config From API</strong> action may remain temporarily as an
+administrator repair path, but it is not the normal publication workflow.</li>
+</ol>
+<h2 id="goals-20"><a class="header" href="#goals-20">Goals</a></h2>
+<ul>
+<li>Reduce a multi-page operation to one API-version-centered publication flow.</li>
+<li>Support both single-version upgrades and intentional parallel API versions.</li>
+<li>Prevent stale <code>endpointRules</code>, <code>ruleBodies</code>, or other API-derived properties
+from surviving a replacement.</li>
+<li>Preserve event sourcing, optimistic concurrency, ownership, and replay.</li>
+<li>Keep server-side API data authoritative; the browser never compiles or
+submits final Gateway property values.</li>
+<li>Make the effects of replacement visible before the operator confirms them.</li>
+<li>Avoid an outage by establishing the new association before retiring the old
+one.</li>
+<li>Keep runtime activation immutable and reversible through configuration
+snapshots.</li>
+<li>Leave room for future API-level publication sections without moving the
+action to another page.</li>
+</ul>
+<h2 id="non-goals-23"><a class="header" href="#non-goals-23">Non-Goals</a></h2>
+<ul>
+<li>Access Overview does not become a deployment or publication page.</li>
+<li>Creating or editing an API version does not automatically change a Gateway.</li>
+<li>Publishing an API version does not automatically activate a configuration
+snapshot.</li>
+<li>Portal does not assume that version strings use Semantic Versioning.</li>
+<li>A higher-looking version does not automatically supersede another version.</li>
+<li>Replacement does not physically delete projection or event history.</li>
+<li>This design does not define traffic draining, request migration, or
+application compatibility between API versions.</li>
+<li>This design does not move Gateway Tool publication back into
+<code>instance_api_property_t</code>; the Tool catalog remains its authoritative
+publication path.</li>
+</ul>
+<h2 id="terminology-4"><a class="header" href="#terminology-4">Terminology</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Term</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td>API version</td><td>One registered API contract identified by <code>apiVersionId</code>.</td></tr>
+<tr><td>Gateway instance</td><td>An active Portal instance eligible to run Light Gateway.</td></tr>
+<tr><td>Instance API</td><td>The association between a Gateway instance and one API version, stored in <code>instance_api_t</code>.</td></tr>
+<tr><td>Publication section</td><td>A server-side compiler that owns a declared set of Gateway configuration properties.</td></tr>
+<tr><td>Keep</td><td>Publish the requested version without retiring an existing version.</td></tr>
+<tr><td>Replace</td><td>Publish the requested version, then retire explicitly selected existing Instance APIs.</td></tr>
+<tr><td>Retire</td><td>Soft-deactivate an Instance API and the dependent records that must not return if it is reactivated.</td></tr>
+<tr><td>Staged</td><td>Desired Portal configuration was projected successfully but no new current snapshot has been activated.</td></tr>
+<tr><td>Activated</td><td>A validated configuration snapshot containing the publication became current for the Gateway.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="user-experience-1"><a class="header" href="#user-experience-1">User Experience</a></h2>
+<h3 id="api-detail-row-action"><a class="header" href="#api-detail-row-action">API Detail row action</a></h3>
+<p><code>/app/apiDetail</code> lists multiple versions, so <strong>Publish to Gateway</strong> belongs in
+the action column of each version row. The action receives the row’s
+<code>hostId</code>, <code>apiId</code>, and <code>apiVersionId</code>. Publication is never an unqualified
+API-level action because configuration and replacement decisions are
+version-specific.</p>
+<p>The action is enabled only when the user may publish the API version. Server
+authorization remains authoritative even when the UI disables the action.</p>
+<h3 id="step-1-select-gateway"><a class="header" href="#step-1-select-gateway">Step 1: Select Gateway</a></h3>
+<p>The dialog lists active Gateway instances that the current user may administer.
+Each option includes:</p>
+<ul>
+<li>instance name and <code>instanceId</code>;</li>
+<li>product and product version;</li>
+<li>environment or environment tag where available;</li>
+<li>existing association status for the selected <code>apiVersionId</code>; and</li>
+<li>current configuration snapshot identity and timestamp where available.</li>
+</ul>
+<p>The generic instance label query is not sufficient as the long-term contract
+because it lists instances without expressing Gateway eligibility,
+authorization, or publication status. A publication-candidate query should
+return the complete server-authorized view needed by this dialog.</p>
+<h3 id="step-2-review-existing-versions"><a class="header" href="#step-2-review-existing-versions">Step 2: Review existing versions</a></h3>
+<p>After a Gateway is selected, Portal shows every active and inactive Instance
+API for the same <code>apiId</code> on that Gateway. It does not show unrelated APIs.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td>API version</td><td>Human-readable version currently associated with the Gateway.</td></tr>
+<tr><td><code>instanceApiId</code></td><td>Durable Instance API identity used for audit and retirement.</td></tr>
+<tr><td>State</td><td>Active, inactive, or selected for replacement.</td></tr>
+<tr><td>Path prefixes</td><td>Indicates whether versions have distinct routing boundaries.</td></tr>
+<tr><td>Application bindings</td><td>Shows consumers that may be affected by retirement.</td></tr>
+<tr><td>Property count</td><td>Shows whether version-specific configuration exists.</td></tr>
+<tr><td>Last update</td><td>Helps identify stale or recently changed associations.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The operator chooses one publication mode:</p>
+<h4 id="keep-existing-versions"><a class="header" href="#keep-existing-versions">Keep Existing Versions</a></h4>
+<p>The selected API version is created, reactivated, or updated while every other
+version remains unchanged. This supports versioned path prefixes, compatibility
+windows, canary rollout, and blue/green migration.</p>
+<h4 id="replace-selected-versions"><a class="header" href="#replace-selected-versions">Replace Selected Versions</a></h4>
+<p>The operator selects one or more existing Instance APIs to retire after the new
+version is staged successfully. The dialog requires explicit confirmation and
+shows dependent path prefixes, application bindings, and properties that will
+be retired or migrated.</p>
+<p>The initial implementation must not provide a mode named “replace all older
+versions.” “Older” is ambiguous without an explicit lifecycle policy and
+cannot be determined safely by lexical version comparison.</p>
+<h3 id="step-3-review-publication-sections"><a class="header" href="#step-3-review-publication-sections">Step 3: Review publication sections</a></h3>
+<p>The dialog previews the sections that Portal will compile. The first section
+is:</p>
+<pre><code class="language-text">Access control
+  rule.endpointRules
+  rule.ruleBodies
+</code></pre>
+<p>The preview reports source counts, validation results, and a normalized diff
+against the selected Gateway’s current Instance API properties. It may show
+property values to an authorized administrator, but those values are generated
+by the server and are not editable in the publication dialog.</p>
+<p>Future sections may be added only with an explicit property-ownership contract.
+Two publication sections must not silently write the same property.</p>
+<h3 id="step-4-confirm-and-publish"><a class="header" href="#step-4-confirm-and-publish">Step 4: Confirm and publish</a></h3>
+<p>The confirmation identifies:</p>
+<ul>
+<li>the new API version;</li>
+<li>the target Gateway;</li>
+<li>whether the association will be created, reactivated, or updated;</li>
+<li>the selected sections;</li>
+<li>existing versions that will remain active;</li>
+<li>existing versions that will be retired;</li>
+<li>dependent bindings that will be migrated or retired; and</li>
+<li>the fact that a configuration snapshot must still be activated.</li>
+</ul>
+<p>On success, the dialog reports <code>STAGED</code> and links to the target Instance API
+and Instance Admin snapshot workflow.</p>
+<h2 id="version-upgrade-policy"><a class="header" href="#version-upgrade-policy">Version Upgrade Policy</a></h2>
+<h3 id="explicit-decision-is-the-default"><a class="header" href="#explicit-decision-is-the-default">Explicit decision is the default</a></h3>
+<p>The first release requires the operator to choose which versions to retire.
+This is safer than automatic replacement because two versions may intentionally
+coexist. Different path prefixes, consumer migration schedules, or rollback
+requirements can all make parallel publication correct.</p>
+<h3 id="optional-automatic-policy"><a class="header" href="#optional-automatic-policy">Optional automatic policy</a></h3>
+<p>Automatic replacement may be added later through an explicit API or Gateway
+publication policy:</p>
+<pre><code class="language-text">MULTI_VERSION
+SINGLE_ACTIVE_VERSION
+</code></pre>
+<p><code>MULTI_VERSION</code> retains existing versions unless the operator selects them for
+retirement. <code>SINGLE_ACTIVE_VERSION</code> preselects all other active versions of the
+same <code>apiId</code> for retirement and clearly shows that decision before submission.
+The server enforces the policy again when processing the command.</p>
+<p>The policy controls lifecycle behavior; it does not derive ordering from
+<code>apiVersion</code> text.</p>
+<h3 id="routing-conflicts"><a class="header" href="#routing-conflicts">Routing conflicts</a></h3>
+<p>Keeping multiple versions is valid only when the resulting Gateway routing is
+unambiguous. The preview rejects or requires resolution for conflicts such as:</p>
+<ul>
+<li>identical path prefixes with incompatible upstream targets;</li>
+<li>duplicate effective endpoint routes;</li>
+<li>incompatible protocol handler configuration; or</li>
+<li>application bindings that cannot distinguish the versions.</li>
+</ul>
+<p>A replacement may reuse a path prefix only when the new configuration and old
+retirement are part of the same staged publication.</p>
+<h2 id="data-model-1"><a class="header" href="#data-model-1">Data Model</a></h2>
+<h3 id="existing-projections"><a class="header" href="#existing-projections">Existing projections</a></h3>
+<p>The design retains the existing tables:</p>
+<pre><code class="language-text">instance_t
+  -&gt; instance_api_t
+       -&gt; instance_api_property_t
+       -&gt; instance_api_path_prefix_t
+       -&gt; instance_app_api_t
+            -&gt; instance_app_api_property_t
+</code></pre>
+<p><code>instance_api_t</code> already enforces one association for
+<code>(host_id, instance_id, api_version_id)</code>. <code>instance_api_property_t</code> identifies
+one override by <code>(host_id, instance_api_id, property_id)</code>.</p>
+<p>Foreign-key <code>ON DELETE CASCADE</code> clauses protect physical deletion, but normal
+Portal deletion is soft deactivation. Therefore, retiring an
+<code>instance_api_t</code> row does not automatically deactivate its child rows.</p>
+<h3 id="publication-record"><a class="header" href="#publication-record">Publication record</a></h3>
+<p>Add an immutable publication projection, conceptually:</p>
+<pre><code class="language-text">api_gateway_publication_t
+  host_id
+  publication_id
+  instance_id
+  api_id
+  api_version_id
+  instance_api_id
+  publication_mode
+  selected_sections
+  compiled_manifest
+  retired_instance_api_ids
+  status
+  requested_by
+  requested_ts
+  completed_ts
+  aggregate_version
+</code></pre>
+<p><code>compiled_manifest</code> stores the exact desired property identities and values,
+path-prefix decisions, binding decisions, and source revisions used by the
+publication. Replay projects the manifest; it does not recompile mutable API
+access tables.</p>
+<p>The publication record provides audit and idempotent retry evidence.
+<code>instance_api_property_t</code> continues to hold the latest mutable desired state
+used for snapshot creation.</p>
+<h2 id="query-contracts-1"><a class="header" href="#query-contracts-1">Query Contracts</a></h2>
+<h3 id="getapigatewaypublicationcandidate"><a class="header" href="#getapigatewaypublicationcandidate"><code>getApiGatewayPublicationCandidate</code></a></h3>
+<p>The candidate query accepts:</p>
+<pre><code class="language-json">{
+  "hostId": "uuid",
+  "apiVersionId": "uuid"
+}
+</code></pre>
+<p>It returns only Gateway instances the caller may publish to. Each candidate
+contains the target instance metadata, association state for the selected
+version, versions of the same API already on that instance, dependent record
+counts, current snapshot metadata, and any policy that constrains replacement.</p>
+<p>The server resolves <code>apiId</code> and <code>apiVersion</code> from <code>apiVersionId</code>. The client
+does not submit them as authoritative identity.</p>
+<h3 id="previewapiversiongatewaypublication"><a class="header" href="#previewapiversiongatewaypublication"><code>previewApiVersionGatewayPublication</code></a></h3>
+<p>The preview accepts the selected <code>instanceId</code>, <code>apiVersionId</code>, publication
+mode, selected retirement IDs, selected sections, and binding decisions. It
+returns:</p>
+<ul>
+<li>resolved source identity and revisions;</li>
+<li>association action: <code>CREATE</code>, <code>REACTIVATE</code>, or <code>UPDATE</code>;</li>
+<li>normalized desired properties;</li>
+<li>create, update, reactivate, deactivate, and unchanged counts;</li>
+<li>routing conflicts and validation errors;</li>
+<li>retirement effects;</li>
+<li>a short-lived <code>previewToken</code>; and</li>
+<li>the concurrency versions that must still match at publication time.</li>
+</ul>
+<p>The token binds the confirmation to the normalized request and compiled
+manifest. It is not a substitute for server-side revalidation.</p>
+<h2 id="command-contract"><a class="header" href="#command-contract">Command Contract</a></h2>
+<h3 id="publishapiversiontogateway"><a class="header" href="#publishapiversiontogateway"><code>publishApiVersionToGateway</code></a></h3>
+<p>The command accepts the decision, not browser-generated configuration:</p>
+<pre><code class="language-json">{
+  "hostId": "uuid",
+  "apiVersionId": "uuid",
+  "instanceId": "uuid",
+  "publicationMode": "REPLACE_SELECTED",
+  "retireInstanceApiIds": ["uuid"],
+  "sections": ["ACCESS_CONTROL"],
+  "bindingActions": [],
+  "previewToken": "opaque",
+  "expectedApiVersionAggregateVersion": 7,
+  "expectedInstanceAggregateVersion": 12
+}
+</code></pre>
+<p>The HTTP request also carries an <code>Idempotency-Key</code>. A replay of the same key
+and normalized request returns the original publication result. Reusing the
+key with a different request is rejected.</p>
+<p>The command must not accept <code>endpointRules</code>, <code>ruleBodies</code>, <code>instanceApiId</code>, or
+property IDs as authoritative client input. Portal resolves and compiles those
+values from current server-side records.</p>
+<h3 id="result"><a class="header" href="#result">Result</a></h3>
+<pre><code class="language-json">{
+  "publicationId": "uuid",
+  "status": "STAGED",
+  "instanceId": "uuid",
+  "instanceApiId": "uuid",
+  "associationAction": "CREATE",
+  "properties": {
+    "created": 2,
+    "updated": 0,
+    "reactivated": 0,
+    "deactivated": 0,
+    "unchanged": 0
+  },
+  "retiredInstanceApiIds": ["uuid"],
+  "snapshotActivationRequired": true
+}
+</code></pre>
+<p>Partial success is not returned. A failed command reports no successful
+retirement and identifies whether the failure occurred during validation,
+event append, or synchronous projection.</p>
+<h2 id="server-side-compilation"><a class="header" href="#server-side-compilation">Server-Side Compilation</a></h2>
+<h3 id="authoritative-source"><a class="header" href="#authoritative-source">Authoritative source</a></h3>
+<p>The compiler loads the selected active API version and its current endpoint,
+permission, filter, and rule projections. It also resolves the registered
+property IDs for <code>rule.endpointRules</code> and <code>rule.ruleBodies</code>.</p>
+<p>The compiler must fail closed when a required source query fails. A failed
+query is different from a successful query returning no configured entries.</p>
+<h3 id="complete-replacement-semantics"><a class="header" href="#complete-replacement-semantics">Complete replacement semantics</a></h3>
+<p>Each selected publication section owns a complete property set. For access
+control, the desired manifest always addresses both owned properties, including
+the empty state. Publication must not omit an event merely because the compiled
+map is empty; doing so can leave a stale value active on the Gateway.</p>
+<p>The section contract defines whether an empty desired value is represented by:</p>
+<ul>
+<li>an active canonical empty value such as <code>{}</code>; or</li>
+<li>a soft-deactivated property that intentionally falls back to a lower scope.</li>
+</ul>
+<p>Access-control publication should use the representation required to prevent
+stale or inherited rules from granting unintended access. That behavior must
+be covered by an explicit empty-source test.</p>
+<h3 id="reconciliation"><a class="header" href="#reconciliation">Reconciliation</a></h3>
+<p>For every owned property, the compiler compares the desired manifest with the
+target projection:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Current state</th><th>Desired state</th><th>Event action</th></tr>
+</thead>
+<tbody>
+<tr><td>Missing</td><td>Present</td><td>Create</td></tr>
+<tr><td>Inactive</td><td>Present</td><td>Create/reactivate above the stored aggregate version</td></tr>
+<tr><td>Active and different</td><td>Present</td><td>Update</td></tr>
+<tr><td>Active and identical</td><td>Present</td><td>No property event</td></tr>
+<tr><td>Active</td><td>Absent by section contract</td><td>Delete/deactivate</td></tr>
+</tbody>
+</table>
+</div>
+<p>Event versions use the greater of the current projection version and event
+store version, plus one. The publication manifest records unchanged values even
+when no property event is required.</p>
+<h2 id="association-creation-and-concurrency"><a class="header" href="#association-creation-and-concurrency">Association Creation And Concurrency</a></h2>
+<p>Portal resolves the Instance API by
+<code>(hostId, instanceId, apiVersionId)</code>:</p>
+<ul>
+<li>active association: reuse its <code>instanceApiId</code>;</li>
+<li>inactive association: reuse and reactivate its <code>instanceApiId</code> with a newer
+aggregate version; or</li>
+<li>no association: allocate an <code>instanceApiId</code> and emit a create event.</li>
+</ul>
+<p>The database uniqueness constraint remains the final guard, but publication
+must handle concurrent first publication deliberately. Two requests must not
+create different IDs for the same natural identity and allow one request to
+fail only during projection. The implementation must serialize creation by the
+natural key, use a deterministic identity, or recover the winning association
+and retry before appending an incompatible manifest.</p>
+<p>The candidate and preview responses are advisory. The command rechecks API,
+Gateway, association, property, and retirement aggregate versions immediately
+before event creation. A stale decision returns a conflict and requires a new
+preview.</p>
+<h2 id="replacement-and-retirement"><a class="header" href="#replacement-and-retirement">Replacement And Retirement</a></h2>
+<h3 id="safe-ordering"><a class="header" href="#safe-ordering">Safe ordering</a></h3>
+<p>A replacement command builds one ordered event set:</p>
+<ol>
+<li>record the immutable publication attempt;</li>
+<li>create or reactivate the new Instance API association when required;</li>
+<li>create, update, reactivate, or deactivate the new association’s selected
+properties;</li>
+<li>create or migrate required path-prefix and application-binding state;</li>
+<li>soft-deactivate dependent state for every selected old Instance API;</li>
+<li>soft-deactivate each selected old <code>instance_api_t</code> association; and</li>
+<li>mark the publication <code>STAGED</code>.</li>
+</ol>
+<p>The new version is established before the old versions are retired. Event
+append treats the publication as one command, and synchronous projection
+applies its ordered events in one database transaction.</p>
+<h3 id="retirement-closure"><a class="header" href="#retirement-closure">Retirement closure</a></h3>
+<p>Soft-deactivating only <code>instance_api_t</code> makes its properties ineffective in
+normal effective-configuration queries, but leaves active child rows behind.
+If the association is later reactivated, those stale children can become
+effective again. A complete retirement therefore evaluates and handles:</p>
+<ul>
+<li>every active <code>instance_api_property_t</code> row;</li>
+<li>every active <code>instance_api_path_prefix_t</code> row;</li>
+<li>every active <code>instance_app_api_t</code> relationship;</li>
+<li>every active <code>instance_app_api_property_t</code> row under those relationships;
+and</li>
+<li>any publication or binding whose domain identity is tied to the retiring
+<code>instanceApiId</code>.</li>
+</ul>
+<p>The preview classifies each dependency as <strong>Migrate</strong>, <strong>Retire</strong>, <strong>Keep via
+old version</strong>, or <strong>Block</strong>. The command rejects a replacement when a required
+decision is missing.</p>
+<p>Gateway Tool publications are instance-level in the current design. Retirement
+must reconcile source bindings that refer to the old API version without
+blindly deleting Tools belonging to other API versions or workflows.</p>
+<h3 id="rollback"><a class="header" href="#rollback">Rollback</a></h3>
+<p>Soft-deactivated records retain audit and replay history. Rolling back to a
+previous version is another publication:</p>
+<ol>
+<li>select the previous API version;</li>
+<li>preview its archived or newly compiled desired configuration;</li>
+<li>reactivate or reconcile its Instance API graph;</li>
+<li>optionally retire the currently active version; and</li>
+<li>create and activate a new configuration snapshot.</li>
+</ol>
+<p>Rollback never rewrites or reselects a historical snapshot as though the
+desired-state publication had not changed. Snapshot-pointer rollback remains
+available for immediate runtime recovery, while a follow-up publication makes
+Portal desired state agree with the chosen runtime state.</p>
+<h2 id="event-and-projection-requirements-1"><a class="header" href="#event-and-projection-requirements-1">Event And Projection Requirements</a></h2>
+<p>The design reuses existing domain events where they express the intended
+state, including Instance API and Instance API property create, update, and
+delete events. It adds a publication event or aggregate that carries the exact
+compiled manifest and replacement decision.</p>
+<p>Required invariants are:</p>
+<ul>
+<li>event data contains stable IDs and compiled values needed for deterministic
+replay;</li>
+<li>replay never reads current mutable access-control rows to rebuild an old
+publication;</li>
+<li>create, update, reactivation, and retirement use monotonic aggregate
+versions;</li>
+<li>child retirement events are emitted explicitly because parent deletion is
+soft;</li>
+<li>the publication and all affected aggregates share a command correlation ID;</li>
+<li>append failure produces no staged publication;</li>
+<li>synchronous projection failure does not report <code>STAGED</code>; and</li>
+<li>replay can complete a canonically appended publication whose synchronous
+projection previously failed.</li>
+</ul>
+<h2 id="authorization-1"><a class="header" href="#authorization-1">Authorization</a></h2>
+<p>Publication combines API ownership and Gateway administration. Possessing the
+generic <code>portal.w</code> scope is necessary but not sufficient.</p>
+<p>The server verifies that the caller may:</p>
+<ul>
+<li>read and publish the selected API version;</li>
+<li>administer the selected Gateway instance;</li>
+<li>create or reactivate its Instance API association;</li>
+<li>modify the selected configuration sections; and</li>
+<li>retire every selected old Instance API and affected binding.</li>
+</ul>
+<p>The candidate query omits unauthorized Gateway instances. The command performs
+the same checks independently to prevent forged IDs or stale browser state.</p>
+<p>Host identity comes from trusted request context. A client-supplied <code>hostId</code>
+must match that context and cannot broaden tenancy.</p>
+<h2 id="runtime-activation"><a class="header" href="#runtime-activation">Runtime Activation</a></h2>
+<p>Publication changes Portal desired state. It does not by itself prove that a
+running Light Gateway has loaded the new configuration.</p>
+<p>After a publication reaches <code>STAGED</code>, Instance Admin performs the established
+runtime flow:</p>
+<ol>
+<li>create an immutable configuration snapshot from the projected desired
+state;</li>
+<li>compare it with the current snapshot;</li>
+<li>validate the rendered Gateway configuration;</li>
+<li>select the new snapshot as current; and</li>
+<li>observe Gateway reload or restart acknowledgement.</li>
+</ol>
+<p>The UI reports these states separately:</p>
+<pre><code class="language-text">STAGED -&gt; SNAPSHOT_CREATED -&gt; CURRENT -&gt; APPLIED
+                              \-&gt; APPLY_FAILED
+</code></pre>
+<p>An <code>APPLIED</code> claim requires runtime evidence. A successful property command or
+snapshot-pointer update alone is not sufficient.</p>
+<h2 id="failure-handling-3"><a class="header" href="#failure-handling-3">Failure Handling</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Condition</th><th>Result</th></tr>
+</thead>
+<tbody>
+<tr><td>API version or Gateway is inactive</td><td>Reject before preview/publication.</td></tr>
+<tr><td>Caller lacks either ownership boundary</td><td>Reject without revealing unauthorized details.</td></tr>
+<tr><td>Required access-control query fails</td><td>Reject; do not treat as empty configuration.</td></tr>
+<tr><td>Existing version state changed after preview</td><td>Conflict; require refresh and confirmation.</td></tr>
+<tr><td>Routing conflict remains unresolved</td><td>Reject replacement or multi-version publication.</td></tr>
+<tr><td>Dependent application binding has no decision</td><td>Reject replacement.</td></tr>
+<tr><td>Event append fails</td><td>No publication is staged.</td></tr>
+<tr><td>Synchronous projection fails after append</td><td>Report projection failure and allow replay recovery; do not retire versions through a second ad hoc command.</td></tr>
+<tr><td>Snapshot validation fails</td><td>Keep the current snapshot unchanged.</td></tr>
+<tr><td>Gateway apply fails</td><td>Keep or restore the last known good runtime configuration and report <code>APPLY_FAILED</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="observability-and-audit-2"><a class="header" href="#observability-and-audit-2">Observability And Audit</a></h2>
+<p>Every preview and publication should expose or log:</p>
+<ul>
+<li><code>publicationId</code> and command correlation ID;</li>
+<li><code>hostId</code>, <code>instanceId</code>, <code>apiId</code>, <code>apiVersionId</code>, and <code>instanceApiId</code>;</li>
+<li>publication mode and selected retirement IDs;</li>
+<li>selected sections and source aggregate versions;</li>
+<li>property and dependency action counts;</li>
+<li>immutable manifest digest;</li>
+<li>requesting user and timestamp;</li>
+<li>event append and projection outcome;</li>
+<li>configuration snapshot ID when later created; and</li>
+<li>runtime apply acknowledgement when available.</li>
+</ul>
+<p>Audit views must distinguish an operator decision to keep an old version from
+a replacement that failed before retirement.</p>
+<h2 id="rollout-plan-7"><a class="header" href="#rollout-plan-7">Rollout Plan</a></h2>
+<h3 id="phase-1-candidate-and-preview"><a class="header" href="#phase-1-candidate-and-preview">Phase 1: Candidate and preview</a></h3>
+<ul>
+<li>Add the API Detail row action and publication dialog.</li>
+<li>Add the Gateway candidate query scoped by API version and authorization.</li>
+<li>Show versions of the same API and their dependency summary.</li>
+<li>Compile and preview access-control properties without writing state.</li>
+</ul>
+<h3 id="phase-2-publish-without-replacement"><a class="header" href="#phase-2-publish-without-replacement">Phase 2: Publish without replacement</a></h3>
+<ul>
+<li>Add the idempotent publication command.</li>
+<li>Create, reuse, or reactivate the selected Instance API.</li>
+<li>Reconcile <code>endpointRules</code> and <code>ruleBodies</code>, including empty desired state.</li>
+<li>Record immutable publication manifests and return <code>STAGED</code>.</li>
+<li>Keep the existing Instance API sync action as a repair fallback.</li>
+</ul>
+<h3 id="phase-3-explicit-replacement"><a class="header" href="#phase-3-explicit-replacement">Phase 3: Explicit replacement</a></h3>
+<ul>
+<li>Add keep/replace selection and dependency decisions.</li>
+<li>Publish the new graph before retiring selected old graphs.</li>
+<li>Add complete child retirement and deterministic replay coverage.</li>
+<li>Reconcile API-version-bound Gateway Tool sources.</li>
+</ul>
+<h3 id="phase-4-snapshot-handoff-and-policy"><a class="header" href="#phase-4-snapshot-handoff-and-policy">Phase 4: Snapshot handoff and policy</a></h3>
+<ul>
+<li>Link successful publication to snapshot creation and comparison.</li>
+<li>Display snapshot and runtime-apply status in publication history.</li>
+<li>Add optional <code>MULTI_VERSION</code> and <code>SINGLE_ACTIVE_VERSION</code> policy after
+operational experience confirms the default behavior.</li>
+<li>Deprecate the manual sync path when publication has equivalent repair and
+recovery tooling.</li>
+</ul>
+<h2 id="validation-strategy"><a class="header" href="#validation-strategy">Validation Strategy</a></h2>
+<h3 id="unit-tests"><a class="header" href="#unit-tests">Unit tests</a></h3>
+<ul>
+<li>Compile permissions, row filters, column filters, rules, and rule bodies into
+deterministic properties.</li>
+<li>Distinguish source-query failure from an empty successful result.</li>
+<li>Create, update, reactivate, deactivate, and unchanged reconciliation.</li>
+<li>Produce explicit empty-state behavior for both access-control properties.</li>
+<li>Reject unauthorized Gateway and retirement IDs.</li>
+<li>Reject stale aggregate versions and expired preview tokens.</li>
+<li>Preserve idempotent results for the same command key.</li>
+</ul>
+<h3 id="database-and-projection-tests"><a class="header" href="#database-and-projection-tests">Database and projection tests</a></h3>
+<ul>
+<li>Create the first association for a Gateway and API version.</li>
+<li>Reuse an active association without emitting a duplicate create.</li>
+<li>Reactivate an inactive association above both projection and event-store
+versions.</li>
+<li>Resolve concurrent first-publication attempts without violating the natural
+unique key.</li>
+<li>Project association creation before property creation.</li>
+<li>Roll back the entire synchronous projection when a later retirement event
+fails.</li>
+<li>Deactivate the complete dependent graph during replacement.</li>
+<li>Replay the immutable manifest without querying current authoring tables.</li>
+<li>Prove that reactivating an old association does not revive stale children.</li>
+</ul>
+<h3 id="ui-tests"><a class="header" href="#ui-tests">UI tests</a></h3>
+<ul>
+<li>Render <strong>Publish to Gateway</strong> on each API-version row, not Access Overview.</li>
+<li>Filter candidates to authorized Gateway instances.</li>
+<li>Show only versions of the same API after Gateway selection.</li>
+<li>Require explicit keep or replacement selection.</li>
+<li>Warn about path-prefix and application-binding impacts.</li>
+<li>Prevent submission when preview validation fails or becomes stale.</li>
+<li>Report staged, snapshot-required, and runtime-applied states distinctly.</li>
+</ul>
+<h3 id="end-to-end-tests"><a class="header" href="#end-to-end-tests">End-to-end tests</a></h3>
+<ul>
+<li>Publish a new API version to a Gateway with no existing association.</li>
+<li>Republish after adding an endpoint and verify updated <code>endpointRules</code>.</li>
+<li>Publish an empty access policy and prove stale values do not survive.</li>
+<li>Keep two versions with non-conflicting path prefixes.</li>
+<li>Replace an old version, migrate selected bindings, and verify the complete old
+graph is inactive.</li>
+<li>Build and activate a snapshot, then verify the Gateway loaded the expected
+endpoint configuration.</li>
+<li>Roll back to the previous API version through a new publication and snapshot.</li>
+</ul>
+<h2 id="acceptance-criteria-5"><a class="header" href="#acceptance-criteria-5">Acceptance Criteria</a></h2>
+<p>The first complete release is accepted when:</p>
+<ul>
+<li>an authorized operator can publish from the selected API-version row without
+navigating through Instance Admin first;</li>
+<li>the target Gateway dialog shows existing versions of the same API;</li>
+<li>the operator can keep versions or explicitly replace selected versions;</li>
+<li>a missing Instance API is created and configured by one idempotent command;</li>
+<li>active, inactive, missing, changed, unchanged, and empty properties reconcile
+correctly;</li>
+<li>replacement cannot retire an old version before the new version is staged;</li>
+<li>retirement deactivates the old association’s complete dependent graph;</li>
+<li>every publication is replayable from an immutable manifest;</li>
+<li>unauthorized API or Gateway combinations are rejected server-side;</li>
+<li>publication reports <code>STAGED</code> until snapshot activation and runtime evidence
+prove a later state; and</li>
+<li>configuration snapshot rollback remains available without corrupting Portal
+desired state or publication history.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-gateway"><a class="header" href="#light-gateway">Light Gateway</a></h1>
@@ -19143,7 +19354,7 @@ other unsafe destinations. A <code>light-gateway</code> TLS sidecar remains the 
 option for a remote HTTP-only runtime, but it is not mandatory for an operator
 whose effective policy permits private HTTP.</p>
 <h2 id="network-profile-contract"><a class="header" href="#network-profile-contract">Network Profile Contract</a></h2>
-<p>The current production projection materializes one <code>ProviderConfig</code> for each
+<p>The current values-backed configuration materializes one <code>ProviderConfig</code> for each
 <code>providerId</code> and rejects conflicting materialization. Keep that ownership rule:
 each Provider endpoint declares exactly one immutable Network Profile, and each
 Provider Deployment references one Provider endpoint. Deployments that share a
@@ -19225,7 +19436,7 @@ gateway snapshot so enforcement does not depend on a caller-supplied label.</p>
 configuration. Project only a versioned reference and SHA-256 digest. Resolve
 the PEM bundle at runtime from a managed configuration mount or configuration
 service. Do not place the PEM repeatedly in every Provider Deployment payload,
-and never put a client private key in a projection.</p>
+and never put a client private key in <code>values.yml</code>.</p>
 <p>This keeps publications small, makes rotation explicit, and lets every replica
 verify that the resolved bundle matches the published digest. A standalone or
 home installation may resolve the reference to a local file. An enterprise may
@@ -19294,7 +19505,7 @@ qualification evidence with a distinct evidence kind;</li>
 price are not ambiguous.</li>
 </ul>
 <p>Deferring these shapes until the TLS client or live runner is implemented would
-reopen the coordinated projection contract.</p>
+reopen the coordinated values-backed configuration contract.</p>
 <h2 id="validation-rules-1"><a class="header" href="#validation-rules-1">Validation Rules</a></h2>
 <h3 id="common-url-rules"><a class="header" href="#common-url-rules">Common URL Rules</a></h3>
 <ul>
@@ -19572,13 +19783,13 @@ cert-manager issuer, SPIRE authority, or equivalent.</p>
 <ol>
 <li>Publish a new trust-bundle version and digest containing the current and next
 CA when the authority changes.</li>
-<li>Verify every LLM gateway replica resolved the advertised digest, rebuilt the
-affected provider client, discarded the old pool, and acknowledged the new
-publication.</li>
+<li>Request <code>llm-router</code> reload for each selected LLM gateway instance and verify
+that it resolved the advertised digest, rebuilt the affected provider client,
+and discarded the old pool.</li>
 <li>Rotate sidecar server certificates.</li>
 <li>Prove conformance and health through every eligible endpoint.</li>
 <li>Remove the old CA through another versioned publication and repeat the
-acknowledgement check.</li>
+explicit reload and verification check.</li>
 </ol>
 <p>Expose certificate expiry and rotation status without logging private-key
 material.</p>
@@ -19695,7 +19906,7 @@ administrators must not submit or edit <code>PASS</code> evidence.</p>
 <p>It has not been removed from the system. The current database still stores
 state, digest, validity, and result evidence; command handlers still support
 pending, completion, and due-refresh transitions; and the production gateway
-projection still requires a complete <code>ConformanceResult</code>. Routing checks its
+configuration still requires a complete <code>ConformanceResult</code>. Routing checks its
 digest, provider protocol, physical model, tested operation, expiry, state, and
 capability evidence.</p>
 <p>The current type cannot prove the transport claims in this design.
@@ -19758,8 +19969,8 @@ termination. Evidence is rejected when the runner and target network namespaces
 are the same or when the isolation-manifest digest is absent.</p>
 <p>The trusted runner signs the canonical result with a runner-held key. The
 gateway verifies the signature against public keys loaded from a protected
-runner trust store that is independent of the evidence database; the projection
-may select an approved key ID but cannot introduce a new trusted key. Signature
+runner trust store that is independent of the evidence database; the values
+snapshot may select an approved key ID but cannot introduce a new trusted key. Signature
 verification happens before state, expiry, operations, model, capabilities,
 endpoint identity, and transport identity checks. The existing self-digest
 remains useful for canonical integrity but is not accepted as proof of producer
@@ -19808,7 +20019,7 @@ platform-owned profiles for global knowledge-base workloads.</p>
 security posture, certificate owner, network zone, and any plaintext risk
 accepted by the operator.</p>
 <h3 id="publication"><a class="header" href="#publication">Publication</a></h3>
-<p>The immutable projection carries identifiers, versions, policy, DNS names,
+<p>The immutable <code>values.yml</code> snapshot carries identifiers, versions, policy, DNS names,
 ports, address constraints, material digests, and approved runner key IDs. It
 cannot introduce runner public keys, and it never carries private keys. Trust
 bundles may be delivered through the existing secret/config mechanism or
@@ -19835,15 +20046,16 @@ distinct external-vantage evidence; and</li>
 <li>duplicate registration of one physical runtime through a weaker endpoint.</li>
 </ul>
 <h3 id="clean-cutover"><a class="header" href="#clean-cutover">Clean Cutover</a></h3>
-<p>Because projection structures are deny-unknown-fields and digest-bound, this is
-a coordinated control-plane and gateway contract change. Reuse the established
-publication cutover procedure:</p>
+<p>Because the compiled configuration structures are deny-unknown-fields and
+digest-bound, this is a coordinated control-plane and gateway contract change.
+Reuse the established publication cutover procedure:</p>
 <ol>
 <li>retain the complete pre-cutover artifact set;</li>
 <li>stop publication while mixed schemas could be emitted;</li>
 <li>deploy readers and writers that understand the new contract;</li>
 <li>publish one complete root with regenerated conformance evidence;</li>
-<li>assert the expected generation and digest on every replica; and</li>
+<li>explicitly reload <code>llm-router</code> on each selected instance and assert the
+expected generation and digest; and</li>
 <li>pair binary rollback with restoration of the previous records.</li>
 </ol>
 <h2 id="runtime-failure-semantics"><a class="header" href="#runtime-failure-semantics">Runtime Failure Semantics</a></h2>
@@ -19992,7 +20204,7 @@ physical-runtime, capacity-domain, readiness, timeout, and pricing-basis
 contracts.</li>
 <li>Extend <code>ConformanceResult</code> with evidence kind, deployment revision, endpoint,
 transport, physical-runtime, capacity, sidecar, signer, and signature binding.</li>
-<li>Thread the complete shapes through Portal DB, commands, projection, runtime
+<li>Thread the complete shapes through Portal DB, commands, values-backed publication, runtime
 configuration, client-reuse digest generation, signature verification, and
 audit.</li>
 <li>Preserve <code>public_tls</code> as the default and current behavior.</li>
@@ -20101,7 +20313,7 @@ vantage and an isolation-manifest digest.</li>
 models are warmed before eligibility, and protected lanes do not share a
 capacity domain.</li>
 <li>A trust-bundle digest change rebuilds every affected client and drops its
-old connection pool before the publication is acknowledged.</li>
+old connection pool when the selected instance reload succeeds.</li>
 <li>Certificate rotation, runner-key rotation, and paired control-plane rollback
 are rehearsed.</li>
 <li>Logs, metrics, errors, and conformance evidence contain no prompt text,
@@ -20120,7 +20332,7 @@ the gateway snapshot.</li>
 sharing a <code>providerId</code> share that complete endpoint configuration.</li>
 <li>A private CA bundle is resolved from managed configuration by versioned
 reference and verified against a published digest; PEM and private keys are
-not repeated in deployment projections. The resolved digest is part of
+not repeated in deployment configuration values. The resolved digest is part of
 provider-client reuse identity.</li>
 <li>An operator may select private HTTP to another computer when the selected
 Network Zone permits it. It is credential-free in the first release, and
@@ -20148,7 +20360,7 @@ and the gateway verifies producer authenticity and endpoint binding.</li>
 <li><a href="https://docs.ollama.com/faq">Ollama network and proxy guidance</a></li>
 <li><a href="https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md">llama.cpp server documentation</a></li>
 <li><a href="https://docs.vllm.ai/en/latest/cli/serve/">vLLM serve TLS options</a></li>
-<li><a href="#llm-gateway-topology-per-host-and-environment">LLM Gateway Topology Per Host And Environment</a></li>
+<li><a href="#llm-gateway-configuration-topology">LLM Gateway Topology Per Host And Environment</a></li>
 <li><a href="#global-and-tenant-knowledge-bases-for-shared-agent-retrieval">Global And Tenant Knowledge Bases For Shared Agent Retrieval</a></li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
@@ -20355,7 +20567,7 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 </tbody>
 </table>
 </div>
-<h2 id="decision-1"><a class="header" href="#decision-1">Decision</a></h2>
+<h2 id="decision-2"><a class="header" href="#decision-2">Decision</a></h2>
 <p>Separate OAuth configuration host from tenant host in the OAuth runtime tables.</p>
 <p>Keep <code>host_id</code> in <code>auth_session_t</code>, <code>auth_code_t</code>, and <code>auth_refresh_token_t</code> as the tenant/current host. Add <code>auth_host_id</code> to those tables to point to the master OAuth host that owns the provider-client mapping.</p>
 <p>The provider-client foreign key should move from <code>host_id</code> to <code>auth_host_id</code>:</p>
@@ -20368,7 +20580,7 @@ auth_code_t.host_id
 auth_refresh_token_t.host_id
 </code></pre>
 <p>This preserves the current meaning of <code>host_id</code> for tenant access while allowing all OAuth configuration to live on the master host.</p>
-<h2 id="data-model-1"><a class="header" href="#data-model-1">Data Model</a></h2>
+<h2 id="data-model-2"><a class="header" href="#data-model-2">Data Model</a></h2>
 <h3 id="auth_session_t"><a class="header" href="#auth_session_t"><code>auth_session_t</code></a></h3>
 <p>Add:</p>
 <pre><code class="language-sql">auth_host_id UUID NOT NULL
@@ -20752,7 +20964,7 @@ runtime validation in the first release.</li>
 basic scalar and raw JSON/YAML editing.</li>
 <li>Do not allow unpublished schemas to validate production config overrides.</li>
 </ul>
-<h2 id="data-model-2"><a class="header" href="#data-model-2">Data Model</a></h2>
+<h2 id="data-model-3"><a class="header" href="#data-model-3">Data Model</a></h2>
 <p>The existing <code>schema_t</code> table is a reasonable starting point. It already has:</p>
 <ul>
 <li><code>schema_id</code></li>
@@ -21211,7 +21423,7 @@ enforcement.</p>
 raw JSON/YAML editors while the registry is being hardened. Once the registry
 foundation is complete, the same page can enable schema-backed forms and command
 validation without changing the operator workflow.</p>
-<h2 id="recommendation-11"><a class="header" href="#recommendation-11">Recommendation</a></h2>
+<h2 id="recommendation-10"><a class="header" href="#recommendation-10">Recommendation</a></h2>
 <p>Use the schema registry as the authoritative source for structured config
 property schemas. Do not implement a separate local schema convention in
 <code>portal-view</code>. Stabilize the registry enough for versioned, tenant-aware,
@@ -22619,7 +22831,7 @@ or equal to zero.</li>
 <p>The cleanup job should not purge visible messages, partially deleted messages,
 or recently deleted-by-all messages. A separate maximum retention policy for
 undeleted private messages would need an explicit product/security decision.</p>
-<h2 id="authorization-1"><a class="header" href="#authorization-1">Authorization</a></h2>
+<h2 id="authorization-2"><a class="header" href="#authorization-2">Authorization</a></h2>
 <p>The command and query handlers must not trust user ids supplied by the client
 for the current user. The current user is always the token subject.</p>
 <p>Rules:</p>
@@ -22703,7 +22915,7 @@ retention and keeps visible, partially deleted, and recently deleted messages.</
 <li>Reply pre-populates recipient context without email.</li>
 <li>Empty and error states do not produce JSON parse failures.</li>
 </ul>
-<h2 id="open-questions-3"><a class="header" href="#open-questions-3">Open Questions</a></h2>
+<h2 id="open-questions-2"><a class="header" href="#open-questions-2">Open Questions</a></h2>
 <ul>
 <li>Should users be able to send messages to themselves as private notes?</li>
 <li>Should profile pages expose a “Message” action only for users in the same
@@ -25090,11 +25302,11 @@ cargo test microservice_registration_uses_jwt_env_when_request_omits_env_tag
 mvn -q -Dtest=ControllerWebSocketIntegrationTest#rejectsMicroserviceJwtWhenHostClaimIsMissing+rejectsMicroserviceJwtWhenHostClaimDiffersFromControllerHostId+rejectsMicroserviceJwtWhenSidIsMissing+rejectsMicroserviceJwtWhenSidDiffersFromServiceId+rejectsMicroserviceJwtWhenEnvClaimIsMissingAndEnvTagIsRequested+rejectsMicroserviceJwtWhenEnvClaimDiffersFromEnvTag+registersMicroserviceWhenEnvTagAndEnvClaimAreOmitted test
 mvn -q -Dtest=ServiceIdAuthorizationUtilTest test
 </code></pre>
-<h2 id="open-questions-4"><a class="header" href="#open-questions-4">Open Questions</a></h2>
+<h2 id="open-questions-3"><a class="header" href="#open-questions-3">Open Questions</a></h2>
 <p>No open questions for SID, host, and environment binding in this phase.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="instance-clone"><a class="header" href="#instance-clone">Instance Clone</a></h1>
-<h2 id="context-6"><a class="header" href="#context-6">Context</a></h2>
+<h2 id="context-5"><a class="header" href="#context-5">Context</a></h2>
 <p>One portal database can serve several runtime environments. For example, the
 <code>portal-bff</code> service can have separate instances for these environment tags:</p>
 <div class="table-wrapper">
@@ -26021,7 +26233,7 @@ retries return a retryable conflict with no committed clone state.</li>
 <li>Filter both sources by the requested config phase.</li>
 <li>Return one filename-to-base64-content map.</li>
 </ol>
-<h2 id="decision-2"><a class="header" href="#decision-2">Decision</a></h2>
+<h2 id="decision-3"><a class="header" href="#decision-3">Decision</a></h2>
 <p>Add <code>config_phase</code> to both runtime and snapshot instance file tables:</p>
 <ul>
 <li><code>instance_file_t.config_phase</code></li>
@@ -26200,13 +26412,13 @@ WHERE h.sub_domain || '.' || h.domain = ?
 <p>The deployment service contains pipeline management, platform management and deployment management. It also integrates with product management and instance management services.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-portal-install"><a class="header" href="#light-portal-install">Light Portal Install</a></h1>
-<h2 id="purpose-3"><a class="header" href="#purpose-3">Purpose</a></h2>
+<h2 id="purpose-4"><a class="header" href="#purpose-4">Purpose</a></h2>
 <p><code>light-portal-install</code> provides a one-command local installation path for Light Portal. The target user should only need Docker Compose on the host machine and should not need to clone the individual service repositories, build Java or Rust projects, install Node.js, or manually copy static assets.</p>
 <p>The intended entrypoint is:</p>
 <pre><code class="language-bash">curl -sL https://raw.githubusercontent.com/networknt/light-portal-install/main/install.sh | bash
 </code></pre>
 <p>The installer downloads the install bundle, prepares the local data directory, writes the selected image and asset versions, and starts the stack with Docker Compose.</p>
-<h2 id="recommendation-12"><a class="header" href="#recommendation-12">Recommendation</a></h2>
+<h2 id="recommendation-11"><a class="header" href="#recommendation-11">Recommendation</a></h2>
 <p>This approach should work if the repo owns the local installation contract instead of acting as a thin pointer to the current developer checkout.</p>
 <p>The install repo contains:</p>
 <ul>
@@ -26390,7 +26602,7 @@ light-portal/releases/
 <li>Keep Docker Compose as the only container runtime dependency; use <code>curl</code> for R2 downloads, not AWS CLI.</li>
 <li>Use fixed archive names for the current R2 object set until the release pipeline publishes a richer manifest automatically.</li>
 </ul>
-<h2 id="decision-3"><a class="header" href="#decision-3">Decision</a></h2>
+<h2 id="decision-4"><a class="header" href="#decision-4">Decision</a></h2>
 <p>Create <code>light-portal-install</code> as the public local install repo with Docker Compose as the only container runtime dependency. Use the Rust <code>all-in-lt</code> service topology, including <code>light-agent</code> and the demo APIs, but package it as checked-in runtime config plus R2-downloaded service jars, SPA assets, <code>events.json</code>, and <code>docker-images.env</code>. Keep the local OAuth authorization code flow through <code>login-view</code> and use existing long-lived local demo tokens for the first version. Publish static install artifacts to Cloudflare R2 behind a custom domain, download the fixed asset archives with <code>curl</code>, and extract them with <code>unzip</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="timestamp"><a class="header" href="#timestamp">Timestamp</a></h1>
@@ -26832,7 +27044,7 @@ of the same request?” It does not answer “Is this the same business entity?�
 <p>The one event that establishes an aggregate stream, normally a registered
 <code>*CreatedEvent</code>. A restore or reactivation is a lifecycle mutation, not another
 birth event.</p>
-<h2 id="required-invariants-3"><a class="header" href="#required-invariants-3">Required Invariants</a></h2>
+<h2 id="required-invariants-2"><a class="header" href="#required-invariants-2">Required Invariants</a></h2>
 <h3 id="one-birth-event-per-aggregate"><a class="header" href="#one-birth-event-per-aggregate">One Birth Event Per Aggregate</a></h3>
 <p>For a normal command append:</p>
 <ul>
@@ -30990,7 +31202,7 @@ before the auth handler.</p>
 <li>Add a timeout to stop polling after ~10-15 seconds to prevent infinite loops.</li>
 </ol>
 <p>As you can see, this is much more complicated than the optimistic update.</p>
-<h3 id="recommendation-13"><a class="header" href="#recommendation-13">Recommendation</a></h3>
+<h3 id="recommendation-12"><a class="header" href="#recommendation-12">Recommendation</a></h3>
 <p><strong>Adopt the Optimistic UI pattern (Option 1).</strong> It provides the best user experience, is resilient to timing issues caused by eventual consistency, and the implementation is clean and modern. The code provided for the optimistic <code>handleDelete</code> is a drop-in replacement that will solve your problem robustly.</p>
 <h3 id="should-you-poll-peroidically-to-sync-other-users-changes"><a class="header" href="#should-you-poll-peroidically-to-sync-other-users-changes">Should you poll peroidically to sync other users’ changes</a></h3>
 <p>The short answer is: <strong>No, you should still avoid client-side polling for this specific use case.</strong> It’s generally the wrong tool for this problem and creates more issues than it solves. The Optimistic UI approach is still preferable, but it needs to be combined with a robust backend and potentially other real-time technologies for a complete solution.</p>
@@ -32664,7 +32876,7 @@ mappings.</li>
 <code>config_property_t</code>.</li>
 <li>Add a portal-view diagnostics link from the config update page.</li>
 </ul>
-<h2 id="open-questions-5"><a class="header" href="#open-questions-5">Open Questions</a></h2>
+<h2 id="open-questions-4"><a class="header" href="#open-questions-4">Open Questions</a></h2>
 <ul>
 <li>Should <code>ProductVersionCreatedEvent</code> optionally carry a <code>configProfileRef</code>,
 or should profile linking remain a separate release step?</li>
@@ -32673,7 +32885,7 @@ regulated products?</li>
 <li>Do we need a profile-clone command for tenant-specific removals, or is manual
 profile creation enough for the MVP?</li>
 </ul>
-<h2 id="recommendation-14"><a class="header" href="#recommendation-14">Recommendation</a></h2>
+<h2 id="recommendation-13"><a class="header" href="#recommendation-13">Recommendation</a></h2>
 <p>Implement the profile schema and Phase 1 importer generator first, then add the
 sync command for live all-host operations.</p>
 <p>The long-term target is release-time automation:</p>
@@ -33190,7 +33402,7 @@ artifact type.</li>
 <li>The first implementation should decide whether AI patches create pull
 requests by default or only update the sandbox workspace for operator review.</li>
 </ul>
-<h2 id="recommendation-15"><a class="header" href="#recommendation-15">Recommendation</a></h2>
+<h2 id="recommendation-14"><a class="header" href="#recommendation-14">Recommendation</a></h2>
 <p>Moving Java and Rust releases to <code>light-workflow</code> is a good direction, provided
 the migration treats <code>light-workflow</code> as the orchestrator and uses sandboxed
 runners for command execution. This gives the release process durable state,
@@ -33314,7 +33526,7 @@ explicit policy and human approval.</p>
 </li>
 </ol>
 <hr>
-<h3 id="final-recommendation-1"><a class="header" href="#final-recommendation-1"><strong>Final Recommendation:</strong></a></h3>
+<h3 id="final-recommendation"><a class="header" href="#final-recommendation"><strong>Final Recommendation:</strong></a></h3>
 <p><strong>Yes, we must include <code>aggregate_version</code> in all projected tables that are used as the basis for user updates, and it must be part of the data retrieved by the UI’s list queries.</strong></p>
 <p>This is the non-negotiable step to ensuring your access control system prevents the dangerous “Last-Write-Wins” scenario.</p>
 <h1 id="refresh-data-for-edit"><a class="header" href="#refresh-data-for-edit">Refresh Data for Edit</a></h1>
@@ -35015,7 +35227,7 @@ aggregate ids survive and can collide on <code>(aggregate_id, aggregate_version)
 logs and continues. The Rust tool should preserve continue behavior by default,
 but explicit exit codes make automation safer.</p>
 <h2 id="testing-strategy"><a class="header" href="#testing-strategy">Testing Strategy</a></h2>
-<h3 id="unit-tests"><a class="header" href="#unit-tests">Unit Tests</a></h3>
+<h3 id="unit-tests-1"><a class="header" href="#unit-tests-1">Unit Tests</a></h3>
 <ul>
 <li>CLI parsing for new and compatibility forms.</li>
 <li>Replacement and enrichment rules, including alias support.</li>
@@ -35064,7 +35276,7 @@ back to one-event isolation when a batch fails.</li>
 <li>Convert a snapshot and import the resulting event list into an empty DB.</li>
 <li>Compare embedded table dependency order against live PostgreSQL metadata.</li>
 </ol>
-<h2 id="rollout-plan-7"><a class="header" href="#rollout-plan-7">Rollout Plan</a></h2>
+<h2 id="rollout-plan-8"><a class="header" href="#rollout-plan-8">Rollout Plan</a></h2>
 <h3 id="phase-1-rust-project-skeleton"><a class="header" href="#phase-1-rust-project-skeleton">Phase 1: Rust Project Skeleton</a></h3>
 <ul>
 <li>Add Cargo project in <code>importer</code>.</li>
@@ -36097,7 +36309,7 @@ field value is included in the event.</p>
 references are never returned to the browser. A repair endpoint may return only
 the explicitly authorized and redacted business fields declared by the repair
 schema.</p>
-<h2 id="failure-handling-3"><a class="header" href="#failure-handling-3">Failure Handling</a></h2>
+<h2 id="failure-handling-4"><a class="header" href="#failure-handling-4">Failure Handling</a></h2>
 <ul>
 <li><strong>Invalid command-side transaction:</strong> reject the command before event-store
 or outbox commit.</li>
@@ -36648,7 +36860,7 @@ containing the reviewed config digest.</p>
 <p>Record <code>VERIFIED</code> only after dashboards, APIs, offsets, audit, and alerts are
 reviewed. Stage <code>ROLLBACK</code> refuses to proceed while requests, barriers, pauses,
 or deferred work remain.</p>
-<h2 id="rollback"><a class="header" href="#rollback">Rollback</a></h2>
+<h2 id="rollback-1"><a class="header" href="#rollback-1">Rollback</a></h2>
 <ol>
 <li>Stop new execute requests and set <code>executionEnabled: false</code>.</li>
 <li>Run the <code>ROLLBACK</code> preflight. If blocked, retain the current worker and give
@@ -36681,7 +36893,7 @@ audit, and break-glass evidence.</li>
 <li><strong>Deployment Trigger:</strong> Automatically created when a deployment occurs (to capture the state being deployed).</li>
 <li><strong>User Trigger:</strong> Manually created by a user via the UI (e.g., to save a milestone).</li>
 </ol>
-<h2 id="data-model-3"><a class="header" href="#data-model-3">Data Model</a></h2>
+<h2 id="data-model-4"><a class="header" href="#data-model-4">Data Model</a></h2>
 <h3 id="snapshot-header-config_snapshot_t"><a class="header" href="#snapshot-header-config_snapshot_t">Snapshot Header (<code>config_snapshot_t</code>)</a></h3>
 <p>Captures metadata about the snapshot.</p>
 <ul>
@@ -36938,7 +37150,7 @@ continuity.</li>
 <li>Enables a focused UI flow with explicit warning, confirmation, copy action,
 and audit trail.</li>
 </ul>
-<h2 id="decision-4"><a class="header" href="#decision-4">Decision</a></h2>
+<h2 id="decision-5"><a class="header" href="#decision-5">Decision</a></h2>
 <p>Add a dedicated “Regenerate Secret” action on the Auth Client page.</p>
 <p>Do not reuse delete/recreate as the normal path. Do not add a recoverable
 encrypted-secret store. The portal should continue treating client secrets as
@@ -37263,7 +37475,7 @@ The Importer processes the list in order:</p>
 </li>
 </ol>
 <h2 id="dry-run-technical-implementation"><a class="header" href="#dry-run-technical-implementation">Dry Run Technical Implementation</a></h2>
-<h3 id="purpose-4"><a class="header" href="#purpose-4">Purpose</a></h3>
+<h3 id="purpose-5"><a class="header" href="#purpose-5">Purpose</a></h3>
 <p>To guarantee the promotion will succeed without actually modifying the Higher Environment (Production).</p>
 <h3 id="option-1-application-layer-simulation-fast-recommended-for-planning"><a class="header" href="#option-1-application-layer-simulation-fast-recommended-for-planning">Option 1: Application-Layer Simulation (Fast, Recommended for Planning)</a></h3>
 <ul>
@@ -37292,7 +37504,7 @@ The Importer processes the list in order:</p>
 <li><strong>Pros:</strong> 100% certainty that the data is valid according to the database schema.</li>
 <li><strong>Cons:</strong> Slightly heavier key locks, but acceptable for admin operations.</li>
 </ul>
-<h3 id="recommendation-16"><a class="header" href="#recommendation-16">Recommendation</a></h3>
+<h3 id="recommendation-15"><a class="header" href="#recommendation-15">Recommendation</a></h3>
 <p>Use <strong>Option 1 (App Simulation)</strong> for the UI preview to show the user “what will happen”.
 Use <strong>Option 2 (Transaction Rollback)</strong> immediately when the user clicks “Promote” (as a pre-flight check) or as an explicit “Verify” button to ensure deep integrity.</p>
 <h2 id="sibling-deletion-handling-orphaned-items"><a class="header" href="#sibling-deletion-handling-orphaned-items">Sibling Deletion: Handling Orphaned Items</a></h2>
@@ -37965,7 +38177,7 @@ receive commands. Recommended options:</p>
 </ul>
 <p>The deployer should have a stable <code>deployerId</code> and should report cluster,
 namespace, version, and capability metadata during registration.</p>
-<h3 id="authorization-2"><a class="header" href="#authorization-2">Authorization</a></h3>
+<h3 id="authorization-3"><a class="header" href="#authorization-3">Authorization</a></h3>
 <p>Light Portal must verify that the requesting user can deploy the target
 instance, environment, and tenant. The deployer must also enforce local
 constraints:</p>
@@ -38160,7 +38372,7 @@ local policy.</li>
 <li>A compromised deployer must not be able to receive commands for another
 tenant.</li>
 </ul>
-<h2 id="failure-handling-4"><a class="header" href="#failure-handling-4">Failure Handling</a></h2>
+<h2 id="failure-handling-5"><a class="header" href="#failure-handling-5">Failure Handling</a></h2>
 <p>The deployer should classify failures:</p>
 <ul>
 <li>template repository fetch failure</li>
@@ -38235,7 +38447,7 @@ later.</li>
 <li>Rollback is a redeploy of a previous Light Portal deployment snapshot, not a
 native Kubernetes rollout undo.</li>
 </ul>
-<h2 id="open-questions-6"><a class="header" href="#open-questions-6">Open Questions</a></h2>
+<h2 id="open-questions-5"><a class="header" href="#open-questions-5">Open Questions</a></h2>
 <ul>
 <li>Which object storage providers should enterprise artifact mode support first?</li>
 <li>What retention policies should be available for encrypted rendered manifest
@@ -38244,7 +38456,7 @@ artifacts?</li>
 long-running deployment progress events?</li>
 <li>Should rollback require the same environment-level approval policy as deploy?</li>
 </ul>
-<h2 id="recommendation-17"><a class="header" href="#recommendation-17">Recommendation</a></h2>
+<h2 id="recommendation-16"><a class="header" href="#recommendation-16">Recommendation</a></h2>
 <p>Use an in-cluster Rust deployer as the default production model. The deployer
 should connect outbound to Light Controller and execute deployment commands via
 MCP-style tools. Direct deployer URL mode is useful for MicroK8s and managed
@@ -45043,7 +45255,7 @@ the current control plane performs percentage-based canary routing.</p>
     C --&gt; U[Publication]
     P --&gt; U
     T --&gt; U
-    U --&gt; G[Gateway snapshot and acknowledgement]
+    U --&gt; G[Config snapshot and module reload]
     G --&gt; V[Authenticated live validation]
 </pre>
 
@@ -45063,7 +45275,7 @@ the current control plane performs percentage-based canary routing.</p>
 <tr><td>Public Alias</td><td>Stable client-facing model name and required policy/capability contract</td></tr>
 <tr><td>Alias Route</td><td>Ordered connection from an Alias to a compatible Deployment</td></tr>
 <tr><td>Pricing</td><td>Effective-dated rates for the Deployment operation</td></tr>
-<tr><td>Publication</td><td>Immutable projection delivered to one selected gateway instance</td></tr>
+<tr><td>Publication</td><td>Typed <code>llm-router.*</code> properties applied to one selected gateway instance</td></tr>
 </tbody>
 </table>
 </div>
@@ -45455,7 +45667,7 @@ records with these differences:</p>
 <p>Use the same conservative generation capability object as Qwen except set
 <code>images: false</code>. Keep <code>parallelTools: false</code> until a workload-specific
 parallel test passes through the full gateway path.</p>
-<h2 id="12-generate-and-publish-the-gateway-projection"><a class="header" href="#12-generate-and-publish-the-gateway-projection">12. Generate and publish the gateway projection</a></h2>
+<h2 id="12-generate-and-publish-the-gateway-configuration"><a class="header" href="#12-generate-and-publish-the-gateway-configuration">12. Generate and publish the gateway configuration</a></h2>
 <p>Open <strong>Publication</strong> in the LLM Model Control Plane:</p>
 <ol>
 <li>Select the target <strong>Instance Env Tag</strong>.</li>
@@ -45463,27 +45675,21 @@ parallel test passes through the full gateway path.</p>
 <li>Confirm that the displayed <strong>LLM environment</strong> matches the Registration and
 Alias environment.</li>
 <li>Choose <strong>Generate from active records</strong>.</li>
-<li>Review the read-only V3 projection. It must contain the exact model ID,
+<li>Review the read-only typed properties. They must contain the exact model ID,
 <code>openai_chat</code>, the Groq base URL, declared capabilities, Alias Route,
 effective Pricing, and only the credential reference.</li>
 <li>Confirm that no raw provider key appears anywhere in the preview.</li>
 <li>Choose <strong>Publish to instance</strong>.</li>
 <li>Create and promote the corresponding configuration snapshot, then reload or
 restart the selected gateway as required by the deployment.</li>
-<li>Confirm that the intended running replica has an <code>ACKNOWLEDGED</code> publication
-with the expected publication ID and root digest. Do not send an upstream
-validation request while acknowledgement is absent, <code>PENDING</code>, <code>FAILED</code>, or
-<code>DIVERGENT</code>.</li>
+<li>If you used reload, confirm that the <code>llm-router</code> module reload succeeded. If
+you restarted, confirm the gateway loaded the promoted snapshot and reports
+the LLM module as available before sending an upstream validation request.</li>
 </ol>
-<p>Publication proves that the configuration is internally consistent and was
-delivered. It does not prove that Groq accepted a request or that the model
-meets the workload’s quality requirements.</p>
-<p>The Portal V3 publication path requires a frozen replica inventory and
-acknowledgement. A development Compose repository may instead provide a
-reviewed, importable instance-publication event and a scoped snapshot-refresh
-script. Use that repository’s supported workflow only for the exact host,
-environment, service, and instance; the normal operator path remains the
-Portal UI.</p>
+<p>Publication applies instance properties. Snapshot promotion plus a successful
+startup or explicit <code>llm-router</code> reload proves that the configuration was
+loaded. It does not prove that Groq accepted a request or that the model meets
+the workload’s quality requirements.</p>
 <h2 id="13-validate-through-the-live-gateway"><a class="header" href="#13-validate-through-the-live-gateway">13. Validate through the live gateway</a></h2>
 <p>Prepare a protected header file containing the gateway caller token. This is
 not <code>GROQ_API_KEY</code>:</p>
@@ -45606,8 +45812,8 @@ fallback, or remove it if it can no longer serve traffic.</li>
 <li>A fallback is optional for a non-production demo. If continuity matters,
 use another currently served and tested model rather than the
 soon-to-be-decommissioned Llama model.</li>
-<li>Generate a fresh projection, inspect the route order, publish, promote the
-snapshot, and confirm replica acknowledgement.</li>
+<li>Generate fresh typed properties, inspect the route order, publish, promote
+the snapshot, and confirm startup or the explicit <code>llm-router</code> reload.</li>
 <li>Run the same smoke request through the unchanged stable Alias.</li>
 <li>Retain the old records for audit until the rollback window closes; do not
 rewrite the Qwen Deployment to represent another physical model.</li>
@@ -45669,8 +45875,8 @@ Pricing exactly as above.</p>
 <tr><td>Publish reports no eligible Credential</td><td>Check purpose, Endpoint/Deployment references, version, database-clock effective time, and expiration.</td></tr>
 <tr><td>Publish reports no effective Pricing</td><td>Create a <code>generate</code> price for a chat/responses/messages Deployment and make its effective window current.</td></tr>
 <tr><td>Route is incompatible</td><td>Align host, logical environment, provider type, physical model, protocol operation, Registration restrictions, and required capabilities.</td></tr>
-<tr><td>Gateway returns Alias not found</td><td>Confirm the caller can see the Alias and the intended acknowledged snapshot is active on that replica.</td></tr>
-<tr><td>Gateway returns 503 after publication</td><td>Inspect the complete projection and gateway logs. One malformed Deployment capability/protocol/pricing contract can invalidate configuration beyond the new Alias.</td></tr>
+<tr><td>Gateway returns Alias not found</td><td>Confirm the caller can see the Alias and the intended config snapshot was loaded by startup or a successful <code>llm-router</code> reload.</td></tr>
+<tr><td>Gateway returns 503 after publication</td><td>Inspect the complete <code>llm-router</code> properties and gateway logs. One malformed Deployment capability/protocol/pricing contract can invalidate configuration beyond the new Alias.</td></tr>
 <tr><td>Gateway reports <code>LLM_CONFIG_INVALID</code></td><td>Inspect every provider in the published snapshot. A missing environment variable such as an unused provider’s secret reference can invalidate the complete router; omit that provider from the snapshot or inject its secret.</td></tr>
 <tr><td>Qwen returns a provider 400 for tool choice</td><td>Use the portable string form <code>"tool_choice":"auto"</code> or <code>"required"</code>; the checked Groq Qwen path rejected a named-function object.</td></tr>
 <tr><td>Qwen exhausts a small output budget or returns <code>&lt;think&gt;</code> text</td><td>Reasoning can consume completion tokens and may appear in message content. Allow a bounded larger completion budget and make the application handle or reject visible reasoning explicitly.</td></tr>
@@ -45696,7 +45902,7 @@ publish, validate, delete, and publish again</strong>. Do not begin with Delete.
 <code>assistant-dev</code>. If they call a physical model ID directly, change them to an
 Alias before retiring the model.</p>
 <h2 id="what-retirement-means"><a class="header" href="#what-retirement-means">What retirement means</a></h2>
-<p>Retirement is a soft deletion from the active LLM control-plane projection. It
+<p>Retirement is a soft deletion from the active LLM control-plane configuration. It
 preserves event history for audit and replay, but excludes the retired records
 from new publications.</p>
 <p>Deleting a global Model also soft-deletes its active dependent records:</p>
@@ -45812,7 +46018,8 @@ the selected <code>llm-gateway</code> instance. Check that:</p>
 <li><code>assistant-dev</code> resolves to the replacement Deployment first;</li>
 <li>the retiring Deployment is no longer referenced by an active route;</li>
 <li>provider, credential, pricing, and capability validation succeeds; and</li>
-<li>the target gateway applies or acknowledges the new publication.</li>
+<li>the target gateway starts from the promoted snapshot or successfully reloads
+<code>llm-router</code>.</li>
 </ul>
 <p>Call <code>/v1/models</code> and <code>/v1/chat/completions</code> through <code>llm-gateway</code> with the
 stable Alias. Repeat the agent tool-calling tests. Keep this routed state for a
@@ -45850,7 +46057,7 @@ model.</p>
 <h2 id="8-preserve-the-local-baseline"><a class="header" href="#8-preserve-the-local-baseline">8. Preserve the local baseline</a></h2>
 <p>Portal control-plane changes are authored and validated only in the local
 <code>portal-config-loc/all-in-lt</code> database. Import the reviewed retirement event
-file there, verify the projections and live gateway behavior, and then export a
+file there, verify the read models and live gateway behavior, and then export a
 new global snapshot to recreate the canonical <code>events.json</code>.</p>
 <p>Use that exported <code>events.json</code> to recreate the databases for
 <code>portal-config-dev</code> and <code>light-portal-install</code>. Do not maintain a separate
@@ -45879,7 +46086,7 @@ publication IDs match the control-plane derivation contract;</li>
 <li>the publication contains neither the retired Deployment nor a stale Alias
 route to it.</li>
 </ul>
-<p>Generate the file from current local projections immediately before the
+<p>Generate the file from current local read models immediately before the
 change. A previously generated retirement file becomes stale as soon as one of
 its aggregates or the publication version changes.</p>
 <h2 id="rollback-after-deletion"><a class="header" href="#rollback-after-deletion">Rollback after deletion</a></h2>
