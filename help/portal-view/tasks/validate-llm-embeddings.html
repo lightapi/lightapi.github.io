@@ -35,7 +35,7 @@
             const path_to_root = "../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../searchindex-e8668a02.js";
+            window.path_to_searchindex_js = "../../../searchindex-52eef62d.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../../toc-4c3602da.js"></script>
@@ -208,27 +208,14 @@ your deployment.</p>
 <p>Portal publication history confirms the configuration application to the
 selected instance. It is not proof that a particular running replica loaded the
 revision.</p>
-<h3 id="2-confirm-the-selected-replica-applied-it"><a class="header" href="#2-confirm-the-selected-replica-applied-it">2. Confirm the selected replica applied it</a></h3>
-<p>Before sending a billable model request, confirm that the replica reports an
-<code>ACKNOWLEDGED</code> row for the intended publication ID, sequence, and root digest.
-Operators with database access can use:</p>
-<pre><code class="language-sql">SELECT gateway_publication_id,
-       gateway_instance,
-       acknowledgement_state,
-       sequence_id,
-       root_digest,
-       material_generation,
-       applied_at
-  FROM llm_gateway_publication_ack_t
- WHERE host_id = :host_id
-   AND environment = :environment
-   AND gateway_publication_id = :gateway_publication_id
-   AND gateway_instance = :gateway_instance;
-</code></pre>
-<p>Use the equivalent acknowledgement view provided by your operations platform
-when direct database access is unavailable. Stop if the row is absent or its
-state is <code>PENDING</code>, <code>FAILED</code>, or <code>DIVERGENT</code>. Alias discovery alone is not proof
-of the intended revision because an older snapshot can expose the same Alias.</p>
+<h3 id="2-confirm-the-selected-gateway-loaded-the-snapshot"><a class="header" href="#2-confirm-the-selected-gateway-loaded-the-snapshot">2. Confirm the selected gateway loaded the snapshot</a></h3>
+<p>Before sending a billable model request, restart the selected gateway or
+explicitly reload the <code>llm-router</code> module. Require a successful standard
+startup/reload result and verify that it reports the intended immutable
+config-snapshot version.</p>
+<p>Stop if startup or reload fails. Alias discovery alone is not proof of the
+intended revision because an older snapshot can expose the same Alias. A failed
+reload leaves the previous last-known-good LLM runtime active.</p>
 <h3 id="3-provision-the-provider-key-only-on-the-gateway"><a class="header" href="#3-provision-the-provider-key-only-on-the-gateway">3. Provision the provider key only on the gateway</a></h3>
 <p>Provision the NVIDIA credential through the selected gateway deployment’s
 protected environment or secret-injection mechanism, then restart or reload
