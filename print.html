@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-cd61167f.js";
+            window.path_to_searchindex_js = "searchindex-643a4123.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-bef4070b.js"></script>
@@ -10425,6 +10425,18 @@ agentic workflow design:</p>
 </div>
 <p>The palette should create minimal valid YAML fragments. Users can then edit the
 full YAML when advanced options are needed.</p>
+<p>The YAML cursor, Steps list, and Visual Graph share one selected top-level
+workflow step. Moving the cursor anywhere inside a <code>do</code> item selects that step
+in the other views. When a step is selected, the palette offers insertion
+immediately before or after it; with the cursor outside a recognized step, it
+appends to the workflow. Invalid or incomplete YAML must not cause an
+unstructured text insertion. If the selected anchor is no longer present, the
+editor reports the stale selection instead of silently appending. Step identity
+and container priority are shared by the cursor, Steps list, Visual Graph, and
+insertion path, including <code>name</code>/<code>id</code>-shaped and map-shaped legacy containers.
+An explicit fork-branch insertion target remains active while the YAML cursor
+moves and is cleared only after insertion, a different explicit selection, or
+the user chooses <strong>Top level</strong>.</p>
 <h2 id="reference-panel"><a class="header" href="#reference-panel">Reference Panel</a></h2>
 <p>The editor should help authors reference existing catalog objects instead of
 typing fragile identifiers by hand:</p>
@@ -10673,6 +10685,27 @@ versions should remain immutable for auditability; create a new canonical
 version instead of rewriting published history. The rollout gate is zero
 unresolved legacy drafts that are expected to be published, plus an explicit
 owner disposition for every remaining invalid stored definition.</p>
+<h3 id="known-debt-secret-keyword-screening-on-existing-definitions"><a class="header" href="#known-debt-secret-keyword-screening-on-existing-definitions">Known Debt: Secret Keyword Screening On Existing Definitions</a></h3>
+<p>The authoring guard screens <code>existingDefinition</code> with the secret <em>key</em> pattern
+in addition to the secret <em>value</em> pattern, and it matches anywhere in the text.
+Any definition that merely mentions a word such as <code>authorization</code> — an HTTP
+header name, an <code>authorizationPolicy</code> field, or the word inside a free-text
+<code>description</code> — is refused with
+<code>WORKFLOW_AUTHORING_SECRET_IN_EXISTING_DEFINITION</code> even though it carries no
+credential. This is pre-existing behaviour rather than a regression from
+schema-backed validation: the guard has always applied the key pattern to the
+whole definition with a substring match, so tightening the pattern’s anchoring
+did not change which definitions are refused.</p>
+<p>The debt is that a keyword screen is the wrong instrument for a document body.
+Key-name matching is appropriate where a key name is being inspected, which is
+the sanitizer’s per-key path; for definition text only the value pattern
+distinguishes an actual credential from a field name. Resolving this means
+screening <code>existingDefinition</code> with the value pattern alone, and it must be
+taken as its own change with its own test coverage, because relaxing a guard
+that currently fails closed is a security-relevant decision that should not
+ride along with an unrelated fix. Until then, authors revising a definition
+that names an authorization concept must strip the wording or start from a new
+draft.</p>
 <h2 id="phased-implementation-1"><a class="header" href="#phased-implementation-1">Phased Implementation</a></h2>
 <h3 id="phase-a-structured-yaml-editor"><a class="header" href="#phase-a-structured-yaml-editor">Phase A: Structured YAML Editor</a></h3>
 <ul>
