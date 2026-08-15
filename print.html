@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-89cdfad7.js";
+            window.path_to_searchindex_js = "searchindex-78b31971.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-228f8296.js"></script>
+        <script src="toc-bef4070b.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -18428,14 +18428,336 @@ configuration snapshot.</li>
 <li><a href="#config-snapshot-output-and-comparison">Configuration Snapshot Output and Comparison</a></li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="endpoint-tools-and-workflow-access"><a class="header" href="#endpoint-tools-and-workflow-access">Endpoint Tools and Workflow Access</a></h1>
+<h2 id="status-7"><a class="header" href="#status-7">Status</a></h2>
+<p>Implemented for the REST/HTTP first slice; MCP and JSON-RPC palette builders
+remain later protocol extensions of the same identity and grant model.</p>
+<h2 id="purpose-2"><a class="header" href="#purpose-2">Purpose</a></h2>
+<p>Light Portal imports API versions, derives their endpoints, and projects those
+endpoints as Tools. A Tool adds the descriptions, schemas, examples, safety
+metadata, and testing information needed by agents and workflow authors.</p>
+<p>This design defines:</p>
+<ul>
+<li>how endpoint identity works across REST, MCP, and hybrid APIs;</li>
+<li>how an API endpoint becomes an enriched Tool;</li>
+<li>where workflow access is granted;</li>
+<li>how the Workflow Editor lists permitted Tools; and</li>
+<li>how a Tool is added as a call inside a fork branch.</li>
+</ul>
+<p>The related designs are <a href="#agent-skill-and-api-endpoint-discovery">Agent Skill And API Endpoint Discovery</a>,
+<a href="#workflow-editor">Workflow Editor</a>, and
+<a href="#workflow-version-and-publication">Workflow Version and Publication</a>.</p>
+<h2 id="decision-summary-7"><a class="header" href="#decision-summary-7">Decision Summary</a></h2>
+<ol>
+<li><code>api_endpoint_t.endpoint_id</code> remains the internal UUID identity used by
+database relationships.</li>
+<li><code>api_endpoint_t.endpoint</code> is the canonical protocol-native endpoint key.</li>
+<li>The endpoint key is unique within a host and API version.</li>
+<li>Every workflow-callable API endpoint has one endpoint-backed Tool.</li>
+<li>The Tool owns the enriched LightAPI consumption document.</li>
+<li>Workflow access is granted from <code>/app/genai/Tool</code>.</li>
+<li>API Admin and Service Endpoint may provide bulk or contextual actions, but
+they use the same Tool workflow grant.</li>
+<li>A workflow invoking a Tool is independent from a Tool implemented by a
+workflow. These are different relationships.</li>
+<li>The Workflow Editor lists only Tools granted to the current workflow.</li>
+<li>Runtime authorization uses the Tool grant and the existing endpoint access
+controls.</li>
+</ol>
+<h2 id="capability-flow"><a class="header" href="#capability-flow">Capability Flow</a></h2>
+<pre><code class="language-text">API Version
+  -&gt; API Endpoint
+       -&gt; endpoint-backed Tool
+            -&gt; LightAPI description, validation, and tests
+            -&gt; workflow access grant
+                 -&gt; Workflow Editor palette
+                      -&gt; call task in a workflow or fork branch
+</code></pre>
+<p>The API version is the contract source. The endpoint is the runtime operation.
+The Tool is the consumable capability. The workflow grant decides whether a
+workflow may use that capability.</p>
+<h2 id="endpoint-identity"><a class="header" href="#endpoint-identity">Endpoint Identity</a></h2>
+<h3 id="internal-identity"><a class="header" href="#internal-identity">Internal identity</a></h3>
+<p>The Portal database continues to use the existing UUID:</p>
+<pre><code class="language-text">host_id + endpoint_id
+</code></pre>
+<p>Permissions, rules, Tool mappings, and other relational data reference this
+UUID. It is not typed into workflow YAML.</p>
+<h3 id="natural-identity"><a class="header" href="#natural-identity">Natural identity</a></h3>
+<p>The endpoint’s natural identity is:</p>
+<pre><code class="language-text">host_id + api_version_id + endpoint
+</code></pre>
+<p>The database must enforce this identity with a unique constraint:</p>
+<pre><code class="language-sql">UNIQUE (host_id, api_version_id, endpoint)
+</code></pre>
+<p><code>endpoint</code> is an opaque, protocol-native key. Consumers do not parse one API
+type as though it were another.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>API type</th><th>Endpoint key example</th></tr>
+</thead>
+<tbody>
+<tr><td>REST/OpenAPI</td><td><code>/customers/{customerId}/preferences@get</code></td></tr>
+<tr><td>MCP tool</td><td><code>getCustomerPreferences@call</code></td></tr>
+<tr><td>Hybrid/JSON-RPC</td><td><code>lightapi.net/customer/getPreferences/0.1.0</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Endpoint producers must generate a deterministic canonical value:</p>
+<ul>
+<li>REST uses the normalized templated path and lowercase HTTP method.</li>
+<li>MCP uses the exact tool name and <code>call</code> operation.</li>
+<li>Hybrid uses <code>host/service/action/version</code>.</li>
+</ul>
+<p>Changing the canonical endpoint key defines a different operation.</p>
+<h3 id="portable-capability-identity"><a class="header" href="#portable-capability-identity">Portable capability identity</a></h3>
+<p>LightAPI uses a qualified <code>endpointId</code> for agent, workflow, and cross-document
+references. It is separate from the database UUID and protocol-native endpoint
+key.</p>
+<p>Examples:</p>
+<pre><code class="language-text">customer-api/customer.preferences.get
+customer-mcp/getCustomerPreferences
+light-portal/customer.getPreferences
+</code></pre>
+<p>The Tool stores this value as <code>capabilityRef</code>. An API version must not contain
+two endpoints with the same <code>capabilityRef</code>.</p>
+<h2 id="api-endpoint-and-tool-responsibilities"><a class="header" href="#api-endpoint-and-tool-responsibilities">API Endpoint and Tool Responsibilities</a></h2>
+<h3 id="api-endpoint"><a class="header" href="#api-endpoint">API endpoint</a></h3>
+<p><code>api_endpoint_t</code> owns the parsed API contract and runtime identity:</p>
+<ul>
+<li>API version relationship;</li>
+<li>protocol-native endpoint key;</li>
+<li>HTTP method and path where applicable;</li>
+<li>generated input and response schemas;</li>
+<li>source protocol and lifecycle; and</li>
+<li>the internal endpoint UUID used by access control.</li>
+</ul>
+<h3 id="tool"><a class="header" href="#tool">Tool</a></h3>
+<p><code>tool_t</code> is the agent- and workflow-facing capability projection. An
+endpoint-backed Tool keeps its <code>endpoint_id</code> relationship and adds:</p>
+<ul>
+<li>Tool name and description;</li>
+<li>portable <code>capabilityRef</code>;</li>
+<li>enriched LightAPI endpoint document;</li>
+<li>safety and idempotency metadata;</li>
+<li>examples and test definitions;</li>
+<li>semantic discovery metadata;</li>
+<li>validation status and document digest; and</li>
+<li>workflow access status.</li>
+</ul>
+<p>For an endpoint-backed Tool, the Tool and endpoint have a one-to-one
+relationship within an API version.</p>
+<h2 id="lightapi-enrichment"><a class="header" href="#lightapi-enrichment">LightAPI Enrichment</a></h2>
+<p>The Tool uses the
+<a href="https://github.com/agentic-workflow/lightapi-description-specification">LightAPI Description Specification</a>
+as its complete consumption contract.</p>
+<p>The Portal generates a <code>profile: endpoint</code> document from the API endpoint and
+allows the Tool administrator to enrich it. The document includes only the
+sections relevant to the operation, including:</p>
+<ul>
+<li><code>info</code> and source provenance;</li>
+<li>protocol invocation details;</li>
+<li>authentication and environments;</li>
+<li>logical input schema and wire request mapping;</li>
+<li>result schema, success cases, failures, and output extraction;</li>
+<li>examples and fixtures;</li>
+<li>safety, confirmation, and idempotency;</li>
+<li>capability classification and tags; and</li>
+<li>agent progressive-disclosure metadata.</li>
+</ul>
+<p>Example:</p>
+<pre><code class="language-yaml">lightapi: 0.1.0
+profile: endpoint
+info:
+  title: Get Customer Preferences
+  namespace: customer-api
+  version: 1.0.0
+operations:
+  getCustomerPreferences:
+    endpointId: customer-api/customer.preferences.get
+    protocol: http
+    method: GET
+    endpoint: /customers/{customerId}/preferences
+    metadata:
+      portalEndpoint: /customers/{customerId}/preferences@get
+    safety:
+      destructive: false
+    idempotency:
+      safeToRetry: true
+    input:
+      schema:
+        type: object
+        required: [customerId]
+        properties:
+          customerId:
+            type: string
+</code></pre>
+<p>The Tool page provides <strong>Validate</strong> and <strong>Test</strong> actions. Validation checks the
+LightAPI schema and endpoint relationship. Testing lets the administrator
+select an environment and run an example or test sequence. Privileged,
+destructive, or confirmation-required operations must not run without the
+required approval.</p>
+<h2 id="workflow-access-grant"><a class="header" href="#workflow-access-grant">Workflow Access Grant</a></h2>
+<p>Workflow access belongs to the Tool because the Tool is the reviewed,
+validated, and testable capability.</p>
+<p>The grant is stored separately from descriptive LightAPI metadata:</p>
+<pre><code class="language-text">workflow_tool_grant_t
+  host_id
+  grant_id
+  tool_id
+  wf_def_id
+  workflow_version             optional
+  tool_version
+  lightapi_digest
+  allowed_environments
+  aggregate_version
+  active
+  update_user
+  update_ts
+</code></pre>
+<p><code>wf_def_id</code> identifies the workflow allowed to use the Tool. When
+<code>workflow_version</code> is present, the grant applies only to that immutable
+workflow version. The Tool version and LightAPI digest pin the reviewed
+capability contract.</p>
+<p>The grant is created and changed through Portal commands and events. Projection
+tables are never edited directly.</p>
+<p>Suggested commands:</p>
+<ul>
+<li><code>grantWorkflowTool</code></li>
+<li><code>updateWorkflowToolGrant</code></li>
+<li><code>revokeWorkflowTool</code></li>
+</ul>
+<p>Suggested events:</p>
+<ul>
+<li><code>WorkflowToolGrantedEvent</code></li>
+<li><code>WorkflowToolGrantUpdatedEvent</code></li>
+<li><code>WorkflowToolRevokedEvent</code></li>
+</ul>
+<h2 id="separate-invocation-directions"><a class="header" href="#separate-invocation-directions">Separate Invocation Directions</a></h2>
+<p>Two relationships must remain distinct:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Relationship</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td>Tool implemented by Workflow</td><td>Calling the Tool starts a selected published workflow.</td></tr>
+<tr><td>Workflow granted Tool</td><td>A workflow call task may invoke the selected Tool.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The second relationship does not depend on how the workflow starts. A
+workflow has the same Tool grant whether it was started by an agent, user,
+scheduler, API, or another workflow.</p>
+<h2 id="portal-user-experience"><a class="header" href="#portal-user-experience">Portal User Experience</a></h2>
+<h3 id="api-admin"><a class="header" href="#api-admin">API Admin</a></h3>
+<p>From <code>/app/service/admin</code>, an administrator selects an API version and can:</p>
+<ul>
+<li>generate or refresh endpoint-backed Tools; and</li>
+<li>open the Tool catalog filtered to that API version.</li>
+</ul>
+<h3 id="service-endpoint"><a class="header" href="#service-endpoint">Service Endpoint</a></h3>
+<p>From <code>/app/serviceEndpoint</code>, an administrator can:</p>
+<ul>
+<li>inspect the protocol-native endpoint and generated schemas;</li>
+<li>open its mapped Tool;</li>
+<li>see whether the Tool is valid and tested; and</li>
+<li>grant selected endpoint Tools through the same Tool grant command.</li>
+</ul>
+<p>This page does not maintain a second workflow-access flag.</p>
+<h3 id="tool-1"><a class="header" href="#tool-1">Tool</a></h3>
+<p>From <code>/app/genai/Tool</code>, an administrator can:</p>
+<ul>
+<li>review and enrich the LightAPI document;</li>
+<li>validate and test the Tool;</li>
+<li>select one workflow or workflow version;</li>
+<li>grant or revoke workflow access; and</li>
+<li>see which workflows currently use the Tool.</li>
+</ul>
+<p>The normal action is named <strong>Workflow Access</strong>. It is not part of
+<code>executionPlacement</code>, because execution placement describes how the Tool itself
+is implemented.</p>
+<h2 id="workflow-editor-palette"><a class="header" href="#workflow-editor-palette">Workflow Editor Palette</a></h2>
+<p>The Workflow Editor queries a workflow-aware catalog:</p>
+<pre><code class="language-text">getWorkflowCallableTool(hostId, wfDefId, workflowVersion, environment)
+</code></pre>
+<p>The query returns only Tools whose grants and contracts are active and valid.
+Each result contains enough trusted data to create a task:</p>
+<ul>
+<li><code>toolId</code> and Tool version;</li>
+<li><code>capabilityRef</code>;</li>
+<li>API name and version;</li>
+<li>protocol-native endpoint key;</li>
+<li>protocol, method, and invocation mapping;</li>
+<li>input and result schemas;</li>
+<li>safety metadata; and</li>
+<li>LightAPI digest.</li>
+</ul>
+<p>The palette groups results by API and API version. Users search by Tool name,
+endpoint, capability, tags, or description.</p>
+<p>Selecting a Tool creates the protocol-specific call task. The author does not
+type an endpoint UUID, URL, method, or Tool name manually.</p>
+<h2 id="fork-branch-editor"><a class="header" href="#fork-branch-editor">Fork Branch Editor</a></h2>
+<p>When a fork step is selected, the property panel provides:</p>
+<ul>
+<li>editable fork step ID;</li>
+<li>editable branch names;</li>
+<li><strong>Add Branch</strong> and <strong>Remove Branch</strong> actions;</li>
+<li>branch validation; and</li>
+<li>an <strong>Add Step</strong> action for each branch.</li>
+</ul>
+<p>Branch names must be unique within the fork. Renaming a branch updates the YAML
+key without changing the tasks inside that branch.</p>
+<p>Choosing <strong>Add Step</strong> opens the normal step palette. Choosing a call task opens
+the workflow-callable Tool selector described above. After selection, the
+editor inserts the generated call beneath that branch and refreshes the YAML,
+outline, and graph from the same parsed workflow model.</p>
+<h2 id="runtime-authorization"><a class="header" href="#runtime-authorization">Runtime Authorization</a></h2>
+<p>Before invoking the downstream operation, the workflow runtime resolves the
+Tool and evaluates:</p>
+<ol>
+<li>the workflow-to-Tool grant;</li>
+<li>the pinned Tool version and LightAPI digest;</li>
+<li>Tool and endpoint lifecycle state;</li>
+<li>the selected environment;</li>
+<li>endpoint scope, permission, and rule configuration; and</li>
+<li>caller or delegated-user policy required by the endpoint.</li>
+</ol>
+<p>A missing, revoked, inactive, or mismatched grant fails before a downstream
+request is sent.</p>
+<p>The workflow identity authorizes use of the Tool. The initiating agent or user
+remains in the execution and audit context so endpoint policies can apply any
+required caller-specific restrictions.</p>
+<h2 id="acceptance-criteria-5"><a class="header" href="#acceptance-criteria-5">Acceptance Criteria</a></h2>
+<ul>
+<li>The database enforces one canonical endpoint key per host and API version.</li>
+<li>REST, MCP, and hybrid endpoint producers generate deterministic keys.</li>
+<li>Every endpoint-backed Tool has an endpoint UUID and portable capability
+reference.</li>
+<li>The Tool LightAPI document validates against the supported specification
+version.</li>
+<li>Tool enrichment is preserved when generated endpoint fields are refreshed.</li>
+<li>Workflow access can be granted and revoked only through Portal events.</li>
+<li>Tool workflow access is independent from workflow-backed Tool execution.</li>
+<li>The callable-Tool query returns only Tools granted to the selected workflow.</li>
+<li>The Workflow Editor creates call tasks from trusted Tool data.</li>
+<li>Fork branches can be added, removed, and renamed from the property panel.</li>
+<li>A call can be added to any fork branch through the same Tool palette.</li>
+<li>Runtime execution rejects unavailable or unauthorized Tool calls before any
+downstream effect.</li>
+<li>Agent-, user-, scheduler-, API-, and workflow-started executions enforce the
+same workflow Tool grant.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-gateway"><a class="header" href="#light-gateway">Light Gateway</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="local-model-provider-transport-for-llm-gateway"><a class="header" href="#local-model-provider-transport-for-llm-gateway">Local Model Provider Transport For LLM Gateway</a></h1>
-<h2 id="status-7"><a class="header" href="#status-7">Status</a></h2>
+<h2 id="status-8"><a class="header" href="#status-8">Status</a></h2>
 <p>Proposed design for implementation and qualification.</p>
 <p>This design extends the completed OpenAI-compatible LLM gateway and the
 Embedding Space Contract. It does not change the public <code>/v1</code> client contract.</p>
-<h2 id="decision-summary-7"><a class="header" href="#decision-summary-7">Decision Summary</a></h2>
+<h2 id="decision-summary-8"><a class="header" href="#decision-summary-8">Decision Summary</a></h2>
 <p>The LLM gateway must support self-hosted model servers running on the same
 machine, in the same Kubernetes cluster, or elsewhere on an organization’s
 private network. Self-hosted models are a first-class production deployment,
@@ -19534,7 +19856,7 @@ embedding.</li>
 <li>Promote a KB index only after the Embedding Space Contract is verified through
 every eligible local deployment.</li>
 </ul>
-<h2 id="acceptance-criteria-5"><a class="header" href="#acceptance-criteria-5">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-6"><a class="header" href="#acceptance-criteria-6">Acceptance Criteria</a></h2>
 <ol>
 <li>An Ollama deployment may use an HTTPS Light Gateway sidecar or an explicitly
 approved, credential-free <code>private_plaintext</code> connection.</li>
@@ -25002,7 +25324,7 @@ plan contains only properties whose parents remain selected.</p>
 <p>The immediate response is <code>ACCEPTED</code>, not completed. It contains the clone
 request ID, target instance ID, transaction ID, terminal event ID, event counts,
 and status URL/action.</p>
-<h3 id="status-8"><a class="header" href="#status-8">Status</a></h3>
+<h3 id="status-9"><a class="header" href="#status-9">Status</a></h3>
 <p><code>getInstanceCloneStatus</code> accepts <code>hostId</code> and <code>cloneRequestId</code> in a POST query
 and returns one of:</p>
 <ul>
@@ -25670,7 +25992,7 @@ WHERE h.sub_domain || '.' || h.domain = ?
 <p>The deployment service contains pipeline management, platform management and deployment management. It also integrates with product management and instance management services.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-portal-install"><a class="header" href="#light-portal-install">Light Portal Install</a></h1>
-<h2 id="purpose-2"><a class="header" href="#purpose-2">Purpose</a></h2>
+<h2 id="purpose-3"><a class="header" href="#purpose-3">Purpose</a></h2>
 <p><code>light-portal-install</code> provides a one-command local installation path for Light Portal. The target user should only need Docker Compose on the host machine and should not need to clone the individual service repositories, build Java or Rust projects, install Node.js, or manually copy static assets.</p>
 <p>The intended entrypoint is:</p>
 <pre><code class="language-bash">curl -sL https://raw.githubusercontent.com/networknt/light-portal-install/main/install.sh | bash
@@ -26182,7 +26504,7 @@ public class UuidUtil {
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="entity-creation-uniqueness"><a class="header" href="#entity-creation-uniqueness">Entity Creation Uniqueness</a></h1>
-<h2 id="status-9"><a class="header" href="#status-9">Status</a></h2>
+<h2 id="status-10"><a class="header" href="#status-10">Status</a></h2>
 <p>Implemented through Phase 5 for Role/Rule stream births and Category/Tag semantic
 identity, client retries, lifecycle alignment, verified historical materialization,
 snapshot/import guards, and policy-aware retry-ledger cleanup. Later aggregate
@@ -27510,7 +27832,7 @@ unprotected append path, importer problem, or policy drift.</p>
 create commands.</li>
 <li>Require elevated, audited authorization for identity release and legacy repair.</li>
 </ul>
-<h2 id="acceptance-criteria-6"><a class="header" href="#acceptance-criteria-6">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-7"><a class="header" href="#acceptance-criteria-7">Acceptance Criteria</a></h2>
 <p>These are program-wide criteria for issue 691. Phase 5 satisfies them only for
 the scoped Role/Rule stream and Category/Tag semantic-identity rollout described
 in Status; criteria involving the remaining 114 <code>REVIEW_PENDING</code> birth events
@@ -32168,7 +32490,7 @@ event-sourced product release model without duplicating standard mappings for
 every tenant.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="release-workflow"><a class="header" href="#release-workflow">Release Workflow</a></h1>
-<h2 id="status-10"><a class="header" href="#status-10">Status</a></h2>
+<h2 id="status-11"><a class="header" href="#status-11">Status</a></h2>
 <p>Proposed design.</p>
 <p>Light Portal should use <code>light-workflow</code> as the durable release orchestrator
 for Java and Rust releases. The workflow should coordinate repository checkout,
@@ -34581,7 +34903,7 @@ Java-compatible unversioned arrays for migration compatibility.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="event-replay"><a class="header" href="#event-replay">Event Replay</a></h1>
-<h2 id="status-11"><a class="header" href="#status-11">Status</a></h2>
+<h2 id="status-12"><a class="header" href="#status-12">Status</a></h2>
 <p>This document defines the revised target design for event replay during the
 early development stage of light-portal. The implementation still contains
 legacy-backfill, staged-rollout, feature-gate, mandatory-encryption, and
@@ -36733,7 +37055,7 @@ The Importer processes the list in order:</p>
 </li>
 </ol>
 <h2 id="dry-run-technical-implementation"><a class="header" href="#dry-run-technical-implementation">Dry Run Technical Implementation</a></h2>
-<h3 id="purpose-3"><a class="header" href="#purpose-3">Purpose</a></h3>
+<h3 id="purpose-4"><a class="header" href="#purpose-4">Purpose</a></h3>
 <p>To guarantee the promotion will succeed without actually modifying the Higher Environment (Production).</p>
 <h3 id="option-1-application-layer-simulation-fast-recommended-for-planning"><a class="header" href="#option-1-application-layer-simulation-fast-recommended-for-planning">Option 1: Application-Layer Simulation (Fast, Recommended for Planning)</a></h3>
 <ul>
@@ -38560,7 +38882,7 @@ records are visible, and which common actions are available.</p>
 <li><a href="#task-center-1">Task Center</a></li>
 <li><a href="#user-session">User Session</a></li>
 <li><a href="#api-catalog">API Catalog</a></li>
-<li><a href="#service-endpoint">Service Endpoint</a></li>
+<li><a href="#service-endpoint-1">Service Endpoint</a></li>
 <li><a href="#workflow-catalog">Workflow Catalog</a></li>
 <li><a href="#schema-catalog">Schema Catalog</a></li>
 <li><a href="#llm-model-control-plane">LLM Model Control Plane</a></li>
@@ -38776,7 +39098,7 @@ consumer, operations, and integration facets</li>
 <li>continue related publish, MCP onboarding, or access-control tasks</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="service-endpoint"><a class="header" href="#service-endpoint">Service Endpoint</a></h1>
+<h1 id="service-endpoint-1"><a class="header" href="#service-endpoint-1">Service Endpoint</a></h1>
 <p>The Service Endpoint page lists the endpoints generated for an API version. Use it to review endpoint metadata and configure endpoint-level access control.</p>
 <h2 id="endpoint-level-access-control"><a class="header" href="#endpoint-level-access-control">Endpoint-Level Access Control</a></h2>
 <p>Access rules, permissions, row filters, and column filters are stored against individual endpoints. Bulk operations on this page write the same endpoint-level records used by the existing per-endpoint pages.</p>
@@ -39418,7 +39740,7 @@ Do not rely on a markdown <code>References</code> section to create executable l
 uses tools that are linked to the skill.</p>
 <p>If the Test tab is disabled, link a workflow to the skill first.</p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="api-admin"><a class="header" href="#api-admin">API Admin</a></h1>
+<h1 id="api-admin-1"><a class="header" href="#api-admin-1">API Admin</a></h1>
 <p>Use API Admin to create, review, update, and retire APIs owned by your team or
 visible to your administrator role.</p>
 <p>This page is owner-aware. Regular users should see only APIs they own or can
@@ -39683,6 +40005,84 @@ or triggered by other portal events.</p>
 <li>update workflow YAML</li>
 <li>start or review related workflow execution records</li>
 </ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="workflow-editor-1"><a class="header" href="#workflow-editor-1">Workflow Editor</a></h1>
+<p>Use Workflow Editor to create, validate, test, version, and publish workflow
+definitions. The Help button on the editor opens this page in a new tab.</p>
+<h2 id="define-the-workflow-contract"><a class="header" href="#define-the-workflow-contract">Define the workflow contract</a></h2>
+<p>The form fields write directly into the YAML definition. For a new workflow,
+start with:</p>
+<ul>
+<li><strong>DSL Version</strong>, <strong>Namespace</strong>, <strong>Name</strong>, <strong>Version</strong>, <strong>Title</strong>, and
+<strong>Summary</strong> for the top-level <code>document</code> object</li>
+<li><strong>Evaluation Language</strong> for <code>evaluate.language</code>; workflow-backed MCP tools
+currently require <code>cel</code></li>
+<li><strong>Input Schema</strong> and <strong>Output Schema</strong> for inline JSON Schema documents</li>
+<li>categories and tags selected from the portal reference tables</li>
+</ul>
+<p>For example, enabling Input Schema creates this structure in the YAML editor:</p>
+<pre><code class="language-yaml">input:
+  schema:
+    format: json
+    document:
+      type: object
+      additionalProperties: false
+      required:
+        - customerId
+      properties:
+        customerId:
+          type: string
+</code></pre>
+<h2 id="add-workflow-tasks"><a class="header" href="#add-workflow-tasks">Add workflow tasks</a></h2>
+<p>Use the Step Palette to select a task type, enter a task name, and add it to the
+workflow. New definitions use the <code>do</code> task list. The editor inserts each task
+into the existing task list instead of creating a competing <code>steps</code> section.</p>
+<p>The palette includes Ask, Assert, HTTP, OpenAPI, JSON-RPC, OpenRPC, gRPC, MCP,
+Rule, Agent, child Workflow, Fork, Switch, Condition, Set, Export, and Wait
+starters. A Condition starter is a named switch skeleton, and an Export starter
+combines a minimal <code>set</code> task with its task-level <code>export</code> mapping. Step IDs keep
+their entered letter case, so names such as <code>loadCustomerContext</code> round-trip
+unchanged.</p>
+<p>Use the YAML editor for task-specific settings that are not exposed by a form.
+The Visual Graph reflects the task structure and lets you inspect the resulting
+flow. Parallel work is represented by a <code>fork</code> task with named branches.</p>
+<p>After inserting or selecting a fork in the Steps list or Visual Graph, use the
+<strong>Fork Branches</strong> panel to rename its branches or add another branch. New
+branches start with a minimal <code>set</code> task that can be replaced with the intended
+call or other task configuration. Branch names must be unique and may contain
+letters, numbers, underscores, and hyphens. The editor keeps at least two
+branches in a fork.</p>
+<p>For an endpoint call, first open the endpoint-backed Tool in <strong>GenAI &gt; Tools</strong>
+and use <strong>Workflow Access</strong> to grant it to this workflow and environment. In
+the fork panel, select <strong>Add Step</strong> on the intended branch, change Reference
+Type to <strong>Endpoints</strong>, and select the granted capability. The editor replaces
+only that branch’s placeholder and generates an executable <code>call: http</code> task
+with a logical <code>lightapi://</code> URI and a pinned Tool version and LightAPI digest.
+It never stores the endpoint UUID or an environment URL in workflow YAML.</p>
+<p>The Endpoints list is workflow-aware. A Tool is absent when its grant is
+revoked, is for another workflow/version/environment, its LightAPI document is
+invalid, or its pinned version or digest is stale. Runtime execution performs
+the same check before resolving the logical URI and sending the request.</p>
+<h2 id="validate-and-test"><a class="header" href="#validate-and-test">Validate and test</a></h2>
+<p><strong>Validate</strong> first parses the YAML in the browser and checks that it has a
+workflow task container. It then calls the portal workflow validation service
+for the supported server-side contract checks. Validation does not currently
+apply the complete workflow specification schema.</p>
+<p>After saving a draft, use <strong>Test</strong> to start it with test input and inspect
+processes, tasks, assignments, audit records, and final output in the Runtime
+Test panel.</p>
+<h2 id="import-save-and-publish"><a class="header" href="#import-save-and-publish">Import, save, and publish</a></h2>
+<ul>
+<li><strong>Import</strong> loads a YAML, YML, or JSON workflow file into the editor.</li>
+<li><strong>Export</strong> downloads the current definition as YAML.</li>
+<li><strong>Save</strong> stores the current draft.</li>
+<li><strong>Publish Version</strong> makes a saved version immutable and available according
+to its catalog and ownership settings.</li>
+<li><strong>Create New Version</strong> copies a published version into a new editable draft.</li>
+</ul>
+<p>Publishing a definition is separate from making it visible in the Workflow
+Catalog. Enable catalog visibility only when the workflow should be discoverable
+by other authorized portal users.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="portal-view-form-help"><a class="header" href="#portal-view-form-help">Portal View Form Help</a></h1>
 <p>This section contains form-level help for generated and custom <code>portal-view</code>
@@ -44339,6 +44739,954 @@ steps:
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-gateway-3"><a class="header" href="#light-gateway-3">light-gateway</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="onboard-an-llm-through-llm-gateway"><a class="header" href="#onboard-an-llm-through-llm-gateway">Onboard an LLM Through <code>llm-gateway</code></a></h1>
+<p>This tutorial onboards a hosted model into the Light Portal LLM control plane,
+publishes it to a dedicated <code>llm-gateway</code>, and validates it through a stable
+Public Alias. The worked example uses Groq’s <code>qwen/qwen3.6-27b</code>, but the same
+workflow applies to other hosted or OpenAI-compatible providers, including the
+compatible APIs offered by Amazon Bedrock.</p>
+<p>Applications must use the Public Alias created in this tutorial. They must not
+depend on the provider name, Deployment ID, or physical model ID. That
+separation makes later provider and model migrations a routing change instead
+of an application release.</p>
+<blockquote class="blockquote-tag blockquote-tag-important">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Important</p>
+<p>Provider availability, limits, capabilities, and prices change. The Qwen
+values below were verified against Groq’s documentation on August 14, 2026.
+Recheck the provider’s current model catalog and contract before creating or
+updating records.</p>
+</blockquote>
+<h2 id="recommendation-for-free-tier-demos"><a class="header" href="#recommendation-for-free-tier-demos">Recommendation for free-tier demos</a></h2>
+<p>Groq will stop serving <code>llama-3.3-70b-versatile</code> to free and developer-tier
+customers on August 16, 2026. Groq recommends either
+<code>openai/gpt-oss-120b</code> or <code>qwen/qwen3.6-27b</code>.</p>
+<p>The two replacements have different operational profiles. The published prices
+are included because the LLM control plane requires effective Pricing metadata;
+they are not the deciding factor for a free-plan development demo.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Groq model</th><th>Lifecycle</th><th>Input/output price per 1M tokens</th><th>Context / maximum completion</th><th>Distinguishing features</th></tr>
+</thead>
+<tbody>
+<tr><td><code>openai/gpt-oss-120b</code></td><td>Production</td><td>$0.15 / $0.60</td><td>131,072 / 65,536</td><td>Text generation, reasoning, tool use, JSON modes, and Groq built-in browser/code tools</td></tr>
+<tr><td><code>qwen/qwen3.6-27b</code></td><td>Preview</td><td>$0.60 / $3.00</td><td>131,072 / 16,384</td><td>Text and image input, reasoning/non-reasoning modes, tool use, JSON Object Mode, vision, multilingual use, and strong coding benchmarks</td></tr>
+</tbody>
+</table>
+</div>
+<p>For a development host whose main purpose is demonstrating local tool calling,
+onboard both models under separate Aliases and select the Alias per agent. Do
+not assume that benchmark or marketing claims make either model universally
+better at tool calling. In the August 14, 2026 dev-host qualification, both
+models produced a valid <code>get_weather</code> tool call with <code>tool_choice</code> set to
+<code>auto</code> and <code>required</code>. GPT-OSS also accepted an OpenAI named-function
+<code>tool_choice</code> object and followed a short exact-answer instruction more
+predictably. Qwen rejected that named-function form and a request that required
+two parallel tool calls, and its normal text response included a visible
+<code>&lt;think&gt;</code> block. The checked Qwen capability therefore keeps
+<code>parallelTools: false</code>.</p>
+<p>This is one bounded compatibility test, not a general quality ranking. Qwen’s
+vision and multilingual capabilities may still make it the better Alias for
+some agents, while GPT-OSS is a useful default for agents that need predictable
+OpenAI-style text and tool behavior. Score both against the product’s real tool
+schemas, arguments, results, and multi-step conversations.</p>
+<p>Qwen’s preview lifecycle is acceptable for a non-production demonstration as
+long as the demo does not promise an availability SLA. Groq currently lists
+Qwen 3.6 27B on its Free Plan with the same published request and token limits
+as GPT-OSS 120B: 30 requests per minute, 1,000 requests per day, 8,000 tokens
+per minute, and 200,000 tokens per day. Users should verify the exact limits in
+their own Groq organization before testing.</p>
+<p>Reconsider lifecycle guarantees, paid rates, sustained quotas, privacy,
+residency, support, and fallback design when this moves from a demo to a
+commercial cloud service. That future production decision does not need to
+constrain the free-tier tutorial.</p>
+<p>A suitable development migration is therefore:</p>
+<ol>
+<li>Onboard Qwen as <code>assistant-qwen</code> and GPT-OSS as <code>assistant-gpt-oss</code>.</li>
+<li>Run the same tool-calling acceptance matrix against both Aliases.</li>
+<li>Assign each agent the Alias that passes its workload-specific cases.</li>
+<li>Keep the existing application Alias stable if users already depend on it.</li>
+<li>Route that stable development Alias to the selected model only after its
+demo cases pass.</li>
+</ol>
+<p>The current Alias Route form fixes weight at <code>1</code> and canary percentage at <code>0</code>.
+Use a separate demo Alias or an external test split; do not claim that
+the current control plane performs percentage-based canary routing.</p>
+<p>Sources:</p>
+<ul>
+<li><a href="https://console.groq.com/docs/deprecations">Groq deprecation schedule</a></li>
+<li><a href="https://console.groq.com/docs/models">Groq supported models</a></li>
+<li><a href="https://console.groq.com/docs/model/qwen/qwen3.6-27b">Groq Qwen 3.6 27B model page</a></li>
+<li><a href="https://console.groq.com/docs/model/openai/gpt-oss-120b">Groq GPT-OSS 120B model page</a></li>
+<li><a href="https://console.groq.com/docs/tool-use/overview">Groq tool-use compatibility</a></li>
+<li><a href="https://console.groq.com/docs/rate-limits">Groq Free Plan rate limits</a></li>
+</ul>
+<h2 id="what-the-workflow-creates"><a class="header" href="#what-the-workflow-creates">What the workflow creates</a></h2>
+<pre class="mermaid">flowchart LR
+    S[Provider contract] --&gt; M[Global Model]
+    M --&gt; R[Host and environment Registration]
+    A[Provider Account] --&gt; E[Provider Endpoint]
+    R --&gt; D[Deployment]
+    E --&gt; D
+    D --&gt; C[External Credential reference]
+    D --&gt; P[Effective Pricing]
+    L[Public Alias] --&gt; T[Alias Route]
+    D --&gt; T
+    C --&gt; U[Publication]
+    P --&gt; U
+    T --&gt; U
+    U --&gt; G[Gateway snapshot and acknowledgement]
+    G --&gt; V[Authenticated live validation]
+</pre>
+
+<p>These records have deliberately different responsibilities:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Record</th><th>Responsibility</th></tr>
+</thead>
+<tbody>
+<tr><td>Model</td><td>Global provider/model identity, limits, modalities, operations, and static capabilities</td></tr>
+<tr><td>Registration</td><td>Approval to use that Model on one host and in one logical environment</td></tr>
+<tr><td>Provider Account</td><td>Non-secret billing, quota, and capacity ownership</td></tr>
+<tr><td>Provider Endpoint</td><td>Wire protocol, base URL, authentication mode, and network transport</td></tr>
+<tr><td>Deployment</td><td>Exact callable model runtime plus capacity and readiness declarations</td></tr>
+<tr><td>Credential</td><td>Versioned reference to a secret resolved by the gateway; never the secret value</td></tr>
+<tr><td>Public Alias</td><td>Stable client-facing model name and required policy/capability contract</td></tr>
+<tr><td>Alias Route</td><td>Ordered connection from an Alias to a compatible Deployment</td></tr>
+<tr><td>Pricing</td><td>Effective-dated rates for the Deployment operation</td></tr>
+<tr><td>Publication</td><td>Immutable projection delivered to one selected gateway instance</td></tr>
+</tbody>
+</table>
+</div>
+<p>Policies and Bindings are optional governance records. They are not required
+to establish the provider connection or publish a normal public generation
+Alias. Add them only when a subject needs policy-based model selection,
+budgets, or other supported governance behavior.</p>
+<h2 id="before-you-begin-3"><a class="header" href="#before-you-begin-3">Before you begin</a></h2>
+<p>You need:</p>
+<ul>
+<li>permission to manage the global LLM catalog and the selected host’s LLM
+records;</li>
+<li>an active <code>gtw</code> instance for the target instance environment tag;</li>
+<li>a running dedicated <code>llm-gateway</code> that loads
+<code>com.networknt.llm.gateway-1.0.0</code> configuration;</li>
+<li>a provider account with permission to use the physical model;</li>
+<li>a protected secret-injection path for the target gateway process; and</li>
+<li>a gateway caller token for the final <code>/v1/models</code> and
+<code>/v1/chat/completions</code> validation.</li>
+</ul>
+<p>Do not put a provider key in Portal, a Model, Endpoint headers, a Deployment,
+an Alias, a command line, source control, or this documentation. Portal stores
+only a reference such as <code>env:GROQ_API_KEY</code>. The provider key is resolved
+inside the target gateway process. The bearer token used by an application to
+call <code>llm-gateway</code> is a different credential.</p>
+<h2 id="1-qualify-the-provider-contract"><a class="header" href="#1-qualify-the-provider-contract">1. Qualify the provider contract</a></h2>
+<p>Record the following information from primary provider documentation before
+opening Portal:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Question</th><th>Why it matters</th></tr>
+</thead>
+<tbody>
+<tr><td>What is the exact physical model ID?</td><td>The gateway sends this value upstream without translating the provider’s catalog.</td></tr>
+<tr><td>Is the model production, preview, or deprecated?</td><td>Determines rollout and fallback requirements.</td></tr>
+<tr><td>Which API operation and wire format serve it?</td><td>Selects the gateway Provider Protocol.</td></tr>
+<tr><td>What base URL ends immediately before the operation path?</td><td>The gateway appends <code>/chat/completions</code>, <code>/responses</code>, <code>/messages</code>, or <code>/embeddings</code>.</td></tr>
+<tr><td>What authentication scheme is required?</td><td>Selects <code>NONE</code>, <code>BEARER</code>, or <code>API_KEY</code>; the current generic client does not sign AWS SigV4 requests.</td></tr>
+<tr><td>Which regions and data classifications are approved?</td><td>Constrains the Registration, Deployment, and Route.</td></tr>
+<tr><td>What are the context and output limits?</td><td>Bounds the Model and Alias.</td></tr>
+<tr><td>Which modalities and features were actually tested?</td><td>Controls declared and required capabilities.</td></tr>
+<tr><td>What are the current input, output, and cached-input rates?</td><td>Creates an auditable Pricing record.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The current gateway accepts these provider wire contracts:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Provider Protocol</th><th>Gateway appends</th><th>Operation</th></tr>
+</thead>
+<tbody>
+<tr><td><code>openai_chat</code></td><td><code>/chat/completions</code></td><td><code>generate</code></td></tr>
+<tr><td><code>openai_responses</code></td><td><code>/responses</code></td><td><code>generate</code></td></tr>
+<tr><td><code>anthropic_messages</code></td><td><code>/messages</code></td><td><code>generate</code></td></tr>
+<tr><td><code>openai_embeddings</code></td><td><code>/embeddings</code></td><td><code>embed</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Provider identity and provider protocol are independent. Groq uses Provider
+Type <code>groq</code> and Provider Protocol <code>openai_chat</code>. An OpenAI-compatible Amazon
+Bedrock endpoint uses Provider Type <code>bedrock</code> and, for Chat Completions,
+Provider Protocol <code>openai_chat</code>.</p>
+<p>Do not select <code>openai_chat</code> merely because a provider has an HTTP API. Verify
+that it implements the compatible request, response, error, and streaming
+contract. Native Bedrock <code>Converse</code> and <code>InvokeModel</code>, for example, are not
+<code>openai_chat</code>.</p>
+<h2 id="2-prepare-the-reference-catalog"><a class="header" href="#2-prepare-the-reference-catalog">2. Prepare the reference catalog</a></h2>
+<p>The Model and Deployment forms use dependent reference-data dropdowns. Before
+creating the Model, confirm that these values are selectable:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Reference table</th><th>Qwen value</th><th>GPT-OSS value</th></tr>
+</thead>
+<tbody>
+<tr><td><code>model_provider</code></td><td><code>groq</code></td><td><code>groq</code></td></tr>
+<tr><td><code>model_name</code></td><td><code>qwen/qwen3.6-27b</code></td><td><code>openai/gpt-oss-120b</code></td></tr>
+<tr><td><code>model_family</code></td><td><code>qwen</code></td><td><code>gpt</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>The following active reference relations are also required:</p>
+<ul>
+<li><code>provider_name</code>: from <code>groq</code> to each exact model name;</li>
+<li><code>model_name_family</code>: from each model name to its <code>qwen</code> or <code>gpt</code> family.</li>
+</ul>
+<p>The current LLM forms query this catalog without a host parameter, so these
+are platform-global catalog values. A host-only reference value will not make
+the Model dropdown work. If a value is missing, ask a reference-data/platform
+administrator to add the table only if the table itself is absent, then add
+the value, its locale label, and both relations. Event-based bootstrap jobs
+must query first and generate only the missing aggregates. Do not
+substitute a similar model ID; provider IDs are exact and case-sensitive unless
+the provider explicitly documents otherwise.</p>
+<p>See <a href="#reference-table-admin">Reference Table Admin</a> for
+the global reference-data model.</p>
+<h2 id="3-verify-the-physical-model-directly"><a class="header" href="#3-verify-the-physical-model-directly">3. Verify the physical model directly</a></h2>
+<p>Use the provider’s console or an approved direct probe from the same egress
+zone as the gateway. For Groq, first verify that the project can see the exact
+model:</p>
+<pre><code class="language-bash">set -euo pipefail
+umask 077
+
+provider_header_file=$(mktemp)
+trap 'rm -f -- "$provider_header_file"' EXIT
+read -rsp 'Groq API key: ' provider_api_key
+printf '\n'
+printf 'Authorization: Bearer %s\n' "$provider_api_key" &gt;"$provider_header_file"
+unset provider_api_key
+
+curl --fail-with-body --silent --show-error \
+  --header @"$provider_header_file" \
+  --header 'Content-Type: application/json' \
+  https://api.groq.com/openai/v1/models
+</code></pre>
+<p>Then send one bounded Chat Completions request. It consumes provider quota and
+may be billable if the account is not on the Free Plan:</p>
+<pre><code class="language-bash">curl --fail-with-body --silent --show-error \
+  --header @"$provider_header_file" \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "model": "qwen/qwen3.6-27b",
+    "messages": [{"role": "user", "content": "Reply with exactly: provider-ok"}],
+    "reasoning_effort": "none",
+    "temperature": 0,
+    "max_completion_tokens": 16,
+    "stream": false
+  }' \
+  https://api.groq.com/openai/v1/chat/completions
+</code></pre>
+<p>Stop if the model is absent, blocked by organization/project permissions, or
+does not accept the required operation. Fix provider access before creating
+Portal records. A successful provider probe does not validate gateway
+authentication, policy, publication, or routing; it validates only the
+upstream premise.</p>
+<p>Groq API keys are scoped to the Groq project, not minted per model. The same
+<code>GROQ_API_KEY</code> can serve Qwen, GPT-OSS, and other models visible to that project
+and allowed by its permissions. Create additional keys only for deliberate
+rotation, isolation, or separate projects—not because this tutorial creates a
+second Deployment.</p>
+<h2 id="4-create-the-global-model"><a class="header" href="#4-create-the-global-model">4. Create the global Model</a></h2>
+<p>Open <strong>Marketplace &gt; LLM Model Catalog</strong>, choose <strong>Create</strong>, and enter:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Qwen example</th></tr>
+</thead>
+<tbody>
+<tr><td>Provider Type</td><td><code>groq</code></td></tr>
+<tr><td>Physical Model Id</td><td><code>qwen/qwen3.6-27b</code></td></tr>
+<tr><td>Model Family</td><td><code>qwen</code></td></tr>
+<tr><td>Model Version</td><td>Leave empty unless the provider publishes a separate stable version identifier</td></tr>
+<tr><td>Context Token Limit</td><td><code>131072</code></td></tr>
+<tr><td>Output Token Limit</td><td><code>16384</code></td></tr>
+<tr><td>Modalities</td><td><code>["text", "image"]</code></td></tr>
+<tr><td>Operations</td><td><code>["generate"]</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Use this conservative static capability contract:</p>
+<pre><code class="language-json">{
+  "operations": ["generate"],
+  "generation": {
+    "content": {
+      "text": true,
+      "images": true,
+      "tools": true,
+      "parallelTools": false,
+      "structuredJson": true,
+      "reasoningUsage": false
+    },
+    "streaming": true
+  }
+}
+</code></pre>
+<p>The Qwen model page documents vision, tool use, JSON Object Mode, reasoning,
+and text output. This contract deliberately leaves <code>parallelTools</code> and
+<code>reasoningUsage</code> false because the checked Groq path rejected the parallel
+two-tool case and exposed reasoning inside normal message content. Declared
+capability means the provider path is allowed to satisfy that requirement; it
+is not descriptive marketing metadata. Set a capability to <code>true</code> only after
+the full gateway path proves the exact behavior required by the application.</p>
+<p>Choose <strong>Apply</strong> after editing each structured JSON or YAML value, then create
+the Model. See <a href="#create-llm-model">Create LLM Model</a>
+for editor behavior and field-level troubleshooting.</p>
+<h2 id="5-create-the-host-registration"><a class="header" href="#5-create-the-host-registration">5. Create the host Registration</a></h2>
+<p>Open <strong>Administration &gt; GenAI Admin &gt; LLM Models</strong>, select the target host, and
+open <strong>Registrations</strong>. Choose <strong>Create registration</strong>.</p>
+<p>Use:</p>
+<ul>
+<li>LLM Model: the new <code>groq / qwen/qwen3.6-27b</code> catalog Model;</li>
+<li>Environment: the logical LLM environment served by the target gateway, such
+as <code>dev</code> or <code>prod</code>;</li>
+<li>Regions: empty for Groq’s public global endpoint unless an approved provider
+region is part of the contract;</li>
+<li>Data Classifications: only classifications approved for this provider path;</li>
+<li>Capability Restrictions: <code>{}</code> unless the host must narrow the global Model
+contract.</li>
+</ul>
+<p>The Registration environment must match the Public Alias environment and the
+logical environment of the selected gateway instance at publication time.</p>
+<h2 id="6-create-or-reuse-the-provider-account"><a class="header" href="#6-create-or-reuse-the-provider-account">6. Create or reuse the Provider Account</a></h2>
+<p>Open <strong>Accounts</strong>. Reuse an existing Groq Account only when it represents the
+same billing principal and quota pool. Otherwise create one with values such
+as:</p>
+<pre><code class="language-json">{
+  "accountName": "groq-developer",
+  "providerType": "groq",
+  "billingPrincipal": "groq-project-llm-platform",
+  "quotaGroupId": "groq-developer-capacity",
+  "capacityMetadata": {
+    "modelLifecycle": "preview"
+  }
+}
+</code></pre>
+<p><code>billingPrincipal</code> and <code>quotaGroupId</code> are operator-assigned governance names,
+not secrets. Record actual approved rate-limit metadata when useful; do not
+copy catalog defaults that differ from the account’s real limits.</p>
+<p>See <a href="#create-provider-account">Create Provider Account</a>.</p>
+<h2 id="7-create-or-reuse-the-provider-endpoint"><a class="header" href="#7-create-or-reuse-the-provider-endpoint">7. Create or reuse the Provider Endpoint</a></h2>
+<p>One Groq OpenAI-compatible Endpoint can be reused by compatible Groq chat
+Deployments under the same Provider Account. In <strong>Provider Endpoints</strong>, use:</p>
+<pre><code class="language-json">{
+  "endpointName": "groq-openai-chat-public",
+  "providerProtocol": "openai_chat",
+  "baseUrl": "https://api.groq.com/openai/v1",
+  "headers": {},
+  "endpointAuthMode": "BEARER",
+  "apiKeyHeader": null,
+  "networkProfileMode": "PUBLIC_TLS",
+  "networkTermination": "NATIVE",
+  "networkZoneId": null,
+  "trustBundleReference": null,
+  "poolIdleTimeoutMs": 30000,
+  "clientRefreshIntervalMs": 300000,
+  "plaintextRiskAcknowledged": false
+}
+</code></pre>
+<p>Select the Provider Account created or reused in the previous step. Do not add
+<code>/chat/completions</code> to <code>baseUrl</code>; the gateway appends it. Do not add an
+<code>Authorization</code> header or API key. The Credential supplies the bearer token at
+runtime.</p>
+<p>See <a href="#create-provider-endpoint">Create Provider Endpoint</a>.</p>
+<h2 id="8-create-the-deployment"><a class="header" href="#8-create-the-deployment">8. Create the Deployment</a></h2>
+<p>In <strong>Deployments</strong>, select the new Registration, Groq Account, and Groq
+Endpoint. Use a distinct Deployment rather than rewriting the existing Llama
+Deployment:</p>
+<pre><code class="language-json">{
+  "deploymentName": "groq-qwen3-6-27b-dev",
+  "providerType": "groq",
+  "providerProtocol": "openai_chat",
+  "physicalModelId": "qwen/qwen3.6-27b",
+  "baseUrl": "https://api.groq.com/openai/v1",
+  "deploymentRevisionId": "groq-qwen3-6-27b-dev/r1",
+  "physicalRuntimeId": "groq/qwen-qwen3-6-27b",
+  "capacityDomainId": "groq-developer-capacity",
+  "runtimeCapacity": {
+    "maxParallelRequests": 2,
+    "maxQueuedRequests": 32,
+    "coldStartTimeoutMs": 30000,
+    "streamSetupTimeoutMs": 10000,
+    "requestTimeoutMs": 120000
+  },
+  "readinessPolicy": "IMMEDIATE",
+  "expectedSidecar": null,
+  "region": null,
+  "transportBounds": {}
+}
+</code></pre>
+<p>Capacity values are bounded starting assumptions, not a claim about Groq
+entitlement. Set them from measured latency, the selected account’s rate
+limits, and the application’s timeout budget. Increase
+<code>deploymentRevisionId</code> when the callable runtime contract changes.</p>
+<p>See <a href="#create-provider-deployment">Create Provider Deployment</a>.</p>
+<h2 id="9-provision-and-reference-the-credential"><a class="header" href="#9-provision-and-reference-the-credential">9. Provision and reference the Credential</a></h2>
+<p>Provision <code>GROQ_API_KEY</code> in the secret manager or protected environment of the
+target <code>llm-gateway</code> workload. In the local <code>portal-config-loc</code> and
+<code>portal-config-dev</code> Compose paths, the key can be supplied through the private
+<code>~/.config/lightapi/light-portal.env</code> file and is passed to the dedicated
+<code>llm-gateway</code> container. Never commit that file or print its value.</p>
+<p>An <code>ENDPOINT</code> credential belongs to the shared endpoint contract. Before
+creating anything, look for an active credential with the same host, Provider
+Endpoint, and Credential Version. Reuse it for every compatible Groq
+Deployment. Do not create one credential per model or Deployment; the control
+plane enforces endpoint/version uniqueness.</p>
+<p>If no matching endpoint credential exists, create one in <strong>Credentials</strong>:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>Credential Purpose</td><td><code>ENDPOINT</code></td></tr>
+<tr><td>Provider Endpoint</td><td><code>groq-openai-chat-public</code></td></tr>
+<tr><td>Provider Deployment</td><td>Select one Deployment attached to the Endpoint if the form requires it; resolution remains endpoint-level</td></tr>
+<tr><td>Credential Version</td><td><code>1</code></td></tr>
+<tr><td>Secret Reference</td><td><code>env:GROQ_API_KEY</code></td></tr>
+<tr><td>Effective Time</td><td>A current or earlier ISO-8601 UTC timestamp</td></tr>
+<tr><td>Expiration Time</td><td>Empty unless the provider key has a known expiry</td></tr>
+</tbody>
+</table>
+</div>
+<p>Restart or explicitly reload the gateway after changing its injected secret.
+Portal cannot determine whether the referenced environment variable exists.</p>
+<p>See <a href="#create-provider-credential">Create Provider Credential</a>.</p>
+<h2 id="10-create-a-demo-alias-and-route"><a class="header" href="#10-create-a-demo-alias-and-route">10. Create a demo Alias and Route</a></h2>
+<p>In <strong>Aliases</strong>, create a new Alias for the tool-calling demo:</p>
+<pre><code class="language-json">{
+  "environment": "dev",
+  "aliasName": "assistant-qwen",
+  "operations": ["generate"],
+  "requiredCapabilities": {
+    "tools": true,
+    "streaming": true
+  },
+  "requireExpectedEmbeddingSpace": false,
+  "embeddingWorkloadLane": "standard",
+  "maxInputTokens": 65536,
+  "maxOutputTokens": 16384,
+  "maxRequestBytes": 1048576,
+  "dataClassification": "internal",
+  "loggingMode": "METADATA",
+  "piiMode": "REDACT",
+  "aliasVisibility": "PUBLIC"
+}
+</code></pre>
+<p>Adjust classification, logging, PII handling, and visibility to the workload’s
+approved policy. The conservative input bound leaves substantial room for the
+completion inside the provider context window; applications may choose lower
+limits.</p>
+<p>In <strong>Routes</strong>, connect <code>assistant-qwen</code> to
+<code>groq-qwen3-6-27b-dev</code>:</p>
+<pre><code class="language-json">{
+  "routePriority": 0,
+  "routeWeight": 1,
+  "fallbackEnabled": false,
+  "canaryPercent": 0,
+  "residencyConditions": {}
+}
+</code></pre>
+<p>The form supplies the selected Alias and Deployment UUIDs. A Route is not
+eligible until the Deployment also has an effective Credential and Pricing.</p>
+<p>See <a href="#create-public-alias">Create Public Alias</a>
+and <a href="#create-alias-route">Create Alias Route</a>.</p>
+<h2 id="11-create-effective-pricing"><a class="header" href="#11-create-effective-pricing">11. Create effective Pricing</a></h2>
+<p>In <strong>Pricing</strong>, select the Qwen Deployment and enter the rates verified on the
+Groq model page:</p>
+<pre><code class="language-json">{
+  "operation": "generate",
+  "pricingVersion": 1,
+  "pricingBasis": "EXTERNAL_PROVIDER",
+  "inputMicrosPerMillion": 600000,
+  "outputMicrosPerMillion": 3000000,
+  "effectiveTs": "2026-08-14T00:00:00Z",
+  "expiresTs": null,
+  "source": "https://console.groq.com/docs/model/qwen/qwen3.6-27b",
+  "approvedBy": "llm-platform-owner"
+}
+</code></pre>
+<p>Rates are integer micros per one million tokens: one currency unit is
+<code>1,000,000</code> micros. Leave Cached Input Micros empty because the cited Qwen
+page does not publish a cached-input rate. Replace the values when the
+provider contract changes, create a new Pricing Version, and publish again.</p>
+<p>See <a href="#create-pricing-version">Create Pricing Version</a>.</p>
+<h3 id="repeat-the-records-for-gpt-oss"><a class="header" href="#repeat-the-records-for-gpt-oss">Repeat the records for GPT-OSS</a></h3>
+<p>Reuse the same Groq Provider Account, Endpoint, and active endpoint Credential.
+Create separate Model, Registration, Deployment, Pricing, Alias, and Route
+records with these differences:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>GPT-OSS value</th></tr>
+</thead>
+<tbody>
+<tr><td>Physical Model Id</td><td><code>openai/gpt-oss-120b</code></td></tr>
+<tr><td>Model Family</td><td><code>gpt</code></td></tr>
+<tr><td>Context / Output Token Limit</td><td><code>131072</code> / <code>65536</code></td></tr>
+<tr><td>Modalities / Operations</td><td><code>["text"]</code> / <code>["generate"]</code></td></tr>
+<tr><td>Deployment Name</td><td><code>groq-gpt-oss-120b-dev</code></td></tr>
+<tr><td>Runtime Capacity</td><td>Start with <code>maxParallelRequests: 2</code></td></tr>
+<tr><td>Alias</td><td><code>assistant-gpt-oss</code></td></tr>
+<tr><td>Alias Input / Output Limit</td><td><code>65536</code> / <code>32768</code></td></tr>
+<tr><td>Input / Output Micros per Million</td><td><code>150000</code> / <code>600000</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Use the same conservative generation capability object as Qwen except set
+<code>images: false</code>. Keep <code>parallelTools: false</code> until a workload-specific
+parallel test passes through the full gateway path.</p>
+<h2 id="12-generate-and-publish-the-gateway-projection"><a class="header" href="#12-generate-and-publish-the-gateway-projection">12. Generate and publish the gateway projection</a></h2>
+<p>Open <strong>Publication</strong> in the LLM Model Control Plane:</p>
+<ol>
+<li>Select the target <strong>Instance Env Tag</strong>.</li>
+<li>Select the active <code>gtw</code> <strong>LLM Gateway Instance</strong>.</li>
+<li>Confirm that the displayed <strong>LLM environment</strong> matches the Registration and
+Alias environment.</li>
+<li>Choose <strong>Generate from active records</strong>.</li>
+<li>Review the read-only V3 projection. It must contain the exact model ID,
+<code>openai_chat</code>, the Groq base URL, declared capabilities, Alias Route,
+effective Pricing, and only the credential reference.</li>
+<li>Confirm that no raw provider key appears anywhere in the preview.</li>
+<li>Choose <strong>Publish to instance</strong>.</li>
+<li>Create and promote the corresponding configuration snapshot, then reload or
+restart the selected gateway as required by the deployment.</li>
+<li>Confirm that the intended running replica has an <code>ACKNOWLEDGED</code> publication
+with the expected publication ID and root digest. Do not send an upstream
+validation request while acknowledgement is absent, <code>PENDING</code>, <code>FAILED</code>, or
+<code>DIVERGENT</code>.</li>
+</ol>
+<p>Publication proves that the configuration is internally consistent and was
+delivered. It does not prove that Groq accepted a request or that the model
+meets the workload’s quality requirements.</p>
+<p>The Portal V3 publication path requires a frozen replica inventory and
+acknowledgement. A development Compose repository may instead provide a
+reviewed, importable instance-publication event and a scoped snapshot-refresh
+script. Use that repository’s supported workflow only for the exact host,
+environment, service, and instance; the normal operator path remains the
+Portal UI.</p>
+<h2 id="13-validate-through-the-live-gateway"><a class="header" href="#13-validate-through-the-live-gateway">13. Validate through the live gateway</a></h2>
+<p>Prepare a protected header file containing the gateway caller token. This is
+not <code>GROQ_API_KEY</code>:</p>
+<pre><code class="language-bash">set -euo pipefail
+umask 077
+
+gateway_header_file=$(mktemp)
+trap 'rm -f -- "$gateway_header_file"' EXIT
+read -rsp 'Gateway client bearer token: ' gateway_client_token
+printf '\n'
+printf 'Authorization: Bearer %s\n' "$gateway_client_token" &gt;"$gateway_header_file"
+unset gateway_client_token
+</code></pre>
+<p>List the Aliases visible to this caller:</p>
+<pre><code class="language-bash">curl --fail-with-body --silent --show-error \
+  --header @"$gateway_header_file" \
+  --cacert /path/to/gateway-ca.pem \
+  https://localhost:8444/v1/models
+</code></pre>
+<p>Then send a small request through the Alias:</p>
+<pre><code class="language-bash">curl --fail-with-body --silent --show-error \
+  --header @"$gateway_header_file" \
+  --header 'Content-Type: application/json' \
+  --cacert /path/to/gateway-ca.pem \
+  --data '{
+    "model": "assistant-qwen",
+    "messages": [{"role": "user", "content": "Reply with exactly: gateway-ok"}],
+    "temperature": 0,
+    "max_tokens": 512,
+    "stream": false
+  }' \
+  https://localhost:8444/v1/chat/completions
+</code></pre>
+<p>Because this demo depends on tool calling, also send a request containing a
+realistic function schema:</p>
+<pre><code class="language-bash">curl --fail-with-body --silent --show-error \
+  --header @"$gateway_header_file" \
+  --header 'Content-Type: application/json' \
+  --cacert /path/to/gateway-ca.pem \
+  --data '{
+    "model": "assistant-qwen",
+    "messages": [{
+      "role": "user",
+      "content": "Use the supplied tool to get the status of the MCP demo."
+    }],
+    "tools": [{
+      "type": "function",
+      "function": {
+        "name": "get_demo_status",
+        "description": "Get the readiness status of a product demo feature.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "feature": {
+              "type": "string",
+              "enum": ["mcp", "workflow"]
+            }
+          },
+          "required": ["feature"],
+          "additionalProperties": false
+        }
+      }
+    }],
+    "tool_choice": "required",
+    "temperature": 0,
+    "max_tokens": 512,
+    "stream": false
+  }' \
+  https://localhost:8444/v1/chat/completions
+</code></pre>
+<p>The response must contain <code>choices[0].message.tool_calls</code>, select
+<code>get_demo_status</code>, and encode <code>{"feature":"mcp"}</code> as valid JSON arguments.
+For full acceptance, let the application execute the tool, append the returned
+assistant message and a <code>tool</code> message with the matching <code>tool_call_id</code>, then
+send the conversation back through the same Alias. The model must consume the
+tool result and either produce the final answer or request the next valid tool.</p>
+<p>Use the real production origin and system trust store in production. Never use
+<code>-k</code>, disable certificate verification, or point the client at the provider
+URL. A successful response proves one normal routed request through gateway
+authentication, authorization, Alias selection, credential resolution,
+provider dispatch, response decoding, usage, pricing, and audit.</p>
+<p>For the checked local smoke suite, use:</p>
+<pre><code class="language-bash">cd /home/steve/workspace/light-portal-test
+make llm LLM_PUBLIC_ALIAS=assistant-qwen
+</code></pre>
+<p>The suite consumes provider quota and may be billable depending on the account
+plan. Keep load and token counts bounded.</p>
+<h2 id="14-run-a-workload-acceptance-matrix"><a class="header" href="#14-run-a-workload-acceptance-matrix">14. Run a workload acceptance matrix</a></h2>
+<p>Test the behavior the application actually uses, not only a greeting:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Area</th><th>Minimum evidence</th></tr>
+</thead>
+<tbody>
+<tr><td>Basic chat</td><td>Representative prompts return usable answers without unsupported fields.</td></tr>
+<tr><td>Streaming</td><td>Valid SSE frames terminate cleanly and preserve usage/audit behavior.</td></tr>
+<tr><td>Tool calling</td><td>Tool names and JSON arguments are valid; required and parallel-tool cases behave as declared.</td></tr>
+<tr><td>Structured output</td><td>Required JSON mode/schema behavior is valid for the selected protocol.</td></tr>
+<tr><td>Reasoning controls</td><td>If provider-specific reasoning controls are exposed and policy-allowlisted, supported values behave correctly and hidden reasoning is not exposed unexpectedly.</td></tr>
+<tr><td>Vision</td><td>Required image formats, sizes, counts, and response behavior pass if the workload uses images.</td></tr>
+<tr><td>Context/output limits</td><td>Requests near the approved application bounds fail or complete predictably.</td></tr>
+<tr><td>Safety and PII</td><td>Prompt-injection, sensitive-data, logging, and redaction expectations pass.</td></tr>
+<tr><td>Reliability</td><td>Rate limits, timeouts, cancellation, retryability, and fallback behavior are understood.</td></tr>
+<tr><td>Quality</td><td>A fixed representative tool set is scored against both Qwen and GPT-OSS before assigning an agent Alias.</td></tr>
+<tr><td>Quota/latency</td><td>Observed token use, time to first token, and completion latency fit the Free Plan demo limits.</td></tr>
+</tbody>
+</table>
+</div>
+<p>If a test fails, narrow the declared capabilities or fix the provider path. Do
+not leave an unproven capability set to <code>true</code> merely to make an Alias eligible.</p>
+<h2 id="15-promote-on-the-development-host"><a class="header" href="#15-promote-on-the-development-host">15. Promote on the development host</a></h2>
+<p>After the replacement passes:</p>
+<ol>
+<li>Ensure the stable development Alias has a compatible Qwen
+Deployment, effective Credential, and Pricing.</li>
+<li>Move the old primary Route to a higher unique priority and mark it as a
+fallback, or remove it if it can no longer serve traffic.</li>
+<li>Add Qwen at priority <code>0</code> with fallback disabled.</li>
+<li>A fallback is optional for a non-production demo. If continuity matters,
+use another currently served and tested model rather than the
+soon-to-be-decommissioned Llama model.</li>
+<li>Generate a fresh projection, inspect the route order, publish, promote the
+snapshot, and confirm replica acknowledgement.</li>
+<li>Run the same smoke request through the unchanged stable Alias.</li>
+<li>Retain the old records for audit until the rollback window closes; do not
+rewrite the Qwen Deployment to represent another physical model.</li>
+</ol>
+<p>After August 16, 2026, <code>llama-3.3-70b-versatile</code> is not a functional rollback
+for affected Groq tiers. Complete the replacement and fallback publication
+before the shutdown date.</p>
+<h2 id="adapt-the-workflow-to-amazon-bedrock"><a class="header" href="#adapt-the-workflow-to-amazon-bedrock">Adapt the workflow to Amazon Bedrock</a></h2>
+<p>Amazon Bedrock now offers OpenAI-compatible Chat Completions and Responses APIs
+and an Anthropic-compatible Messages API. Prefer the <code>bedrock-mantle</code> endpoint
+when the selected model supports it. The Portal mapping for compatible Chat
+Completions is:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Portal field</th><th>Bedrock-compatible value</th></tr>
+</thead>
+<tbody>
+<tr><td>Provider Type</td><td><code>bedrock</code></td></tr>
+<tr><td>Provider Protocol</td><td><code>openai_chat</code></td></tr>
+<tr><td>Base URL</td><td><code>https://bedrock-mantle.{region}.api.aws/v1</code></td></tr>
+<tr><td>Endpoint Authentication</td><td><code>BEARER</code></td></tr>
+<tr><td>Secret Reference</td><td><code>env:AWS_BEARER_TOKEN_BEDROCK</code></td></tr>
+<tr><td>Region</td><td>The approved AWS Region</td></tr>
+<tr><td>Physical Model Id</td><td>Exact model or inference-profile ID returned for that endpoint/account</td></tr>
+</tbody>
+</table>
+</div>
+<p>Use an Amazon Bedrock API key for this generic bearer path. The current
+<code>llm-gateway</code> provider client can send no authentication, bearer authentication,
+or an API key in <code>authorization</code>/<code>x-api-key</code>; it does not generate AWS SigV4
+signatures. If the selected Bedrock model is available only through native
+<code>Converse</code>/<code>InvokeModel</code>, or organizational policy requires SigV4, configuration
+alone is insufficient. First deploy an approved TLS adapter/sidecar that
+exposes one of the supported gateway protocols, or add and qualify a native
+provider adapter. Never mislabel the native Bedrock API as <code>openai_chat</code>.</p>
+<p>Bedrock model IDs, inference profiles, regional availability, capabilities,
+and pricing are account- and region-specific. Discover them from the chosen
+endpoint and AWS account, then create the reference values, global Model,
+Registration, Account, Endpoint, Deployment, Credential, Alias, Route, and
+Pricing exactly as above.</p>
+<p>See:</p>
+<ul>
+<li><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/endpoints.html">Amazon Bedrock endpoints</a></li>
+<li><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/models-api-compatibility.html">Amazon Bedrock API compatibility by model</a></li>
+<li><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/inference-chat-completions-mantle.html">Amazon Bedrock Chat Completions</a></li>
+<li><a href="#local-model-provider-transport-for-llm-gateway">Local Model Provider Transport</a></li>
+</ul>
+<h2 id="troubleshooting-2"><a class="header" href="#troubleshooting-2">Troubleshooting</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Symptom</th><th>Likely cause and correction</th></tr>
+</thead>
+<tbody>
+<tr><td>Provider, model, or family dropdown is empty</td><td>Add the missing global reference value, locale, <code>provider_name</code> relation, and <code>model_name_family</code> relation.</td></tr>
+<tr><td>Provider returns 404</td><td>Check the exact base URL and physical model ID. The base URL must not already contain the operation path.</td></tr>
+<tr><td>Provider returns 401 or 403</td><td>Confirm model permission and that the provider key is injected into the selected <code>llm-gateway</code> process under the variable named by <code>secretReference</code>.</td></tr>
+<tr><td>Publish reports no eligible Credential</td><td>Check purpose, Endpoint/Deployment references, version, database-clock effective time, and expiration.</td></tr>
+<tr><td>Publish reports no effective Pricing</td><td>Create a <code>generate</code> price for a chat/responses/messages Deployment and make its effective window current.</td></tr>
+<tr><td>Route is incompatible</td><td>Align host, logical environment, provider type, physical model, protocol operation, Registration restrictions, and required capabilities.</td></tr>
+<tr><td>Gateway returns Alias not found</td><td>Confirm the caller can see the Alias and the intended acknowledged snapshot is active on that replica.</td></tr>
+<tr><td>Gateway returns 503 after publication</td><td>Inspect the complete projection and gateway logs. One malformed Deployment capability/protocol/pricing contract can invalidate configuration beyond the new Alias.</td></tr>
+<tr><td>Gateway reports <code>LLM_CONFIG_INVALID</code></td><td>Inspect every provider in the published snapshot. A missing environment variable such as an unused provider’s secret reference can invalidate the complete router; omit that provider from the snapshot or inject its secret.</td></tr>
+<tr><td>Qwen returns a provider 400 for tool choice</td><td>Use the portable string form <code>"tool_choice":"auto"</code> or <code>"required"</code>; the checked Groq Qwen path rejected a named-function object.</td></tr>
+<tr><td>Qwen exhausts a small output budget or returns <code>&lt;think&gt;</code> text</td><td>Reasoning can consume completion tokens and may appear in message content. Allow a bounded larger completion budget and make the application handle or reject visible reasoning explicitly.</td></tr>
+<tr><td>A parallel tool request fails</td><td>Keep <code>parallelTools: false</code>, avoid requiring parallel calls on the Alias, and sequence tool calls until the exact provider/model path is qualified.</td></tr>
+<tr><td>A provider-specific request field is rejected</td><td>The gateway rejects unknown extensions by default. Use only a reviewed field explicitly permitted by the applicable native-extension Policy, or omit it.</td></tr>
+<tr><td>Structured JSON editor looks correct but Create is disabled</td><td>Choose <strong>Apply</strong> to commit the JSON/YAML draft to the form model.</td></tr>
+<tr><td>Secret appears in a preview, event, log, or ticket</td><td>Stop, revoke and rotate it, remove the exposed material through the approved incident process, and retain only an external reference.</td></tr>
+</tbody>
+</table>
+</div>
+<p>For the complete control-plane record order and publication behavior, see
+<a href="#llm-model-control-plane">LLM Model Control Plane</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="retire-an-llm-from-llm-gateway"><a class="header" href="#retire-an-llm-from-llm-gateway">Retire an LLM from <code>llm-gateway</code></a></h1>
+<p>This tutorial removes a provider model from active routing without changing the
+model name used by applications. The worked example retires Groq’s
+<code>llama-3.3-70b-versatile</code> before its August 16, 2026 decommission date and
+moves the existing <code>assistant-dev</code> Alias to <code>qwen/qwen3.6-27b</code>.</p>
+<p>Use the same workflow for a Bedrock model, a provider migration, or any other
+model lifecycle change. The important sequence is always <strong>qualify, cut over,
+publish, validate, delete, and publish again</strong>. Do not begin with Delete.</p>
+<p>Applications and agents should call a stable Public Alias such as
+<code>assistant-dev</code>. If they call a physical model ID directly, change them to an
+Alias before retiring the model.</p>
+<h2 id="what-retirement-means"><a class="header" href="#what-retirement-means">What retirement means</a></h2>
+<p>Retirement is a soft deletion from the active LLM control-plane projection. It
+preserves event history for audit and replay, but excludes the retired records
+from new publications.</p>
+<p>Deleting a global Model also soft-deletes its active dependent records:</p>
+<ul>
+<li>Model Registrations;</li>
+<li>Provider Deployments;</li>
+<li>Alias Routes that still target those Deployments;</li>
+<li>Provider Credentials that still belong to those Deployments; and</li>
+<li>Pricing Versions for those Deployments.</li>
+</ul>
+<p>The cascade is useful for model-exclusive data, but it makes deletion the last
+step. Move every shared or reusable dependency first.</p>
+<blockquote class="blockquote-tag blockquote-tag-warning">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Warning</p>
+<p>A Credential is resolved through a Provider Endpoint, but the control-plane
+record also belongs to a Provider Deployment. If the active Credential still
+names the retiring Deployment, deleting the Model deactivates that
+Credential and can break other models using the same Endpoint. Reassign or
+replace the Credential before deleting the Model.</p>
+</blockquote>
+<p>Do not delete a shared Provider Account or Provider Endpoint when only one
+model is retiring. Do not delete the model’s global reference-table values or
+locale labels merely to hide an inactive model; they can be needed for event
+history, audit, and replay.</p>
+<h2 id="1-inventory-the-dependency-graph"><a class="header" href="#1-inventory-the-dependency-graph">1. Inventory the dependency graph</a></h2>
+<p>Open <strong>Administration &gt; GenAI Admin &gt; LLM Models</strong>, select the target host and
+environment, and identify:</p>
+<ol>
+<li>the global Model and its current Aggregate Version;</li>
+<li>every Registration for that Model;</li>
+<li>every Deployment under those Registrations;</li>
+<li>every Alias Route targeting those Deployments;</li>
+<li>every Credential and Pricing Version attached to those Deployments; and</li>
+<li>every Agent, policy binding, workflow, or test that uses the affected
+Public Alias.</li>
+</ol>
+<p>Record the current publication version and export or retain a tested event
+baseline before changing anything. Aggregate versions shown in the control
+plane are required for update and delete commands; do not guess them from an
+older event file.</p>
+<p>For the Groq example, the initial relationships are:</p>
+<pre class="mermaid">flowchart LR
+    A[assistant-dev] --&gt; L[Llama Deployment]
+    A --&gt; G[Gemini fallback]
+    C[Groq endpoint Credential] --&gt; L
+    Q[assistant-qwen] --&gt; D[Qwen Deployment]
+    D --&gt; E[Shared Groq Endpoint]
+    L --&gt; E
+</pre>
+
+<p>The Alias Route and Credential must move from the Llama Deployment to the
+Qwen Deployment before Llama is deleted.</p>
+<h2 id="2-qualify-the-replacement"><a class="header" href="#2-qualify-the-replacement">2. Qualify the replacement</a></h2>
+<p>Complete <a href="#onboard-an-llm-through-llm-gateway">Onboard an LLM Through llm-gateway</a> for the
+replacement model before changing an existing Alias. Confirm that its Model,
+Registration, Deployment, Credential, Pricing, Alias, and Route are active.</p>
+<p>Publish the replacement under a temporary or model-specific Alias, then run
+the acceptance cases used by the real agents:</p>
+<ul>
+<li>a normal non-streaming response;</li>
+<li>a streaming response;</li>
+<li>every required tool schema and representative arguments;</li>
+<li>the tool-result continuation turn;</li>
+<li>structured JSON, if used;</li>
+<li>input and output limits; and</li>
+<li>expected provider errors, timeouts, and rate limits.</li>
+</ul>
+<p>Do not infer compatibility from a provider benchmark. Retirement is safe only
+after the replacement passes the application’s actual request shapes.</p>
+<h2 id="3-cut-over-the-stable-alias"><a class="header" href="#3-cut-over-the-stable-alias">3. Cut over the stable Alias</a></h2>
+<p>In <strong>Alias Routes</strong>, update the route that currently targets the retiring
+Deployment:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Groq example</th></tr>
+</thead>
+<tbody>
+<tr><td>Public Alias</td><td>existing <code>assistant-dev</code> Alias</td></tr>
+<tr><td>Provider Deployment</td><td><code>groq-qwen3-6-27b-dev</code></td></tr>
+<tr><td>Route Priority</td><td><code>0</code></td></tr>
+<tr><td>Route Weight</td><td><code>1</code></td></tr>
+<tr><td>Fallback Enabled</td><td><code>false</code></td></tr>
+<tr><td>Canary Percent</td><td><code>0</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Keep the existing Alias ID. Consumers should not need configuration or code
+changes. If a second compatible route remains, verify its priority explicitly;
+do not rely on row insertion order.</p>
+<p>If the replacement has lower context or output limits, update the Public Alias
+limits before the cutover or ensure callers already stay within the replacement
+contract.</p>
+<h2 id="4-preserve-shared-credentials"><a class="header" href="#4-preserve-shared-credentials">4. Preserve shared credentials</a></h2>
+<p>If the retiring Deployment owns a Credential needed by a retained model, use
+one of these approaches:</p>
+<ul>
+<li>update the existing Credential so <code>Provider Deployment</code> names a retained
+Deployment on the same Endpoint; or</li>
+<li>create a new active Credential version for the retained Deployment and
+verify it is the effective Endpoint credential.</li>
+</ul>
+<p>Keep <code>Provider Endpoint</code>, <code>Credential Purpose</code>, and the external secret
+reference consistent unless this change also rotates credentials. For the
+Groq example, the reference remains <code>env:GROQ_API_KEY</code>; no API key value is
+stored in Portal or in an event file.</p>
+<p>Before proceeding, confirm the retained Qwen and GPT-OSS Deployments resolve an
+active, effective, unexpired Credential through the shared Groq Endpoint.</p>
+<h2 id="5-publish-and-validate-the-cutover"><a class="header" href="#5-publish-and-validate-the-cutover">5. Publish and validate the cutover</a></h2>
+<p>Open <strong>Publication</strong>, regenerate the candidate, validate it, and publish it to
+the selected <code>llm-gateway</code> instance. Check that:</p>
+<ul>
+<li><code>assistant-dev</code> resolves to the replacement Deployment first;</li>
+<li>the retiring Deployment is no longer referenced by an active route;</li>
+<li>provider, credential, pricing, and capability validation succeeds; and</li>
+<li>the target gateway applies or acknowledges the new publication.</li>
+</ul>
+<p>Call <code>/v1/models</code> and <code>/v1/chat/completions</code> through <code>llm-gateway</code> with the
+stable Alias. Repeat the agent tool-calling tests. Keep this routed state for a
+short observation window when the environment is shared with other users.</p>
+<p>If validation fails, move the Alias Route back to the previous Deployment and
+publish again. This is the simplest rollback and is available only while the
+provider still serves the old model.</p>
+<h2 id="6-delete-the-global-model"><a class="header" href="#6-delete-the-global-model">6. Delete the global Model</a></h2>
+<p>After the stable Alias is proven on the replacement, open <strong>LLM Models</strong>, find
+the exact provider and physical model ID, and choose <strong>Delete</strong>. Confirm the
+current Aggregate Version.</p>
+<p>For this example, delete only:</p>
+<pre><code class="language-text">providerType: groq
+physicalModelId: llama-3.3-70b-versatile
+</code></pre>
+<p>Do not delete <code>qwen/qwen3.6-27b</code>, <code>openai/gpt-oss-120b</code>, the Groq Provider
+Account, or the shared Groq Endpoint.</p>
+<p>The delete event deactivates the Model and any dependents that still point to
+its Deployment. Verify that the previously moved Alias Route and Credential
+remain active. If they were unexpectedly deactivated, stop and repair the
+control-plane rows before publishing.</p>
+<h2 id="7-publish-the-retired-state"><a class="header" href="#7-publish-the-retired-state">7. Publish the retired state</a></h2>
+<p>Generate and publish the next immutable gateway revision. The candidate must:</p>
+<ul>
+<li>omit the retired Model and Deployment;</li>
+<li>omit its inactive Registration and Pricing;</li>
+<li>retain the replacement routes and effective credentials;</li>
+<li>contain no Alias that references the retired Deployment; and</li>
+<li>pass the expected provider, deployment, and Alias counts.</li>
+</ul>
+<p>Validate <code>/v1/models</code>, normal generation, streaming, and tool calling once
+more. A database row marked inactive is not sufficient: retirement is complete
+only when the gateway is running a publication that no longer contains the
+model.</p>
+<h2 id="8-preserve-the-local-baseline"><a class="header" href="#8-preserve-the-local-baseline">8. Preserve the local baseline</a></h2>
+<p>Portal control-plane changes are authored and validated only in the local
+<code>portal-config-loc/all-in-lt</code> database. Import the reviewed retirement event
+file there, verify the projections and live gateway behavior, and then export a
+new global snapshot to recreate the canonical <code>events.json</code>.</p>
+<p>Use that exported <code>events.json</code> to recreate the databases for
+<code>portal-config-dev</code> and <code>light-portal-install</code>. Do not maintain a separate
+development-only copy of the LLM gateway control-plane records; those
+environments are downstream consumers of the local global snapshot.</p>
+<p>After recreating a database, verify that event replay produces the same active
+Models, Deployments, Aliases, Routes, Credentials, Pricing Versions, and latest
+publication as the local baseline.</p>
+<h2 id="event-file-checklist"><a class="header" href="#event-file-checklist">Event-file checklist</a></h2>
+<p>An import-ready retirement event file normally contains, in this order:</p>
+<ol>
+<li>updates or creates that move routes and credentials to retained
+Deployments;</li>
+<li><code>LlmModelDeletedEvent</code> with the Model’s current Aggregate Version; and</li>
+<li><code>LlmGatewayInstancePublicationCreatedEvent</code> containing the post-retirement
+properties and the next application version.</li>
+</ol>
+<p>Before import, validate that:</p>
+<ul>
+<li>every randomly generated event or entity ID is UUID v7, while deterministic
+publication IDs match the control-plane derivation contract;</li>
+<li><code>subject</code>, payload identity, Aggregate Type, and versions agree;</li>
+<li>update/delete versions match the current local event streams;</li>
+<li>the importer will allocate each <code>nonce: "0"</code> sentinel atomically;</li>
+<li>event IDs and subject/version pairs do not already exist; and</li>
+<li>the publication contains neither the retired Deployment nor a stale Alias
+route to it.</li>
+</ul>
+<p>Generate the file from current local projections immediately before the
+change. A previously generated retirement file becomes stale as soon as one of
+its aggregates or the publication version changes.</p>
+<h2 id="rollback-after-deletion"><a class="header" href="#rollback-after-deletion">Rollback after deletion</a></h2>
+<p>Deleting the Model cascades across several independently versioned aggregates.
+Updating only the Model does not reactivate all of them. A rollback after
+deletion therefore requires either:</p>
+<ul>
+<li>explicit, version-correct reactivation or recreation of the Model and every
+required dependent aggregate, followed by a new publication; or</li>
+<li>restoration and replay of a previously tested canonical event baseline.</li>
+</ul>
+<p>Prefer routing rollback before deletion. Once the provider’s decommission date
+passes, the old physical model is not a usable fallback even if its Portal
+records are restored.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="create-the-workflow-mcp-smoke-tool-from-the-portal"><a class="header" href="#create-the-workflow-mcp-smoke-tool-from-the-portal">Create the workflow MCP smoke tool from the portal</a></h1>
 <p>This tutorial creates the <code>workflow-mcp-smoke</code> workflow and exposes it as the
 <code>workflow_mcp_smoke</code> MCP tool. Create both resources through the portal UI. Do
@@ -44615,7 +45963,7 @@ development <code>light-portal-install</code> deployment, run the corresponding
 <pre><code class="language-bash">cd /home/steve/workspace/light-portal-test
 make workflow-mcp
 </code></pre>
-<h2 id="troubleshooting-2"><a class="header" href="#troubleshooting-2">Troubleshooting</a></h2>
+<h2 id="troubleshooting-3"><a class="header" href="#troubleshooting-3">Troubleshooting</a></h2>
 <h3 id="the-workflow-create-event-goes-to-the-dlq"><a class="header" href="#the-workflow-create-event-goes-to-the-dlq">The workflow Create event goes to the DLQ</a></h3>
 <p>Check for an older projection-only row with the same host, namespace, name,
 and version. Do not edit the new event payload. Remove or quarantine the
@@ -44774,7 +46122,7 @@ do:
               with:
                 method: GET
                 endpoint:
-                  uri: http://demo-customer-profile-api:8085/customers/${{ customerId }}
+                  uri: http://demo-customer-profile-api:8085/customers/${{customerId}}
                 output: content
               metadata:
                 endpointRef: customer-360.profile
@@ -44783,7 +46131,7 @@ do:
               with:
                 method: GET
                 endpoint:
-                  uri: http://demo-customer-profile-api:8085/customers/${{ customerId }}/preferences?channel=${{ channel }}
+                  uri: http://demo-customer-profile-api:8085/customers/${{customerId}}/preferences?channel=${{channel}}
                 output: content
               metadata:
                 endpointRef: customer-360.preferences
@@ -44792,7 +46140,7 @@ do:
               with:
                 method: GET
                 endpoint:
-                  uri: http://demo-customer-profile-api:8085/customers/${{ customerId }}/policies
+                  uri: http://demo-customer-profile-api:8085/customers/${{customerId}}/policies
                 output: content
               metadata:
                 endpointRef: customer-360.policies
@@ -44813,7 +46161,6 @@ do:
           - source: policies
             status: success
             data: "${{ responses.policies }}"
-      end: true
 </code></pre>
 <h2 id="1-review-the-workflow"><a class="header" href="#1-review-the-workflow">1. Review the workflow</a></h2>
 <p>The workflow has one non-competing fork with three GET branches. Each HTTP
@@ -45011,7 +46358,7 @@ token from this tutorial:</p>
 <pre><code class="language-bash">cd /home/steve/workspace/light-portal-test
 make workflow-mcp
 </code></pre>
-<h2 id="troubleshooting-3"><a class="header" href="#troubleshooting-3">Troubleshooting</a></h2>
+<h2 id="troubleshooting-4"><a class="header" href="#troubleshooting-4">Troubleshooting</a></h2>
 <h3 id="the-create-event-goes-to-the-dlq"><a class="header" href="#the-create-event-goes-to-the-dlq">The Create event goes to the DLQ</a></h3>
 <p>Check for an older active resource with the same workflow identity or tool
 name. Also confirm the tool event references the active workflow ID and exact
