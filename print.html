@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-2507e467.js";
+            window.path_to_searchindex_js = "searchindex-ee8ea31c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-4c3602da.js"></script>
+        <script src="toc-d529d790.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -20469,6 +20469,545 @@ and the gateway verifies producer authenticity and endpoint binding.</li>
 <li><a href="#global-and-tenant-knowledge-bases-for-shared-agent-retrieval">Global And Tenant Knowledge Bases For Shared Agent Retrieval</a></li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="light-workflow-tool-access-approval"><a class="header" href="#light-workflow-tool-access-approval">Light Workflow Tool Access Approval</a></h1>
+<h2 id="status-9"><a class="header" href="#status-9">Status</a></h2>
+<p>Proposed.</p>
+<p>The design reuses the Portal Workflow application, <code>ask</code> tasks, role-based
+worklists, and the existing workflow Tool grant events. It changes the
+authoring and approval experience but does not weaken runtime Tool grant
+enforcement.</p>
+<h2 id="purpose-4"><a class="header" href="#purpose-4">Purpose</a></h2>
+<p>A workflow author currently sees only Tools that are already granted to the
+workflow definition. This creates a circular authoring flow:</p>
+<ol>
+<li>The workflow must exist before a Tool can be granted to it.</li>
+<li>The author needs the Tool while constructing the workflow.</li>
+<li>Granting the Tool is performed outside the Workflow Editor.</li>
+<li>The author might not have Tool administration permission.</li>
+<li>A Tool administrator must be given the workflow definition ID, version,
+Tool version, digest, and environments through an out-of-band conversation.</li>
+</ol>
+<p>The result is a manually saved, incomplete workflow and an approval process
+with poor context and weak usability.</p>
+<p>This design introduces a built-in Light Portal workflow named <strong>Grant Tools to
+Workflow</strong>. A workflow author starts it from the Workflow Editor. The workflow
+assigns an approval task to the configured Tool approver role, applies the
+approved grants through a constrained internal command, and sends an
+acknowledgement task to the original author.</p>
+<p>The related designs are:</p>
+<ul>
+<li><a href="#workflow-editor">Workflow Editor</a></li>
+<li><a href="#human-task-ui">Human Task UI</a></li>
+<li><a href="#endpoint-tools-and-workflow-access">Endpoint Tools and Workflow Access</a></li>
+<li><a href="#workflow-version-and-publication">Workflow Version and Publication</a></li>
+</ul>
+<h2 id="decision-summary-9"><a class="header" href="#decision-summary-9">Decision Summary</a></h2>
+<ol>
+<li>Runtime authorization remains an explicit Tool grant scoped to one workflow
+definition. Version-scoped grants are deferred because the current active
+uniqueness key and deterministic grant identity are definition-wide.</li>
+<li>Tools are not granted automatically to every workflow on a host.</li>
+<li>Creating a workflow immediately persists a minimal draft and allocates its
+stable <code>wfDefId</code>.</li>
+<li>The editor distinguishes requestable and pending Tools from callable Tools.</li>
+<li>A pending Tool can be inserted into a draft, but it cannot be tested,
+published, or executed.</li>
+<li>Access is requested by starting the built-in <strong>Grant Tools to Workflow</strong>
+workflow from the editor.</li>
+<li>The approval <code>ask</code> task is assigned to an approver role such as
+<code>genai-admin</code>. One role assignment is visible to all active members and one
+member claims it.</li>
+<li>Approval alone does not bypass command authorization. A typed completion
+action on the generic Human Task page verifies the approval and applies the
+grants in the same transaction as task completion.</li>
+<li>All Tool grants in one approved request are applied atomically.</li>
+<li>The editor enables testing when it observes committed grants. The author’s
+acknowledgement task is informational and is not an authorization gate.</li>
+</ol>
+<h2 id="goals-22"><a class="header" href="#goals-22">Goals</a></h2>
+<ul>
+<li>Keep the workflow author inside the Workflow Editor.</li>
+<li>Allow an author to compose a complete draft while access is pending.</li>
+<li>Preserve separation of duties between workflow authors and Tool approvers.</li>
+<li>Give approvers names, schemas, environments, safety metadata, usage
+locations, and justification instead of requiring raw ID exchange.</li>
+<li>Reuse the Portal Workflow Worklist and Human Task pages.</li>
+<li>Record the requester, approver, decision, exact Tool pins, and grant result.</li>
+<li>Keep the existing <code>workflow_tool_grant_t</code> projection as the runtime
+authorization authority.</li>
+<li>Fail closed when a Tool changes between request and approval.</li>
+</ul>
+<h2 id="non-goals-25"><a class="header" href="#non-goals-25">Non-Goals</a></h2>
+<ul>
+<li>Do not grant a Tool to every workflow on the host by default.</li>
+<li>Do not let a pending request satisfy runtime authorization.</li>
+<li>Do not let the workflow service credential grant arbitrary Tool access.</li>
+<li>Do not treat the original author’s JWT as an administrator credential after
+another user approves a task.</li>
+<li>Do not create a workflow-specific approval page. The generic Human Task page
+renders the approval task and dispatches its typed completion action to the
+workflow Tool access decision command.</li>
+<li>Do not duplicate the durable Tool grant in the access-request read model.</li>
+</ul>
+<h2 id="existing-platform-capabilities"><a class="header" href="#existing-platform-capabilities">Existing Platform Capabilities</a></h2>
+<p>The implementation can build on existing behavior:</p>
+<ul>
+<li>An <code>ask</code> task can assign work to a <code>roleId</code> or an <code>assigneeId</code>.</li>
+<li>A role assignment is visible to active members of that role.</li>
+<li>A user claims a role task before completing it.</li>
+<li>Completion rechecks assignment ownership and active role membership.</li>
+<li>The parent task records the completing user and submitted result.</li>
+<li>Other users cannot complete a role task after one user has completed it.</li>
+<li>The Portal Worklist and Human Task pages already query, claim, release, and
+complete these assignments.</li>
+</ul>
+<p>The built-in workflow should use these generic facilities rather than
+introducing a separate approval inbox.</p>
+<h2 id="identity-bootstrap"><a class="header" href="#identity-bootstrap">Identity Bootstrap</a></h2>
+<p>An access request requires a target <code>wfDefId</code>. The editor must therefore create
+the workflow identity before the author needs the first Tool.</p>
+<p>When the user chooses <strong>New Workflow</strong>, Portal creates a minimal valid draft
+containing workflow metadata and an empty task list, then opens the editor with
+the returned <code>wfDefId</code>. This is an intentional draft lifecycle operation, not a
+manual save of a half-built workflow.</p>
+<p>The <code>wfDefId</code> remains stable across versions. The initial implementation grants
+access definition-wide. It removes <code>workflow_version</code> from the final
+<code>workflow_tool_grant_t</code> contract and keys one active grant by
+<code>(host_id, tool_id, wf_def_id)</code>. Adding version scope later requires a new
+identity design, active uniqueness key, deterministic grant ID, query contract,
+and runtime predicate; it is not a nullable option in this release.</p>
+<p>This removal is limited to <code>workflow_tool_grant_t.workflow_version</code> and its
+grant command/query/event contracts. It does not change
+<code>workflow_tool_binding_t.workflow_version</code>, which pins a workflow-backed MCP
+Tool to its implementation version and remains required.</p>
+<h2 id="authoring-flow"><a class="header" href="#authoring-flow">Authoring Flow</a></h2>
+<pre><code class="language-text">Create or open workflow draft
+  -&gt; search granted and requestable Tools
+  -&gt; select one or more requestable Tools
+  -&gt; insert pending references into the draft
+  -&gt; start Grant Tools to Workflow
+  -&gt; continue editing while approval is pending
+  -&gt; observe grant status in the editor
+  -&gt; test and publish after every required grant is active
+</code></pre>
+<h3 id="selecting-tools"><a class="header" href="#selecting-tools">Selecting Tools</a></h3>
+<p>The Reference dropdown presents Tool availability explicitly:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Status</th><th>Meaning</th><th>Selectable</th><th>Testable</th></tr>
+</thead>
+<tbody>
+<tr><td><code>GRANTED</code></td><td>An active grant matches the Tool pin and environment.</td><td>Yes</td><td>Yes</td></tr>
+<tr><td><code>REQUESTABLE</code></td><td>The Tool is discoverable and eligible for a request.</td><td>Yes</td><td>No</td></tr>
+<tr><td><code>REQUEST_REQUIRED</code></td><td>The draft references the eligible Tool but no nonterminal request exists.</td><td>Yes</td><td>No</td></tr>
+<tr><td><code>PENDING_APPROVAL</code></td><td>A <code>REQUESTED</code> request is waiting for an approver.</td><td>Yes</td><td>No</td></tr>
+<tr><td><code>REJECTED</code></td><td>The approver rejected the request.</td><td>Existing reference only</td><td>No</td></tr>
+<tr><td><code>STALE</code></td><td>Tool identity, version, digest, policy, or environment changed.</td><td>Existing reference only</td><td>No</td></tr>
+<tr><td><code>INELIGIBLE</code></td><td>The Tool cannot currently be granted.</td><td>No</td><td>No</td></tr>
+</tbody>
+</table>
+</div>
+<p>Pending references must have a visible badge in the dropdown, workflow graph,
+outline, and task property panel. The editor must not describe them as
+callable.</p>
+<p><code>GRANTED</code> is derived only from a current active <code>workflow_tool_grant_t</code> row,
+not from the terminal request status. Revoking a grant therefore immediately
+returns the reference to a blocked request-required state even though the old
+request remains <code>GRANTED</code> for audit.</p>
+<h3 id="discovery-versus-authorization"><a class="header" href="#discovery-versus-authorization">Discovery Versus Authorization</a></h3>
+<p>Showing a Tool before approval reveals its name, description, and schemas.
+Discovery must therefore be authorized independently from execution.</p>
+<p>The initial requestable catalog requires both permission to edit the target
+workflow and the explicit <code>tool.catalog.read</code> permission. It returns only
+eligible endpoint-backed Tools within that authorized host. This permission
+allows metadata/schema discovery but grants no execution authority. A future
+owner-controlled requestable flag may narrow discovery further, but the first
+release does not add one.</p>
+<p>The current callable query remains strict and returns only granted Tools. A new
+workflow-reference catalog combines callable, requestable, and request-state
+information for authoring.</p>
+<h2 id="starting-the-access-workflow"><a class="header" href="#starting-the-access-workflow">Starting the Access Workflow</a></h2>
+<p>The editor provides <strong>Request Tool Access</strong> after the author selects one or
+more Tools. Starting the built-in workflow derives requester and tenant
+identity from the authenticated request rather than trusting client-supplied
+values.</p>
+<p>The workflow input contains:</p>
+<pre><code class="language-json">{
+  "requestId": "UUID",
+  "hostId": "UUID",
+  "targetWorkflow": {
+    "wfDefId": "UUID",
+    "namespace": "customer",
+    "name": "customer-360",
+    "version": "1.0.0"
+  },
+  "requester": {
+    "userId": "UUID"
+  },
+  "justification": "Read customer context for the customer-360 workflow.",
+  "tools": [
+    {
+      "toolId": "UUID",
+      "name": "getCustomerProfile",
+      "version": "1.0.0",
+      "lightapiDigest": "sha256:...",
+      "capabilityRef": "API0004/getCustomerProfile",
+      "allowedEnvironments": ["loc", "dev"],
+      "usageLocations": ["loadCustomer/profile"]
+    }
+  ]
+}
+</code></pre>
+<p>Before starting the approval workflow, the server validates that:</p>
+<ul>
+<li>the target workflow draft exists and the requester may edit it;</li>
+<li>each Tool is discoverable and currently requestable;</li>
+<li>every item carries both <code>toolId</code> and <code>capabilityRef</code>, and that exact pair
+identifies the same active Tool row;</li>
+<li>Tool versions, capability references, and digests match current projections;</li>
+<li>requested environments are explicit and allowed; and</li>
+<li>there is no equivalent active grant or pending request.</li>
+</ul>
+<p>The current workflow version is review context, not grant scope. Each
+<code>metadata.workflowTool</code> pin is extended to contain <code>toolId</code>, <code>capabilityRef</code>,
+Tool <code>version</code>, <code>lightapiDigest</code>, and nonempty <code>allowedEnvironments</code>. The
+request must reproduce that exact identity pair and environment set. A
+capability reference alone is never sufficient to choose a Tool aggregate.</p>
+<p>The server computes and stores a canonical request digest over the immutable
+approval fields. Display labels may be refreshed for presentation, but the
+approved IDs, pins, environments, target workflow, and digest cannot change
+inside a nonterminal request.</p>
+<h2 id="approval-workflow"><a class="header" href="#approval-workflow">Approval Workflow</a></h2>
+<p>The published <strong>Grant Tools to Workflow</strong> definition contains these logical
+steps:</p>
+<ol>
+<li>Validate and record the request.</li>
+<li>Create a required approval <code>ask</code> task.</li>
+<li>Assign the task to the configured Tool approver role.</li>
+<li>On rejection, record the reason and notify the requester.</li>
+<li>On approval, submit the typed human-task decision, which completes the task
+and applies the grant set atomically under the approver identity.</li>
+<li>Record either <code>GRANTED</code> or <code>STALE</code>/<code>FAILED</code> from the decision result.</li>
+<li>Create an informational acknowledgement task for the requester.</li>
+</ol>
+<p>The approval task uses the generic assignment model:</p>
+<pre><code class="language-yaml">ask:
+  prompt: Review the requested workflow Tool access.
+  mode: approval
+  assignment:
+    roleId: genai-admin
+    categoryCode: workflow-tool-access
+    reasonCode: grant-tools-to-workflow
+  options:
+    - label: Approve
+      value: APPROVED
+    - label: Reject
+      value: REJECTED
+  commentRequired: true
+  required: true
+</code></pre>
+<p>The concrete role ID is configuration. Authorization at completion is based on
+an approval permission such as <code>genai.workflowTool.approve</code>, not solely on a
+hard-coded display role name.</p>
+<h3 id="role-assignment-semantics"><a class="header" href="#role-assignment-semantics">Role Assignment Semantics</a></h3>
+<p>The workflow creates one role assignment, not one independent approval task
+per role member. Every active member sees the assignment in the Worklist. The
+first member claims it; other members then see it as claimed. Completion
+records the actual approving user and makes the task unavailable to the other
+members.</p>
+<p>The generic Human Task page’s typed approval renderer shows:</p>
+<ul>
+<li>requester and justification;</li>
+<li>target workflow name, namespace, definition ID, and current draft version
+for review context;</li>
+<li>each Tool name, capability, version, and digest;</li>
+<li>requested environments;</li>
+<li>safety, sensitivity, lifecycle, and endpoint policy metadata;</li>
+<li>workflow task or branch locations using each Tool; and</li>
+<li>any differences from an existing or previous grant.</li>
+</ul>
+<h2 id="secure-grant-application"><a class="header" href="#secure-grant-application">Secure Grant Application</a></h2>
+<p>The generic Human Task page recognizes the trusted task’s typed action and
+calls <code>workflow/decideWorkflowToolAccess/0.1.0</code> instead of generic
+<code>completeTask</code>. This is not a workflow-specific page; it is a specialized
+completion contract rendered by the existing Human Task UI.</p>
+<p><code>CompleteTask.additionalAction(...)</code> cannot be used for grant application
+because it runs after <code>completeHumanTask</code> has committed. The database provider
+must factor the existing lock, assignment, role-membership, and sibling-cancel
+logic into reusable internals and expose one atomic decision operation. That
+operation locks and verifies:</p>
+<ol>
+<li>The workflow instance uses the configured published <strong>Grant Tools to
+Workflow</strong> definition, version, and definition digest.</li>
+<li>The referenced approval task and <code>taskAsstId</code> belong to that instance and
+are active and claimed by the authenticated approver.</li>
+<li>The approver still has active role membership and
+<code>genai.workflowTool.approve</code> permission.</li>
+<li>The submitted answer is <code>APPROVE</code> or <code>REJECT</code>.</li>
+<li>The approved request digest matches the immutable request payload.</li>
+<li>The approval has not already been consumed for a different payload.</li>
+<li>Each requested <code>toolId</code> and <code>capabilityRef</code> pair, Tool pin, endpoint policy,
+lifecycle, and environment set still matches current data.</li>
+</ol>
+<p>For approval it completes the task, cancels sibling assignments, emits
+<code>WorkflowToolGrantedEvent</code> for new or inactive deterministic grants and
+<code>WorkflowToolGrantUpdatedEvent</code> for approved changes to an active grant, emits
+the request decision event, projects all changes, and commits once. An already
+equivalent active grant is rejected before request creation. Rejection completes
+the task and request decision without grant events. Every event is attributed
+to the authenticated human approver. The workflow service receives no general
+grant permission.</p>
+<h2 id="atomicity-and-idempotency"><a class="header" href="#atomicity-and-idempotency">Atomicity And Idempotency</a></h2>
+<p>One approval decision covers the exact Tool set represented by the request
+digest. Applying the request is all-or-nothing:</p>
+<ul>
+<li>revalidate every requested Tool first;</li>
+<li>insert all grant events in one transaction; and</li>
+<li>create no grants if any item is stale or invalid.</li>
+</ul>
+<p>The operation is idempotent by <code>hostId + requestId + requestDigest</code>. Retrying
+after an uncertain response returns the existing result and does not create a
+second grant aggregate or advance versions twice.</p>
+<p>If partial approval is needed, the approver rejects the original set and the
+author submits a smaller request. A later design may add line-item decisions,
+but partial mutation is not part of the initial implementation.</p>
+<h2 id="request-state-projection"><a class="header" href="#request-state-projection">Request State Projection</a></h2>
+<p>The workflow instance and human tasks are the source of orchestration truth.
+The editor needs an efficient read model keyed by the target workflow and Tool.
+That projection does not replace <code>workflow_tool_grant_t</code>.</p>
+<p>Recommended request fields include:</p>
+<pre><code class="language-text">workflow_tool_access_request_t
+  host_id
+  request_id
+  approval_wf_instance_id
+  target_wf_def_id
+  requester_user_id
+  request_digest
+  status
+  decision_user_id              optional
+  decision_comment              optional
+  requested_ts
+  decided_ts                    optional
+  error_code                    optional
+  error_message                 optional
+
+workflow_tool_access_request_item_t
+  host_id
+  request_id
+  tool_id
+  capability_ref
+  tool_version
+  lightapi_digest
+  allowed_environments
+  usage_locations
+  status
+</code></pre>
+<p>The projection is rebuildable from workflow/request events and grant results.
+The actual authorization decision continues to come from an active matching
+row in <code>workflow_tool_grant_t</code>.</p>
+<p>There is no separate <code>applied_ts</code>: a <code>GRANTED</code> decision and its grant events
+commit atomically, so <code>decided_ts</code> is also the application time. Generic
+<code>update_user</code>/<code>update_ts</code> fields are intentionally omitted; requester and
+decision actors are captured by <code>requester_user_id</code>/<code>decision_user_id</code>, while
+<code>requested_ts</code>/<code>decided_ts</code> capture their corresponding transitions. A
+<code>STALE</code> or <code>FAILED</code> decision also records <code>error_code</code> and <code>error_message</code>.</p>
+<p>Recommended request states are:</p>
+<pre><code class="language-text">REQUESTED -&gt; GRANTED
+REQUESTED -&gt; REJECTED
+REQUESTED -&gt; CANCELLED
+REQUESTED -&gt; STALE
+REQUESTED -&gt; FAILED
+</code></pre>
+<p>Human <code>ask</code> tasks currently have no waiting-task deadline sweeper. The first
+release therefore has no automatic rejection, expiry, or acknowledgement
+auto-completion promise. Those states require a separately designed runtime
+deadline primitive and are deferred to hardening.</p>
+<h2 id="editor-validation-and-gates"><a class="header" href="#editor-validation-and-gates">Editor Validation And Gates</a></h2>
+<p>Validation depends on the operation being performed:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Operation</th><th>Pending reference behavior</th></tr>
+</thead>
+<tbody>
+<tr><td>Edit</td><td>Allowed and visibly marked.</td></tr>
+<tr><td>Save draft</td><td>Allowed with warnings.</td></tr>
+<tr><td>Static definition validation</td><td>Structure and schema pass; access warning remains.</td></tr>
+<tr><td>Test</td><td>Blocked until every referenced Tool is granted.</td></tr>
+<tr><td>Publish</td><td>Blocked until every referenced Tool is granted and current.</td></tr>
+<tr><td>Execute</td><td>Fails closed if a grant is absent, inactive, stale, or out of environment.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Every <code>metadata.workflowTool</code> pin declares a nonempty
+<code>allowedEnvironments</code> set. An active grant satisfies the pin only when it
+contains the same <code>toolId</code>/<code>capabilityRef</code> pair and covers every declared
+environment. Draft save validates the set structurally, Publish validates all
+declared environments, editor Test additionally requires the selected test
+environment, and Start/runtime require the actual service environment. An
+undeclared deployment environment fails closed rather than inheriting access.</p>
+<p>The editor should explain the blocking state instead of returning only a list
+of unresolved capability references. Example:</p>
+<pre><code class="language-text">Testing is blocked while Tool access is pending:
+- API0004/getCustomerProfile: waiting for genai-admin approval
+- API0004/getCustomerPolicies: request became stale after Tool update
+</code></pre>
+<p>The <strong>Test</strong> button may remain visible but disabled, with a link to the request
+status and approval workflow instance.</p>
+<h2 id="acknowledgement-and-notification"><a class="header" href="#acknowledgement-and-notification">Acknowledgement And Notification</a></h2>
+<p>After grants commit, the workflow creates an acknowledgement <code>ask</code> task
+assigned directly to the original requester:</p>
+<pre><code class="language-yaml">assignment:
+  assigneeId: "${ .requester.userId }"
+  categoryCode: workflow-tool-access
+  reasonCode: access-request-completed
+</code></pre>
+<p>The task summarizes granted Tools and links back to the target workflow. It is
+informational:</p>
+<ul>
+<li>grants are effective before acknowledgement;</li>
+<li>the editor unlocks testing by querying committed grant state;</li>
+<li>failure to acknowledge never revokes or delays a grant; and</li>
+<li>an unacknowledged informational task may remain open in the first release.</li>
+</ul>
+<p>The existing Portal notification channel may additionally notify the author
+and approver, but notification delivery is not part of authorization.</p>
+<h2 id="rejection-cancellation-and-staleness"><a class="header" href="#rejection-cancellation-and-staleness">Rejection, Cancellation, And Staleness</a></h2>
+<h3 id="rejection"><a class="header" href="#rejection">Rejection</a></h3>
+<p>Rejection requires a comment. Pending references remain in the draft so the
+author can see exactly what is blocked, but the editor offers <strong>Remove
+Reference</strong> and <strong>Submit New Request</strong> actions.</p>
+<h3 id="cancellation"><a class="header" href="#cancellation">Cancellation</a></h3>
+<p>The requester may cancel only before an approval decision. Deleting the draft
+or removing all requested references should offer to cancel the pending
+request. Cancellation does not affect existing grants.</p>
+<h3 id="staleness"><a class="header" href="#staleness">Staleness</a></h3>
+<p>The request becomes stale when any approved security-relevant value changes,
+including:</p>
+<ul>
+<li>Tool version or LightAPI digest;</li>
+<li>endpoint identity or lifecycle;</li>
+<li>allowed environments; or</li>
+<li>endpoint authorization or policy configuration.</li>
+</ul>
+<p>A stale request creates no grants. The author refreshes the Tool pins and
+submits a new request. Existing active grants continue to follow their normal
+digest and lifecycle validation rules.</p>
+<h2 id="authorization-model-1"><a class="header" href="#authorization-model-1">Authorization Model</a></h2>
+<p>Recommended permissions are:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Permission</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>workflow.write</code></td><td>Edit the target workflow draft.</td></tr>
+<tr><td><code>workflow.toolAccess.request</code></td><td>Start or cancel an access request.</td></tr>
+<tr><td><code>tool.catalog.read</code></td><td>Discover Tool metadata and schemas.</td></tr>
+<tr><td><code>genai.workflowTool.approve</code></td><td>Claim and decide the typed task and atomically apply grants.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The request endpoint checks <code>workflow.write</code>,
+<code>workflow.toolAccess.request</code>, and <code>tool.catalog.read</code>. The typed Human Task
+completion path checks current assignment and approval permission, then applies
+the grants in that same transaction. Runtime continues checking the resulting
+workflow Tool grant.</p>
+<p>Passing the original user JWT through workflow execution remains necessary for
+downstream endpoint authorization. It does not replace the workflow-level Tool
+grant:</p>
+<pre><code class="language-text">user authorization      -&gt; may this user access the endpoint?
+workflow Tool grant     -&gt; may this workflow invoke the capability?
+approval evidence       -&gt; did an authorized approver permit this exact grant?
+</code></pre>
+<h2 id="audit-requirements"><a class="header" href="#audit-requirements">Audit Requirements</a></h2>
+<p>The audit trail must answer:</p>
+<ul>
+<li>Who requested access?</li>
+<li>Which workflow definition and current draft version was reviewed?</li>
+<li>Which exact Tool versions, digests, and environments were reviewed?</li>
+<li>Where were the Tools referenced in the workflow draft?</li>
+<li>Who claimed and completed the approval task?</li>
+<li>What decision and comment were submitted?</li>
+<li>Which grants were created and by which request?</li>
+<li>Did any item become stale before application?</li>
+<li>Was the author notified and did the author acknowledge the result?</li>
+</ul>
+<p>The request digest connects the editor selection, approval task, decision command,
+and emitted grant events.</p>
+<h2 id="deployment-and-promotion"><a class="header" href="#deployment-and-promotion">Deployment And Promotion</a></h2>
+<p>The built-in workflow is a versioned, published control-plane artifact. Each
+environment must configure its expected workflow definition identity, version,
+and digest for the typed decision allowlist.</p>
+<p>Deployment order is:</p>
+<ol>
+<li>Deploy schema, projection, query, and disabled decision support with an empty
+trusted-workflow identity.</li>
+<li>Publish the built-in approval workflow.</li>
+<li>Capture and configure its exact definition ID, version, and digest.</li>
+<li>Enable the request/decision feature and its authorization policy.</li>
+<li>Deploy editor support for draft identity creation, requestable Tools,
+pending-reference save behavior, and test/publication gates.</li>
+</ol>
+<p>The request and decision commands must remain disabled until the trusted workflow definition
+and its expected digest are configured. Promotion carries the built-in
+workflow and ordinary Tool grant events through the established control-plane
+promotion process; transient approval tasks are environment-local operational
+state and are not promoted. Add <code>task_asst_t</code> and the two request tables to the
+global snapshot export/conversion skip sets; <code>process_info_t</code> and <code>task_info_t</code>
+are already skipped.</p>
+<p><code>workflow_tool_approval_evidence_t</code> is unrelated: it records approval evidence
+for a workflow-backed MCP Tool binding keyed by <code>binding_id</code>. This design’s
+request aggregate is keyed by <code>request_id</code> and must not reuse that table.</p>
+<h2 id="implementation-phases-3"><a class="header" href="#implementation-phases-3">Implementation Phases</a></h2>
+<h3 id="phase-1-authoring-and-request"><a class="header" href="#phase-1-authoring-and-request">Phase 1: Authoring And Request</a></h3>
+<ul>
+<li>Create a minimal draft when <strong>New Workflow</strong> opens.</li>
+<li>Add the workflow-reference Tool catalog and status badges.</li>
+<li>Allow pending Tool references in drafts.</li>
+<li>Start the built-in access workflow from the editor.</li>
+<li>Project request and item status for editor queries.</li>
+</ul>
+<h3 id="phase-2-approval-and-grant-application"><a class="header" href="#phase-2-approval-and-grant-application">Phase 2: Approval And Grant Application</a></h3>
+<ul>
+<li>Publish the built-in approval workflow.</li>
+<li>Assign and display the role-based approval task.</li>
+<li>Implement durable request digests and approval evidence.</li>
+<li>Implement atomic, idempotent grant application.</li>
+<li>Add requester acknowledgement and editor status refresh.</li>
+</ul>
+<h3 id="phase-3-hardening"><a class="header" href="#phase-3-hardening">Phase 3: Hardening</a></h3>
+<ul>
+<li>Add cancellation, expiry, retry, and stale-request flows.</li>
+<li>Add notifications and deep links.</li>
+<li>Add audit reports and operational dashboards.</li>
+<li>Add configurable definition-wide versus version-specific approval policy.</li>
+<li>Consider preapproved Tool bundles for low-risk workflow namespaces while
+still materializing explicit per-workflow grants.</li>
+</ul>
+<h2 id="acceptance-criteria-6"><a class="header" href="#acceptance-criteria-6">Acceptance Criteria</a></h2>
+<p>The design is complete when:</p>
+<ol>
+<li>A new workflow receives a stable <code>wfDefId</code> before the author selects Tools.</li>
+<li>An authorized author can discover and insert a requestable Tool without Tool
+administration access.</li>
+<li>The draft saves while the Tool is pending, with an explicit warning.</li>
+<li>The author cannot test, publish, or execute the pending reference.</li>
+<li>Starting the request creates one claimable role task visible to eligible
+approvers.</li>
+<li>A non-member cannot claim or complete the approval task.</li>
+<li>Approval of an unchanged request atomically creates all expected existing
+workflow Tool grants.</li>
+<li>Rejection or staleness creates no grants.</li>
+<li>Retrying grant application is idempotent.</li>
+<li>The editor unlocks testing from committed grant state without waiting for
+acknowledgement.</li>
+<li>The author receives a user-assigned acknowledgement containing a link to
+the workflow.</li>
+<li>No generic task or arbitrary workflow can invoke the typed decision action.</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="claim-org-role-bootstrap"><a class="header" href="#claim-org-role-bootstrap">Claim Org Role Bootstrap</a></h1>
 <h2 id="problem-10"><a class="header" href="#problem-10">Problem</a></h2>
 <p>The Claim Org action lets a signed-in user create an organization and its default host from the profile menu. The <code>createOrg</code> form captures the organization owner, default subdomain, host description, and host owner. The backend create-org flow then creates the organization, the default host, and user-host membership rows in one transaction.</p>
@@ -20500,7 +21039,7 @@ and the gateway verifies producer authenticity and endpoint binding.</li>
 <li><code>role_permission_t</code></li>
 </ul>
 <p>The <code>role_user_t</code> table has a foreign key to <code>(host_id, role_id)</code> in <code>role_t</code>, so role rows must exist before the user-role assignments are inserted.</p>
-<h2 id="goals-22"><a class="header" href="#goals-22">Goals</a></h2>
+<h2 id="goals-23"><a class="header" href="#goals-23">Goals</a></h2>
 <ol>
 <li>A claimed organization must be immediately usable by the selected organization owner and host owner.</li>
 <li>The default host must receive deterministic administrative roles.</li>
@@ -20508,7 +21047,7 @@ and the gateway verifies producer authenticity and endpoint binding.</li>
 <li>The event stream and projections must remain replayable and idempotent.</li>
 <li>The implementation must use the canonical role IDs already used by the portal data: <code>org-admin</code> and <code>host-admin</code>.</li>
 </ol>
-<h2 id="non-goals-25"><a class="header" href="#non-goals-25">Non-Goals</a></h2>
+<h2 id="non-goals-26"><a class="header" href="#non-goals-26">Non-Goals</a></h2>
 <p>This design does not introduce a new global organization-role table. Existing roles are host-scoped through <code>role_t.host_id</code>, so the organization administrator role for a claimed organization is represented as a role on the default host.</p>
 <p>This design also does not merge organization and host administration into one broad role. Organization ownership and host ownership are separate responsibilities, and the system should grant both roles only when the same user is selected for both owner fields.</p>
 <h2 id="role-model-1"><a class="header" href="#role-model-1">Role Model</a></h2>
@@ -20645,7 +21184,7 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 <p>The new tenant host does not and should not have duplicate OAuth provider/client rows. The FK therefore rejects login with:</p>
 <pre><code class="language-text">auth_session_t_host_id_client_id_provider_id_fkey
 </code></pre>
-<h2 id="goals-23"><a class="header" href="#goals-23">Goals</a></h2>
+<h2 id="goals-24"><a class="header" href="#goals-24">Goals</a></h2>
 <ol>
 <li>Keep <code>dev.lightapi.net</code> as the single master OAuth host for the instance.</li>
 <li>Allow users whose current host is a tenant host to log in through the master host’s provider/client.</li>
@@ -20654,7 +21193,7 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 <li>Allow Claim Org to switch the host owner to the new host and require logout/login for fresh claims.</li>
 <li>Keep session, auth-code, refresh-token, and audit lifecycle behavior deterministic and queryable.</li>
 </ol>
-<h2 id="non-goals-26"><a class="header" href="#non-goals-26">Non-Goals</a></h2>
+<h2 id="non-goals-27"><a class="header" href="#non-goals-27">Non-Goals</a></h2>
 <p>This design does not introduce tenant-specific OAuth provider IDs, client IDs, redirect URIs, or BFF configuration.</p>
 <p>This design does not change the portal UI or BFF to select a different OAuth provider per tenant host.</p>
 <p>This design does not remove database referential integrity. The provider-client relationship should remain enforced, but it should be enforced against the master OAuth host instead of the tenant host.</p>
@@ -21041,7 +21580,7 @@ service yet. The main gaps are:</p>
 <li>tests for schema CRUD, tenant/global lookup, versioning, and config
 validation are incomplete</li>
 </ul>
-<h2 id="goals-24"><a class="header" href="#goals-24">Goals</a></h2>
+<h2 id="goals-25"><a class="header" href="#goals-25">Goals</a></h2>
 <ul>
 <li>Store JSON Schema documents with clear tenant/global ownership.</li>
 <li>Support immutable published schema versions.</li>
@@ -21058,7 +21597,7 @@ and loading schema bodies lazily.</li>
 JSON path.</li>
 <li>Categorize and tag schemas for easier discovery and filtering.</li>
 </ul>
-<h2 id="non-goals-27"><a class="header" href="#non-goals-27">Non-Goals</a></h2>
+<h2 id="non-goals-28"><a class="header" href="#non-goals-28">Non-Goals</a></h2>
 <ul>
 <li>Do not build a full schema compatibility engine in the first release.</li>
 <li>Do not require every config property to have a schema.</li>
@@ -22698,7 +23237,7 @@ model conversations, read state, participant visibility, or per-user delete.</li
 messages page should load its own data from the query API.</li>
 <li>The existing private-message tests are disabled stubs.</li>
 </ul>
-<h2 id="goals-25"><a class="header" href="#goals-25">Goals</a></h2>
+<h2 id="goals-26"><a class="header" href="#goals-26">Goals</a></h2>
 <ul>
 <li>Let one logged-in user send a message to another portal user without knowing
 or seeing the recipient email.</li>
@@ -22713,7 +23252,7 @@ recipient email internally.</li>
 <li>Provide a path from the existing <code>message_t</code> skeleton to a conversation-based
 model without breaking existing UI routes immediately.</li>
 </ul>
-<h2 id="non-goals-28"><a class="header" href="#non-goals-28">Non-Goals</a></h2>
+<h2 id="non-goals-29"><a class="header" href="#non-goals-29">Non-Goals</a></h2>
 <ul>
 <li>Do not build group chat in the first phase.</li>
 <li>Do not expose email addresses in message APIs, events, UI state, or task
@@ -24970,7 +25509,7 @@ should not be forced to match <code>sid</code> until the product-level authoriza
 is explicitly designed.</p>
 <p>The same exception does not apply to controller registry registration because
 <code>service/register</code> always carries a requested <code>serviceId</code>.</p>
-<h2 id="goals-26"><a class="header" href="#goals-26">Goals</a></h2>
+<h2 id="goals-27"><a class="header" href="#goals-27">Goals</a></h2>
 <ul>
 <li>Prevent one service token from downloading another service’s config, certs,
 or files.</li>
@@ -25016,7 +25555,7 @@ helper.</p>
 <p>The focused implementation tests cover missing and mismatched <code>host</code>, missing
 and mismatched <code>sid</code>, missing and mismatched <code>env</code> when <code>envTag</code> is requested,
 blank values, whitespace trimming, and case-sensitive identifier comparison.</p>
-<h2 id="non-goals-29"><a class="header" href="#non-goals-29">Non-Goals</a></h2>
+<h2 id="non-goals-30"><a class="header" href="#non-goals-30">Non-Goals</a></h2>
 <ul>
 <li>Do not replace JWT verification middleware.</li>
 <li>Do not redesign OAuth token issuance.</li>
@@ -25433,7 +25972,7 @@ copies the current active state of this graph and lets the administrator change
 the target identity and environment-specific configuration.</p>
 <p>This is a same-host operation. Cross-host or cross-database copying remains an
 event-promotion/import concern.</p>
-<h2 id="goals-27"><a class="header" href="#goals-27">Goals</a></h2>
+<h2 id="goals-28"><a class="header" href="#goals-28">Goals</a></h2>
 <ul>
 <li>Clone an active instance and its selected active children with one command.</li>
 <li>Require a target instance name and environment tag while allowing other
@@ -25450,7 +25989,7 @@ omit it without exposing values unnecessarily.</li>
 transaction when requested.</li>
 <li>Report durable projection and snapshot status after command acceptance.</li>
 </ul>
-<h2 id="non-goals-30"><a class="header" href="#non-goals-30">Non-goals</a></h2>
+<h2 id="non-goals-31"><a class="header" href="#non-goals-31">Non-goals</a></h2>
 <ul>
 <li>Copy raw historical events or preserve source aggregate versions.</li>
 <li>Copy an existing configuration snapshot, runtime registration, deployment
@@ -25849,7 +26388,7 @@ plan contains only properties whose parents remain selected.</p>
 <p>The immediate response is <code>ACCEPTED</code>, not completed. It contains the clone
 request ID, target instance ID, transaction ID, terminal event ID, event counts,
 and status URL/action.</p>
-<h3 id="status-9"><a class="header" href="#status-9">Status</a></h3>
+<h3 id="status-10"><a class="header" href="#status-10">Status</a></h3>
 <p><code>getInstanceCloneStatus</code> accepts <code>hostId</code> and <code>cloneRequestId</code> in a POST query
 and returns one of:</p>
 <ul>
@@ -26517,7 +27056,7 @@ WHERE h.sub_domain || '.' || h.domain = ?
 <p>The deployment service contains pipeline management, platform management and deployment management. It also integrates with product management and instance management services.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-portal-install"><a class="header" href="#light-portal-install">Light Portal Install</a></h1>
-<h2 id="purpose-4"><a class="header" href="#purpose-4">Purpose</a></h2>
+<h2 id="purpose-5"><a class="header" href="#purpose-5">Purpose</a></h2>
 <p><code>light-portal-install</code> provides a one-command local installation path for Light Portal. The target user should only need Docker Compose on the host machine and should not need to clone the individual service repositories, build Java or Rust projects, install Node.js, or manually copy static assets.</p>
 <p>The intended entrypoint is:</p>
 <pre><code class="language-bash">curl -sL https://raw.githubusercontent.com/networknt/light-portal-install/main/install.sh | bash
@@ -27029,7 +27568,7 @@ public class UuidUtil {
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="entity-creation-uniqueness"><a class="header" href="#entity-creation-uniqueness">Entity Creation Uniqueness</a></h1>
-<h2 id="status-10"><a class="header" href="#status-10">Status</a></h2>
+<h2 id="status-11"><a class="header" href="#status-11">Status</a></h2>
 <p>Implemented through Phase 5 for Role/Rule stream births and Category/Tag semantic
 identity, client retries, lifecycle alignment, verified historical materialization,
 snapshot/import guards, and policy-aware retry-ledger cleanup. Later aggregate
@@ -27093,7 +27632,7 @@ the second event reaches a projection unique constraint.</li>
 </ul>
 <p>The failure is not specific to role or rule. It is a missing write-side creation
 contract shared by many command services.</p>
-<h2 id="goals-28"><a class="header" href="#goals-28">Goals</a></h2>
+<h2 id="goals-29"><a class="header" href="#goals-29">Goals</a></h2>
 <ul>
 <li>Reject a second create for an existing aggregate without changing its event
 stream.</li>
@@ -27105,7 +27644,7 @@ stream.</li>
 <li>Provide one reusable implementation rather than handler-specific query checks.</li>
 <li>Return an actionable conflict to the UI without exposing another tenant’s data.</li>
 </ul>
-<h2 id="non-goals-31"><a class="header" href="#non-goals-31">Non-goals</a></h2>
+<h2 id="non-goals-32"><a class="header" href="#non-goals-32">Non-goals</a></h2>
 <ul>
 <li>Treating all equal request payloads as the same entity.</li>
 <li>Preventing valid multiplicity for events such as audit records, workflow runs,
@@ -28357,7 +28896,7 @@ unprotected append path, importer problem, or policy drift.</p>
 create commands.</li>
 <li>Require elevated, audited authorization for identity release and legacy repair.</li>
 </ul>
-<h2 id="acceptance-criteria-6"><a class="header" href="#acceptance-criteria-6">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-7"><a class="header" href="#acceptance-criteria-7">Acceptance Criteria</a></h2>
 <p>These are program-wide criteria for issue 691. Phase 5 satisfies them only for
 the scoped Role/Rule stream and Category/Tag semantic-identity rollout described
 in Status; criteria involving the remaining 114 <code>REVIEW_PENDING</code> birth events
@@ -32366,7 +32905,7 @@ unchanged products and to the new <code>productVersionId</code> for rebuilt prod
 </tbody>
 </table>
 </div>
-<h2 id="goals-29"><a class="header" href="#goals-29">Goals</a></h2>
+<h2 id="goals-30"><a class="header" href="#goals-30">Goals</a></h2>
 <ul>
 <li>Auto-populate config mappings for every new Java or Rust product release.</li>
 <li>Preserve event replay, auditability, and projection rebuild behavior.</li>
@@ -32379,7 +32918,7 @@ event amplification.</li>
 <li>Detect missing config and property definitions before a release appears
 complete.</li>
 </ul>
-<h2 id="non-goals-32"><a class="header" href="#non-goals-32">Non-Goals</a></h2>
+<h2 id="non-goals-33"><a class="header" href="#non-goals-33">Non-Goals</a></h2>
 <ul>
 <li>Do not change the config override hierarchy.</li>
 <li>Do not write directly to config mapping projection tables.</li>
@@ -33015,7 +33554,7 @@ event-sourced product release model without duplicating standard mappings for
 every tenant.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="release-workflow"><a class="header" href="#release-workflow">Release Workflow</a></h1>
-<h2 id="status-11"><a class="header" href="#status-11">Status</a></h2>
+<h2 id="status-12"><a class="header" href="#status-12">Status</a></h2>
 <p>Proposed design.</p>
 <p>Light Portal should use <code>light-workflow</code> as the durable release orchestrator
 for Java and Rust releases. The workflow should coordinate repository checkout,
@@ -33044,7 +33583,7 @@ and who approved publication.</li>
 <p>The release workflow should be flexible enough to call existing command-line
 tools, but controlled enough that it does not become an unrestricted shell
 inside Light Portal.</p>
-<h2 id="goals-30"><a class="header" href="#goals-30">Goals</a></h2>
+<h2 id="goals-31"><a class="header" href="#goals-31">Goals</a></h2>
 <ul>
 <li>Replace the current Java <code>light-bot</code> release path with <code>light-workflow</code> once
 parity is proven.</li>
@@ -33062,7 +33601,7 @@ reporting into the release gate.</li>
 behind explicit approval.</li>
 <li>Preserve release auditability and reproducibility.</li>
 </ul>
-<h2 id="non-goals-33"><a class="header" href="#non-goals-33">Non-Goals</a></h2>
+<h2 id="non-goals-34"><a class="header" href="#non-goals-34">Non-Goals</a></h2>
 <ul>
 <li>Do not run arbitrary release commands in the Light Portal service process.</li>
 <li>Do not replace Maven, Cargo, Docker, GitHub CLI, or existing release scripts
@@ -34860,7 +35399,7 @@ aggregate version for that subject.</li>
 </li>
 </ol>
 <p>The generated JSON is then imported through import mode.</p>
-<h2 id="goals-31"><a class="header" href="#goals-31">Goals</a></h2>
+<h2 id="goals-32"><a class="header" href="#goals-32">Goals</a></h2>
 <ul>
 <li>Preserve Java CLI compatibility for existing scripts and runbooks.</li>
 <li>Preserve event-store, outbox, notification, nonce, offset, and transaction
@@ -34872,7 +35411,7 @@ into testable modules.</li>
 <li>Support large migration workflows with stdin/stdout piping, bounded-memory
 conversion options, aggregate-version caching, and configurable batch imports.</li>
 </ul>
-<h2 id="non-goals-34"><a class="header" href="#non-goals-34">Non-Goals</a></h2>
+<h2 id="non-goals-35"><a class="header" href="#non-goals-35">Non-Goals</a></h2>
 <ul>
 <li>No online REST service in the first version.</li>
 <li>No schema migration management.</li>
@@ -35428,7 +35967,7 @@ Java-compatible unversioned arrays for migration compatibility.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="event-replay"><a class="header" href="#event-replay">Event Replay</a></h1>
-<h2 id="status-12"><a class="header" href="#status-12">Status</a></h2>
+<h2 id="status-13"><a class="header" href="#status-13">Status</a></h2>
 <p>This document defines the revised target design for event replay during the
 early development stage of light-portal. The implementation still contains
 legacy-backfill, staged-rollout, feature-gate, mandatory-encryption, and
@@ -35468,7 +36007,7 @@ transactions first;</li>
 <p>Event replay therefore operates on complete canonical failure transactions,
 not individual notification or DLQ rows. It invokes the same projection
 executor as live processing without rewinding PostgreSQL or Kafka offsets.</p>
-<h2 id="goals-32"><a class="header" href="#goals-32">Goals</a></h2>
+<h2 id="goals-33"><a class="header" href="#goals-33">Goals</a></h2>
 <ul>
 <li>Capture every new failed projection transaction in a replayable canonical
 form.</li>
@@ -35493,7 +36032,7 @@ schema is present.</li>
 <li>Keep configuration small enough that a developer can understand the entire
 replay setup from one screen.</li>
 </ul>
-<h2 id="non-goals-35"><a class="header" href="#non-goals-35">Non-Goals</a></h2>
+<h2 id="non-goals-36"><a class="header" href="#non-goals-36">Non-Goals</a></h2>
 <ul>
 <li>Historical or legacy <code>dead_letter_queue</code> rows are not imported. They remain
 diagnostic history only.</li>
@@ -37580,7 +38119,7 @@ The Importer processes the list in order:</p>
 </li>
 </ol>
 <h2 id="dry-run-technical-implementation"><a class="header" href="#dry-run-technical-implementation">Dry Run Technical Implementation</a></h2>
-<h3 id="purpose-5"><a class="header" href="#purpose-5">Purpose</a></h3>
+<h3 id="purpose-6"><a class="header" href="#purpose-6">Purpose</a></h3>
 <p>To guarantee the promotion will succeed without actually modifying the Higher Environment (Production).</p>
 <h3 id="option-1-application-layer-simulation-fast-recommended-for-planning"><a class="header" href="#option-1-application-layer-simulation-fast-recommended-for-planning">Option 1: Application-Layer Simulation (Fast, Recommended for Planning)</a></h3>
 <ul>
@@ -37868,7 +38407,7 @@ CREATE TABLE promotion_item_t (
 <p>A standard <code>MaterialReactTable</code> listing past promotions with columns: Source Host, Target Host, Entity Type, Status (color-coded chip), Created By, Timestamp, Promotion ID. Row action: View Details (navigates to diff view).</p>
 <h4 id="promotiondiffviewtsx-apppromotiondiff"><a class="header" href="#promotiondiffviewtsx-apppromotiondiff">PromotionDiffView.tsx (<code>/app/promotion/diff</code>)</a></h4>
 <p>Displays detailed promotion metadata (source/target hosts, status, timestamps) and a table of all promotion items with expandable field-level diffs showing source vs. target values and per-item execution status.</p>
-<h3 id="implementation-phases-3"><a class="header" href="#implementation-phases-3">Implementation Phases</a></h3>
+<h3 id="implementation-phases-4"><a class="header" href="#implementation-phases-4">Implementation Phases</a></h3>
 <ol>
 <li><strong>Phase 1 – UI Foundation:</strong> Create promotion pages, sidebar menu entry, route registration. <em>(Completed)</em></li>
 <li><strong>Phase 2 – Backend Services:</strong> Implement <code>exportSnapshot</code>, <code>importDryRun</code>, and validation for <code>importExecute</code>. <em>(Partially completed: selective execution is blocked until event materialization is implemented.)</em></li>
@@ -38703,7 +39242,7 @@ the provider <code>jwk</code> from <code>auth_provider_t</code>. The implementat
 that the JWT header <code>kid</code> is present in the returned JWKS for the same provider.
 That guarantee matters more once external AWS services cache the discovery and
 JWKS responses.</p>
-<h2 id="goals-33"><a class="header" href="#goals-33">Goals</a></h2>
+<h2 id="goals-34"><a class="header" href="#goals-34">Goals</a></h2>
 <ul>
 <li>Let AWS AgentCore use Rust <code>light-oauth</code> or Java <code>oauth-kafka</code> as a JWT
 bearer token issuer.</li>
@@ -38715,7 +39254,7 @@ claims working.</li>
 <li>Keep issuer, audience, and discovery URLs deterministic across environments.</li>
 <li>Add tests that prove discovery, JWKS, and signed token claims line up.</li>
 </ul>
-<h2 id="non-goals-36"><a class="header" href="#non-goals-36">Non-Goals</a></h2>
+<h2 id="non-goals-37"><a class="header" href="#non-goals-37">Non-Goals</a></h2>
 <ul>
 <li>Do not implement full OIDC identity-provider behavior in the first phase.</li>
 <li>Do not add dynamic client registration.</li>
@@ -40577,23 +41116,32 @@ branches start with a minimal <code>set</code> task that can be replaced with th
 call or other task configuration. Branch names must be unique and may contain
 letters, numbers, underscores, and hyphens. The editor keeps at least two
 branches in a fork.</p>
-<p>For an endpoint call, first open the endpoint-backed Tool in <strong>GenAI &gt; Tools</strong>
-and use <strong>Workflow Access</strong> to grant it to this workflow and environment. In
-the fork panel, select <strong>Add Step</strong> on the intended branch, change Reference
-Type to <strong>Endpoints</strong>, and select the granted capability. The editor replaces
-only that branch’s placeholder and generates an executable <code>call: http</code> task
-with a logical <code>lightapi://</code> URI and a pinned Tool version and LightAPI digest.
-It never stores the endpoint UUID or an environment URL in workflow YAML.</p>
-<p>The Endpoints list is workflow-aware. A Tool is absent when its grant is
-revoked, is for another workflow/version/environment, its LightAPI document is
-invalid, or its pinned version or digest is stale. Runtime execution performs
-the same check before resolving the logical URI and sending the request.</p>
+<p>For an endpoint call, select <strong>Endpoints</strong> in Reference Type and choose an
+eligible capability. The list includes granted and requestable endpoint Tools
+and labels each one with its access state. The editor generates an executable
+<code>call: http</code> task with a logical <code>lightapi://</code> URI plus the exact Tool ID,
+capability, version, LightAPI digest, and environment pin. It never stores an
+environment URL in workflow YAML.</p>
+<p>You may insert requestable or pending Tools and save the draft. Select
+<strong>Request Tool Access</strong>, review the grouped exact pins and usage locations,
+enter a justification, and submit the request. The built-in <strong>Grant Tools to
+Workflow</strong> process assigns one approval task to the <code>genai-admin</code> role. The
+first administrator who claims it can approve or reject the complete Tool set
+from the normal Human Tasks page. Approval is atomic: if any Tool changed or
+became ineligible, no grants are created and the request becomes stale.</p>
+<p>The editor polls only while an approval is pending and displays the request and
+approval workflow instance IDs. After the transaction commits, the status
+changes to <strong>GRANTED</strong> and testing becomes available. A rejection or stale
+request remains visible so the author can update the draft and submit a new
+request. Tool Admin’s Workflow Access dialog is intentionally read-only except
+for revoking existing grants.</p>
 <h2 id="validate-and-test"><a class="header" href="#validate-and-test">Validate and test</a></h2>
-<p><strong>Validate</strong> first parses the YAML in the browser and checks that it has a
-workflow task container. It then calls the portal workflow validation service
-for the supported server-side contract checks. Validation does not currently
-apply the complete workflow specification schema.</p>
-<p>After saving a draft, use <strong>Test</strong> to start it with test input and inspect
+<p><strong>Validate</strong> first parses the YAML in the browser and then performs server-side
+draft validation. Missing grants are warnings, so an incomplete draft can be
+saved while approval is pending. <strong>Test</strong> and <strong>Publish Version</strong> use execution
+validation instead and fail closed unless every referenced Tool ID,
+capability, version, digest, and requested environment matches an active grant.</p>
+<p>Use <strong>Test</strong> to start a fully granted draft with test input and inspect
 processes, tasks, assignments, audit records, and final output in the Runtime
 Test panel.</p>
 <h2 id="import-save-and-publish"><a class="header" href="#import-save-and-publish">Import, save, and publish</a></h2>
