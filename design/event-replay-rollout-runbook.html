@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-23bdf48c.js";
+            window.path_to_searchindex_js = "../searchindex-84095f9f.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9c5951d2.js"></script>
@@ -185,7 +185,7 @@ operators, and retained rollout evidence.</p>
 <li>Use <code>ALLOWLIST</code> for every canary. <code>ALL</code> is an expansion action, not a shortcut.</li>
 <li>Never remove a host from the allowlist while it owns an active request,
 barrier, pause, deferred transaction, or quarantine.</li>
-<li>Disable <code>executionEnabled</code> before rolling back worker or command code.</li>
+<li>Disable <code>executionEnabled</code> before rolling back query processor or command code.</li>
 <li>Do not drop replay tables during application rollback.</li>
 <li>Do not rewind database/Kafka offsets, edit graph revisions, or delete
 canonical failures to make a canary pass.</li>
@@ -213,14 +213,14 @@ rollout:
 </code></pre>
 <p>Add <code>KAFKA</code>, <code>portal-query</code>, and the Kafka group only at the Kafka capture
 stage. Read, plan, dry-run, and execution APIs reject requests outside this
-exact boundary. The worker claim query independently matches the host,
-projection, and consumer group before it can claim an existing request.</p>
+exact boundary. The direct query claim independently matches the host, replay
+request, and immutable plan hash before it can claim an existing request.</p>
 <h2 id="ordered-rollout"><a class="header" href="#ordered-rollout">Ordered Rollout</a></h2>
 <ol>
 <li><strong>Schema:</strong> Apply the fresh DDL or all dated patches through Phase 11 twice
 in a disposable database, then once in the target environment. Record
 <code>SCHEMA/VERIFIED</code> evidence.</li>
-<li><strong>Dormant code:</strong> Deploy both adapters, worker, APIs, UI, and operations hooks
+<li><strong>Dormant code:</strong> Deploy both adapters, direct processor, APIs, UI, and operational monitoring
 with all gates off and <code>rollout.mode: DISABLED</code>.</li>
 <li><strong>Database capture:</strong> Enable <code>captureEnabled</code> for one database projection
 group and one non-production host. Compare canonical transaction membership,
@@ -311,7 +311,7 @@ or deferred work remain.</p>
 <h2 id="rollback"><a class="header" href="#rollback">Rollback</a></h2>
 <ol>
 <li>Stop new execute requests and set <code>executionEnabled: false</code>.</li>
-<li>Run the <code>ROLLBACK</code> preflight. If blocked, retain the current worker and give
+<li>Run the <code>ROLLBACK</code> preflight. If blocked, retain the current processor and give
 every active scope an operator-owned recovery plan.</li>
 <li>Disable dry-run, planning, Kafka publication, and capture in that order.</li>
 <li>Preserve canonical tables, payload keys, objects, attempts, audit, backfill

@@ -35,7 +35,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-23bdf48c.js";
+            window.path_to_searchindex_js = "../../searchindex-84095f9f.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-9c5951d2.js"></script>
@@ -175,6 +175,372 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="direct-event-replay-execution"><a class="header" href="#direct-event-replay-execution">Direct Event Replay Execution</a></h1>
+<h2 id="status"><a class="header" href="#status">Status</a></h2>
+<p>Implemented on 2026-08-19 as the replacement for the asynchronous
+replay-worker execution path in <a href="../event-replay.html">Event Replay</a>.</p>
+<p>This design changes only the trigger and invocation path for an approved replay.
+The existing replay processor, durable state, approval, fencing, barriers,
+repairs, audit, and projection correctness rules remain in place.</p>
+<h2 id="decision"><a class="header" href="#decision">Decision</a></h2>
+<p>An authorized Portal user starts the exact replay request synchronously:</p>
+<pre><code class="language-text">Portal UI
+   |
+   | executeEventReplay
+   v
+hybrid-command
+   | authorize and commit execution intent
+   | forward the user's bearer token
+   v
+HybridQueryClient
+   | POST processEventReplay; no automatic retry
+   v
+hybrid-query
+   | process(hostId, replayRequestId, planHash)
+   | on the RPC request thread
+   v
+hybrid-command -&gt; Portal UI
+</code></pre>
+<p>There is no replay queue consumer, PostgreSQL <code>LISTEN</code>/<code>NOTIFY</code>, recovery scan,
+or permanent replay execution thread. The UI action is the trigger. If the call
+fails, the UI reads the durable request state and the user may try again.</p>
+<p><code>hybrid-query</code> remains the execution owner because it already owns the live
+projection runtime and <code>ProjectionTransactionExecutor</code>. Although the database
+provider is also present in current <code>hybrid-command</code> deployments, duplicating
+projection execution configuration in command is unnecessary when the existing
+<code>HybridQueryClient</code> path can call query directly.</p>
+<h2 id="why-change-it"><a class="header" href="#why-change-it">Why Change It</a></h2>
+<p>Replay is an exceptional operator action that occurs only a few times per
+month. The current <code>PostgresEventReplayDispatcher</code> keeps a listener connection,
+listener task, drain executor, and recovery executor alive on every query
+replica. A notification only means that some work may exist; the worker’s
+<code>processOne()</code> then claims the oldest eligible request rather than the request
+that caused the notification.</p>
+<p>Direct execution is both smaller and more precise: the command names one
+approved request and query processes that request only. Removing the idle
+dispatcher machinery also removes its shutdown delay from <code>hybrid-query</code>.</p>
+<h2 id="goals"><a class="header" href="#goals">Goals</a></h2>
+<ul>
+<li>Execute only the <code>(hostId, replayRequestId)</code> submitted by the user.</li>
+<li>Pass the user’s existing bearer token from command to query.</li>
+<li>Reuse the existing replay processor and database safety checks.</li>
+<li>Preserve durable status so an ambiguous response is safe to inspect and retry.</li>
+<li>Perform no automatic retry in the client, command handler, query handler, or
+gateway route.</li>
+<li>Remove permanent threads and database sessions that exist only to wait for
+replay work.</li>
+</ul>
+<h2 id="non-goals"><a class="header" href="#non-goals">Non-Goals</a></h2>
+<ul>
+<li>No queue, scheduler, workflow, Kafka topic, or outbox consumer is added.</li>
+<li>No machine or bootstrap token is introduced for this call.</li>
+<li>No background continuation or automatic recovery is added.</li>
+<li>No replay schema is removed in the first implementation.</li>
+<li>Failure capture, planning, approval, repairs, barriers, attempts, audit, and
+terminal history are unchanged.</li>
+<li>Live projection remains deferred for a barriered scope while its replay is
+non-terminal. Operators must be alerted if that condition becomes stale.</li>
+</ul>
+<h2 id="rpc-contract"><a class="header" href="#rpc-contract">RPC Contract</a></h2>
+<h3 id="public-command"><a class="header" href="#public-command">Public command</a></h3>
+<p>Keep the existing public service:</p>
+<pre><code class="language-text">lightapi.net/user/executeEventReplay/0.1.0
+</code></pre>
+<p>The request remains:</p>
+<pre><code class="language-json">{
+  "hostId": "019...",
+  "replayRequestId": "019...",
+  "planHash": "sha256:...",
+  "reason": "Operator supplied reason"
+}
+</code></pre>
+<p>The command handler remains responsible for user authorization, host scope,
+plan-hash validation, reason capture, and requester/approver separation.</p>
+<h3 id="query-command"><a class="header" href="#query-command">Query command</a></h3>
+<p>Add a query-side hybrid handler:</p>
+<pre><code class="language-text">lightapi.net/user/processEventReplay/0.1.0
+</code></pre>
+<p><code>HybridQueryClient.processEventReplay(...)</code> sends a POST with:</p>
+<pre><code class="language-json">{
+  "host": "lightapi.net",
+  "service": "user",
+  "action": "processEventReplay",
+  "version": "0.1.0",
+  "data": {
+    "hostId": "019...",
+    "replayRequestId": "019...",
+    "planHash": "sha256:..."
+  }
+}
+</code></pre>
+<p>The command passes the incoming user bearer token exactly as other
+<code>HybridQueryClient</code> calls do. The new method must not fall back to a bootstrap
+token. Query independently validates the user token, host scope, and replay
+execute permission.</p>
+<p>Register the new service in <code>user-query</code> <code>schema.json</code> and <code>spec.yaml</code> with
+<code>scope: portal.w</code> and <code>skipAuth: false</code>. Add the exact endpoint to the Portal
+endpoint-to-role configuration used by light-gateway. Add
+<code>PROCESS_EVENT_REPLAY("processEventReplay", false, false)</code> to
+<code>ReplayAuthorizationPolicy.Operation</code>. The <code>mutation=false</code> policy flag does
+not mean the processor is read-only; it means this internal operation applies
+intent that command already authorized and persisted, so it does not require a
+new reason field in the RPC. Query loads and validates the stored reason.</p>
+<p>This is intentionally the first <code>portal.w</code> service in <code>user-query</code>; the other
+query registrations are read operations and use <code>portal.r</code>. Processing replay
+applies already-approved projection mutations, and the forwarded user token
+already needs <code>portal.w</code> to invoke <code>executeEventReplay</code>. Do not normalize this
+registration back to <code>portal.r</code> merely because it resides in <code>user-query</code>.</p>
+<p><code>RUN_REPLAY_WORKER</code> machine-token authorization is not used by this path and can
+be retired when the background worker is removed. A direct call to the query
+handler cannot create execution intent: query accepts only the exact request
+already moved by command to <code>INSTALLING_BARRIER</code>, or a resumable <code>RUNNING</code>
+request. The durable request supplies the approved plan, actor, and reason.</p>
+<p>Return metadata sufficient for the UI to refresh status:</p>
+<pre><code class="language-json">{
+  "replayRequestId": "019...",
+  "status": "SUCCEEDED",
+  "retryable": false,
+  "failureCode": null
+}
+</code></pre>
+<p><code>status</code> is the durable request status. A partially completed request never
+claims that the whole projection was committed. The response contains no event
+or repair payload.</p>
+<h2 id="execution-flow"><a class="header" href="#execution-flow">Execution Flow</a></h2>
+<h3 id="1-command-commits-intent"><a class="header" href="#1-command-commits-intent">1. Command commits intent</a></h3>
+<p>For a request in <code>APPROVED</code>, <code>JdbcEventReplayCommandProvider</code> keeps its current
+transactional validation and transition to <code>INSTALLING_BARRIER</code>, including the
+execution audit record. It stops calling <code>pg_notify</code>.</p>
+<p>For a manual retry, the command handler may accept the same request in
+<code>INSTALLING_BARRIER</code> or <code>RUNNING</code> without repeating the intent transition. It
+still checks the authenticated user, host scope, plan hash, stored approval,
+and original reason before calling query. A retry writes a distinct
+<code>EVENT_REPLAY_EXECUTION_RETRIED</code> audit event.</p>
+<p>If replay is disabled, command rejects a new execution before committing
+intent. Query checks the flag again before installing a barrier or starting a
+new item. Disabling replay during an item does not roll back committed work;
+query stops before the next item and leaves the request resumable. Re-enabling
+replay does not start work automatically—the user must retry.</p>
+<h3 id="2-command-calls-query"><a class="header" href="#2-command-calls-query">2. Command calls query</a></h3>
+<p>After intent commits, <code>ExecuteEventReplay</code> calls
+<code>HybridQueryClient.processEventReplay(...)</code> synchronously. No layer
+automatically retries the POST.</p>
+<p>The existing runtime maximum is 1,800 seconds. The internal command-to-query
+HTTP/2 call is bounded to 1,830 seconds and may therefore keep a command worker
+thread and a query worker thread occupied for up to 30 minutes. This is an
+explicit tradeoff for a rare operator operation and avoids adding another
+execution mechanism. The call resolves query directly through <code>Cluster</code>; it
+does not traverse light-gateway. A borrowed HTTP/2 connection remains valid for
+the in-flight call and is closed rather than returned idle to the pool if the
+client deadline expires.</p>
+<p>The browser-facing command request keeps the existing global
+<code>router.maxRequestTime: 5000</code>. All hybrid commands share <code>/portal/command</code>, so
+raising that global timeout would weaken the hung-backend protection for every
+Portal command. The expected UI path is therefore:</p>
+<ol>
+<li>gateway ends the browser request after about five seconds;</li>
+<li>command’s direct query call continues synchronously on its request thread;</li>
+<li>query continues the replay on its request thread; and</li>
+<li>Portal View treats the browser result as transport-ambiguous and uses its
+existing <code>getEventReplay</code> polling to display durable progress and completion.</li>
+</ol>
+<p>This is not background execution: the original command-to-query request still
+owns the replay. The gateway timeout only closes the outer browser leg. No
+automatic retry occurs.</p>
+<h3 id="3-query-claims-the-exact-request"><a class="header" href="#3-query-claims-the-exact-request">3. Query claims the exact request</a></h3>
+<p>Refactor the worker entry point from untargeted <code>processOne()</code> to a targeted
+method such as:</p>
+<pre><code class="language-java">process(UUID hostId, UUID replayRequestId, String planHash)
+</code></pre>
+<p>The targeted claim must preserve the current claim semantics:</p>
+<ul>
+<li>lock and validate the exact request row;</li>
+<li>verify <code>INSTALLING_BARRIER</code> or resumable <code>RUNNING</code> state;</li>
+<li>reject a different host or plan hash;</li>
+<li>advance the fencing token with the existing compare-and-set update;</li>
+<li>abandon interrupted <code>RUNNING</code> attempts and reset their <code>RUNNING</code> items to
+<code>PENDING</code> before resuming; and</li>
+<li>keep every fenced write’s existing <code>LEASE_LOST</code> row-count check.</li>
+</ul>
+<p>Keep <code>event_replay_lease_t</code> for the first implementation. Use the existing
+lease to reject a concurrent invocation. At claim time, set its expiry to the
+remaining per-attempt execution budget; do not create a heartbeat executor. A
+process failure leaves the lease to expire, after which a user may retry and
+advance the fencing token. The accepted tradeoff is a worst-case recovery wait
+of about 30 minutes after an early process failure, rather than today’s roughly
+30-second heartbeat lease recovery. Show the lease expiry in operator status
+and document that wait in the runbook. No new advisory-lock design or schema
+migration is required.</p>
+<p>The execution budget is per attempt. Do not calculate a retry’s remaining time
+from the request’s original <code>started_ts</code>. Use the existing in-memory
+<code>Claim.started</code> as the deadline origin for the single request thread, but
+populate it with the targeted claim time (<code>Instant.now()</code>) instead of the
+currently selected request <code>started_ts</code>. This needs no schema migration; the
+request’s <code>started_ts</code> remains the original execution-intent audit timestamp.
+Update <code>lockAndVerifyRequest(...)</code> to compare the execution deadline against
+<code>claim.started</code>; changing only the <code>Claim</code> value while that method continues to
+compare the request-row <code>started_ts</code> would leave retries permanently expired.</p>
+<p>Keep <code>workerHeartbeatSeconds</code> and <code>workerLeaseSeconds</code> in the positional
+<code>EventReplayRuntimePolicy.Limits</code> contract for the first release.
+<code>PortalEventConsumerStartupHook</code> independently uses <code>workerHeartbeatSeconds</code>
+as its live-consumer backoff, and tests such as
+<code>JdbcProjectionFailureRepositoryPostgresTest</code> construct <code>Limits</code> positionally.
+Remove only the <code>Limits.validate()</code> rule requiring
+<code>workerLeaseSeconds &gt; workerHeartbeatSeconds</code>; replay lease expiry is now
+derived from the attempt deadline. Renaming the live-consumer backoff and later
+removing obsolete fields is a separate cleanup.</p>
+<h3 id="4-query-executes-on-the-request-thread"><a class="header" href="#4-query-executes-on-the-request-thread">4. Query executes on the request thread</a></h3>
+<p>The RPC request thread calls the existing processor phases: install the
+barrier, validate immutable state, replay items through
+<code>ProjectionTransactionExecutor</code>, drain deferred work, resolve failures, release
+the barrier, and commit the terminal state. It does not create a worker thread.</p>
+<p>When query returns, command returns the durable status to the UI. If the
+connection is lost, query may still finish the current request; the UI resolves
+that ambiguity by refreshing status, not by an automatic resubmission.</p>
+<h2 id="failure-and-retry-semantics"><a class="header" href="#failure-and-retry-semantics">Failure and Retry Semantics</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Durable state</th><th>User action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>APPROVED</code></td><td>Command commits intent and calls query.</td></tr>
+<tr><td><code>INSTALLING_BARRIER</code> or <code>RUNNING</code>, active lease</td><td>Show current status and lease expiry; do not start a second execution. After a crashed process, expiry may take up to about 30 minutes.</td></tr>
+<tr><td><code>INSTALLING_BARRIER</code> or <code>RUNNING</code>, expired/no lease</td><td>An authorized manual retry resumes the exact request with a new attempt budget and fencing token.</td></tr>
+<tr><td><code>SUCCEEDED</code></td><td>Return the stored success without replaying again.</td></tr>
+<tr><td>Terminal failure/cancellation/expiry</td><td>Show the stable failure; require the existing plan, repair, or release procedure as applicable.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Projection failures retain their existing domain status and failure code.
+Network failures are not stored as projection failures. The response’s
+<code>retryable</code> value is derived by the server from durable state so the UI does not
+classify status strings itself.</p>
+<p>Command maps a query connection failure or lost internal response to the stable
+public code <code>REPLAY_EXECUTION_UNAVAILABLE</code>. The error catalog marks it
+retryable and the UI refreshes <code>getEventReplay</code> before offering Retry. Do not
+return raw <code>ERR11000</code> exception text for this case.</p>
+<p>If another invocation already owns the targeted lease, query returns the
+non-retryable domain code <code>REPLAY_EXECUTION_IN_PROGRESS</code>. Command preserves
+that query result, and the UI displays it after refreshing durable state.</p>
+<p>Because there is no automatic recovery, stale barriers require explicit
+operations visibility. Retain the existing <code>active_barriers</code>,
+<code>oldest_blocked_scope_age_seconds</code>, and <code>deferred_transactions</code> metrics and
+alert when a blocked scope reaches the existing
+<code>blockedScopeIncidentSeconds = 900</code> threshold. The two-person
+<code>releaseEventReplayBarrier</code> operation remains the escalation path.</p>
+<h2 id="threads-hooks-and-observability"><a class="header" href="#threads-hooks-and-observability">Threads, Hooks, and Observability</a></h2>
+<p>Remove replay execution infrastructure:</p>
+<ul>
+<li><code>EventReplayWorkerStartupHook</code> and <code>EventReplayWorkerShutdownHook</code>;</li>
+<li><code>PostgresEventReplayDispatcher</code>;</li>
+<li>the PostgreSQL listener connection;</li>
+<li>listener, drain, recovery, and lease-heartbeat executors; and</li>
+<li>notification and recovery-scan health fields.</li>
+</ul>
+<p>Keep <code>EventReplayConfigStartupHook</code>; it validates configuration without waiting
+for work.</p>
+<p>Do not delete capture and capacity observability with the dispatcher.
+<code>EventReplayOperationsMonitor</code> covers failure capture, deferred bytes, archive
+capacity, publication backlog, quarantined scopes, and barrier health. Re-home
+its snapshot refresh, gauges, alerts, and retention work under the existing
+<code>OperationalCleanupStartupHook</code>, which is already registered in the query
+deployment mirrors. It must not own a replay execution thread. Preserve the
+current refresh and retention cadences rather than running the full operational
+query on every metrics scrape. Schedule health refresh independently from
+retention and general cleanup so a long cleanup cannot delay a stale-barrier
+alert past its threshold.</p>
+<h2 id="deployment-changes"><a class="header" href="#deployment-changes">Deployment Changes</a></h2>
+<p>Remove the replay worker and dispatcher hook registrations from every
+<code>hybrid-query</code> deployment mirror, including all nodes under:</p>
+<ul>
+<li><code>portal-config-loc/all-in-lt</code>;</li>
+<li><code>portal-config-loc/all-in-pg</code>;</li>
+<li><code>portal-config-loc/all-in-one</code>;</li>
+<li><code>portal-config-dev</code>;</li>
+<li><code>light-portal-install</code>; and</li>
+<li><code>implementation/light-gateway/bedrock-converse/replay-query-config</code>.</li>
+</ul>
+<p>Keep the existing hybrid-query direct-registry mapping used by
+<code>HybridQueryClient</code>. No new service, listener port, PostgreSQL channel,
+advisory-lock requirement, or container is introduced.</p>
+<p>The first release leaves <code>event_replay_lease_t</code>, schema verification, snapshot
+persistence, operations repository queries, DDL, init mirrors, and schema gates
+unchanged. A later cleanup may remove unused lease artifacts only after the
+runtime no longer depends on them.</p>
+<h2 id="implementation-plan"><a class="header" href="#implementation-plan">Implementation Plan</a></h2>
+<h3 id="p1-targeted-processor"><a class="header" href="#p1-targeted-processor">P1: Targeted processor</a></h3>
+<ul>
+<li>Add the request/response schema, service specification, <code>portal.w</code> scope,
+endpoint-to-role mapping, error-catalog entry, and contract fixtures for
+<code>processEventReplay</code> and <code>REPLAY_EXECUTION_UNAVAILABLE</code>.</li>
+<li>Add <code>process(hostId, replayRequestId, planHash)</code>.</li>
+<li>Preserve targeted lease claim, fencing-token advancement, interrupted-attempt
+cleanup, per-attempt timing, barriers, repairs, and terminal audit behavior.</li>
+<li>Add <code>PROCESS_EVENT_REPLAY</code> and the query hybrid handler with user-token
+authorization and stored-reason validation.</li>
+<li>Update the shared authorization fixture, its Portal View copy, and the
+phase-zero contract tests in both <code>user-command</code> and <code>user-query</code>; remove
+<code>RUN_REPLAY_WORKER</code> coverage with the worker identity.</li>
+</ul>
+<h3 id="p2-direct-command-to-query-call"><a class="header" href="#p2-direct-command-to-query-call">P2: Direct command-to-query call</a></h3>
+<ul>
+<li>Remove <code>pg_notify</code> from command execution.</li>
+<li>Add the bounded POST method to <code>HybridQueryClient</code> with exact user-token
+forwarding and no retry.</li>
+<li>Make command submission and manual retry idempotent by durable state.</li>
+</ul>
+<h3 id="p3-remove-idle-execution-machinery"><a class="header" href="#p3-remove-idle-execution-machinery">P3: Remove idle execution machinery</a></h3>
+<ul>
+<li>Delete the dispatcher, listener, execution hooks, and replay execution
+executors.</li>
+<li>Retain the positional runtime-policy fields and remove only their replay-lease
+comparison so <code>PortalEventConsumerStartupHook</code> and positional test
+construction continue to compile.</li>
+<li>Update every deployment mirror.</li>
+<li>Preserve capture/capacity metrics and stale-barrier alerting outside the
+dispatcher.</li>
+</ul>
+<h3 id="p4-ui-and-documentation"><a class="header" href="#p4-ui-and-documentation">P4: UI and documentation</a></h3>
+<ul>
+<li>Treat the expected five-second browser/gateway timeout as the primary flow:
+continue the existing three-second <code>getEventReplay</code> polling until terminal.</li>
+<li>Use server-provided <code>status</code>, <code>retryable</code>, and <code>failureCode</code>.</li>
+<li>Update the main replay design and runbook to remove worker, notification,
+automatic recovery, and listener-health instructions.</li>
+</ul>
+<h2 id="verification"><a class="header" href="#verification">Verification</a></h2>
+<ul>
+<li>An approved exact replay and repair replay execute through the public command.</li>
+<li>Query processes only the named request, never another eligible row.</li>
+<li>The user bearer token and host scope reach query; a bootstrap token is not
+substituted.</li>
+<li>A direct query call cannot execute an <code>APPROVED</code> request or alter its stored
+actor, reason, approval, or plan.</li>
+<li>Two concurrent calls produce one active execution; stale writes fail their
+fencing checks.</li>
+<li>A retry after more than 30 minutes receives a fresh attempt budget.</li>
+<li>Disabling replay prevents new work and does not auto-resume on re-enable.</li>
+<li>No client, gateway route, command handler, or query handler retries the POST.</li>
+<li>An ambiguous HTTP result is resolved through durable status without a second
+projection commit.</li>
+<li>The gateway remains at <code>router.maxRequestTime: 5000</code>; after that expected
+browser timeout, the internal command-to-query request completes the replay
+and the UI polling reaches the terminal state.</li>
+<li><code>REPLAY_EXECUTION_UNAVAILABLE</code> is returned for an internal query transport
+failure that reaches command before the browser leg closes.</li>
+<li>A killed query process exposes the lease expiry and rejects retry until that
+expiry, with a worst-case wait of about 30 minutes.</li>
+<li>Stale barriers alert at 900 seconds and retain the two-person release path.</li>
+<li>Capture, deferred-byte, archive-capacity, publication, and quarantine metrics
+remain available after dispatcher removal.</li>
+<li>An idle query JVM has no replay listener, polling scan, or replay execution
+thread and stops gracefully without waiting for Compose’s 30-second kill
+timeout.</li>
+</ul>
+<h2 id="documentation-reconciliation"><a class="header" href="#documentation-reconciliation">Documentation Reconciliation</a></h2>
+<p>After implementation, update <a href="../event-replay.html">Event Replay</a>, its operations
+runbook, and rollout tests. The durable database state remains authoritative;
+only the trigger changes from background discovery to the explicit user request.</p>
 
                     </main>
 

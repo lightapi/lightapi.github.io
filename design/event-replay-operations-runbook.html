@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-23bdf48c.js";
+            window.path_to_searchindex_js = "../searchindex-84095f9f.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9c5951d2.js"></script>
@@ -210,7 +210,7 @@ hard condition clears.</p>
 PostgreSQL data filesystem.</li>
 <li>Stop unrelated disk growth and add capacity if needed.</li>
 <li>Do not manually truncate replay tables or audit evidence.</li>
-<li>Allow the retention worker to remove only eligible resolved payloads and
+<li>Allow the scheduled retention task to remove only eligible resolved payloads and
 aged metadata. Resume processors only after <code>database_free_ratio</code> exceeds
 the hard boundary.</li>
 </ol>
@@ -220,7 +220,7 @@ the hard boundary.</li>
 the external DLQ merely because publication failed.</li>
 <li>Repair Kafka connectivity/topic/ACL configuration.</li>
 <li>Preserve the terminal row until its outcome has been copied to immutable
-audit evidence. The retention worker performs that copy before deletion.</li>
+audit evidence. The scheduled retention task performs that copy before deletion.</li>
 <li>Confirm backlog age and terminal-failure gauges fall after recovery.</li>
 </ol>
 <h3 id="stuck-fallback-pause-acknowledgement"><a class="header" href="#stuck-fallback-pause-acknowledgement">Stuck fallback pause acknowledgement</a></h3>
@@ -240,6 +240,14 @@ and immutable attempt history.</li>
 <li>Execute the exact approved hash. Do not delete deferred rows or change the
 barrier owner manually.</li>
 </ol>
+<p>Direct execution has no background recovery. If a request remains
+<code>INSTALLING_BARRIER</code> or <code>RUNNING</code>, inspect <code>leaseExpiresAt</code>. Event Admin offers
+Retry only after that lease expires; a query-process crash can therefore make
+the operator wait up to about 30 minutes. Live projection for the affected
+scope remains deferred during that interval. Alert when
+<code>oldest_blocked_scope_age_seconds</code> reaches 900 seconds. If safe retry cannot
+recover the request, use the separately approved <code>RELEASE_WITH_GAP</code> procedure;
+never edit the lease, fence, or barrier rows manually.</p>
 <h3 id="repeated-stale_plan-or-lease_lost"><a class="header" href="#repeated-stale_plan-or-lease_lost">Repeated <code>STALE_PLAN</code> or <code>LEASE_LOST</code></a></h3>
 <ol>
 <li>Stop approving the stale hash and create a new plan from current graph and
@@ -259,7 +267,7 @@ hide key loss.</li>
 <h3 id="cleanup-or-object-reconciliation-failed"><a class="header" href="#cleanup-or-object-reconciliation-failed">Cleanup or object reconciliation failed</a></h3>
 <ol>
 <li>Check <code>event_replay.cleanup_failures</code> and <code>reconciliation_failures</code> plus the
-worker error type. Payload and identifiers are deliberately absent from logs.</li>
+task error type. Payload and identifiers are deliberately absent from logs.</li>
 <li>Repair database/object connectivity and retry. Cleanup batches are
 resumable and use <code>SKIP LOCKED</code>.</li>
 <li>An object is deleted as orphaned only when it uses the managed <code>replay/v1/</code>
@@ -273,7 +281,7 @@ locator/version reference in PostgreSQL.</li>
 measurement, object-store listing support, dashboards, and alerts are verified.
 Enable one query node first. Multiple nodes are safe because cleanup candidates
 are locked with <code>FOR UPDATE SKIP LOCKED</code>.</p>
-<p>To roll back the worker, set <code>operations.enabled</code> false and restart. Do not roll
+<p>To roll back scheduled cleanup, set <code>operations.enabled</code> false and restart. Do not roll
 back schema additions or remove retention evidence. Capture, planning, and
 execution gates remain independent.</p>
 
