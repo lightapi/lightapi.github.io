@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-73e142f9.js";
+            window.path_to_searchindex_js = "../searchindex-23bdf48c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-1a733359.js"></script>
+        <script src="../toc-9c5951d2.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -298,9 +298,11 @@ importer --convert --filename snapshot.json --targetHostId ... --adminUserId ...
 <li><code>--enrichment</code>, <code>-e</code>: JSON string or <code>@file</code> containing enrichment rules.</li>
 <li><code>--dry-run</code>: parse, mutate, validate, and report without writing.</li>
 <li><code>--fail-fast</code>: stop on the first failed event. Default is continue.</li>
-<li><code>--batch-size</code>: number of events per transaction. Default is <code>1</code> for Java
-compatibility. Snapshot imports should use a larger value, such as <code>500</code>,
-after validation passes.</li>
+<li><code>--batch-size</code>: soft event-count target for one physical database commit.
+It never defines logical transaction membership. Every event in the
+snapshot-derived JSON array receives a distinct singleton logical
+transaction. See
+<a href="./light-portal/database-recreation-event-bootstrap.html">Fast Snapshot-Derived Database Bootstrap</a>.</li>
 <li><code>--summary-json</code>: print machine-readable summary.</li>
 </ul>
 <h3 id="convert-options"><a class="header" href="#convert-options">Convert Options</a></h3>
@@ -524,14 +526,15 @@ SET next_offset = next_offset + $1
 WHERE id = 1
 RETURNING next_offset - $1
 </code></pre>
-<p>For import mode, keep Java’s isolation behavior by default: one event per
-transaction and one <code>transaction_id</code> per event. When <code>--batch-size</code> is greater
-than <code>1</code>, reserve enough offsets for the batch and write the batch in one
-transaction with one <code>transaction_id</code>.</p>
-<p>If a batched transaction fails because of a validation or constraint error, roll
-back the batch and retry its events one at a time unless <code>--fail-fast</code> is set.
-This keeps fast-path imports efficient without losing the Java tool’s ability to
-identify the bad event and continue later events.</p>
+<p>The supported snapshot-derived array contains synthetic events without source
+transaction metadata. Preserve Java’s isolation semantics by assigning one
+singleton logical transaction per event, with ordinal <code>0</code> and count <code>1</code>.</p>
+<p><code>--batch-size</code> may place several singleton append requests in one physical
+PostgreSQL commit, but it must retain a distinct generated <code>transaction_id</code> for
+every event. If a physical commit chunk fails, roll it back and retry its events
+individually for diagnosis unless <code>--fail-fast</code> is set. Import of true canonical
+event history with original multi-event transaction membership is outside this
+snapshot-import design.</p>
 <h3 id="insert-sql"><a class="header" href="#insert-sql">Insert SQL</a></h3>
 <p>Write both event rows in one transaction:</p>
 <pre><code class="language-sql">INSERT INTO event_store_t
@@ -774,8 +777,9 @@ target is PostgreSQL-specific SQL and JSONB.</p>
 <li>Verify failed event rolls back without blocking later events.</li>
 <li>Verify unique-constraint collisions are categorized as exact duplicate or
 failed conflict.</li>
-<li>Verify <code>--batch-size</code> imports multiple events in one transaction and falls
-back to one-event isolation when a batch fails.</li>
+<li>Verify <code>--batch-size</code> packs singleton append requests into physical commit
+chunks while retaining a distinct transaction ID, ordinal <code>0</code>, and count <code>1</code>
+for every event, then falls back to per-event diagnostics when a chunk fails.</li>
 <li>Convert a snapshot and import the resulting event list into an empty DB.</li>
 <li>Compare embedded table dependency order against live PostgreSQL metadata.</li>
 </ol>
@@ -817,8 +821,9 @@ snapshot conversion and import scenarios.</li>
 <ul>
 <li>Include an embedded table dependency graph in the first release and keep
 database metadata mode as a validation/refresh path.</li>
-<li>Implement <code>--batch-size</code> during import parity work. Default to <code>1</code> for Java
-behavior, but support larger batches for initial snapshot imports.</li>
+<li>Implement <code>--batch-size</code> as a physical commit target during import parity
+work. Default conservatively and treat every snapshot-derived event as a
+singleton logical transaction.</li>
 <li>Support stdin/stdout in both modes so operators can run
 <code>importer convert ... --output - | importer import --filename -</code>.</li>
 <li>Formalize replacement/enrichment as versioned <code>serde</code> schemas while accepting

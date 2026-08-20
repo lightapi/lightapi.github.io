@@ -1,0 +1,1185 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Fast Snapshot-Derived Database Bootstrap - Light Portal Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../../css/general-e96d0476.css">
+        <link rel="stylesheet" href="../../css/chrome-d279d366.css">
+        <link rel="stylesheet" href="../../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../../searchindex-23bdf48c.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../../toc-9c5951d2.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Light Portal Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="fast-snapshot-derived-database-bootstrap"><a class="header" href="#fast-snapshot-derived-database-bootstrap">Fast Snapshot-Derived Database Bootstrap</a></h1>
+<h2 id="status"><a class="header" href="#status">Status</a></h2>
+<p>Implemented with a narrower ingestion-only boundary. The projection-aware
+bootstrap proposal retained below records the review history, but its barrier,
+materialization, convergence, DLQ, and database-ready requirements are
+superseded by the decision below.</p>
+<h2 id="implemented-ingestion-boundary"><a class="header" href="#implemented-ingestion-boundary">Implemented Ingestion Boundary</a></h2>
+<p>For <code>--bootstrap-import</code>, success means only that every input event has been
+durably inserted into <code>event_store_t</code>, <code>outbox_message_t</code>, and <code>notification_t</code>.
+The importer does not invoke guarded graph command persistence and does not
+wait for, inspect, or modify projection state. Projection, retry, DLQ handling,
+identity materialization, terminal convergence, and user notification are the
+responsibility of the asynchronous event-processing system.</p>
+<p>The retained correctness contract is limited to the write itself:</p>
+<ul>
+<li>the destination event, outbox, and notification tables must be empty;</li>
+<li>one UUIDv7 logical transaction envelope is generated per event;</li>
+<li>nonce allocation, offset allocation, and all three table writes occur on the
+coordinator connection and roll back together;</li>
+<li>multiple singleton logical transactions may share one bounded physical
+commit, with a default and hard ceiling of 500 events;</li>
+<li>a session advisory lock prevents concurrent bootstrap importers;</li>
+<li>importer success does not imply projection readiness or an empty DLQ.</li>
+</ul>
+<p>This document defines how Light Portal recreates an empty database quickly from
+the <code>events.json</code> generated from a global projection snapshot. Those events are
+new synthetic CreatedEvents. They are not an export of canonical event history
+and cannot preserve the original business transaction IDs.</p>
+<p>The first optimized implementation remains on the Java <code>event-importer</code> and
+<code>light-portal</code> persistence path. The Rust importer may replace it only after it
+passes the parity gates in this document.</p>
+<p>Related designs are <a href="../importer-rust.html">Rust Event Importer</a>,
+<a href="../event-replay.html">Event Replay</a>, and
+<a href="../light-portal-install.html">Light Portal Install</a>.</p>
+<h2 id="problem"><a class="header" href="#problem">Problem</a></h2>
+<p>Database recreation currently imports <code>events.json</code> one event at a time. Each
+event opens and commits a PostgreSQL transaction. Guarded graph appends also
+commit and then poll projection convergence at 250 ms intervals before the next
+input event. This protects failure, graph, and DLQ isolation, but a
+baseline of approximately 17,000 events takes several minutes and the generated
+event set will continue to grow.</p>
+<p>The current implementation has not attributed that elapsed time reliably. The
+candidate costs are:</p>
+<ul>
+<li>PostgreSQL transaction commits;</li>
+<li>nonce, aggregate-version, and offset queries;</li>
+<li>event-store, outbox, and notification writes;</li>
+<li>guarded append validation and graph metadata stamping;</li>
+<li>projection convergence and identity materialization barriers.</li>
+</ul>
+<p>P0 must measure these costs separately before a default chunk size or primary
+optimization is selected. Commit reduction is a useful proxy, not the outcome:
+the optimization succeeds only when measured time-to-database-ready improves
+without falsely claiming that adjacent snapshot-derived events belonged to one
+original business transaction. Changing from Java to Rust or running outside a
+container does not answer that measurement question.</p>
+<h2 id="source-of-truth-correction"><a class="header" href="#source-of-truth-correction">Source-Of-Truth Correction</a></h2>
+<p><code>events.json</code> is produced in two distinct stages:</p>
+<ol>
+<li>Global snapshot export reads current projection and read-model tables.</li>
+<li>Snapshot conversion turns projection rows into new ordered CreatedEvents.</li>
+</ol>
+<p>The global snapshot deliberately excludes infrastructure and operational tables
+such as:</p>
+<ul>
+<li><code>event_store_t</code>;</li>
+<li><code>outbox_message_t</code>;</li>
+<li><code>notification_t</code>;</li>
+<li><code>dead_letter_queue</code>;</li>
+<li><code>log_counter</code>;</li>
+<li><code>consumer_offsets</code>.</li>
+</ul>
+<p>The converter may also fold several child projection rows into one parent event,
+derive a new aggregate version sequence, and generate a new event UUID. A
+projection row can represent the result of many historical events, while
+deleted or intermediate states may not appear in the snapshot at all.</p>
+<p>Consequently, there is no reliable mapping from a converted event back to an
+original <code>transaction_id</code>, <code>transaction_ordinal</code>, or <code>transaction_count</code>.
+Querying <code>event_store_t</code> or joining <code>outbox_message_t</code> separately cannot restore
+that relationship for synthetic snapshot events.</p>
+<p>The importer must not attempt to enrich snapshot-derived <code>events.json</code> with
+original transaction metadata. Original-history export is a separate problem
+and is outside this design.</p>
+<h2 id="decision-summary"><a class="header" href="#decision-summary">Decision Summary</a></h2>
+<ol>
+<li>The existing top-level JSON array remains the canonical snapshot-derived
+<code>events.json</code> format.</li>
+<li>Every generated event represents one new singleton logical transaction.</li>
+<li>At import, each event receives its own newly generated UUIDv7
+<code>transaction_id</code>,
+<code>transaction_ordinal = 0</code>, and <code>transaction_count = 1</code>.</li>
+<li>Adjacent events are never flattened under one logical <code>transaction_id</code>.</li>
+<li>A physical PostgreSQL transaction may persist several singleton logical
+transactions while retaining a different logical transaction ID for every
+event.</li>
+<li>Configured chunk size controls physical commit frequency only. It never
+defines business transaction membership.</li>
+<li>Graph and validator read-model dependencies create commit barriers. The
+importer commits the barrier event before waiting for required projection
+state. It must never wait for a row produced by an open chunk.</li>
+<li>The guarded Java append path remains authoritative during the first phase.
+Direct SQL that bypasses <code>GraphCommandPersistence</code>, <code>EventAppendValidator</code>,
+recovery projection markers, or identity materialization is not an accepted
+optimization.</li>
+<li>Public installation should normally restore a release-built, validated
+PostgreSQL bootstrap archive and import only later event deltas. Complete
+snapshot-event import remains the portable fallback and qualification
+oracle.</li>
+<li>Container versus host execution is an operational choice, not the primary
+performance design.</li>
+<li>The Rust importer is not selected for database recreation until it
+implements singleton logical transactions, guarded bootstrap behavior, and
+Java-versus-Rust differential tests.</li>
+<li>The first implementation is a single writer, enforced by a session-level
+advisory lock, and uses <code>READ COMMITTED</code> transactions.</li>
+<li>Barrier latency is a first-class optimization target. P0 starts with an
+adaptive low-latency poll and evaluates <code>LISTEN</code>/<code>NOTIFY</code> if polling remains
+material.</li>
+</ol>
+<h2 id="goals"><a class="header" href="#goals">Goals</a></h2>
+<ul>
+<li>Reduce empty-database recreation time as snapshot event volume grows.</li>
+<li>Preserve the current one-event logical transaction and DLQ isolation
+semantics.</li>
+<li>Reduce physical PostgreSQL commits without creating false multi-event
+transactions.</li>
+<li>Preserve nonce, aggregate-version, outbox-offset, policy-version, graph, and
+projection behavior.</li>
+<li>Keep current snapshot generation and <code>events.json</code> consumption portable.</li>
+<li>Preserve exact failure diagnostics during bootstrap.</li>
+<li>Provide a fast, reproducible installation artifact tied to an exact schema
+and event baseline.</li>
+<li>Compare Java and Rust importers against the same fixtures and database
+postconditions.</li>
+</ul>
+<h2 id="non-goals"><a class="header" href="#non-goals">Non-Goals</a></h2>
+<ul>
+<li>Recovering original history or adding original <code>transaction_id</code> metadata to
+the snapshot/event format.</li>
+<li>Treating chunk adjacency as business transaction membership, using one giant
+transaction, or parallelizing arbitrary events.</li>
+<li>Weakening validation and graph/identity guards or bypassing them with direct
+<code>COPY</code> into canonical tables.</li>
+<li>Making a physical PostgreSQL volume the portable public artifact.</li>
+<li>Removing snapshot-event import as the recovery/conformance path or treating
+successful append as database readiness.</li>
+</ul>
+<h2 id="terminology"><a class="header" href="#terminology">Terminology</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Term</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td>Projection snapshot</td><td>Current state exported from projection and read-model tables.</td></tr>
+<tr><td>Synthetic event</td><td>A new CreatedEvent generated from a projection row or folded group of rows.</td></tr>
+<tr><td>Logical transaction</td><td>The event-processing and replay unit identified by <code>transaction_id</code>. Every snapshot-derived event has its own singleton logical transaction.</td></tr>
+<tr><td>Physical commit chunk</td><td>One PostgreSQL transaction used to persist several singleton logical transactions.</td></tr>
+<tr><td>Chunk target</td><td>A soft event-count and byte-size target used to construct a physical commit chunk.</td></tr>
+<tr><td>Projection barrier</td><td>An event after which the importer must commit and wait before later events can be accepted safely.</td></tr>
+<tr><td>Bootstrap archive</td><td>A release-built PostgreSQL archive containing canonical synthetic history and already-converged projection state.</td></tr>
+<tr><td>Archive baseline ID</td><td>Immutable release-manifest coordinate identifying the exact schema, full <code>events.json</code>, and ordered release deltas already represented by an archive. It is not inferred from a maximum event UUID, nonce, or offset.</td></tr>
+<tr><td>Database ready</td><td>Synthetic canonical history is present, required projections and identities are verified, and no bootstrap failure or pending convergence remains.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="current-behavior-and-constraints"><a class="header" href="#current-behavior-and-constraints">Current Behavior And Constraints</a></h2>
+<h3 id="snapshot-converter"><a class="header" href="#snapshot-converter">Snapshot converter</a></h3>
+<p>The converter:</p>
+<ol>
+<li>reads the snapshot’s <code>tables</code> object;</li>
+<li>removes tables excluded from export and conversion;</li>
+<li>topologically sorts remaining tables;</li>
+<li>folds selected child rows into parent event payloads;</li>
+<li>derives aggregate identity and sequential aggregate versions;</li>
+<li>generates a new UUID for every event;</li>
+<li>writes nonce <code>0</code> as an import-time placeholder;</li>
+<li>emits a top-level JSON array.</li>
+</ol>
+<p>The generated events contain no transaction metadata. This is intentional, not
+a legacy-format defect.</p>
+<h3 id="java-importer"><a class="header" href="#java-importer">Java importer</a></h3>
+<p>The Java importer currently validates, normalizes, and persists every generated
+event independently. Each call creates:</p>
+<ul>
+<li>one PostgreSQL commit;</li>
+<li>one newly generated logical <code>transaction_id</code>;</li>
+<li>one outbox member with ordinal <code>0</code> and count <code>1</code>;</li>
+<li>one pending notification associated with that transaction.</li>
+</ul>
+<p>The underlying persistence implementation already exposes connection-aware
+<code>EventPersistenceImpl.insertEventStore(Connection, CloudEvent[], UUID)</code> and
+<code>GraphCommandPersistence.append(Connection, CloudEvent[], UUID)</code> entry points,
+as well as array inserts, append validation, nonce and offset allocation, and
+JDBC batches. One array still becomes one logical transaction, so a physical
+chunk cannot be passed as one arbitrary array without incorrectly turning
+unrelated snapshot events into a multi-event DLQ and replay group.</p>
+<p>Two concrete connection-level gaps remain. The public guarded connection-aware
+append hardcodes ordinary projection behavior; there is no public
+connection-aware bootstrap overload that sets <code>recoveryProjection=true</code>.
+Also, the current non-guarded importer reserves the nonce through
+<code>queryNonceByUserId</code> on a separate data-source connection before the append.
+That reservation is committed independently and must be moved onto the chunk
+connection.</p>
+<h3 id="guarded-append-constraints"><a class="header" href="#guarded-append-constraints">Guarded append constraints</a></h3>
+<p>The optimized path must retain:</p>
+<ul>
+<li>common trusted host and user identity validation;</li>
+<li>create-stream and semantic-identity guards;</li>
+<li>graph root and accepted-revision locking;</li>
+<li>policy registry and repair schema validation;</li>
+<li>recovery projection markers used by bootstrap;</li>
+<li>Category and Tag identity materialization;</li>
+<li>projection convergence waits;</li>
+<li>fail-fast empty-destination behavior.</li>
+</ul>
+<h3 id="rust-importer"><a class="header" href="#rust-importer">Rust importer</a></h3>
+<p>The current Rust importer generates one transaction ID for all events in its
+configured batch. A batch of 500 therefore becomes one synthetic 500-event
+logical transaction. That does not match this design.</p>
+<p>The Rust implementation also writes canonical and outbox tables directly
+without the complete guarded bootstrap, historical import, graph,
+recovery-projection, policy registry, and identity-materialization behavior of
+the Java path. It remains an experimental performance candidate until parity is
+proven.</p>
+<h2 id="snapshot-event-contract"><a class="header" href="#snapshot-event-contract">Snapshot Event Contract</a></h2>
+<p>The canonical input remains:</p>
+<pre><code class="language-json">[
+  {
+    "specversion": "1.0",
+    "id": "019ccccc-0000-7000-8000-000000000002",
+    "type": "RefTableCreatedEvent",
+    "subject": "019ccccc-0000-7000-8000-000000000003",
+    "host": "019ccccc-0000-7000-8000-000000000004",
+    "user": "019ccccc-0000-7000-8000-000000000005",
+    "nonce": "0",
+    "aggregateversion": 1,
+    "data": {}
+  }
+]
+</code></pre>
+<p>For every array member, the importer derives a singleton append envelope:</p>
+<pre><code class="language-text">transaction_id      = UuidUtil.getUUID() // UUIDv7
+transaction_ordinal = 0
+transaction_count   = 1
+</code></pre>
+<p>Transaction identity is import infrastructure metadata. It is not added to the
+CloudEvent or claimed to represent source history. Java uses the system-standard
+<code>UuidUtil.getUUID()</code>, which generates a time-ordered epoch UUIDv7. Rust must
+generate an RFC-compatible UUIDv7 through its shared UUID utility. UUIDv7 keeps
+the transaction IDs aligned with other generated identifiers in the system,
+but transaction processing order remains exclusively offset- and
+ordinal-based; consumers must not infer ordering semantics from
+<code>transaction_id</code>.</p>
+<p>Before writes begin, each synthetic event is checked for:</p>
+<ul>
+<li>valid CloudEvent structure;</li>
+<li>a unique event ID within the file;</li>
+<li>a trusted host and user;</li>
+<li>a non-empty subject and aggregate type;</li>
+<li>a supported event type and policy version;</li>
+<li>a valid aggregate-version sequence;</li>
+<li>replacement and enrichment rule validity;</li>
+<li>bootstrap append-mode classification;</li>
+<li>hard event-size limits.</li>
+</ul>
+<p>Duplicate input aggregate versions or an existing equal/higher target version
+follow the existing importer rules. Empty-database bootstrap still requires a
+complete, skip-free result.</p>
+<h2 id="import-planning"><a class="header" href="#import-planning">Import Planning</a></h2>
+<p>Import separates planning from execution:</p>
+<pre><code class="language-text">snapshot-derived events.json
+  |
+  v
+parse, mutate, normalize, and validate events
+  |
+  v
+assign one singleton logical transaction per event
+  |
+  v
+classify append mode and projection barriers
+  |
+  v
+pack compatible singleton appends into physical commit chunks
+  |
+  v
+append -&gt; commit -&gt; wait at barriers -&gt; verify
+</code></pre>
+<h3 id="append-mode-classification"><a class="header" href="#append-mode-classification">Append-mode classification</a></h3>
+<p>Every event receives exactly one append mode:</p>
+<ul>
+<li>guarded command append;</li>
+<li>guarded bootstrap append;</li>
+<li>write-fenced bootstrap identity append;</li>
+<li>write-fenced historical append.</li>
+</ul>
+<p>A physical chunk may contain different singleton append modes only if the
+bootstrap coordinator can preserve each mode’s validation and projection
+behavior. The initial implementation should flush the chunk when mode changes.</p>
+<h3 id="projection-barriers"><a class="header" href="#projection-barriers">Projection barriers</a></h3>
+<p>The planner creates a barrier around work whose successor requires committed
+projection state. Initial barriers include:</p>
+<ul>
+<li>guarded graph events whose projected revision must catch up;</li>
+<li>an event whose validator requires a read model produced by an earlier event;</li>
+<li>an explicit end-of-import convergence check.</li>
+</ul>
+<p>Category and Tag birth events remain forced single-event physical chunks
+because they cannot share an append batch with other events. Their identity
+materialization is not a mid-import wait: the current importer runs
+<code>materializeBootstrapIdentities()</code> once after the complete event loop, so it is
+a terminal bootstrap step unless a future dependency proves otherwise.</p>
+<p>Barrier classification is registry-driven and versioned with the importer. Its
+source is the same contract that creates the dependency:</p>
+<ul>
+<li>graph barriers live beside <code>GraphEventRegistry.resolveRoot</code> and its
+projection-table root resolution;</li>
+<li>validator barriers live beside the validator read-model dependency registry.</li>
+</ul>
+<p>This avoids a second hand-maintained event-type list drifting from the reads it
+must protect. Classification is never inferred from timing or a failed retry.</p>
+<h3 id="physical-commit-chunk-construction"><a class="header" href="#physical-commit-chunk-construction">Physical commit chunk construction</a></h3>
+<p>The chunk builder follows these rules:</p>
+<ol>
+<li>Preserve input order.</li>
+<li>Keep every event as a distinct singleton logical transaction.</li>
+<li>Never cross a projection barrier.</li>
+<li>Flush when append mode or another guarded compatibility boundary changes.</li>
+<li>Stop before the event-count or byte-size target would be exceeded.</li>
+<li>Reject one event only when it exceeds the separate hard event-size limit.</li>
+</ol>
+<p>Initial tuning candidates are 50, 100, 250, and 500 events per physical commit
+chunk. A candidate must pass the lock-pressure test as well as performance and
+correctness gates. The selected production default is based on qualification
+results, not on language or container runtime.</p>
+<h3 id="transaction-and-barrier-invariants"><a class="header" href="#transaction-and-barrier-invariants">Transaction and barrier invariants</a></h3>
+<p>The coordinator enforces these named invariants:</p>
+<ol>
+<li><strong>Never wait inside an open chunk.</strong> <code>log_counter.next_offset</code> is advanced in
+the event write transaction, while the database consumer treats
+<code>next_offset - 1</code> as the claimable tip. Uncommitted rows are therefore
+intentionally invisible to the projector. A barrier event is appended and
+committed before any wait for its projection begins.</li>
+<li><strong>Use <code>READ COMMITTED</code>.</strong> Root resolution and validator dependencies read
+projection rows written by another process between chunks. A transaction
+must not retain a stale <code>REPEATABLE READ</code> snapshot across such a wait.</li>
+<li><strong>One active bootstrap writer.</strong> The coordinator acquires a well-known
+session-level PostgreSQL advisory lock before the empty-destination check and
+holds it through final verification. A second importer fails fast.</li>
+<li><strong>Preserve append lock order.</strong> A chunk repeats existing singleton append
+lock order on one connection. Locks last until commit, so chunk qualification
+records lock waits and distinct advisory locks and rejects sizes that create
+unsafe shared-lock-table, WAL, memory, or rollback pressure.</li>
+</ol>
+<h2 id="persistence-design"><a class="header" href="#persistence-design">Persistence Design</a></h2>
+<h3 id="separate-logical-transactions-inside-one-physical-commit"><a class="header" href="#separate-logical-transactions-inside-one-physical-commit">Separate logical transactions inside one physical commit</a></h3>
+<p>The required shape is:</p>
+<pre><code class="language-text">PostgreSQL transaction
+  event A -&gt; transaction A / ordinal 0 / count 1
+  event B -&gt; transaction B / ordinal 0 / count 1
+  event C -&gt; transaction C / ordinal 0 / count 1
+commit
+</code></pre>
+<p>The existing persistence APIs are already connection-aware, but each call
+accepts one transaction ID with one event array. The optimized path therefore
+needs a connection-aware bootstrap coordinator that accepts a sequence of
+singleton append requests. Within one PostgreSQL transaction it processes each
+request in input order through the same validation and stamping path, supplying
+a new transaction ID and a one-event array for every request.</p>
+<p>The coordinator must not flatten the chunk into one event array with one
+generated transaction ID.</p>
+<p>The first API change is a public connection-aware bootstrap guarded append, for
+example <code>appendBootstrap(Connection, CloudEvent[], UUID)</code>, that preserves the
+current recovery projection marker. The coordinator constructs and reuses one
+<code>GraphCommandPersistence</code> with one loaded <code>GraphCommandConfig</code>; it must not
+repeat the current <code>PortalDbProviderImpl.appendCommandEvents</code> behavior of
+loading config and constructing the persistence object for every event.</p>
+<h3 id="first-optimization-boundary"><a class="header" href="#first-optimization-boundary">First optimization boundary</a></h3>
+<p>The first implementation reduces connection acquisition and commit/fsync cost
+while retaining existing per-event validation, nonce stamping, offset
+reservation, and persistence calls inside the shared PostgreSQL transaction.</p>
+<p>This deliberately separates the highest-value change from later SQL
+optimization. After correctness is proven, prepared statements, nonce ranges,
+offset ranges, and notification inserts may be optimized without changing
+logical transaction identity.</p>
+<h3 id="nonce-and-offset-allocation"><a class="header" href="#nonce-and-offset-allocation">Nonce and offset allocation</a></h3>
+<p>Nonce and offset allocation must become atomic with canonical and outbox writes
+for every append mode. This is already true for guarded append because
+<code>GraphCommandPersistence</code> calls the connection-taking nonce reservation. It is
+not true today for direct bootstrap modes: <code>queryNonceByUserId</code> reserves and
+commits through a separate connection before the event append.</p>
+<ul>
+<li>Preserve event order when assigning nonce values.</li>
+<li>Never trust nonce <code>0</code> from <code>events.json</code> as a persisted value.</li>
+<li>Add and use the connection-taking nonce reservation for direct append modes;
+never reserve or read a nonce outside the chunk transaction.</li>
+<li>Keep each outbox row’s distinct transaction ID, ordinal <code>0</code>, and count <code>1</code>.</li>
+<li>Allocate gapless, commit-ordered outbox offsets across the physical chunk.</li>
+<li>Rollback returns the complete physical chunk to its pre-import state.</li>
+</ul>
+<p>Until this gap is fixed, a rolled-back direct-mode chunk burns its already
+committed nonces and does not satisfy the optimized bootstrap contract.</p>
+<p><code>EventAppendValidator</code> requires contiguous nonces inside one append array.
+Singleton append calls satisfy that rule. This is an additional prohibition on
+folding a physical chunk into one array unless the full multi-event logical
+transaction contract is deliberately invoked.</p>
+<p>Set-based range reservation is a later optimization and requires the same
+locking and monotonicity proof as the current guarded path. Nonce or offset
+ranges must never be reserved in a separate transaction: the consumer advances
+its claim cursor to the committed counter tip, so publishing an offset tip
+before its rows could cause permanently skipped events.</p>
+<h3 id="sql-batching"><a class="header" href="#sql-batching">SQL batching</a></h3>
+<p>Prepared statements should be reused within the physical chunk where the
+validated persistence API permits it. Event-store, outbox, and notification
+inserts may use JDBC batch or set-based execution after parity tests prove
+identical validation, conflict, and notification behavior.</p>
+<p>The implementation continues to write:</p>
+<ul>
+<li><code>event_store_t</code> with validated policy and repair schema versions;</li>
+<li><code>outbox_message_t</code> with one distinct singleton transaction per event;</li>
+<li><code>notification_t</code> with the corresponding transaction ID and <code>PENDING</code> status.</li>
+</ul>
+<h3 id="failure-behavior"><a class="header" href="#failure-behavior">Failure behavior</a></h3>
+<p>Bootstrap import is fail-fast at the file level.</p>
+<p>If a physical chunk fails:</p>
+<ol>
+<li>roll back the complete physical chunk;</li>
+<li>retain the failing chunk number and event IDs in diagnostics;</li>
+<li>rerun the chunk one singleton event at a time in an isolated diagnostic
+attempt when enabled;</li>
+<li>identify the first failing event and its validation or SQL code;</li>
+<li>discard and recreate the destination, then restart from the verified empty
+state.</li>
+</ol>
+<p>Diagnostic retry must not leave a partial database that an installer can
+mistake for success.</p>
+<p>The initial design has no resumable import checkpoint. That is consistent with
+the existing <code>requireEmptyBootstrapDestination</code> guard and with bootstrap’s hard
+failure when any duplicate or existing aggregate version is skipped. A future
+checkpoint design would need its own durable cursor, chunk checksum, idempotency
+contract, and a deliberate relaxation of the empty-destination rule.</p>
+<h3 id="disposable-durability-optimization"><a class="header" href="#disposable-durability-optimization">Disposable durability optimization</a></h3>
+<p>The importer may expose an empty-database-only option that executes
+<code>SET LOCAL synchronous_commit = off</code> inside each physical chunk. Transaction
+scope is preferred to a session GUC so the relaxed durability cannot leak into
+unrelated work if connection handling changes. It does not disable <code>fsync</code>,
+constraints, or transactional rollback globally. If the host fails during
+bootstrap, installation restarts from an empty destination.</p>
+<p>This option is never enabled for incremental imports or existing databases.</p>
+<p>P0 also benchmarks, and records an explicit accept or reject decision for:</p>
+<ul>
+<li>bootstrap-window <code>max_wal_size</code> and checkpoint tuning;</li>
+<li>deferring non-essential projection indexes and rebuilding them before ready;</li>
+<li>temporarily setting projection-only tables <code>UNLOGGED</code>, including the
+<code>SET LOGGED</code> rewrite and crash-restart cost.</li>
+</ul>
+<p>Canonical event, outbox, nonce, offset, constraint, and guard tables remain
+logged and indexed. No tuning is accepted unless the ordinary released
+configuration is restored and verified before database-ready is reported.</p>
+<h2 id="release-built-postgresql-bootstrap-archive"><a class="header" href="#release-built-postgresql-bootstrap-archive">Release-Built PostgreSQL Bootstrap Archive</a></h2>
+<p>Physical commit chunking improves recovery performance, but public installation
+should not repeatedly pay the full synthetic-event import and projection cost.
+The release pipeline performs that work once and publishes a validated archive.</p>
+<h3 id="archive-generation"><a class="header" href="#archive-generation">Archive generation</a></h3>
+<pre><code class="language-text">canonical snapshot-derived events.json
+  |
+  v
+fresh release-matched PostgreSQL
+  |
+  v
+guarded singleton-logical / chunked-physical import
+  |
+  v
+projection and identity convergence
+  |
+  v
+correctness and checksum gates
+  |
+  v
+pg_dump archive + signed manifest
+</code></pre>
+<p>The generator uses the same released schema, service artifacts, policies, and
+projection handlers declared by the installation bundle.</p>
+<h3 id="archive-contents"><a class="header" href="#archive-contents">Archive contents</a></h3>
+<p>The archive contains:</p>
+<ul>
+<li>canonical synthetic <code>event_store_t</code> history;</li>
+<li>event-derived read models;</li>
+<li>identity and graph revision state;</li>
+<li>required reference and bootstrap tables;</li>
+<li>consistent nonce and offset counters;</li>
+<li>schema objects owned by the release.</li>
+</ul>
+<p><code>user_t.password</code> and <code>auth_client_t.client_secret</code> are credential verifiers in
+the canonical projection schema. A public archive must not turn a release seed
+into a reusable credential shared by every installation. The published archive
+contains disabled placeholder verifiers. During first boot, the installer
+generates installation-unique administrator and client credentials locally,
+stores only their verifiers, and delivers clear values through the existing
+one-time secret/enrollment boundary. No externally reachable listener starts
+until that rotation is verified. The dedicated auth-client secret regeneration
+contract is reused where applicable. Stable host, user, and client identifiers
+may remain in the archive; they are identifiers, not authentication secrets.</p>
+<p>Checksums and signatures prove artifact integrity and provenance; they do not
+make embedded credentials secret.</p>
+<p>Before capture, the generator quiesces projection work and normalizes
+operational state:</p>
+<ul>
+<li>all required projection cursors equal the baseline watermark;</li>
+<li>no required projection transaction is pending or failed;</li>
+<li>transport queues are empty or recorded under one explicitly versioned
+archive policy;</li>
+<li>bootstrap notifications and transient diagnostics are removed unless the
+release contract explicitly retains them;</li>
+<li>the next nonce and outbox offset remain monotonic after restore.</li>
+</ul>
+<h3 id="manifest"><a class="header" href="#manifest">Manifest</a></h3>
+<p>The archive manifest includes:</p>
+<pre><code class="language-json">{
+  "format": "lightapi.portal-postgres-bootstrap",
+  "formatVersion": 1,
+  "postgresMajor": 18,
+  "portalDbCommit": "...",
+  "eventsJsonSha256": "...",
+  "eventCount": 17000,
+  "singletonTransactionCount": 17000,
+  "lastEventId": "...",
+  "lastOutboxOffset": 17000,
+  "archiveBaselineId": "portal-2026.08.0-baseline-1",
+  "includedDeltaIds": [],
+  "checksumProfile": "portal-bootstrap-v1",
+  "canonicalizationSpecSha256": "...",
+  "projectionChecksumSet": "...",
+  "createdAt": "..."
+}
+</code></pre>
+<p>The PostgreSQL major version is illustrative; generation records the actual
+release version. The manifest also contains archive SHA-256, byte size, schema
+digest, required extension versions, per-table verification counts, credential
+sanitization policy, restore role mapping, and release signing identity.</p>
+<p><code>pg_dump</code> does not carry cluster roles and planner statistics are not a durable
+restore contract. Archive generation therefore uses an ownership-neutral dump
+and records the intended application role/grants separately. Restore uses
+<code>pg_restore --no-owner --no-acl</code> (or an explicitly mapped restore role),
+reapplies and verifies grants, and runs <code>ANALYZE</code> before the readiness timer can
+succeed.</p>
+<h3 id="checksum-canonicalization-and-reproducibility"><a class="header" href="#checksum-canonicalization-and-reproducibility">Checksum canonicalization and reproducibility</a></h3>
+<p>UUIDv7 transaction IDs and database-generated operational timestamps differ
+between valid rebuilds. Differential and archive checks therefore use a
+versioned, machine-readable checksum profile, not an unspecified
+“canonicalized” comparison. The <code>portal-bootstrap-v1</code> profile defines an exact
+ordered column list and row sort key for every checksummed table; no wildcard
+column exclusion is permitted.</p>
+<p>The initial exclusion/normalization set is:</p>
+<ul>
+<li>exclude <code>outbox_message_t.transaction_id</code> and, if notifications are retained
+by archive policy, <code>notification_t.transaction_id</code>; verify UUIDv7 type,
+uniqueness, ordinal, count, and event association through separate queries;</li>
+<li>exclude archive/build timestamps such as manifest <code>createdAt</code>;</li>
+<li>normalize only database-wall-clock columns named by the table profile,
+initially <code>entity_aggregate_t.created_ts</code>,
+<code>entity_aggregate_t.retired_ts</code>,
+<code>entity_identity_t.created_ts</code>,
+<code>entity_identity_t.demoted_ts</code>,
+<code>entity_identity_materialization_t.completed_ts</code>,
+<code>instance_graph_revision_t.accepted_ts</code>,
+<code>instance_graph_revision_t.projected_ts</code>,
+<code>notification_t.process_ts</code>, <code>notification_t.read_ts</code>,
+<code>portal_event_delta_t.imported_ts</code>, and <code>dead_letter_queue.created_dt</code> when
+those operational tables are retained;</li>
+<li>retain source-event <code>event_ts</code>, event IDs, payloads, metadata, aggregate
+identity/version, nonces, offsets, graph revisions, policy versions, and all
+other business columns exactly.</li>
+</ul>
+<p>If implementation shows that another database-generated column is
+nondeterministic, the versioned profile and its digest must change explicitly;
+the test harness must not silently drop it. Gate 1 compares canonical event
+content, Gate 10 uses this profile for projections, and Gate 13 compares Java
+and Rust after the same normalization while separately checking UUIDv7
+transaction invariants.</p>
+<p>A rebuilt <code>pg_dump</code> archive is not expected to be byte-identical to the
+published archive. UUIDv7 values, operational timestamps, dump ordering,
+compression, and planner statistics can differ. Installation verifies the
+published object’s exact SHA-256 and signature from the release manifest. An
+independent rebuild verifies schema digest, the versioned canonical table
+checksums, per-table counts, and the separate transaction/ordering invariants;
+it does not verify dump-byte equality.</p>
+<h3 id="delta-contract"><a class="header" href="#delta-contract">Delta contract</a></h3>
+<p>The archive watermark is the manifest’s <code>archiveBaselineId</code> plus its exact
+ordered <code>includedDeltaIds</code>; it is not <code>MAX(c_offset)</code>, a maximum event UUID, or
+a per-user nonce. Offsets and nonces are local consistency checks, not a
+portable release coordinate.</p>
+<p>Post-archive changes use the existing release event-delta shape: one ordered
+JSON file per immutable delta, an ID derived from its release filename, a
+SHA-256 recorded in the signed release manifest, and an effect-verification SQL
+contract. <code>portal_event_delta_t(delta_id, checksum)</code> records successful
+application. The delta importer continues aggregate versions from the restored
+state, reserves nonces and offsets transactionally, and records the delta only
+after the exact event or an explicitly accepted equivalent effect at that or a
+later aggregate version is verified.</p>
+<p>The archive manifest lists the first delta that may follow it and the ordered
+set or release range accepted thereafter. Delta files, verification SQL, and
+supersession metadata are covered by the same signed release manifest as the
+archive. An unknown, missing, reordered, checksum-mismatched, or unverifiable
+delta fails closed. Database-ready requires all selected deltas and their
+projections to converge.</p>
+<h3 id="installation-flow"><a class="header" href="#installation-flow">Installation flow</a></h3>
+<p>For an empty destination, the installer:</p>
+<ol>
+<li>downloads the version-matched archive and manifest;</li>
+<li>verifies checksum, signature, PostgreSQL major version, schema identity, and
+<code>events.json</code> digest;</li>
+<li>restores with <code>pg_restore --no-owner --no-acl</code>, an explicit
+restore/application role mapping, and safe parallel jobs where supported;</li>
+<li>reapplies and verifies grants, runs <code>ANALYZE</code>, and verifies the archive’s
+credential sanitization or pre-listener rotation contract;</li>
+<li>runs post-restore counter, graph, identity, projection, and row-count gates;</li>
+<li>imports only manifest-authorized event deltas after the archive baseline;</li>
+<li>starts normal externally reachable services only after credential and delta
+gates pass;</li>
+<li>reports database ready only after delta projection converges.</li>
+</ol>
+<p>If compatibility or verification fails, the installer discards the incomplete
+empty destination and falls back to canonical snapshot-event import. It never
+mixes an unverified partial restore with replay.</p>
+<h3 id="why-not-a-physical-volume-snapshot"><a class="header" href="#why-not-a-physical-volume-snapshot">Why not a physical volume snapshot</a></h3>
+<p>A physical PostgreSQL data-directory or container-volume snapshot can restore
+faster, but it is coupled to PostgreSQL binary version, architecture, storage
+layout, and crash-recovery state. A PostgreSQL archive plus compatibility
+manifest is the initial portable distribution choice. A physical snapshot may
+be added later for tightly controlled hosted environments.</p>
+<h2 id="java-and-rust-responsibilities"><a class="header" href="#java-and-rust-responsibilities">Java And Rust Responsibilities</a></h2>
+<h3 id="phase-one-java-path"><a class="header" href="#phase-one-java-path">Phase-one Java path</a></h3>
+<p>The Java path owns the first optimized implementation because it already has:</p>
+<ul>
+<li>graph-aware command append and revision guards;</li>
+<li>append validation and policy selection;</li>
+<li>bootstrap recovery projection markers;</li>
+<li>nonce reservation through the trusted persistence layer;</li>
+<li>identity materialization and projection convergence waits;</li>
+<li>the deployment flags used by current recreation scripts.</li>
+</ul>
+<p>The implementation adds a dedicated connection-aware bootstrap coordinator
+instead of changing ordinary live-command semantics.</p>
+<h3 id="rust-qualification-requirements"><a class="header" href="#rust-qualification-requirements">Rust qualification requirements</a></h3>
+<p>The Rust importer becomes eligible only when it:</p>
+<ul>
+<li>reads the existing top-level snapshot event array;</li>
+<li>assigns one distinct UUIDv7 singleton logical transaction per event;</li>
+<li>never creates a logical transaction from arbitrary chunk membership;</li>
+<li>supports guarded bootstrap, historical, and bootstrap identity modes;</li>
+<li>uses the same event-type, aggregate, policy, repair-schema, and graph
+validation contracts;</li>
+<li>preserves the recovery projection marker without modifying canonical event
+history;</li>
+<li>reserves nonce and offset values atomically;</li>
+<li>performs required identity materialization and convergence barriers;</li>
+<li>emits parity-compatible summaries and failure codes;</li>
+<li>passes database differential tests against the Java importer.</li>
+</ul>
+<p>Running the Rust binary directly on the host remains supported after parity,
+but that removes only container startup overhead. It is not a substitute for
+physical commit chunking or the bootstrap archive.</p>
+<h2 id="concurrency"><a class="header" href="#concurrency">Concurrency</a></h2>
+<p>The first implementation uses one ordered importer and enforces exclusivity
+with the session advisory lock defined above. Arbitrary parallel workers are
+rejected because they contend on:</p>
+<ul>
+<li>per-user nonce allocation;</li>
+<li>the global outbox offset counter;</li>
+<li>aggregate-version streams;</li>
+<li>logical identity and graph advisory locks;</li>
+<li>projection dependencies between earlier and later events.</li>
+</ul>
+<p>Future parallelism may partition proven-independent hosts, but the current
+snapshot baseline normally uses one target host and one administrative user.
+Parallelism is considered only after physical commit chunking and archive
+restore are measured.</p>
+<p>Chunking also extends transaction-scoped lock lifetime. Row locks do not each
+consume a <code>max_locks_per_transaction</code> slot, but distinct advisory and relation
+locks use the shared lock table and all retained locks can increase blocking and
+rollback cost. Qualification at the maximum supported chunk size records
+distinct advisory locks, relation locks, lock waits, transaction memory, WAL,
+and any PostgreSQL <code>out of shared memory</code> failure. The default remains below the
+smallest demonstrated safe ceiling on the reference runner.</p>
+<h2 id="observability"><a class="header" href="#observability">Observability</a></h2>
+<p>The importer emits structured progress and a final machine-readable summary:</p>
+<ul>
+<li>input event count;</li>
+<li>assigned singleton logical transaction count;</li>
+<li>physical chunk count and size distribution;</li>
+<li>database commit count;</li>
+<li>events and commits per second;</li>
+<li>parse, plan, validation, per-event database round-trip, append, commit,
+lock-wait, and final-verification duration;</li>
+<li>barrier count and total, mean, and p95 wait duration broken out by graph-root
+resolution, validator dependency, terminal identity materialization, and
+final convergence;</li>
+<li>barrier poll count and wake-up latency;</li>
+<li>skipped duplicate and existing aggregate-version counts;</li>
+<li>diagnostic fallback count;</li>
+<li>current outbox and projection lag;</li>
+<li>failed event ID and error code;</li>
+<li>final graph, identity, and projection verification result.</li>
+</ul>
+<p>Logs include synthetic transaction IDs where useful but do not log secrets or
+complete sensitive event payloads.</p>
+<h2 id="configuration"><a class="header" href="#configuration">Configuration</a></h2>
+<p>Initial options are explicit and bootstrap-scoped:</p>
+<pre><code class="language-text">--bootstrap-import                         # existing
+--bootstrap-operator-id &lt;uuid&gt;             # existing
+--bootstrap-materialization-timeout-seconds 120  # existing
+--physical-chunk-events 100
+--physical-chunk-bytes 16777216
+--max-event-bytes 67108864
+--diagnose-failed-chunk
+--bootstrap-synchronous-commit-off
+--physical-chunking-disabled
+</code></pre>
+<p>The first three flags already exist. The remaining names and default values are
+provisional until implementation review. The existing materialization timeout
+is a terminal Category/Tag convergence budget and currently also bounds each
+graph projection wait. The implementation separates or explicitly documents
+those budgets so a file with many graph barriers cannot silently multiply one
+operator setting into an unbounded total wait.</p>
+<p><code>--physical-chunking-disabled</code> preserves the current one-commit-per-event path
+as a field rollback and reference oracle. The important contract is that
+physical chunk limits never create logical transaction membership.</p>
+<p>Ordinary incremental imports retain their existing durability and
+failure-isolation behavior unless separately designed and qualified.</p>
+<h2 id="correctness-gates"><a class="header" href="#correctness-gates">Correctness Gates</a></h2>
+<p>Every optimized import or archive qualification run must prove:</p>
+<ol>
+<li>Exact canonical event ID, type, payload, metadata, aggregate identity,
+aggregate version, and policy-version parity with the one-event reference.</li>
+<li>Every snapshot event has a distinct UUIDv7 outbox <code>transaction_id</code>.</li>
+<li>Every outbox member has <code>transaction_ordinal = 0</code> and
+<code>transaction_count = 1</code>.</li>
+<li>No two adjacent snapshot events are represented as one logical transaction.</li>
+<li>For each user, nonces are contiguous within every successfully committed
+chunk; a rolled-back chunk restores <code>user_t.nonce</code> and introduces no gap.</li>
+<li>Outbox offsets are gapless and commit-ordered; no counter tip is visible
+before every row through that tip is committed.</li>
+<li>No physical chunk member is visible after rollback.</li>
+<li>Database-ready returns no row from
+<code>instance_graph_revision_t WHERE projected_revision &lt; accepted_revision</code>.</li>
+<li>Required identity materialization rows are verified.</li>
+<li>Projection table counts and checksums produced by the manifest-pinned
+canonicalization profile match the one-event reference import.</li>
+<li>No unexpected <code>FAILED</code>, DLQ, replay-candidate, or pending-bootstrap rows
+remain.</li>
+<li>Crash and retry tests never report a partial database as ready.</li>
+<li>Java and Rust database postconditions match before Rust is selected.</li>
+<li>A barrier wait cannot execute while the coordinator connection has an open
+transaction, and the barrier event is visible before the wait begins.</li>
+<li>Projection rows committed by another process between chunks are visible to
+the coordinator under <code>READ COMMITTED</code>.</li>
+<li>A second bootstrap importer fails on the session advisory lock before it
+mutates the destination.</li>
+<li>Direct and guarded nonce changes roll back with their physical chunk.</li>
+<li>Restored ownership, grants, credential sanitization/rotation, and planner
+statistics pass before externally reachable services start.</li>
+</ol>
+<h2 id="performance-gates"><a class="header" href="#performance-gates">Performance Gates</a></h2>
+<p>Performance is recorded on a named reference runner with PostgreSQL, storage,
+CPU, memory, container runtime, <code>events.json</code> checksum, and service versions in
+the result manifest.</p>
+<p>Initial acceptance targets for the approximately 17,000-event baseline are:</p>
+<ul>
+<li>optimized import reaches database-ready state at least five times faster than
+the one-event reference without failing any correctness gate;</li>
+<li>physical commit chunking reduces PostgreSQL commits by at least 90%, recorded
+as a diagnostic proxy rather than a substitute for the readiness target;</li>
+<li>bootstrap archive restore reaches database-ready state within 60 seconds on
+the reference runner;</li>
+<li>p95 archive restore time across ten clean runs remains within 20% of the
+median;</li>
+<li>increasing the fixture to 50,000 events does not reintroduce one commit per
+event or superlinear planning behavior.</li>
+</ul>
+<p>These are release qualification gates, not claims about every customer host.
+The measured reference results determine the final default chunk targets. A
+large commit reduction with only a 1.2x readiness improvement fails
+qualification and redirects work to the measured barrier, round-trip,
+validation, lock, or restore bottleneck.</p>
+<h2 id="rollout-plan"><a class="header" href="#rollout-plan">Rollout Plan</a></h2>
+<h3 id="p0-baseline-and-instrumentation"><a class="header" href="#p0-baseline-and-instrumentation">P0: Baseline and instrumentation</a></h3>
+<ul>
+<li>Attribute parse, validation, per-event round trips, append, commit, lock wait,
+each barrier type, projection, identity materialization, and total readiness
+time. No default chunk decision precedes this result.</li>
+<li>Capture the 17,000-event and 50,000-event fixtures and checksums.</li>
+<li>Add singleton transaction, nonce, offset, graph, identity, and projection
+verification queries.</li>
+<li>Keep current one-event import as the reference oracle.</li>
+<li>Benchmark adaptive graph polling starting at 2-5 ms with bounded backoff. If
+graph waits remain material, prototype a projection-advance <code>LISTEN</code>/<code>NOTIFY</code>
+channel using polling only as the lost-notification safety net.</li>
+<li>Benchmark and record decisions for transaction-local <code>synchronous_commit</code>,
+WAL/checkpoint tuning, deferred projection indexes, and unlogged projection
+tables.</li>
+</ul>
+<p>P0 exits only when instrumented buckets reconcile to within 5% of wall-clock
+readiness time and the selected workstreams have a measured path to the 5x
+gate. Chunking proceeds as the primary P2 workstream only when avoided commit
+and connection work predicts at least a 20% readiness reduction; otherwise the
+measured barrier, validation, or round-trip workstream moves ahead of chunk-size
+tuning. Chunking may still follow for scale and commit-count control.</p>
+<h3 id="p1-explicit-singleton-semantics"><a class="header" href="#p1-explicit-singleton-semantics">P1: Explicit singleton semantics</a></h3>
+<ul>
+<li>Document the snapshot-to-synthetic-event boundary in converter and importer
+tests.</li>
+<li>Assert that generated <code>events.json</code> contains no source transaction metadata.</li>
+<li>Add a bootstrap plan that assigns one UUIDv7 singleton logical transaction
+per event.</li>
+<li>Reject any optimization that flattens a physical chunk under one transaction
+ID.</li>
+</ul>
+<h3 id="p2-java-physical-commit-chunking"><a class="header" href="#p2-java-physical-commit-chunking">P2: Java physical commit chunking</a></h3>
+<ul>
+<li>Add import planning, barrier classification, and physical chunk construction.</li>
+<li>Add the connection-aware bootstrap overload and coordinator; reuse loaded
+graph configuration and persistence objects.</li>
+<li>Move direct-mode nonce reservation onto the coordinator connection.</li>
+<li>Enforce <code>READ COMMITTED</code>, the session advisory lock, and never-wait-in-open-
+chunk invariant.</li>
+<li>Preserve distinct singleton transaction IDs within every physical commit.</li>
+<li>Add failed-chunk rollback and per-event diagnostics.</li>
+<li>Run the 500-event lock-pressure test, then select a qualified default and hard
+ceiling.</li>
+</ul>
+<h3 id="p3-release-built-bootstrap-archive"><a class="header" href="#p3-release-built-bootstrap-archive">P3: Release-built bootstrap archive</a></h3>
+<ul>
+<li>Generate the archive from a clean, release-matched database.</li>
+<li>Add manifest, checksum, signature, and post-restore gates.</li>
+<li>Add ownership-neutral restore, grant verification, disabled archive
+verifiers, forced installation-unique pre-listener credential rotation, and
+<code>ANALYZE</code> to the readiness gate.</li>
+<li>Publish immutable versioned archive objects.</li>
+<li>Make installation prefer restore and fall back to snapshot-event import.</li>
+<li>Import and verify only release-manifest deltas after the archive baseline.</li>
+<li>Pin the named reference runner in <code>light-portal-install</code> release CI and enforce
+the 60-second ready gate for every release archive.</li>
+</ul>
+<h3 id="p4-rust-parity-and-optimization"><a class="header" href="#p4-rust-parity-and-optimization">P4: Rust parity and optimization</a></h3>
+<ul>
+<li>Correct Rust singleton transaction and guarded bootstrap semantics.</li>
+<li>Add Java-versus-Rust differential database tests.</li>
+<li>Optimize prepared statements, set-based range reservation, and inserts only
+after parity passes.</li>
+<li>Select Rust as the default only through an explicit qualification decision.</li>
+</ul>
+<h3 id="p5-optional-partitioned-import"><a class="header" href="#p5-optional-partitioned-import">P5: Optional partitioned import</a></h3>
+<ul>
+<li>Evaluate host-level parallelism only if archive restore and ordered physical
+chunking still miss the installation objective.</li>
+<li>Retain one global offset allocator and prove event ordering.</li>
+</ul>
+<h2 id="test-matrix"><a class="header" href="#test-matrix">Test Matrix</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Scenario</th><th>Required result</th></tr>
+</thead>
+<tbody>
+<tr><td>Snapshot array with 1,000 events</td><td>1,000 distinct UUIDv7 logical transaction IDs; every ordinal is 0 and count is 1.</td></tr>
+<tr><td>Same snapshot imported into two clean databases</td><td>UUIDv7 transaction values may differ; manifest-pinned canonical checksums and separate transaction-shape gates match.</td></tr>
+<tr><td>Physical chunk target 100</td><td>Approximately 10 physical commits without changing singleton transaction metadata.</td></tr>
+<tr><td>Event larger than chunk byte target but below hard limit</td><td>One-event physical chunk.</td></tr>
+<tr><td>Event beyond hard size limit</td><td>Import rejected before writes.</td></tr>
+<tr><td>Mode change inside planned chunk</td><td>Prior chunk flushed; next mode starts a new chunk.</td></tr>
+<tr><td>Projection barrier between ordinary events</td><td>Prior chunk committed; required projection wait completes before continuation.</td></tr>
+<tr><td>SQL failure on event 42 of a chunk</td><td>Whole physical chunk rolled back; diagnostic retry identifies event 42.</td></tr>
+<tr><td>Crash before physical commit</td><td>No chunk member visible.</td></tr>
+<tr><td>Crash after a non-final chunk commit</td><td>Destination is not reported ready; installer recreates the empty destination and restarts.</td></tr>
+<tr><td>Two adjacent related CreatedEvents</td><td>Still receive different logical transaction IDs.</td></tr>
+<tr><td>Barrier event at the end of a chunk</td><td>Chunk commits before wait; projector observes it and wait terminates.</td></tr>
+<tr><td>Attempted barrier wait with open transaction</td><td>Coordinator test fails immediately rather than timing out.</td></tr>
+<tr><td>Projection advances between chunks</td><td>Coordinator observes it under <code>READ COMMITTED</code>.</td></tr>
+<tr><td>Direct-mode failure after nonce reservation</td><td>Chunk rollback restores nonce, event, outbox, and notification state.</td></tr>
+<tr><td>Two concurrent bootstrap importers</td><td>Second importer fails before the empty check or any write.</td></tr>
+<tr><td>Chunk target 500 with graph/identity-heavy fixture</td><td>No lock-table exhaustion; lock waits, WAL, memory, and rollback time remain within the qualified ceiling.</td></tr>
+<tr><td>Rust <code>--batch-size 500</code> parity test</td><td>500 singleton transaction IDs, not one 500-member transaction.</td></tr>
+<tr><td>Archive schema or PostgreSQL mismatch</td><td>Restore refused; clean fallback to snapshot-event import.</td></tr>
+<tr><td>Archive checksum mismatch</td><td>Restore refused before database mutation.</td></tr>
+<tr><td>Archive rebuilt from the same baseline</td><td>Dump bytes may differ; schema digest, table counts, canonical checksums, and transaction invariants match.</td></tr>
+<tr><td>Archive restore role absent from dump source</td><td><code>--no-owner --no-acl</code> restore plus explicit grants succeeds and application-role access verification passes.</td></tr>
+<tr><td>Restored archive before <code>ANALYZE</code></td><td>Database-ready remains false.</td></tr>
+<tr><td>Public archive with unchanged seed verifier</td><td>Publication or pre-listener readiness gate fails according to the credential policy.</td></tr>
+<tr><td>Delta after archive baseline</td><td>Manifest order and checksum, aggregate effects, counters, and projection convergence pass before database-ready.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="rejected-alternatives"><a class="header" href="#rejected-alternatives">Rejected Alternatives</a></h2>
+<h3 id="enrich-snapshot-events-with-original-transaction-ids"><a class="header" href="#enrich-snapshot-events-with-original-transaction-ids">Enrich snapshot events with original transaction IDs</a></h3>
+<p>The snapshot excludes canonical event and outbox history, and converted events
+do not map one-to-one to historical events. Any inferred ID would be false.</p>
+<h3 id="run-the-java-jar-outside-a-container"><a class="header" href="#run-the-java-jar-outside-a-container">Run the Java JAR outside a container</a></h3>
+<p>This removes container startup and image-mount overhead but retains one commit
+per event. It remains a useful development option, not the primary solution.</p>
+<h3 id="select-rust-solely-for-speed"><a class="header" href="#select-rust-solely-for-speed">Select Rust solely for speed</a></h3>
+<p>The current Rust path does not yet preserve singleton logical transaction,
+guarded bootstrap, and projection semantics. Language selection cannot replace
+parity.</p>
+<h3 id="arbitrary---batch-size-n-as-one-transaction"><a class="header" href="#arbitrary---batch-size-n-as-one-transaction">Arbitrary <code>--batch-size N</code> as one transaction</a></h3>
+<p>This invents business transaction membership from file adjacency and merges
+unrelated failures into one DLQ/replay group. Chunk size may control physical
+commits only.</p>
+<h3 id="parallel-event-workers"><a class="header" href="#parallel-event-workers">Parallel event workers</a></h3>
+<p>This introduces ordering, nonce, offset, aggregate, and graph races before the
+measured serial bottlenecks and archive path are exhausted.</p>
+<h3 id="one-transaction-id-for-the-entire-file"><a class="header" href="#one-transaction-id-for-the-entire-file">One transaction ID for the entire file</a></h3>
+<p>This creates one false logical failure domain and changes replay semantics even
+if the database write is fast.</p>
+<h3 id="one-physical-transaction-for-the-entire-file"><a class="header" href="#one-physical-transaction-for-the-entire-file">One physical transaction for the entire file</a></h3>
+<p>Even with singleton logical IDs, this creates excessive rollback scope, delayed
+visibility, large lock and WAL pressure, and poor failure diagnostics.</p>
+<h3 id="reserve-nonce-or-offset-ranges-in-a-separate-transaction"><a class="header" href="#reserve-nonce-or-offset-ranges-in-a-separate-transaction">Reserve nonce or offset ranges in a separate transaction</a></h3>
+<p>This makes counter state visible before canonical/outbox rows. In particular,
+the database consumer claims through <code>log_counter.next_offset - 1</code> and advances
+its cursor to that tip. A separately committed range could therefore make it
+skip uncommitted rows permanently. Any future set-based reservation remains on
+the same physical connection and transaction as the rows it reserves.</p>
+<h3 id="direct-copy-into-canonical-tables"><a class="header" href="#direct-copy-into-canonical-tables">Direct <code>COPY</code> into canonical tables</a></h3>
+<p>Raw <code>COPY</code> is fast but bypasses append validation, policy selection, graph
+stamping, nonce allocation, recovery projection markers, notification behavior,
+and identity materialization. It is not a valid bootstrap import path.</p>
+<h3 id="preserve-only-a-postgresql-physical-volume"><a class="header" href="#preserve-only-a-postgresql-physical-volume">Preserve only a PostgreSQL physical volume</a></h3>
+<p>Physical storage snapshots are too tightly coupled for the initial public
+installation artifact. The portable archive is slower than a physical copy but
+has an explicit compatibility and verification contract.</p>
+<h3 id="assume-a-storage-tuning-lever-without-measurement"><a class="header" href="#assume-a-storage-tuning-lever-without-measurement">Assume a storage tuning lever without measurement</a></h3>
+<p>Transaction-local <code>synchronous_commit=off</code>, WAL/checkpoint tuning, deferred
+projection indexes, and temporary unlogged projections may be useful on an
+empty disposable destination, but each changes a different cost and some add a
+rewrite or recovery penalty. P0 measures them independently. None may bypass
+the canonical append path or remain active after the readiness gate.</p>
+<h2 id="open-questions"><a class="header" href="#open-questions">Open Questions</a></h2>
+<ol>
+<li>Which validator read-model dependencies, beyond graph-root resolution, need
+an initial barrier-registry entry?</li>
+<li>Which operational tables and cursors are normalized versus retained in the
+bootstrap archive?</li>
+<li>Do the P0 graph-barrier count, mean wait, p95 wait, and total barrier share
+show that adaptive polling meets the target, or do they justify a dedicated
+projection-advance notification channel?</li>
+<li>After Java qualification, is Rust replacement still valuable, or is the
+release-built archive sufficient for installation performance?</li>
+</ol>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../../design/light-portal/event-replay-direct-execution.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../../design/light-gateway.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../../design/light-portal/event-replay-direct-execution.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../../design/light-gateway.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../../mark-09e88c2c.min.js"></script>
+        <script src="../../searcher-09f2665d.js"></script>
+
+        <script src="../../clipboard-1626706a.min.js"></script>
+        <script src="../../highlight-abc7f01d.js"></script>
+        <script src="../../book-609e4cb8.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../../mermaid-3a6b472a.min.js"></script>
+        <script src="../../mermaid-init-025d9952.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

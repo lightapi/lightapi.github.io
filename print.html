@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-73e142f9.js";
+            window.path_to_searchindex_js = "searchindex-23bdf48c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-1a733359.js"></script>
+        <script src="toc-9c5951d2.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -7947,6 +7947,453 @@ because the mandatory local tuple failed first.</p>
 <li><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-listeners.html">AWS Network Load Balancer listeners</a></li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="rust-product-and-portal-service-inventory"><a class="header" href="#rust-product-and-portal-service-inventory">Rust Product And Portal Service Inventory</a></h1>
+<h2 id="status-2"><a class="header" href="#status-2">Status</a></h2>
+<p>Code- and deployment-grounded inventory as of 2026-08-19.</p>
+<p>This inventory answers three separate questions:</p>
+<ol>
+<li>which externally useful Rust products and runtime services exist;</li>
+<li>which customer or operator feature families each product exposes; and</li>
+<li>whether each feature is production-ready in the current repository and
+deployment evidence.</li>
+</ol>
+<p>It also includes the Java Light Portal command/query services hosted by
+<code>hybrid-command</code> and <code>hybrid-query</code>. Those services are not Rust products, but
+they are the control plane that configures and manages the Rust products and
+therefore belong in the operational inventory.</p>
+<h2 id="readiness-vocabulary"><a class="header" href="#readiness-vocabulary">Readiness Vocabulary</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Status</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Production-ready</strong></td><td>Implemented, enabled in a supported production profile, and backed by current release/deployment qualification with no known blocker in the reviewed scope.</td></tr>
+<tr><td><strong>Conditional</strong></td><td>Implemented and useful, but production use still depends on a deployment-specific gate, stable release artifact, security configuration, or qualification evidence. Treat this as <strong>not yet proven production-ready</strong> for a new deployment.</td></tr>
+<tr><td><strong>Development</strong></td><td>Implemented locally or in component/integration gates, but the product documentation or deployment still calls out missing runtime, scale, recovery, security, or promotion evidence.</td></tr>
+<tr><td><strong>Partial</strong></td><td>Only part of the advertised contract is implemented, or the current implementation contains a scaffold/stub path.</td></tr>
+<tr><td><strong>Proposed</strong></td><td>Design exists, but it is not an available product feature.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The status is intentionally conservative. A passing unit test or a service in
+<code>all-in-lt</code> proves implementation or local integration; it does not by itself
+prove production readiness. Image tags ending in <code>-dev</code>, <code>SNAPSHOT</code>, or
+<code>latest</code>, default-off production switches, placeholder health checks, and an
+explicitly pending live gate prevent a <strong>Production-ready</strong> classification.</p>
+<h2 id="product-boundary"><a class="header" href="#product-boundary">Product Boundary</a></h2>
+<p>The following are counted as products or independently deployable product
+services:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Product or service</th><th>Source</th><th>Primary purpose</th><th>Overall readiness</th></tr>
+</thead>
+<tbody>
+<tr><td>Light API</td><td><code>light-fabric/frameworks/light-axum</code>, <code>light-example-rs</code></td><td>Build small Rust REST or MCP services on the common Light runtime.</td><td><strong>Conditional</strong>: framework and examples exist; there is no single Light API production binary or current product-level qualification record.</td></tr>
+<tr><td>Light Gateway</td><td><code>light-fabric/apps/light-gateway</code>, <code>light-pingora</code></td><td>API microgateway, BFF, MCP gateway, WebSocket gateway, and shared policy enforcement point.</td><td><strong>Conditional</strong> for the core proxy/BFF surface; advanced profiles have the more restrictive statuses below.</td></tr>
+<tr><td>LLM Gateway profile</td><td>Same <code>light-gateway</code> binary with the LLM handler/profile</td><td>Governed OpenAI-compatible inference across provider deployments.</td><td><strong>Development</strong>: extensive implementation exists, but production enablement is explicitly blocked by live performance, SDK/provider, canary, and rollback evidence.</td></tr>
+<tr><td>Light Agent</td><td><code>light-fabric/apps/light-agent</code></td><td>Durable, policy-governed interactive enterprise, coding, and personal-agent runtime.</td><td><strong>Development</strong>: the durable engine is substantial, but the architecture remains under staged qualification and the local stack uses a dev image.</td></tr>
+<tr><td>Light Workflow</td><td><code>light-fabric/apps/light-workflow</code></td><td>Durable workflow orchestration, human tasks, API/MCP calls, agent calls, retries, cancellation, and compensation.</td><td><strong>Development</strong>: implemented paths are broad; live workflow-MCP, remote runner, recovery, and production rollout qualification remain incomplete.</td></tr>
+<tr><td>Light Knowledge</td><td><code>light-fabric/apps/light-knowledge</code></td><td>Governed Knowledge Base ingestion, indexing, retrieval, citations, uploads, and MCP retrieval.</td><td><strong>Development</strong>: Phase 1a/1b code and local gates exist; production operations and external qualification remain pending.</td></tr>
+<tr><td>Light Deployer</td><td><code>light-fabric/apps/light-deployer</code></td><td>Cluster-local rendering, policy checking, and Kubernetes deployment execution.</td><td><strong>Partial</strong>: the Phase 1 slice is implemented, with controller integration, config references, rollback integration, and richer deployment engines still missing.</td></tr>
+<tr><td>Controller RS</td><td><code>controller-rs</code></td><td>Runtime registration/discovery and MCP-based operational control of services and execution runners.</td><td><strong>Development</strong>: JSON/WebSocket V1 is the active milestone; authorization, persistence/worker, backpressure, and deployment qualification are not fully closed.</td></tr>
+<tr><td>Config Server</td><td><code>portal-service/apps/config-server</code></td><td>Authenticated delivery of generated service configuration, certificates, and files.</td><td><strong>Conditional</strong>: the Rust API and Java-parity work exist, but the local Compose health check is a placeholder and production deployment evidence is not recorded here.</td></tr>
+<tr><td>Light OAuth</td><td><code>portal-service/apps/light-oauth</code></td><td>OAuth/OIDC authorization server, JWT/JWKS issuer, authorization-code and token exchange service.</td><td><strong>Conditional</strong>: the core server and parity tests exist; production key custody, TLS, HA, and deployed-flow qualification are environment-specific and not proven by <code>all-in-lt</code>.</td></tr>
+<tr><td>Portal Service</td><td><code>portal-service/apps/portal-service</code></td><td>Rust reference/schema service, memory recall endpoint, and emerging MCP facade.</td><td><strong>Partial</strong>: reference/schema APIs are implemented; MCP tool execution is explicitly a stub and memory has a narrow surface.</td></tr>
+<tr><td>Rust Event Importer</td><td><code>importer</code></td><td>Import CloudEvents and convert Portal database snapshots into replayable events.</td><td><strong>Conditional</strong>: both CLI modes are implemented; production use requires database backup, dry-run/report review, schema compatibility, and an operator-controlled import window.</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>llm-gateway</code> is listed separately because it is separately deployed in
+<code>all-in-lt</code>, but it is a profile of the Light Gateway binary rather than an
+independent source product.</p>
+<h2 id="feature-inventory"><a class="header" href="#feature-inventory">Feature Inventory</a></h2>
+<h3 id="light-api"><a class="header" href="#light-api">Light API</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Feature</th><th>What it provides</th><th>Readiness</th></tr>
+</thead>
+<tbody>
+<tr><td>Axum application framework</td><td>Common startup, configuration, server binding, lifecycle, tracing, and handler composition for Rust APIs.</td><td><strong>Conditional</strong>: implemented and reused, but qualification belongs to each product built on it.</td></tr>
+<tr><td>REST API services</td><td>Typed Axum routes and JSON APIs; demonstrated by customer-profile and offer-decision examples.</td><td><strong>Development</strong> as a product template; the example services are not production products.</td></tr>
+<tr><td>MCP server services</td><td>Streamable HTTP/MCP service construction; demonstrated by the insurance-claim MCP example.</td><td><strong>Development</strong> as a template; example-server qualification is not product qualification.</td></tr>
+<tr><td>Config Server bootstrap and controller registration</td><td>Download runtime config and register the running instance with the control plane.</td><td><strong>Conditional</strong> on production TLS, identity, and controller/config-server availability.</td></tr>
+<tr><td>Graceful shutdown and observability</td><td>Shared signal handling, request draining, structured logging, health/readiness patterns.</td><td><strong>Conditional</strong>: implementation exists; the cross-product design says deployment qualification is pending.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="light-gateway"><a class="header" href="#light-gateway">Light Gateway</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Feature</th><th>What it provides</th><th>Readiness</th></tr>
+</thead>
+<tbody>
+<tr><td>HTTP/HTTPS reverse proxy</td><td>Pingora-based ingress, upstream forwarding, URI routing, TLS, headers, and connection handling.</td><td><strong>Conditional</strong>: this is the core product path, but readiness still depends on the exact release image, certificates, and deployment profile.</td></tr>
+<tr><td>Handler chains</td><td>Ordered correlation, security, access control, rate limit, header, CORS, metrics, proxy, static, MCP, and other handlers.</td><td><strong>Conditional</strong>; invalid or incomplete production chains must fail startup.</td></tr>
+<tr><td>Service discovery</td><td>Static targets, direct registry lookup, controller-backed discovery, and service-aware routing.</td><td><strong>Conditional</strong> on the selected discovery backend and outage/failover qualification.</td></tr>
+<tr><td>JWT/API policy and fine-grained authorization</td><td>Authentication plus request access control and response row/field filtering using endpoint identities.</td><td><strong>Conditional</strong>; production safety depends on current Portal projections, exact endpoint identities, and fail-closed policy configuration.</td></tr>
+<tr><td>Endpoint identity</td><td>Method-qualified identities such as <code>/v1/models@get</code> for policy, metrics, and audit.</td><td><strong>Development</strong>: accepted and represented in current code/design, but the design record is not itself release qualification.</td></tr>
+<tr><td>Static SPA/BFF</td><td>Static Portal/sign-in assets, cookie sessions, CSRF, downstream token injection, and logout.</td><td><strong>Conditional</strong> on secure cookies, public TLS, OAuth redirect configuration, and live browser qualification.</td></tr>
+<tr><td>Stateless social OAuth</td><td>Authorization-code callbacks and refresh for Google, Facebook, GitHub, and generic providers.</td><td><strong>Conditional</strong>: initial Rust implementation is complete; provider-specific production qualification is still required.</td></tr>
+<tr><td>Microsoft MSAL login/exchange</td><td>Azure token validation, optional Light OAuth exchange, cookies, CSRF, refresh, and downstream token selection.</td><td><strong>Conditional</strong> on tenant/provider configuration and live login/refresh testing.</td></tr>
+<tr><td>WebSocket routing</td><td>Upstream WebSocket proxying, session limits, idle/size controls, and production controls.</td><td><strong>Conditional</strong>: implemented, with route-specific soak and operational qualification required.</td></tr>
+<tr><td>MCP legacy stateful routing</td><td><code>initialize</code>, <code>tools/list</code>, <code>tools/call</code>, frontend session state, direct HTTP tools, service discovery, and backend MCP forwarding.</td><td><strong>Conditional</strong>: implemented single-process session mapping; HA/session-placement constraints must be respected.</td></tr>
+<tr><td>MCP 2026-07-28 sessionless/stateless profiles</td><td>Modern dual-profile MCP routing and lifecycle validation.</td><td><strong>Development</strong>: code and gates exist, but client/backend compatibility and deployment qualification remain profile-specific.</td></tr>
+<tr><td>MCP tool authorization and filtering</td><td>Request access control, list filtering, response filtering, and tool metadata enforcement.</td><td><strong>Conditional</strong> on complete policy projections and exact caller claims.</td></tr>
+<tr><td>Workflow-backed MCP tools</td><td>Expose a published workflow as one governed MCP tool with synchronous/asynchronous execution, cancellation, compensation, and optional skill binding.</td><td><strong>Development</strong>: phases are implemented in component gates, but runtime promotion is disabled and live qualification is incomplete.</td></tr>
+<tr><td>Module registry and reload</td><td>Report active modules and masked config, then reload supported modules without restart.</td><td><strong>Partial</strong>: Phase 4 is implemented for gateway modules; additional reloaders remain planned.</td></tr>
+<tr><td>Cache control plane</td><td>List, inspect, and clear named service caches through controller tools.</td><td><strong>Proposed</strong> as a generic product feature; controller forwarding exists but the cross-product cache contract is not complete.</td></tr>
+<tr><td>HMAC webhook authentication</td><td>Raw-body HMAC verification, initially for GitHub webhooks, composable with JWT/API key.</td><td><strong>Proposed</strong>; implementation has not started.</td></tr>
+<tr><td>Kubernetes Gateway API product</td><td>Kubernetes-native GatewayClass/Gateway/HTTPRoute control plane.</td><td><strong>Proposed</strong> as a separate future <code>light-k8s-gateway</code>; it is not a current Light Gateway feature.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="llm-gateway-profile"><a class="header" href="#llm-gateway-profile">LLM Gateway Profile</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Feature</th><th>What it provides</th><th>Readiness</th></tr>
+</thead>
+<tbody>
+<tr><td>OpenAI-compatible model APIs</td><td><code>GET /v1/models</code>, model detail, Chat Completions, Responses, and Embeddings.</td><td><strong>Development</strong>: core APIs are implemented; live production qualification is pending.</td></tr>
+<tr><td>Buffered and SSE streaming inference</td><td>Bounded request/response handling, early SSE, usage frames, cancellation, and deadlines.</td><td><strong>Development</strong> pending declared performance and live SDK/provider evidence.</td></tr>
+<tr><td>Provider-neutral routing</td><td>Governed public aliases mapped to OpenAI, Anthropic, Gemini, NVIDIA, Bedrock, Ollama/local, and other configured deployments.</td><td><strong>Development</strong>; every physical deployment requires a current conformance result and secret/trust configuration.</td></tr>
+<tr><td>Routing reliability</td><td>Eligibility, priorities, retry/fallback, passive circuits, deadlines, admission, and overload behavior.</td><td><strong>Development</strong> pending live failure/canary/rollback exercises.</td></tr>
+<tr><td>Runtime snapshot publication</td><td>Monotonic Portal projection, immutable compiled runtime, multi-replica convergence, acknowledgement, and rollback.</td><td><strong>Development</strong>; operational publication approval and exact deployment evidence are outstanding.</td></tr>
+<tr><td>Token and cost governance</td><td>Usage normalization, budgets, rate metadata, accounting, and replay-aware circuit state.</td><td><strong>Development</strong> pending external qualification against real providers and production policy.</td></tr>
+<tr><td>Durable audit</td><td>Bounded async or local-durable WAL/sink, ownership lock, replay, reclamation, and privacy-aware records.</td><td><strong>Development</strong>; durability and performance evidence are required for the selected profile.</td></tr>
+<tr><td>Request-scoped PII tokenization</td><td>Authenticated placeholders and exact fragmented-stream recovery with independent promotion lanes.</td><td><strong>Development</strong>; all functional, security, durability, and PERF-4 lanes must pass.</td></tr>
+<tr><td>Session/host-scoped reversible PII</td><td>Durable vault-backed token mappings beyond one request.</td><td><strong>Not available</strong> until the durable-vault lane is implemented and qualified.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="light-agent"><a class="header" href="#light-agent">Light Agent</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Feature</th><th>What it provides</th><th>Readiness</th></tr>
+</thead>
+<tbody>
+<tr><td>Authenticated WebSocket chat</td><td>Interactive sessions, streaming turns, model/tool loop, cancellation, and reconnect behavior.</td><td><strong>Development</strong> pending complete live multi-user and failure-injection qualification.</td></tr>
+<tr><td>Durable sessions, turns, actions, and event projections</td><td>PostgreSQL state machine, idempotent admission, terminal reconciliation, and projection rebuild.</td><td><strong>Development</strong>: implemented in current code, but still part of a staged rollout.</td></tr>
+<tr><td>Immutable agent policy snapshots</td><td>Fail-closed admission against published definition, policy, catalog, model, profile, and boundary digests.</td><td><strong>Development</strong> pending production publication and revocation exercises.</td></tr>
+<tr><td>Fair scheduling and quotas</td><td>Host-scoped advisory locking, cross-replica fair dispatch, pool concurrency, token/cost reservation, and trusted settlement.</td><td><strong>Development</strong> pending scale and failover evidence.</td></tr>
+<tr><td>Enterprise business-agent profile</td><td>Remote model providers plus typed API/MCP tools through Light Gateway.</td><td><strong>Development</strong>; safe broad production use still depends on gateway delegation and policy qualification.</td></tr>
+<tr><td>Coding-agent profile</td><td>Immutable repository bundles, bounded workspaces, approved tools, Pi/Codex-style runner dispatch, and patch limits.</td><td><strong>Development</strong>; sandbox/runner production baseline is not closed.</td></tr>
+<tr><td>Personal-assistant/edge profile</td><td>Typed edge actions, effect classification, approval, runner identity, and schema revalidation.</td><td><strong>Development</strong>; channel and edge-runner rollout is not production-qualified.</td></tr>
+<tr><td>Tool discovery and execution</td><td>Portal effective catalog, gateway <code>tools/list</code> intersection, exact <code>tools/call</code>, and short-lived delegated tokens.</td><td><strong>Development</strong> pending live catalog/revocation and mixed-failure exercises.</td></tr>
+<tr><td>Human approval</td><td>Durable approval request, approval/rejection, fresh attempts, and policy revalidation.</td><td><strong>Development</strong> pending complete operator/UI and recovery qualification.</td></tr>
+<tr><td>Memory and Knowledge integration</td><td>Hindsight/Portal memory, Knowledge Base bindings, retrieval, and upload-only delegation.</td><td><strong>Development</strong>; Knowledge and memory production lanes remain separately gated.</td></tr>
+<tr><td>Skill packages</td><td>Immutable package publication, revocation, retention, and diagnostics.</td><td><strong>Development</strong>; safe materialization/execution qualification remains required.</td></tr>
+<tr><td>Broad gateway-token compatibility</td><td>Legacy forwarding of a broad caller bearer token.</td><td><strong>Not production-ready</strong>; it is a default-off local compatibility mode.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="light-workflow"><a class="header" href="#light-workflow">Light Workflow</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Feature</th><th>What it provides</th><th>Readiness</th></tr>
+</thead>
+<tbody>
+<tr><td>Durable orchestration</td><td>Event-driven workflow start, process/task persistence, idempotency, leases, and restart recovery.</td><td><strong>Development</strong> pending deployed recovery and scale qualification.</td></tr>
+<tr><td>Core task model</td><td><code>set</code>, <code>assert</code>, <code>switch</code>, <code>ask</code>, HTTP/OpenAPI/JSON-RPC/MCP calls, agent calls, export, and transitions.</td><td><strong>Development</strong>: broad implementation and tests exist; production compatibility is limited to the explicitly supported Open Workflow subset.</td></tr>
+<tr><td>Human tasks</td><td>Assignment, wait, answer, deadline, approval, rejection, and expiry behavior.</td><td><strong>Development</strong> pending full Portal UI/operator and failure-path qualification.</td></tr>
+<tr><td>Synchronous and asynchronous invocation API</td><td>Start, status, wait, result, cancellation, and credential refresh for long-running work.</td><td><strong>Development</strong>; live gateway/workflow deployment qualification remains incomplete.</td></tr>
+<tr><td>User plus gateway authorization</td><td>Original user JWT in <code>Authorization</code>, gateway service JWT in <code>X-Scope-Token</code>, environment and caller-service validation.</td><td><strong>Development</strong>; gateway, workflow, and database migration must ship together.</td></tr>
+<tr><td>Retries, effects, cancellation, and compensation</td><td>Deadline-aware retries, effect fencing, uncertain outcome reconciliation, cancellation, and compensation flow.</td><td><strong>Development</strong> pending live side-effect and crash/recovery evidence.</td></tr>
+<tr><td>Fork/join parallelism</td><td>Bounded workflow forks with service-wide maximum parallelism.</td><td><strong>Development</strong> pending concurrency and capacity qualification.</td></tr>
+<tr><td>Native agent task</td><td>Load Portal agent/skill/tool state, call a model directly, validate bounded structured output, and continue the workflow.</td><td><strong>Development</strong>; it is the recommended boundary but not a substitute for interactive Light Agent.</td></tr>
+<tr><td>Workflow-backed MCP execution</td><td>Execute published workflows invoked as gateway MCP tools.</td><td><strong>Development</strong>; runtime promotion remains disabled until numeric live gates pass.</td></tr>
+<tr><td>Runner scheduling and result reconciliation</td><td>Reserve remote runners, fence attempts, reconcile results, and enforce effective policy.</td><td><strong>Development/Partial</strong>; code exists, while the tenant-side runner architecture is still documented as proposed.</td></tr>
+<tr><td>Sandboxed execution backends</td><td>MicroVM, container, Kubernetes Job, dedicated VM, host-integrated, or fixed-action execution selected by policy.</td><td><strong>Proposed/Partial</strong>; the production sandbox backend baseline is not complete.</td></tr>
+<tr><td>Artifact publication and retention</td><td>Tenant-scoped staged artifacts, digest verification, promotion evidence, cleanup, and provenance.</td><td><strong>Development</strong> pending external object-store and production recovery qualification.</td></tr>
+<tr><td>Rule test API</td><td>Execute the supported rule/expression profile for Portal authoring and validation.</td><td><strong>Development</strong>; useful locally, not evidence that arbitrary CEL/Open Workflow behavior is supported.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="light-knowledge"><a class="header" href="#light-knowledge">Light Knowledge</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Feature</th><th>What it provides</th><th>Readiness</th></tr>
+</thead>
+<tbody>
+<tr><td>Knowledge Base control-plane projection</td><td>Consume Portal events and project KBs, sources, bindings, profiles, generations, and authorization into the Knowledge database.</td><td><strong>Development</strong>; projection freshness and security-removal acknowledgements require deployed qualification.</td></tr>
+<tr><td>Git/Markdown ingestion</td><td>Approved repository source, normalized documents, bounded chunking, full BASE generations, embeddings, and atomic promotion.</td><td><strong>Development</strong>: Phase 1a/local implementation exists; production object store and model qualification remain pending.</td></tr>
+<tr><td>Hybrid retrieval</td><td>Authorization filter, lexical/vector candidates, fusion, bounded passages, citations, and query embedding cache.</td><td><strong>Development</strong> pending production recall, latency, concurrency, and protected-lane evidence.</td></tr>
+<tr><td>Exact-version citations</td><td>Resolve immutable document versions and citation anchors returned by retrieval.</td><td><strong>Development</strong>; exact-version support exists, with broader passage-anchor behavior belonging to later qualification.</td></tr>
+<tr><td>Upload ingestion</td><td>Upload-only delegated authorization, staged objects, validation, orphan cleanup, and indexed publication.</td><td><strong>Development</strong>: Phase 1b implementation is locally complete, not production-promoted.</td></tr>
+<tr><td>Incremental/delta generations</td><td>BASE plus ordered DELTA segments, reuse, catch-up, and compaction.</td><td><strong>Development</strong> behind Phase 1b switches and external crash/restart qualification.</td></tr>
+<tr><td>Multi-KB retrieval</td><td>Select multiple authorized KBs and fuse results without crossing tenant or policy boundaries.</td><td><strong>Development</strong> behind Phase 1b promotion gates.</td></tr>
+<tr><td>REST and MCP retrieval</td><td><code>/v1/knowledge/retrieve</code>, upload APIs, MCP <code>initialize</code>, <code>tools/list</code>, and <code>tools/call</code>.</td><td><strong>Development</strong> pending live REST/MCP parity and auth-failure matrices.</td></tr>
+<tr><td>Readiness, metrics, jobs, and leases</td><td>Health/readiness, metrics, embedded worker/projector, job leases, retry, and heartbeat behavior.</td><td><strong>Development</strong> pending operational SLO and recovery evidence.</td></tr>
+<tr><td>Embedding model migration</td><td>Candidate generation, backfill/catch-up, evaluation, atomic promotion, rollback, and retirement.</td><td><strong>Development</strong>; an end-to-end production model-upgrade exercise is still required.</td></tr>
+<tr><td>Enterprise SharePoint/Confluence ACL connectors</td><td>Source-specific ACL ingestion and authorization projection.</td><td><strong>Proposed</strong> for Phase 2.</td></tr>
+<tr><td>Graph-assisted retrieval</td><td>Optional bounded relational-path evidence with hybrid fallback.</td><td><strong>Development pilot/default-off</strong>; not a production baseline.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="light-deployer"><a class="header" href="#light-deployer">Light Deployer</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Feature</th><th>What it provides</th><th>Readiness</th></tr>
+</thead>
+<tbody>
+<tr><td>Deployment render/validate</td><td>Parse YAML structurally, substitute placeholders, redact secrets, and produce a safe diff.</td><td><strong>Development</strong>; typed placeholders and Config Server <code>valuesRef</code> are not complete.</td></tr>
+<tr><td>Git template fetch</td><td>Fetch public/private HTTPS repositories and select a ref/path.</td><td><strong>Development</strong>; HTTPS token auth exists, SSH and stronger repository trust handling are deferred.</td></tr>
+<tr><td>Kubernetes server-side apply</td><td>Dry-run, apply, delete, status, and basic rollout handling with <code>kube-rs</code>.</td><td><strong>Development</strong> pending production cluster/RBAC/recovery qualification.</td></tr>
+<tr><td>Pruning and blast-radius policy</td><td>Calculate stale resources and enforce pruning safety rules.</td><td><strong>Development</strong> pending broader resource and rollout exercises.</td></tr>
+<tr><td>SSE deployment events</td><td>Request-scoped progress events.</td><td><strong>Development</strong>; durable/resumable delivery is not established.</td></tr>
+<tr><td>Controller-mediated execution</td><td>Route Portal deployment commands through the controller to the cluster-local deployer.</td><td><strong>Partial</strong>; direct HTTP/MCP-style mode was implemented first and controller integration remains a stated gap.</td></tr>
+<tr><td>Rollback from Portal snapshots</td><td>Restore a prior generated deployment/config state.</td><td><strong>Partial</strong>; represented in the model but Portal snapshot integration remains.</td></tr>
+<tr><td>Helm/Kustomize</td><td>Render and deploy Helm charts or Kustomize overlays.</td><td><strong>Not implemented</strong>.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="controller-rs"><a class="header" href="#controller-rs">Controller RS</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Feature</th><th>What it provides</th><th>Readiness</th></tr>
+</thead>
+<tbody>
+<tr><td>Runtime registration and discovery</td><td>Track live instances, service identities, endpoints, health, and subscriptions over authenticated WebSockets.</td><td><strong>Development</strong> pending HA/distributed-state and production deployment qualification.</td></tr>
+<tr><td>Unified external MCP control socket</td><td>MCP initialize, list/call, caller context, correlation, limits, and Portal notifications on <code>/ctrl/mcp</code>.</td><td><strong>Development</strong>; JSON/WebSocket V1 is the active milestone.</td></tr>
+<tr><td>Runtime inspection</td><td>Server info, list/get instances, runtime capabilities, checks, and module information.</td><td><strong>Development</strong> with fail-closed capability intersection; production authorization and compatibility must be qualified.</td></tr>
+<tr><td>Logging control</td><td>Get/set loggers and filters, read logs, start/renew/stop caller-owned live log streams.</td><td><strong>Development</strong> pending live Portal/client soak and disconnect recovery evidence.</td></tr>
+<tr><td>Cache and module forwarding</td><td>List/get/clear caches and reload supported runtime modules.</td><td><strong>Partial</strong> because participating runtimes do not all implement the generic contracts.</td></tr>
+<tr><td>Shutdown and chaos operations</td><td>Feature-switched shutdown, chaos configuration, and chaos execution.</td><td><strong>Development/default-off</strong>; not production-enabled without explicit policy and switches.</td></tr>
+<tr><td>Admission/backpressure</td><td>Connection, per-subject, request-rate, queue, in-flight, message-size, and JSON-depth limits.</td><td><strong>Development</strong> pending deployment load/abuse qualification.</td></tr>
+<tr><td>JWT and scope policy</td><td>JWKS validation, exact scopes, expiry, read/write separation, and mutation-specific switches.</td><td><strong>Development</strong>; the repository README still calls out richer key management and external policy gaps.</td></tr>
+<tr><td>Audit and persistence</td><td>Event/outbox/runtime-instance persistence scaffolding and bounded audit values.</td><td><strong>Partial</strong>; downstream outbox/projection completion remains a known gap.</td></tr>
+<tr><td>Runner enrollment, leases, and fencing</td><td>Register execution runners and mediate workflow/agent attempts with capabilities and isolation metadata.</td><td><strong>Development</strong>; the end-to-end runner product boundary is not production-qualified.</td></tr>
+<tr><td>WebTransport/rkyv</td><td>Alternative browser/runtime transport and binary codec.</td><td><strong>Proposed/blocked</strong>; WebSocket plus JSON remains the active baseline.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="rust-config-server"><a class="header" href="#rust-config-server">Rust Config Server</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Feature</th><th>What it provides</th><th>Readiness</th></tr>
+</thead>
+<tbody>
+<tr><td><code>/config-server/configs</code></td><td>Resolve product/version/instance properties and generate runtime configuration.</td><td><strong>Conditional</strong> on schema parity, trusted host/instance identity, and exact product mappings.</td></tr>
+<tr><td><code>/config-server/certs</code></td><td>Return authorized certificate material for the requesting runtime.</td><td><strong>Conditional</strong> on production certificate custody, rotation, and caller authorization.</td></tr>
+<tr><td><code>/config-server/files</code></td><td>Return authorized instance files and metadata.</td><td><strong>Conditional</strong> on host/service binding and production storage policy.</td></tr>
+<tr><td>JWT SID/host enforcement</td><td>Bind service identity and trusted claims to the requested host and instance.</td><td><strong>Conditional</strong>; Rust and Java parity must remain covered for every route.</td></tr>
+<tr><td>Snapshot output parity</td><td>Produce the same deterministic <code>values.yml</code>/snapshot semantics as the Java Config Server.</td><td><strong>Development/Conditional</strong>: parity work and comparison tests exist; all product codecs and live rollback paths must remain qualified.</td></tr>
+<tr><td>Embedded defaults and graceful shutdown</td><td>Bootstrap from embedded configuration and drain HTTPS/database resources on termination.</td><td><strong>Conditional</strong>; cross-product deployment qualification remains pending.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="rust-light-oauth"><a class="header" href="#rust-light-oauth">Rust Light OAuth</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Feature</th><th>What it provides</th><th>Readiness</th></tr>
+</thead>
+<tbody>
+<tr><td>JWKS endpoint</td><td>Provider-scoped signing-key publication.</td><td><strong>Conditional</strong> on secure production signing-key storage, rotation, and HA.</td></tr>
+<tr><td>Authorization code endpoint</td><td>Create/validate authorization codes and tenant/auth-host session state.</td><td><strong>Conditional</strong> on complete browser, redirect, replay, and tenant-boundary testing.</td></tr>
+<tr><td>Token endpoint</td><td>Authorization-code, refresh, client, and supported exchange flows with scoped JWT issuance.</td><td><strong>Conditional</strong> on exact enabled grants and live security qualification.</td></tr>
+<tr><td>OIDC discovery</td><td>Root and provider-scoped <code>openid-configuration</code> documents.</td><td><strong>Development/Conditional</strong>; code is present, while ecosystem consumer qualification is still required.</td></tr>
+<tr><td>External JWT exchange</td><td>Optional Microsoft/CCAC verification and internal token exchange.</td><td><strong>Conditional</strong> on issuer/audience/JWKS and failure-path configuration.</td></tr>
+<tr><td>Refresh-token rotation grace</td><td>Rotation and bounded replay/grace handling.</td><td><strong>Conditional</strong> on concurrency/replay tests and production database policy.</td></tr>
+<tr><td>TLS and graceful shutdown</td><td>Rustls HTTPS listener and bounded database/server drain.</td><td><strong>Conditional</strong> on production certificates and orchestrator qualification.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="rust-portal-service"><a class="header" href="#rust-portal-service">Rust Portal Service</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Feature</th><th>What it provides</th><th>Readiness</th></tr>
+</thead>
+<tbody>
+<tr><td>Reference data API</td><td>Host/global, language, and relation-aware reference lookup with cache.</td><td><strong>Conditional</strong> pending production authorization, cache invalidation, and parity qualification.</td></tr>
+<tr><td>Schema registry read API</td><td>Retrieve a schema by alias/version, optionally as an envelope, with metadata headers.</td><td><strong>Conditional</strong> pending complete auth, cache, and Java/API compatibility qualification.</td></tr>
+<tr><td>Memory recall API</td><td>Vector-based recall from one authenticated host and memory bank.</td><td><strong>Partial/Development</strong>; the public route is narrow and does not establish the full governed Agent Memory product.</td></tr>
+<tr><td>MCP initialize and tools list</td><td>Legacy SSE/messages MCP scaffold and Portal skill listing.</td><td><strong>Partial</strong>; session handling is described in code as not real yet.</td></tr>
+<tr><td>MCP tool execution</td><td>Route skill tools and memory operations.</td><td><strong>Not production-ready</strong>: <code>memory_recall</code> returns placeholder text and other tools return “not implemented yet.”</td></tr>
+<tr><td>Config bootstrap/controller registration</td><td>Load local/remote config, register, expose runtime control, and shut down gracefully.</td><td><strong>Conditional</strong> on production identity/TLS and controller availability.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="rust-event-importer"><a class="header" href="#rust-event-importer">Rust Event Importer</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Feature</th><th>What it provides</th><th>Readiness</th></tr>
+</thead>
+<tbody>
+<tr><td>CloudEvent import</td><td>Validate and insert ordered Portal events with aggregate-version, nonce, offset, and transaction rules.</td><td><strong>Conditional</strong>: suitable for controlled operations, not unattended production mutation.</td></tr>
+<tr><td>Replacement and enrichment</td><td>Rewrite approved values and add import metadata without changing unrelated event semantics.</td><td><strong>Conditional</strong>; generated output and target state must be reviewed.</td></tr>
+<tr><td>Dry run, fail-fast, batching, and summary</td><td>Preflight events, choose failure behavior, control transaction batches, and emit machine-readable results.</td><td><strong>Conditional</strong> and recommended before every production import.</td></tr>
+<tr><td>Snapshot conversion</td><td>Convert supported Portal snapshot tables into ordered CloudEvents with host/admin rewrite and table-specific rules.</td><td><strong>Conditional</strong>; schema/table coverage must match the snapshot version.</td></tr>
+<tr><td>Idempotency/conflict detection</td><td>Detect duplicate identifiers, aggregate conflicts, and database collisions.</td><td><strong>Conditional</strong>; a database backup and explicit operator recovery plan remain required.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="portal-java-application-inventory"><a class="header" href="#portal-java-application-inventory">Portal Java Application Inventory</a></h2>
+<h3 id="hybrid-hosts"><a class="header" href="#hybrid-hosts">Hybrid Hosts</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Service</th><th>What it is for</th><th>Readiness</th></tr>
+</thead>
+<tbody>
+<tr><td><code>hybrid-command</code></td><td>Runs all Light Portal write-side Java command modules in one <code>light-hybrid-4j</code> process. It validates commands, applies aggregate rules, appends CloudEvents/outbox records, and performs command-side operational work.</td><td><strong>Conditional</strong> for the reviewed local artifact: Compose uses a stable host image, but the mounted modules are <code>2.3.8-SNAPSHOT</code>; current production release and live rollout evidence must be supplied separately.</td></tr>
+<tr><td><code>hybrid-query</code></td><td>Runs all Light Portal read-side Java query modules in one process. It serves read models, event projections, filters, admin/query APIs, and selected background tasks.</td><td><strong>Conditional</strong> for the reviewed local artifact: mounted modules are <code>2.3.8-SNAPSHOT</code>, hostname verification is disabled by a JVM development flag, and the current production release is not proven here.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The two hybrid containers are deployment hosts, not replacements for the
+individual domain services below. Each JAR remains an independently named
+service/module with its own API contract and repository.</p>
+<h3 id="command-and-query-domain-services"><a class="header" href="#command-and-query-domain-services">Command And Query Domain Services</a></h3>
+<p>All 29 command/query pairs below are present as mounted JARs in
+<code>portal-config-loc/all-in-lt</code>. Their baseline status is <strong>Conditional</strong> rather
+than <strong>Production-ready</strong> because this inventory sees <code>2.3.8-SNAPSHOT</code>
+artifacts in a local stack. A domain marked “advanced paths gated” has a usable
+core but also contains newer functions whose own documents require additional
+promotion evidence.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Domain</th><th>Command service</th><th>Query service</th><th>What it manages</th><th>Current readiness</th></tr>
+</thead>
+<tbody>
+<tr><td>Attribute</td><td><code>attribute-command</code></td><td><code>attribute-query</code></td><td>Reusable attribute definitions and values used to extend Portal entities.</td><td><strong>Conditional</strong> core CRUD/projection.</td></tr>
+<tr><td>Blog</td><td><code>blog-command</code></td><td><code>blog-query</code></td><td>Portal blog content and publication metadata.</td><td><strong>Conditional</strong> core CRUD/projection.</td></tr>
+<tr><td>Category</td><td><code>category-command</code></td><td><code>category-query</code></td><td>Hierarchical catalog/content categorization.</td><td><strong>Conditional</strong> core CRUD/projection.</td></tr>
+<tr><td>Client</td><td><code>client-command</code></td><td><code>client-query</code></td><td>OAuth clients, client credentials, scopes, and client/host relationships.</td><td><strong>Conditional</strong>; secret regeneration and tenant/security paths require live qualification.</td></tr>
+<tr><td>Config</td><td><code>config-command</code></td><td><code>config-query</code></td><td>Config properties, product-version mappings, instance configs, snapshots, clone, commit, rollback, and Gateway publication inputs.</td><td><strong>Conditional; advanced paths gated</strong> for snapshot rollback, instance clone, and publication workflows.</td></tr>
+<tr><td>Deployment</td><td><code>deployment-command</code></td><td><code>deployment-query</code></td><td>Deployment definitions, environments, targets, requests, and status/read models.</td><td><strong>Conditional; advanced paths gated</strong> because Rust deployer and production approval/rollback are not complete.</td></tr>
+<tr><td>Document</td><td><code>document-command</code></td><td><code>document-query</code></td><td>General Portal documents/content records.</td><td><strong>Conditional</strong> core CRUD/projection.</td></tr>
+<tr><td>Error</td><td><code>error-command</code></td><td><code>error-query</code></td><td>Error/status-code catalog definitions and localized metadata.</td><td><strong>Conditional</strong> core CRUD/projection.</td></tr>
+<tr><td>Form</td><td><code>form-command</code></td><td><code>form-query</code></td><td>Schema-driven form definitions and Portal form metadata.</td><td><strong>Conditional</strong> core CRUD/projection.</td></tr>
+<tr><td>GenAI</td><td><code>genai-command</code></td><td><code>genai-query</code></td><td>Providers, models, deployments, aliases, agents, skills, tools, Knowledge Bases, grants, embedding spaces, and AI publication state.</td><td><strong>Development/Conditional by subfeature</strong>; LLM, Agent, Knowledge, and workflow-tool promotion gates remain separate.</td></tr>
+<tr><td>Group</td><td><code>group-command</code></td><td><code>group-query</code></td><td>User groups and group-based access-control relationships.</td><td><strong>Conditional</strong> core CRUD/projection.</td></tr>
+<tr><td>Host</td><td><code>host-command</code></td><td><code>host-query</code></td><td>Tenants/organizations, host lifecycle, ownership, and host settings.</td><td><strong>Conditional</strong>; tenant-boundary changes require security regression coverage.</td></tr>
+<tr><td>Instance</td><td><code>instance-command</code></td><td><code>instance-query</code></td><td>Runtime instances, instance APIs/apps/files, cloning, and runtime configuration.</td><td><strong>Conditional; advanced paths gated</strong> for clone, config snapshots, and live runtime operations.</td></tr>
+<tr><td>Map Root</td><td><code>maproot-command</code></td><td><code>maproot-query</code></td><td>Root mappings used to organize and resolve configurable map/reference structures.</td><td><strong>Conditional</strong> core CRUD/projection.</td></tr>
+<tr><td>News</td><td><code>news-command</code></td><td><code>news-query</code></td><td>Portal news/announcement content.</td><td><strong>Conditional</strong> core CRUD/projection.</td></tr>
+<tr><td>OAuth</td><td><code>oauth-command</code></td><td><code>oauth-query</code></td><td>OAuth providers, keys, authorization metadata, and related Portal administration.</td><td><strong>Conditional</strong>; end-to-end issuer/key/tenant flows require live security qualification.</td></tr>
+<tr><td>Page</td><td><code>page-command</code></td><td><code>page-query</code></td><td>Portal page definitions and page content/configuration.</td><td><strong>Conditional</strong> core CRUD/projection.</td></tr>
+<tr><td>Position</td><td><code>position-command</code></td><td><code>position-query</code></td><td>Organization/job positions and position-based relationships.</td><td><strong>Conditional</strong> core CRUD/projection.</td></tr>
+<tr><td>Product</td><td><code>product-command</code></td><td><code>product-query</code></td><td>Products, versions, releases, and product-version configuration associations.</td><td><strong>Conditional</strong>; Rust release/config mapping automation is not fully operationalized.</td></tr>
+<tr><td>Reference</td><td><code>ref-command</code></td><td><code>ref-query</code></td><td>Reference tables, localized data, relationships, and lookup models.</td><td><strong>Conditional</strong>; Rust Portal Service cache invalidation/control-plane parity is not complete.</td></tr>
+<tr><td>Role</td><td><code>role-command</code></td><td><code>role-query</code></td><td>Roles, permissions, scopes, and role assignments.</td><td><strong>Conditional</strong> core CRUD/projection with security-sensitive regression requirements.</td></tr>
+<tr><td>Rule</td><td><code>rule-command</code></td><td><code>rule-query</code></td><td>Rule definitions, versions, YAML/CEL metadata, and rule lookup/test inputs.</td><td><strong>Conditional</strong> for supported rule subsets; arbitrary CEL/YAML behavior is not implied.</td></tr>
+<tr><td>Schedule</td><td><code>schedule-command</code></td><td><code>schedule-query</code></td><td>Scheduled jobs/triggers and scheduler-facing read models.</td><td><strong>Conditional</strong>; distributed scheduling behavior needs deployment-specific qualification.</td></tr>
+<tr><td>Schema</td><td><code>schema-command</code></td><td><code>schema-query</code></td><td>JSON Schema registry records, aliases, versions, and publication/read APIs.</td><td><strong>Conditional</strong>; registry/runtime consumer parity must be maintained.</td></tr>
+<tr><td>Service</td><td><code>service-command</code></td><td><code>service-query</code></td><td>Services, endpoints, APIs, paths, callable tools, and Gateway publication metadata.</td><td><strong>Conditional; advanced paths gated</strong> for endpoint identity, tool publication, and live Gateway apply/rollback.</td></tr>
+<tr><td>Tag</td><td><code>tag-command</code></td><td><code>tag-query</code></td><td>Reusable tags and tagged-entity relationships.</td><td><strong>Conditional</strong> core CRUD/projection.</td></tr>
+<tr><td>Template</td><td><code>template-command</code></td><td><code>template-query</code></td><td>Reusable content/config/deployment templates.</td><td><strong>Conditional</strong> core CRUD/projection.</td></tr>
+<tr><td>User</td><td><code>user-command</code></td><td><code>user-query</code></td><td>Users, memberships, sessions, notifications, private messages, and user/host access.</td><td><strong>Conditional; security-sensitive</strong> for host binding, claims, notification access, and privacy paths.</td></tr>
+<tr><td>Workflow</td><td><code>workflow-command</code></td><td><code>workflow-query</code></td><td>Workflow definitions/versions, publication, editor/read models, invocation-facing metadata, and workflow-tool grants.</td><td><strong>Development/Conditional by subfeature</strong>; publication is implemented, while workflow-backed MCP production promotion is incomplete.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="alternate-java-runtime-services-in-docker-compose-javayml"><a class="header" href="#alternate-java-runtime-services-in-docker-compose-javayml">Alternate Java Runtime Services In <code>docker-compose-java.yml</code></a></h3>
+<p>These are Java alternatives for core runtime positions in the stack. They are
+not additional Rust products, but an operator choosing the Java profile runs
+them alongside the Portal hybrids.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Compose service</th><th>Java implementation</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>controller</code></td><td><code>light-controller</code></td><td>Runtime registry and operational control plane.</td></tr>
+<tr><td><code>light-oauth</code></td><td><code>oauth-kafka</code></td><td>OAuth/JWT authorization server and Kafka-backed OAuth processing.</td></tr>
+<tr><td><code>config-server</code></td><td>Java Config Server</td><td>Runtime configuration, certificates, and files.</td></tr>
+<tr><td><code>portal-service</code></td><td><code>light-reference</code></td><td>Reference/schema service used by applications.</td></tr>
+<tr><td><code>light-gateway</code></td><td>Java Light Gateway</td><td>Portal ingress/BFF/API/MCP gateway alternative.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="deployment-coverage-in-all-in-lt"><a class="header" href="#deployment-coverage-in-all-in-lt">Deployment Coverage In <code>all-in-lt</code></a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Deployment item</th><th>Inventory treatment</th></tr>
+</thead>
+<tbody>
+<tr><td>PostgreSQL/TimescaleDB and <code>knowledge-schema-migration</code></td><td>Infrastructure and one-shot migration helper, not products.</td></tr>
+<tr><td><code>controller</code>, <code>light-oauth</code>, <code>config-server</code>, <code>portal-service</code>, <code>light-workflow</code>, <code>light-gateway</code>, <code>llm-gateway</code>, <code>light-agent</code>, <code>light-knowledge</code></td><td>Rust product services described above.</td></tr>
+<tr><td><code>hybrid-command</code>, <code>hybrid-query</code> and their 58 mounted JARs</td><td>Java Light Portal control-plane services described above.</td></tr>
+<tr><td><code>demo-customer-profile-api</code>, <code>demo-offer-decision-api</code>, <code>demo-insurance-claim-mcp-server</code></td><td>Rust examples/qualification fixtures, not supported product SKUs.</td></tr>
+<tr><td><code>light-knowledge-worker</code></td><td>A build/worker component in source; the current normal Compose topology embeds/supervises Knowledge work in <code>light-knowledge</code> rather than declaring a separate long-running service.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="source-components-that-are-not-separate-products"><a class="header" href="#source-components-that-are-not-separate-products">Source Components That Are Not Separate Products</a></h2>
+<p>The following should remain visible to engineering without inflating the
+product count:</p>
+<ul>
+<li><code>light-axum</code> and <code>light-pingora</code> are frameworks;</li>
+<li><code>light-runtime</code>, <code>portal-registry</code>, <code>model-provider</code>, <code>workflow-core</code>,
+execution-backend crates, Knowledge crates, and security/config crates are
+shared libraries;</li>
+<li><code>light-k8s-gateway</code> is proposed and does not yet belong in the current
+product count.</li>
+</ul>
+<p>Every additional Rust executable currently present under <code>light-fabric/apps</code>
+is classified below so that a component cannot be confused with an omitted
+product:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Executable</th><th>Classification and purpose</th><th>Readiness as an independent product</th></tr>
+</thead>
+<tbody>
+<tr><td><code>light-workflow-runner</code></td><td>Tenant-side fenced executor for workflow tasks and agent actions near private systems or sandboxes.</td><td><strong>Not an independent production product</strong>; runner architecture and end-to-end qualification remain in development.</td></tr>
+<tr><td><code>light-agent-worker</code></td><td>Worker-side agent execution component sharing the runner/execution contracts.</td><td><strong>Not an independent production product</strong>; component of Light Agent execution.</td></tr>
+<tr><td><code>light-agent-channel</code></td><td>Separate channel-gateway boundary for personal-assistant messages and proactive triggers.</td><td><strong>Not an independent production product</strong>; personal profile rollout remains in development.</td></tr>
+<tr><td><code>light-knowledge-worker</code></td><td>Knowledge ingestion/build worker that can be reused for heavy or offline work.</td><td><strong>Not a default standalone product</strong>; the normal Compose topology embeds Knowledge work in <code>light-knowledge</code>.</td></tr>
+<tr><td><code>light-github-action-provider</code></td><td>Fixed-action/provider integration for bounded GitHub operations.</td><td><strong>Component/development integration</strong>, not a general product.</td></tr>
+<tr><td><code>light-pi-rpc-adapter</code></td><td>Adapter between the Light runner protocol and the Pi coding-agent RPC boundary.</td><td><strong>Component/development integration</strong>, not a general product.</td></tr>
+<tr><td><code>provider-qualification-runner</code></td><td>Captures model-provider conformance evidence used by LLM Gateway promotion.</td><td><strong>Qualification tool</strong>, not a serving product.</td></tr>
+<tr><td><code>llm-provider-mock</code></td><td>Deterministic upstream provider used by tests and qualification gates.</td><td><strong>Test fixture</strong>, never a production provider.</td></tr>
+<tr><td><code>llm-phase0-spikes</code></td><td>Experimental LLM performance/architecture spike binary.</td><td><strong>Experiment</strong>, not a supported product.</td></tr>
+<tr><td><code>light-coding-agent-fixture</code></td><td>Deterministic coding-agent fixture used to exercise runner contracts.</td><td><strong>Test fixture</strong>, not a production agent.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The three binaries in <code>light-example-rs</code> are likewise examples rather than
+products: <code>demo-customer-profile-api</code>, <code>demo-offer-decision-api</code>, and
+<code>demo-insurance-claim-mcp-server</code>.</p>
+<h2 id="readiness-summary"><a class="header" href="#readiness-summary">Readiness Summary</a></h2>
+<p>No reviewed advanced Rust feature should be presented to customers as
+unconditionally production-ready from this checkout alone. The core Gateway,
+Config Server, Light OAuth, reference/schema API, Light API framework, and
+Importer have useful implemented baselines, but all are <strong>Conditional</strong> because
+the current inventory does not include the exact stable artifact plus deployed
+security, performance, failover, canary, and rollback evidence required for a
+new production claim.</p>
+<p>The clearest non-ready areas are:</p>
+<ul>
+<li>LLM Gateway production promotion;</li>
+<li>workflow-backed MCP runtime promotion;</li>
+<li>broad multi-profile Light Agent execution;</li>
+<li>tenant runner and sandbox execution;</li>
+<li>Light Knowledge production operations and enterprise connectors;</li>
+<li>Controller distributed/production qualification;</li>
+<li>Light Deployer controller/rollback/config-reference integration; and</li>
+<li>Portal Service MCP execution.</li>
+</ul>
+<p>Release management should turn <strong>Conditional</strong> into <strong>Production-ready</strong> only
+for a named product version and deployment profile, with immutable evidence for
+the exact source commit, image digest, configuration/projection digest,
+database migration set, and live qualification run.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="agent-skill-and-api-endpoint-discovery"><a class="header" href="#agent-skill-and-api-endpoint-discovery">Agent Skill And API Endpoint Discovery</a></h1>
 <h2 id="problem-6"><a class="header" href="#problem-6">Problem</a></h2>
 <p>The GenAI chat flow has two separate concepts that are easy to confuse:</p>
@@ -12794,7 +13241,7 @@ standard snapshot workflow.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="control-plane-policy-publication-through-config-server"><a class="header" href="#control-plane-policy-publication-through-config-server">Control-Plane Policy Publication Through Config Server</a></h1>
-<h2 id="status-2"><a class="header" href="#status-2">Status</a></h2>
+<h2 id="status-3"><a class="header" href="#status-3">Status</a></h2>
 <p>Proposed target architecture.</p>
 <p>This document defines how Light Portal publishes immutable policy and runtime
 configuration to independently operated workloads such as Agent and Gateway.
@@ -13695,7 +14142,7 @@ topology remains an explicit internal contract that can later be replaced by
 event or Config Server delivery without changing pinned policy identities.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="global-and-tenant-entity-scope"><a class="header" href="#global-and-tenant-entity-scope">Global And Tenant Entity Scope</a></h1>
-<h2 id="status-3"><a class="header" href="#status-3">Status</a></h2>
+<h2 id="status-4"><a class="header" href="#status-4">Status</a></h2>
 <p>Proposed design for discussion.</p>
 <h2 id="decision-summary-3"><a class="header" href="#decision-summary-3">Decision Summary</a></h2>
 <p>Use <code>host_id IS NULL</code> as the storage representation for a global row when one
@@ -14285,7 +14732,7 @@ structure is intentional: it makes cross-tenant impact explicit and auditable.</
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="global-and-tenant-knowledge-bases-for-shared-agent-retrieval"><a class="header" href="#global-and-tenant-knowledge-bases-for-shared-agent-retrieval">Global And Tenant Knowledge Bases For Shared Agent Retrieval</a></h1>
-<h2 id="status-4"><a class="header" href="#status-4">Status</a></h2>
+<h2 id="status-5"><a class="header" href="#status-5">Status</a></h2>
 <p>Proposed design for discussion.</p>
 <h2 id="decision-summary-4"><a class="header" href="#decision-summary-4">Decision Summary</a></h2>
 <p>Add Knowledge Bases as a Light Portal resource with two ownership scopes:</p>
@@ -18056,7 +18503,7 @@ Platform defaults or SLOs</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="workflow-version-and-publication"><a class="header" href="#workflow-version-and-publication">Workflow Version and Publication</a></h1>
-<h2 id="status-5"><a class="header" href="#status-5">Status</a></h2>
+<h2 id="status-6"><a class="header" href="#status-6">Status</a></h2>
 <p>Accepted design.</p>
 <p>The workflow draft, publish, immutable-version, published-version selection,
 and comparison flows are implemented. Publishing one or more tools to a
@@ -18531,7 +18978,7 @@ configuration snapshot.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="endpoint-tools-and-workflow-access"><a class="header" href="#endpoint-tools-and-workflow-access">Endpoint Tools and Workflow Access</a></h1>
-<h2 id="status-6"><a class="header" href="#status-6">Status</a></h2>
+<h2 id="status-7"><a class="header" href="#status-7">Status</a></h2>
 <p>Implemented for the REST/HTTP first slice, with qualification still pending.
 MCP and JSON-RPC palette builders remain later protocol extensions of the same
 identity and grant model. Authentication metadata must explicitly resolve to
@@ -18892,7 +19339,7 @@ same workflow Tool grant.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="api-version-publication-to-gateway"><a class="header" href="#api-version-publication-to-gateway">API Version Publication To Gateway</a></h1>
-<h2 id="status-7"><a class="header" href="#status-7">Status</a></h2>
+<h2 id="status-8"><a class="header" href="#status-8">Status</a></h2>
 <p>Source implementation complete; integration and runtime qualification remain.</p>
 <p>The query, compiler, append-only command, locked graph-revision guard,
 replacement event ordering, snapshot-readiness guard, API Detail dialog, and
@@ -19598,14 +20045,966 @@ projection is behind or has an unresolved failure;</li>
 remain separate from the publication command.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="light-gateway"><a class="header" href="#light-gateway">Light Gateway</a></h1>
+<h1 id="direct-event-replay-execution"><a class="header" href="#direct-event-replay-execution">Direct Event Replay Execution</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="fast-snapshot-derived-database-bootstrap"><a class="header" href="#fast-snapshot-derived-database-bootstrap">Fast Snapshot-Derived Database Bootstrap</a></h1>
+<h2 id="status-9"><a class="header" href="#status-9">Status</a></h2>
+<p>Implemented with a narrower ingestion-only boundary. The projection-aware
+bootstrap proposal retained below records the review history, but its barrier,
+materialization, convergence, DLQ, and database-ready requirements are
+superseded by the decision below.</p>
+<h2 id="implemented-ingestion-boundary"><a class="header" href="#implemented-ingestion-boundary">Implemented Ingestion Boundary</a></h2>
+<p>For <code>--bootstrap-import</code>, success means only that every input event has been
+durably inserted into <code>event_store_t</code>, <code>outbox_message_t</code>, and <code>notification_t</code>.
+The importer does not invoke guarded graph command persistence and does not
+wait for, inspect, or modify projection state. Projection, retry, DLQ handling,
+identity materialization, terminal convergence, and user notification are the
+responsibility of the asynchronous event-processing system.</p>
+<p>The retained correctness contract is limited to the write itself:</p>
+<ul>
+<li>the destination event, outbox, and notification tables must be empty;</li>
+<li>one UUIDv7 logical transaction envelope is generated per event;</li>
+<li>nonce allocation, offset allocation, and all three table writes occur on the
+coordinator connection and roll back together;</li>
+<li>multiple singleton logical transactions may share one bounded physical
+commit, with a default and hard ceiling of 500 events;</li>
+<li>a session advisory lock prevents concurrent bootstrap importers;</li>
+<li>importer success does not imply projection readiness or an empty DLQ.</li>
+</ul>
+<p>This document defines how Light Portal recreates an empty database quickly from
+the <code>events.json</code> generated from a global projection snapshot. Those events are
+new synthetic CreatedEvents. They are not an export of canonical event history
+and cannot preserve the original business transaction IDs.</p>
+<p>The first optimized implementation remains on the Java <code>event-importer</code> and
+<code>light-portal</code> persistence path. The Rust importer may replace it only after it
+passes the parity gates in this document.</p>
+<p>Related designs are <a href="#rust-event-importer-design">Rust Event Importer</a>,
+<a href="#event-replay">Event Replay</a>, and
+<a href="#light-portal-install">Light Portal Install</a>.</p>
+<h2 id="problem-10"><a class="header" href="#problem-10">Problem</a></h2>
+<p>Database recreation currently imports <code>events.json</code> one event at a time. Each
+event opens and commits a PostgreSQL transaction. Guarded graph appends also
+commit and then poll projection convergence at 250 ms intervals before the next
+input event. This protects failure, graph, and DLQ isolation, but a
+baseline of approximately 17,000 events takes several minutes and the generated
+event set will continue to grow.</p>
+<p>The current implementation has not attributed that elapsed time reliably. The
+candidate costs are:</p>
+<ul>
+<li>PostgreSQL transaction commits;</li>
+<li>nonce, aggregate-version, and offset queries;</li>
+<li>event-store, outbox, and notification writes;</li>
+<li>guarded append validation and graph metadata stamping;</li>
+<li>projection convergence and identity materialization barriers.</li>
+</ul>
+<p>P0 must measure these costs separately before a default chunk size or primary
+optimization is selected. Commit reduction is a useful proxy, not the outcome:
+the optimization succeeds only when measured time-to-database-ready improves
+without falsely claiming that adjacent snapshot-derived events belonged to one
+original business transaction. Changing from Java to Rust or running outside a
+container does not answer that measurement question.</p>
+<h2 id="source-of-truth-correction"><a class="header" href="#source-of-truth-correction">Source-Of-Truth Correction</a></h2>
+<p><code>events.json</code> is produced in two distinct stages:</p>
+<ol>
+<li>Global snapshot export reads current projection and read-model tables.</li>
+<li>Snapshot conversion turns projection rows into new ordered CreatedEvents.</li>
+</ol>
+<p>The global snapshot deliberately excludes infrastructure and operational tables
+such as:</p>
+<ul>
+<li><code>event_store_t</code>;</li>
+<li><code>outbox_message_t</code>;</li>
+<li><code>notification_t</code>;</li>
+<li><code>dead_letter_queue</code>;</li>
+<li><code>log_counter</code>;</li>
+<li><code>consumer_offsets</code>.</li>
+</ul>
+<p>The converter may also fold several child projection rows into one parent event,
+derive a new aggregate version sequence, and generate a new event UUID. A
+projection row can represent the result of many historical events, while
+deleted or intermediate states may not appear in the snapshot at all.</p>
+<p>Consequently, there is no reliable mapping from a converted event back to an
+original <code>transaction_id</code>, <code>transaction_ordinal</code>, or <code>transaction_count</code>.
+Querying <code>event_store_t</code> or joining <code>outbox_message_t</code> separately cannot restore
+that relationship for synthetic snapshot events.</p>
+<p>The importer must not attempt to enrich snapshot-derived <code>events.json</code> with
+original transaction metadata. Original-history export is a separate problem
+and is outside this design.</p>
+<h2 id="decision-summary-8"><a class="header" href="#decision-summary-8">Decision Summary</a></h2>
+<ol>
+<li>The existing top-level JSON array remains the canonical snapshot-derived
+<code>events.json</code> format.</li>
+<li>Every generated event represents one new singleton logical transaction.</li>
+<li>At import, each event receives its own newly generated UUIDv7
+<code>transaction_id</code>,
+<code>transaction_ordinal = 0</code>, and <code>transaction_count = 1</code>.</li>
+<li>Adjacent events are never flattened under one logical <code>transaction_id</code>.</li>
+<li>A physical PostgreSQL transaction may persist several singleton logical
+transactions while retaining a different logical transaction ID for every
+event.</li>
+<li>Configured chunk size controls physical commit frequency only. It never
+defines business transaction membership.</li>
+<li>Graph and validator read-model dependencies create commit barriers. The
+importer commits the barrier event before waiting for required projection
+state. It must never wait for a row produced by an open chunk.</li>
+<li>The guarded Java append path remains authoritative during the first phase.
+Direct SQL that bypasses <code>GraphCommandPersistence</code>, <code>EventAppendValidator</code>,
+recovery projection markers, or identity materialization is not an accepted
+optimization.</li>
+<li>Public installation should normally restore a release-built, validated
+PostgreSQL bootstrap archive and import only later event deltas. Complete
+snapshot-event import remains the portable fallback and qualification
+oracle.</li>
+<li>Container versus host execution is an operational choice, not the primary
+performance design.</li>
+<li>The Rust importer is not selected for database recreation until it
+implements singleton logical transactions, guarded bootstrap behavior, and
+Java-versus-Rust differential tests.</li>
+<li>The first implementation is a single writer, enforced by a session-level
+advisory lock, and uses <code>READ COMMITTED</code> transactions.</li>
+<li>Barrier latency is a first-class optimization target. P0 starts with an
+adaptive low-latency poll and evaluates <code>LISTEN</code>/<code>NOTIFY</code> if polling remains
+material.</li>
+</ol>
+<h2 id="goals-21"><a class="header" href="#goals-21">Goals</a></h2>
+<ul>
+<li>Reduce empty-database recreation time as snapshot event volume grows.</li>
+<li>Preserve the current one-event logical transaction and DLQ isolation
+semantics.</li>
+<li>Reduce physical PostgreSQL commits without creating false multi-event
+transactions.</li>
+<li>Preserve nonce, aggregate-version, outbox-offset, policy-version, graph, and
+projection behavior.</li>
+<li>Keep current snapshot generation and <code>events.json</code> consumption portable.</li>
+<li>Preserve exact failure diagnostics during bootstrap.</li>
+<li>Provide a fast, reproducible installation artifact tied to an exact schema
+and event baseline.</li>
+<li>Compare Java and Rust importers against the same fixtures and database
+postconditions.</li>
+</ul>
+<h2 id="non-goals-24"><a class="header" href="#non-goals-24">Non-Goals</a></h2>
+<ul>
+<li>Recovering original history or adding original <code>transaction_id</code> metadata to
+the snapshot/event format.</li>
+<li>Treating chunk adjacency as business transaction membership, using one giant
+transaction, or parallelizing arbitrary events.</li>
+<li>Weakening validation and graph/identity guards or bypassing them with direct
+<code>COPY</code> into canonical tables.</li>
+<li>Making a physical PostgreSQL volume the portable public artifact.</li>
+<li>Removing snapshot-event import as the recovery/conformance path or treating
+successful append as database readiness.</li>
+</ul>
+<h2 id="terminology-5"><a class="header" href="#terminology-5">Terminology</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Term</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td>Projection snapshot</td><td>Current state exported from projection and read-model tables.</td></tr>
+<tr><td>Synthetic event</td><td>A new CreatedEvent generated from a projection row or folded group of rows.</td></tr>
+<tr><td>Logical transaction</td><td>The event-processing and replay unit identified by <code>transaction_id</code>. Every snapshot-derived event has its own singleton logical transaction.</td></tr>
+<tr><td>Physical commit chunk</td><td>One PostgreSQL transaction used to persist several singleton logical transactions.</td></tr>
+<tr><td>Chunk target</td><td>A soft event-count and byte-size target used to construct a physical commit chunk.</td></tr>
+<tr><td>Projection barrier</td><td>An event after which the importer must commit and wait before later events can be accepted safely.</td></tr>
+<tr><td>Bootstrap archive</td><td>A release-built PostgreSQL archive containing canonical synthetic history and already-converged projection state.</td></tr>
+<tr><td>Archive baseline ID</td><td>Immutable release-manifest coordinate identifying the exact schema, full <code>events.json</code>, and ordered release deltas already represented by an archive. It is not inferred from a maximum event UUID, nonce, or offset.</td></tr>
+<tr><td>Database ready</td><td>Synthetic canonical history is present, required projections and identities are verified, and no bootstrap failure or pending convergence remains.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="current-behavior-and-constraints"><a class="header" href="#current-behavior-and-constraints">Current Behavior And Constraints</a></h2>
+<h3 id="snapshot-converter"><a class="header" href="#snapshot-converter">Snapshot converter</a></h3>
+<p>The converter:</p>
+<ol>
+<li>reads the snapshot’s <code>tables</code> object;</li>
+<li>removes tables excluded from export and conversion;</li>
+<li>topologically sorts remaining tables;</li>
+<li>folds selected child rows into parent event payloads;</li>
+<li>derives aggregate identity and sequential aggregate versions;</li>
+<li>generates a new UUID for every event;</li>
+<li>writes nonce <code>0</code> as an import-time placeholder;</li>
+<li>emits a top-level JSON array.</li>
+</ol>
+<p>The generated events contain no transaction metadata. This is intentional, not
+a legacy-format defect.</p>
+<h3 id="java-importer"><a class="header" href="#java-importer">Java importer</a></h3>
+<p>The Java importer currently validates, normalizes, and persists every generated
+event independently. Each call creates:</p>
+<ul>
+<li>one PostgreSQL commit;</li>
+<li>one newly generated logical <code>transaction_id</code>;</li>
+<li>one outbox member with ordinal <code>0</code> and count <code>1</code>;</li>
+<li>one pending notification associated with that transaction.</li>
+</ul>
+<p>The underlying persistence implementation already exposes connection-aware
+<code>EventPersistenceImpl.insertEventStore(Connection, CloudEvent[], UUID)</code> and
+<code>GraphCommandPersistence.append(Connection, CloudEvent[], UUID)</code> entry points,
+as well as array inserts, append validation, nonce and offset allocation, and
+JDBC batches. One array still becomes one logical transaction, so a physical
+chunk cannot be passed as one arbitrary array without incorrectly turning
+unrelated snapshot events into a multi-event DLQ and replay group.</p>
+<p>Two concrete connection-level gaps remain. The public guarded connection-aware
+append hardcodes ordinary projection behavior; there is no public
+connection-aware bootstrap overload that sets <code>recoveryProjection=true</code>.
+Also, the current non-guarded importer reserves the nonce through
+<code>queryNonceByUserId</code> on a separate data-source connection before the append.
+That reservation is committed independently and must be moved onto the chunk
+connection.</p>
+<h3 id="guarded-append-constraints"><a class="header" href="#guarded-append-constraints">Guarded append constraints</a></h3>
+<p>The optimized path must retain:</p>
+<ul>
+<li>common trusted host and user identity validation;</li>
+<li>create-stream and semantic-identity guards;</li>
+<li>graph root and accepted-revision locking;</li>
+<li>policy registry and repair schema validation;</li>
+<li>recovery projection markers used by bootstrap;</li>
+<li>Category and Tag identity materialization;</li>
+<li>projection convergence waits;</li>
+<li>fail-fast empty-destination behavior.</li>
+</ul>
+<h3 id="rust-importer"><a class="header" href="#rust-importer">Rust importer</a></h3>
+<p>The current Rust importer generates one transaction ID for all events in its
+configured batch. A batch of 500 therefore becomes one synthetic 500-event
+logical transaction. That does not match this design.</p>
+<p>The Rust implementation also writes canonical and outbox tables directly
+without the complete guarded bootstrap, historical import, graph,
+recovery-projection, policy registry, and identity-materialization behavior of
+the Java path. It remains an experimental performance candidate until parity is
+proven.</p>
+<h2 id="snapshot-event-contract"><a class="header" href="#snapshot-event-contract">Snapshot Event Contract</a></h2>
+<p>The canonical input remains:</p>
+<pre><code class="language-json">[
+  {
+    "specversion": "1.0",
+    "id": "019ccccc-0000-7000-8000-000000000002",
+    "type": "RefTableCreatedEvent",
+    "subject": "019ccccc-0000-7000-8000-000000000003",
+    "host": "019ccccc-0000-7000-8000-000000000004",
+    "user": "019ccccc-0000-7000-8000-000000000005",
+    "nonce": "0",
+    "aggregateversion": 1,
+    "data": {}
+  }
+]
+</code></pre>
+<p>For every array member, the importer derives a singleton append envelope:</p>
+<pre><code class="language-text">transaction_id      = UuidUtil.getUUID() // UUIDv7
+transaction_ordinal = 0
+transaction_count   = 1
+</code></pre>
+<p>Transaction identity is import infrastructure metadata. It is not added to the
+CloudEvent or claimed to represent source history. Java uses the system-standard
+<code>UuidUtil.getUUID()</code>, which generates a time-ordered epoch UUIDv7. Rust must
+generate an RFC-compatible UUIDv7 through its shared UUID utility. UUIDv7 keeps
+the transaction IDs aligned with other generated identifiers in the system,
+but transaction processing order remains exclusively offset- and
+ordinal-based; consumers must not infer ordering semantics from
+<code>transaction_id</code>.</p>
+<p>Before writes begin, each synthetic event is checked for:</p>
+<ul>
+<li>valid CloudEvent structure;</li>
+<li>a unique event ID within the file;</li>
+<li>a trusted host and user;</li>
+<li>a non-empty subject and aggregate type;</li>
+<li>a supported event type and policy version;</li>
+<li>a valid aggregate-version sequence;</li>
+<li>replacement and enrichment rule validity;</li>
+<li>bootstrap append-mode classification;</li>
+<li>hard event-size limits.</li>
+</ul>
+<p>Duplicate input aggregate versions or an existing equal/higher target version
+follow the existing importer rules. Empty-database bootstrap still requires a
+complete, skip-free result.</p>
+<h2 id="import-planning"><a class="header" href="#import-planning">Import Planning</a></h2>
+<p>Import separates planning from execution:</p>
+<pre><code class="language-text">snapshot-derived events.json
+  |
+  v
+parse, mutate, normalize, and validate events
+  |
+  v
+assign one singleton logical transaction per event
+  |
+  v
+classify append mode and projection barriers
+  |
+  v
+pack compatible singleton appends into physical commit chunks
+  |
+  v
+append -&gt; commit -&gt; wait at barriers -&gt; verify
+</code></pre>
+<h3 id="append-mode-classification"><a class="header" href="#append-mode-classification">Append-mode classification</a></h3>
+<p>Every event receives exactly one append mode:</p>
+<ul>
+<li>guarded command append;</li>
+<li>guarded bootstrap append;</li>
+<li>write-fenced bootstrap identity append;</li>
+<li>write-fenced historical append.</li>
+</ul>
+<p>A physical chunk may contain different singleton append modes only if the
+bootstrap coordinator can preserve each mode’s validation and projection
+behavior. The initial implementation should flush the chunk when mode changes.</p>
+<h3 id="projection-barriers"><a class="header" href="#projection-barriers">Projection barriers</a></h3>
+<p>The planner creates a barrier around work whose successor requires committed
+projection state. Initial barriers include:</p>
+<ul>
+<li>guarded graph events whose projected revision must catch up;</li>
+<li>an event whose validator requires a read model produced by an earlier event;</li>
+<li>an explicit end-of-import convergence check.</li>
+</ul>
+<p>Category and Tag birth events remain forced single-event physical chunks
+because they cannot share an append batch with other events. Their identity
+materialization is not a mid-import wait: the current importer runs
+<code>materializeBootstrapIdentities()</code> once after the complete event loop, so it is
+a terminal bootstrap step unless a future dependency proves otherwise.</p>
+<p>Barrier classification is registry-driven and versioned with the importer. Its
+source is the same contract that creates the dependency:</p>
+<ul>
+<li>graph barriers live beside <code>GraphEventRegistry.resolveRoot</code> and its
+projection-table root resolution;</li>
+<li>validator barriers live beside the validator read-model dependency registry.</li>
+</ul>
+<p>This avoids a second hand-maintained event-type list drifting from the reads it
+must protect. Classification is never inferred from timing or a failed retry.</p>
+<h3 id="physical-commit-chunk-construction"><a class="header" href="#physical-commit-chunk-construction">Physical commit chunk construction</a></h3>
+<p>The chunk builder follows these rules:</p>
+<ol>
+<li>Preserve input order.</li>
+<li>Keep every event as a distinct singleton logical transaction.</li>
+<li>Never cross a projection barrier.</li>
+<li>Flush when append mode or another guarded compatibility boundary changes.</li>
+<li>Stop before the event-count or byte-size target would be exceeded.</li>
+<li>Reject one event only when it exceeds the separate hard event-size limit.</li>
+</ol>
+<p>Initial tuning candidates are 50, 100, 250, and 500 events per physical commit
+chunk. A candidate must pass the lock-pressure test as well as performance and
+correctness gates. The selected production default is based on qualification
+results, not on language or container runtime.</p>
+<h3 id="transaction-and-barrier-invariants"><a class="header" href="#transaction-and-barrier-invariants">Transaction and barrier invariants</a></h3>
+<p>The coordinator enforces these named invariants:</p>
+<ol>
+<li><strong>Never wait inside an open chunk.</strong> <code>log_counter.next_offset</code> is advanced in
+the event write transaction, while the database consumer treats
+<code>next_offset - 1</code> as the claimable tip. Uncommitted rows are therefore
+intentionally invisible to the projector. A barrier event is appended and
+committed before any wait for its projection begins.</li>
+<li><strong>Use <code>READ COMMITTED</code>.</strong> Root resolution and validator dependencies read
+projection rows written by another process between chunks. A transaction
+must not retain a stale <code>REPEATABLE READ</code> snapshot across such a wait.</li>
+<li><strong>One active bootstrap writer.</strong> The coordinator acquires a well-known
+session-level PostgreSQL advisory lock before the empty-destination check and
+holds it through final verification. A second importer fails fast.</li>
+<li><strong>Preserve append lock order.</strong> A chunk repeats existing singleton append
+lock order on one connection. Locks last until commit, so chunk qualification
+records lock waits and distinct advisory locks and rejects sizes that create
+unsafe shared-lock-table, WAL, memory, or rollback pressure.</li>
+</ol>
+<h2 id="persistence-design"><a class="header" href="#persistence-design">Persistence Design</a></h2>
+<h3 id="separate-logical-transactions-inside-one-physical-commit"><a class="header" href="#separate-logical-transactions-inside-one-physical-commit">Separate logical transactions inside one physical commit</a></h3>
+<p>The required shape is:</p>
+<pre><code class="language-text">PostgreSQL transaction
+  event A -&gt; transaction A / ordinal 0 / count 1
+  event B -&gt; transaction B / ordinal 0 / count 1
+  event C -&gt; transaction C / ordinal 0 / count 1
+commit
+</code></pre>
+<p>The existing persistence APIs are already connection-aware, but each call
+accepts one transaction ID with one event array. The optimized path therefore
+needs a connection-aware bootstrap coordinator that accepts a sequence of
+singleton append requests. Within one PostgreSQL transaction it processes each
+request in input order through the same validation and stamping path, supplying
+a new transaction ID and a one-event array for every request.</p>
+<p>The coordinator must not flatten the chunk into one event array with one
+generated transaction ID.</p>
+<p>The first API change is a public connection-aware bootstrap guarded append, for
+example <code>appendBootstrap(Connection, CloudEvent[], UUID)</code>, that preserves the
+current recovery projection marker. The coordinator constructs and reuses one
+<code>GraphCommandPersistence</code> with one loaded <code>GraphCommandConfig</code>; it must not
+repeat the current <code>PortalDbProviderImpl.appendCommandEvents</code> behavior of
+loading config and constructing the persistence object for every event.</p>
+<h3 id="first-optimization-boundary"><a class="header" href="#first-optimization-boundary">First optimization boundary</a></h3>
+<p>The first implementation reduces connection acquisition and commit/fsync cost
+while retaining existing per-event validation, nonce stamping, offset
+reservation, and persistence calls inside the shared PostgreSQL transaction.</p>
+<p>This deliberately separates the highest-value change from later SQL
+optimization. After correctness is proven, prepared statements, nonce ranges,
+offset ranges, and notification inserts may be optimized without changing
+logical transaction identity.</p>
+<h3 id="nonce-and-offset-allocation"><a class="header" href="#nonce-and-offset-allocation">Nonce and offset allocation</a></h3>
+<p>Nonce and offset allocation must become atomic with canonical and outbox writes
+for every append mode. This is already true for guarded append because
+<code>GraphCommandPersistence</code> calls the connection-taking nonce reservation. It is
+not true today for direct bootstrap modes: <code>queryNonceByUserId</code> reserves and
+commits through a separate connection before the event append.</p>
+<ul>
+<li>Preserve event order when assigning nonce values.</li>
+<li>Never trust nonce <code>0</code> from <code>events.json</code> as a persisted value.</li>
+<li>Add and use the connection-taking nonce reservation for direct append modes;
+never reserve or read a nonce outside the chunk transaction.</li>
+<li>Keep each outbox row’s distinct transaction ID, ordinal <code>0</code>, and count <code>1</code>.</li>
+<li>Allocate gapless, commit-ordered outbox offsets across the physical chunk.</li>
+<li>Rollback returns the complete physical chunk to its pre-import state.</li>
+</ul>
+<p>Until this gap is fixed, a rolled-back direct-mode chunk burns its already
+committed nonces and does not satisfy the optimized bootstrap contract.</p>
+<p><code>EventAppendValidator</code> requires contiguous nonces inside one append array.
+Singleton append calls satisfy that rule. This is an additional prohibition on
+folding a physical chunk into one array unless the full multi-event logical
+transaction contract is deliberately invoked.</p>
+<p>Set-based range reservation is a later optimization and requires the same
+locking and monotonicity proof as the current guarded path. Nonce or offset
+ranges must never be reserved in a separate transaction: the consumer advances
+its claim cursor to the committed counter tip, so publishing an offset tip
+before its rows could cause permanently skipped events.</p>
+<h3 id="sql-batching"><a class="header" href="#sql-batching">SQL batching</a></h3>
+<p>Prepared statements should be reused within the physical chunk where the
+validated persistence API permits it. Event-store, outbox, and notification
+inserts may use JDBC batch or set-based execution after parity tests prove
+identical validation, conflict, and notification behavior.</p>
+<p>The implementation continues to write:</p>
+<ul>
+<li><code>event_store_t</code> with validated policy and repair schema versions;</li>
+<li><code>outbox_message_t</code> with one distinct singleton transaction per event;</li>
+<li><code>notification_t</code> with the corresponding transaction ID and <code>PENDING</code> status.</li>
+</ul>
+<h3 id="failure-behavior-1"><a class="header" href="#failure-behavior-1">Failure behavior</a></h3>
+<p>Bootstrap import is fail-fast at the file level.</p>
+<p>If a physical chunk fails:</p>
+<ol>
+<li>roll back the complete physical chunk;</li>
+<li>retain the failing chunk number and event IDs in diagnostics;</li>
+<li>rerun the chunk one singleton event at a time in an isolated diagnostic
+attempt when enabled;</li>
+<li>identify the first failing event and its validation or SQL code;</li>
+<li>discard and recreate the destination, then restart from the verified empty
+state.</li>
+</ol>
+<p>Diagnostic retry must not leave a partial database that an installer can
+mistake for success.</p>
+<p>The initial design has no resumable import checkpoint. That is consistent with
+the existing <code>requireEmptyBootstrapDestination</code> guard and with bootstrap’s hard
+failure when any duplicate or existing aggregate version is skipped. A future
+checkpoint design would need its own durable cursor, chunk checksum, idempotency
+contract, and a deliberate relaxation of the empty-destination rule.</p>
+<h3 id="disposable-durability-optimization"><a class="header" href="#disposable-durability-optimization">Disposable durability optimization</a></h3>
+<p>The importer may expose an empty-database-only option that executes
+<code>SET LOCAL synchronous_commit = off</code> inside each physical chunk. Transaction
+scope is preferred to a session GUC so the relaxed durability cannot leak into
+unrelated work if connection handling changes. It does not disable <code>fsync</code>,
+constraints, or transactional rollback globally. If the host fails during
+bootstrap, installation restarts from an empty destination.</p>
+<p>This option is never enabled for incremental imports or existing databases.</p>
+<p>P0 also benchmarks, and records an explicit accept or reject decision for:</p>
+<ul>
+<li>bootstrap-window <code>max_wal_size</code> and checkpoint tuning;</li>
+<li>deferring non-essential projection indexes and rebuilding them before ready;</li>
+<li>temporarily setting projection-only tables <code>UNLOGGED</code>, including the
+<code>SET LOGGED</code> rewrite and crash-restart cost.</li>
+</ul>
+<p>Canonical event, outbox, nonce, offset, constraint, and guard tables remain
+logged and indexed. No tuning is accepted unless the ordinary released
+configuration is restored and verified before database-ready is reported.</p>
+<h2 id="release-built-postgresql-bootstrap-archive"><a class="header" href="#release-built-postgresql-bootstrap-archive">Release-Built PostgreSQL Bootstrap Archive</a></h2>
+<p>Physical commit chunking improves recovery performance, but public installation
+should not repeatedly pay the full synthetic-event import and projection cost.
+The release pipeline performs that work once and publishes a validated archive.</p>
+<h3 id="archive-generation"><a class="header" href="#archive-generation">Archive generation</a></h3>
+<pre><code class="language-text">canonical snapshot-derived events.json
+  |
+  v
+fresh release-matched PostgreSQL
+  |
+  v
+guarded singleton-logical / chunked-physical import
+  |
+  v
+projection and identity convergence
+  |
+  v
+correctness and checksum gates
+  |
+  v
+pg_dump archive + signed manifest
+</code></pre>
+<p>The generator uses the same released schema, service artifacts, policies, and
+projection handlers declared by the installation bundle.</p>
+<h3 id="archive-contents"><a class="header" href="#archive-contents">Archive contents</a></h3>
+<p>The archive contains:</p>
+<ul>
+<li>canonical synthetic <code>event_store_t</code> history;</li>
+<li>event-derived read models;</li>
+<li>identity and graph revision state;</li>
+<li>required reference and bootstrap tables;</li>
+<li>consistent nonce and offset counters;</li>
+<li>schema objects owned by the release.</li>
+</ul>
+<p><code>user_t.password</code> and <code>auth_client_t.client_secret</code> are credential verifiers in
+the canonical projection schema. A public archive must not turn a release seed
+into a reusable credential shared by every installation. The published archive
+contains disabled placeholder verifiers. During first boot, the installer
+generates installation-unique administrator and client credentials locally,
+stores only their verifiers, and delivers clear values through the existing
+one-time secret/enrollment boundary. No externally reachable listener starts
+until that rotation is verified. The dedicated auth-client secret regeneration
+contract is reused where applicable. Stable host, user, and client identifiers
+may remain in the archive; they are identifiers, not authentication secrets.</p>
+<p>Checksums and signatures prove artifact integrity and provenance; they do not
+make embedded credentials secret.</p>
+<p>Before capture, the generator quiesces projection work and normalizes
+operational state:</p>
+<ul>
+<li>all required projection cursors equal the baseline watermark;</li>
+<li>no required projection transaction is pending or failed;</li>
+<li>transport queues are empty or recorded under one explicitly versioned
+archive policy;</li>
+<li>bootstrap notifications and transient diagnostics are removed unless the
+release contract explicitly retains them;</li>
+<li>the next nonce and outbox offset remain monotonic after restore.</li>
+</ul>
+<h3 id="manifest"><a class="header" href="#manifest">Manifest</a></h3>
+<p>The archive manifest includes:</p>
+<pre><code class="language-json">{
+  "format": "lightapi.portal-postgres-bootstrap",
+  "formatVersion": 1,
+  "postgresMajor": 18,
+  "portalDbCommit": "...",
+  "eventsJsonSha256": "...",
+  "eventCount": 17000,
+  "singletonTransactionCount": 17000,
+  "lastEventId": "...",
+  "lastOutboxOffset": 17000,
+  "archiveBaselineId": "portal-2026.08.0-baseline-1",
+  "includedDeltaIds": [],
+  "checksumProfile": "portal-bootstrap-v1",
+  "canonicalizationSpecSha256": "...",
+  "projectionChecksumSet": "...",
+  "createdAt": "..."
+}
+</code></pre>
+<p>The PostgreSQL major version is illustrative; generation records the actual
+release version. The manifest also contains archive SHA-256, byte size, schema
+digest, required extension versions, per-table verification counts, credential
+sanitization policy, restore role mapping, and release signing identity.</p>
+<p><code>pg_dump</code> does not carry cluster roles and planner statistics are not a durable
+restore contract. Archive generation therefore uses an ownership-neutral dump
+and records the intended application role/grants separately. Restore uses
+<code>pg_restore --no-owner --no-acl</code> (or an explicitly mapped restore role),
+reapplies and verifies grants, and runs <code>ANALYZE</code> before the readiness timer can
+succeed.</p>
+<h3 id="checksum-canonicalization-and-reproducibility"><a class="header" href="#checksum-canonicalization-and-reproducibility">Checksum canonicalization and reproducibility</a></h3>
+<p>UUIDv7 transaction IDs and database-generated operational timestamps differ
+between valid rebuilds. Differential and archive checks therefore use a
+versioned, machine-readable checksum profile, not an unspecified
+“canonicalized” comparison. The <code>portal-bootstrap-v1</code> profile defines an exact
+ordered column list and row sort key for every checksummed table; no wildcard
+column exclusion is permitted.</p>
+<p>The initial exclusion/normalization set is:</p>
+<ul>
+<li>exclude <code>outbox_message_t.transaction_id</code> and, if notifications are retained
+by archive policy, <code>notification_t.transaction_id</code>; verify UUIDv7 type,
+uniqueness, ordinal, count, and event association through separate queries;</li>
+<li>exclude archive/build timestamps such as manifest <code>createdAt</code>;</li>
+<li>normalize only database-wall-clock columns named by the table profile,
+initially <code>entity_aggregate_t.created_ts</code>,
+<code>entity_aggregate_t.retired_ts</code>,
+<code>entity_identity_t.created_ts</code>,
+<code>entity_identity_t.demoted_ts</code>,
+<code>entity_identity_materialization_t.completed_ts</code>,
+<code>instance_graph_revision_t.accepted_ts</code>,
+<code>instance_graph_revision_t.projected_ts</code>,
+<code>notification_t.process_ts</code>, <code>notification_t.read_ts</code>,
+<code>portal_event_delta_t.imported_ts</code>, and <code>dead_letter_queue.created_dt</code> when
+those operational tables are retained;</li>
+<li>retain source-event <code>event_ts</code>, event IDs, payloads, metadata, aggregate
+identity/version, nonces, offsets, graph revisions, policy versions, and all
+other business columns exactly.</li>
+</ul>
+<p>If implementation shows that another database-generated column is
+nondeterministic, the versioned profile and its digest must change explicitly;
+the test harness must not silently drop it. Gate 1 compares canonical event
+content, Gate 10 uses this profile for projections, and Gate 13 compares Java
+and Rust after the same normalization while separately checking UUIDv7
+transaction invariants.</p>
+<p>A rebuilt <code>pg_dump</code> archive is not expected to be byte-identical to the
+published archive. UUIDv7 values, operational timestamps, dump ordering,
+compression, and planner statistics can differ. Installation verifies the
+published object’s exact SHA-256 and signature from the release manifest. An
+independent rebuild verifies schema digest, the versioned canonical table
+checksums, per-table counts, and the separate transaction/ordering invariants;
+it does not verify dump-byte equality.</p>
+<h3 id="delta-contract"><a class="header" href="#delta-contract">Delta contract</a></h3>
+<p>The archive watermark is the manifest’s <code>archiveBaselineId</code> plus its exact
+ordered <code>includedDeltaIds</code>; it is not <code>MAX(c_offset)</code>, a maximum event UUID, or
+a per-user nonce. Offsets and nonces are local consistency checks, not a
+portable release coordinate.</p>
+<p>Post-archive changes use the existing release event-delta shape: one ordered
+JSON file per immutable delta, an ID derived from its release filename, a
+SHA-256 recorded in the signed release manifest, and an effect-verification SQL
+contract. <code>portal_event_delta_t(delta_id, checksum)</code> records successful
+application. The delta importer continues aggregate versions from the restored
+state, reserves nonces and offsets transactionally, and records the delta only
+after the exact event or an explicitly accepted equivalent effect at that or a
+later aggregate version is verified.</p>
+<p>The archive manifest lists the first delta that may follow it and the ordered
+set or release range accepted thereafter. Delta files, verification SQL, and
+supersession metadata are covered by the same signed release manifest as the
+archive. An unknown, missing, reordered, checksum-mismatched, or unverifiable
+delta fails closed. Database-ready requires all selected deltas and their
+projections to converge.</p>
+<h3 id="installation-flow"><a class="header" href="#installation-flow">Installation flow</a></h3>
+<p>For an empty destination, the installer:</p>
+<ol>
+<li>downloads the version-matched archive and manifest;</li>
+<li>verifies checksum, signature, PostgreSQL major version, schema identity, and
+<code>events.json</code> digest;</li>
+<li>restores with <code>pg_restore --no-owner --no-acl</code>, an explicit
+restore/application role mapping, and safe parallel jobs where supported;</li>
+<li>reapplies and verifies grants, runs <code>ANALYZE</code>, and verifies the archive’s
+credential sanitization or pre-listener rotation contract;</li>
+<li>runs post-restore counter, graph, identity, projection, and row-count gates;</li>
+<li>imports only manifest-authorized event deltas after the archive baseline;</li>
+<li>starts normal externally reachable services only after credential and delta
+gates pass;</li>
+<li>reports database ready only after delta projection converges.</li>
+</ol>
+<p>If compatibility or verification fails, the installer discards the incomplete
+empty destination and falls back to canonical snapshot-event import. It never
+mixes an unverified partial restore with replay.</p>
+<h3 id="why-not-a-physical-volume-snapshot"><a class="header" href="#why-not-a-physical-volume-snapshot">Why not a physical volume snapshot</a></h3>
+<p>A physical PostgreSQL data-directory or container-volume snapshot can restore
+faster, but it is coupled to PostgreSQL binary version, architecture, storage
+layout, and crash-recovery state. A PostgreSQL archive plus compatibility
+manifest is the initial portable distribution choice. A physical snapshot may
+be added later for tightly controlled hosted environments.</p>
+<h2 id="java-and-rust-responsibilities"><a class="header" href="#java-and-rust-responsibilities">Java And Rust Responsibilities</a></h2>
+<h3 id="phase-one-java-path"><a class="header" href="#phase-one-java-path">Phase-one Java path</a></h3>
+<p>The Java path owns the first optimized implementation because it already has:</p>
+<ul>
+<li>graph-aware command append and revision guards;</li>
+<li>append validation and policy selection;</li>
+<li>bootstrap recovery projection markers;</li>
+<li>nonce reservation through the trusted persistence layer;</li>
+<li>identity materialization and projection convergence waits;</li>
+<li>the deployment flags used by current recreation scripts.</li>
+</ul>
+<p>The implementation adds a dedicated connection-aware bootstrap coordinator
+instead of changing ordinary live-command semantics.</p>
+<h3 id="rust-qualification-requirements"><a class="header" href="#rust-qualification-requirements">Rust qualification requirements</a></h3>
+<p>The Rust importer becomes eligible only when it:</p>
+<ul>
+<li>reads the existing top-level snapshot event array;</li>
+<li>assigns one distinct UUIDv7 singleton logical transaction per event;</li>
+<li>never creates a logical transaction from arbitrary chunk membership;</li>
+<li>supports guarded bootstrap, historical, and bootstrap identity modes;</li>
+<li>uses the same event-type, aggregate, policy, repair-schema, and graph
+validation contracts;</li>
+<li>preserves the recovery projection marker without modifying canonical event
+history;</li>
+<li>reserves nonce and offset values atomically;</li>
+<li>performs required identity materialization and convergence barriers;</li>
+<li>emits parity-compatible summaries and failure codes;</li>
+<li>passes database differential tests against the Java importer.</li>
+</ul>
+<p>Running the Rust binary directly on the host remains supported after parity,
+but that removes only container startup overhead. It is not a substitute for
+physical commit chunking or the bootstrap archive.</p>
+<h2 id="concurrency"><a class="header" href="#concurrency">Concurrency</a></h2>
+<p>The first implementation uses one ordered importer and enforces exclusivity
+with the session advisory lock defined above. Arbitrary parallel workers are
+rejected because they contend on:</p>
+<ul>
+<li>per-user nonce allocation;</li>
+<li>the global outbox offset counter;</li>
+<li>aggregate-version streams;</li>
+<li>logical identity and graph advisory locks;</li>
+<li>projection dependencies between earlier and later events.</li>
+</ul>
+<p>Future parallelism may partition proven-independent hosts, but the current
+snapshot baseline normally uses one target host and one administrative user.
+Parallelism is considered only after physical commit chunking and archive
+restore are measured.</p>
+<p>Chunking also extends transaction-scoped lock lifetime. Row locks do not each
+consume a <code>max_locks_per_transaction</code> slot, but distinct advisory and relation
+locks use the shared lock table and all retained locks can increase blocking and
+rollback cost. Qualification at the maximum supported chunk size records
+distinct advisory locks, relation locks, lock waits, transaction memory, WAL,
+and any PostgreSQL <code>out of shared memory</code> failure. The default remains below the
+smallest demonstrated safe ceiling on the reference runner.</p>
+<h2 id="observability-1"><a class="header" href="#observability-1">Observability</a></h2>
+<p>The importer emits structured progress and a final machine-readable summary:</p>
+<ul>
+<li>input event count;</li>
+<li>assigned singleton logical transaction count;</li>
+<li>physical chunk count and size distribution;</li>
+<li>database commit count;</li>
+<li>events and commits per second;</li>
+<li>parse, plan, validation, per-event database round-trip, append, commit,
+lock-wait, and final-verification duration;</li>
+<li>barrier count and total, mean, and p95 wait duration broken out by graph-root
+resolution, validator dependency, terminal identity materialization, and
+final convergence;</li>
+<li>barrier poll count and wake-up latency;</li>
+<li>skipped duplicate and existing aggregate-version counts;</li>
+<li>diagnostic fallback count;</li>
+<li>current outbox and projection lag;</li>
+<li>failed event ID and error code;</li>
+<li>final graph, identity, and projection verification result.</li>
+</ul>
+<p>Logs include synthetic transaction IDs where useful but do not log secrets or
+complete sensitive event payloads.</p>
+<h2 id="configuration-1"><a class="header" href="#configuration-1">Configuration</a></h2>
+<p>Initial options are explicit and bootstrap-scoped:</p>
+<pre><code class="language-text">--bootstrap-import                         # existing
+--bootstrap-operator-id &lt;uuid&gt;             # existing
+--bootstrap-materialization-timeout-seconds 120  # existing
+--physical-chunk-events 100
+--physical-chunk-bytes 16777216
+--max-event-bytes 67108864
+--diagnose-failed-chunk
+--bootstrap-synchronous-commit-off
+--physical-chunking-disabled
+</code></pre>
+<p>The first three flags already exist. The remaining names and default values are
+provisional until implementation review. The existing materialization timeout
+is a terminal Category/Tag convergence budget and currently also bounds each
+graph projection wait. The implementation separates or explicitly documents
+those budgets so a file with many graph barriers cannot silently multiply one
+operator setting into an unbounded total wait.</p>
+<p><code>--physical-chunking-disabled</code> preserves the current one-commit-per-event path
+as a field rollback and reference oracle. The important contract is that
+physical chunk limits never create logical transaction membership.</p>
+<p>Ordinary incremental imports retain their existing durability and
+failure-isolation behavior unless separately designed and qualified.</p>
+<h2 id="correctness-gates"><a class="header" href="#correctness-gates">Correctness Gates</a></h2>
+<p>Every optimized import or archive qualification run must prove:</p>
+<ol>
+<li>Exact canonical event ID, type, payload, metadata, aggregate identity,
+aggregate version, and policy-version parity with the one-event reference.</li>
+<li>Every snapshot event has a distinct UUIDv7 outbox <code>transaction_id</code>.</li>
+<li>Every outbox member has <code>transaction_ordinal = 0</code> and
+<code>transaction_count = 1</code>.</li>
+<li>No two adjacent snapshot events are represented as one logical transaction.</li>
+<li>For each user, nonces are contiguous within every successfully committed
+chunk; a rolled-back chunk restores <code>user_t.nonce</code> and introduces no gap.</li>
+<li>Outbox offsets are gapless and commit-ordered; no counter tip is visible
+before every row through that tip is committed.</li>
+<li>No physical chunk member is visible after rollback.</li>
+<li>Database-ready returns no row from
+<code>instance_graph_revision_t WHERE projected_revision &lt; accepted_revision</code>.</li>
+<li>Required identity materialization rows are verified.</li>
+<li>Projection table counts and checksums produced by the manifest-pinned
+canonicalization profile match the one-event reference import.</li>
+<li>No unexpected <code>FAILED</code>, DLQ, replay-candidate, or pending-bootstrap rows
+remain.</li>
+<li>Crash and retry tests never report a partial database as ready.</li>
+<li>Java and Rust database postconditions match before Rust is selected.</li>
+<li>A barrier wait cannot execute while the coordinator connection has an open
+transaction, and the barrier event is visible before the wait begins.</li>
+<li>Projection rows committed by another process between chunks are visible to
+the coordinator under <code>READ COMMITTED</code>.</li>
+<li>A second bootstrap importer fails on the session advisory lock before it
+mutates the destination.</li>
+<li>Direct and guarded nonce changes roll back with their physical chunk.</li>
+<li>Restored ownership, grants, credential sanitization/rotation, and planner
+statistics pass before externally reachable services start.</li>
+</ol>
+<h2 id="performance-gates"><a class="header" href="#performance-gates">Performance Gates</a></h2>
+<p>Performance is recorded on a named reference runner with PostgreSQL, storage,
+CPU, memory, container runtime, <code>events.json</code> checksum, and service versions in
+the result manifest.</p>
+<p>Initial acceptance targets for the approximately 17,000-event baseline are:</p>
+<ul>
+<li>optimized import reaches database-ready state at least five times faster than
+the one-event reference without failing any correctness gate;</li>
+<li>physical commit chunking reduces PostgreSQL commits by at least 90%, recorded
+as a diagnostic proxy rather than a substitute for the readiness target;</li>
+<li>bootstrap archive restore reaches database-ready state within 60 seconds on
+the reference runner;</li>
+<li>p95 archive restore time across ten clean runs remains within 20% of the
+median;</li>
+<li>increasing the fixture to 50,000 events does not reintroduce one commit per
+event or superlinear planning behavior.</li>
+</ul>
+<p>These are release qualification gates, not claims about every customer host.
+The measured reference results determine the final default chunk targets. A
+large commit reduction with only a 1.2x readiness improvement fails
+qualification and redirects work to the measured barrier, round-trip,
+validation, lock, or restore bottleneck.</p>
+<h2 id="rollout-plan-7"><a class="header" href="#rollout-plan-7">Rollout Plan</a></h2>
+<h3 id="p0-baseline-and-instrumentation"><a class="header" href="#p0-baseline-and-instrumentation">P0: Baseline and instrumentation</a></h3>
+<ul>
+<li>Attribute parse, validation, per-event round trips, append, commit, lock wait,
+each barrier type, projection, identity materialization, and total readiness
+time. No default chunk decision precedes this result.</li>
+<li>Capture the 17,000-event and 50,000-event fixtures and checksums.</li>
+<li>Add singleton transaction, nonce, offset, graph, identity, and projection
+verification queries.</li>
+<li>Keep current one-event import as the reference oracle.</li>
+<li>Benchmark adaptive graph polling starting at 2-5 ms with bounded backoff. If
+graph waits remain material, prototype a projection-advance <code>LISTEN</code>/<code>NOTIFY</code>
+channel using polling only as the lost-notification safety net.</li>
+<li>Benchmark and record decisions for transaction-local <code>synchronous_commit</code>,
+WAL/checkpoint tuning, deferred projection indexes, and unlogged projection
+tables.</li>
+</ul>
+<p>P0 exits only when instrumented buckets reconcile to within 5% of wall-clock
+readiness time and the selected workstreams have a measured path to the 5x
+gate. Chunking proceeds as the primary P2 workstream only when avoided commit
+and connection work predicts at least a 20% readiness reduction; otherwise the
+measured barrier, validation, or round-trip workstream moves ahead of chunk-size
+tuning. Chunking may still follow for scale and commit-count control.</p>
+<h3 id="p1-explicit-singleton-semantics"><a class="header" href="#p1-explicit-singleton-semantics">P1: Explicit singleton semantics</a></h3>
+<ul>
+<li>Document the snapshot-to-synthetic-event boundary in converter and importer
+tests.</li>
+<li>Assert that generated <code>events.json</code> contains no source transaction metadata.</li>
+<li>Add a bootstrap plan that assigns one UUIDv7 singleton logical transaction
+per event.</li>
+<li>Reject any optimization that flattens a physical chunk under one transaction
+ID.</li>
+</ul>
+<h3 id="p2-java-physical-commit-chunking"><a class="header" href="#p2-java-physical-commit-chunking">P2: Java physical commit chunking</a></h3>
+<ul>
+<li>Add import planning, barrier classification, and physical chunk construction.</li>
+<li>Add the connection-aware bootstrap overload and coordinator; reuse loaded
+graph configuration and persistence objects.</li>
+<li>Move direct-mode nonce reservation onto the coordinator connection.</li>
+<li>Enforce <code>READ COMMITTED</code>, the session advisory lock, and never-wait-in-open-
+chunk invariant.</li>
+<li>Preserve distinct singleton transaction IDs within every physical commit.</li>
+<li>Add failed-chunk rollback and per-event diagnostics.</li>
+<li>Run the 500-event lock-pressure test, then select a qualified default and hard
+ceiling.</li>
+</ul>
+<h3 id="p3-release-built-bootstrap-archive"><a class="header" href="#p3-release-built-bootstrap-archive">P3: Release-built bootstrap archive</a></h3>
+<ul>
+<li>Generate the archive from a clean, release-matched database.</li>
+<li>Add manifest, checksum, signature, and post-restore gates.</li>
+<li>Add ownership-neutral restore, grant verification, disabled archive
+verifiers, forced installation-unique pre-listener credential rotation, and
+<code>ANALYZE</code> to the readiness gate.</li>
+<li>Publish immutable versioned archive objects.</li>
+<li>Make installation prefer restore and fall back to snapshot-event import.</li>
+<li>Import and verify only release-manifest deltas after the archive baseline.</li>
+<li>Pin the named reference runner in <code>light-portal-install</code> release CI and enforce
+the 60-second ready gate for every release archive.</li>
+</ul>
+<h3 id="p4-rust-parity-and-optimization"><a class="header" href="#p4-rust-parity-and-optimization">P4: Rust parity and optimization</a></h3>
+<ul>
+<li>Correct Rust singleton transaction and guarded bootstrap semantics.</li>
+<li>Add Java-versus-Rust differential database tests.</li>
+<li>Optimize prepared statements, set-based range reservation, and inserts only
+after parity passes.</li>
+<li>Select Rust as the default only through an explicit qualification decision.</li>
+</ul>
+<h3 id="p5-optional-partitioned-import"><a class="header" href="#p5-optional-partitioned-import">P5: Optional partitioned import</a></h3>
+<ul>
+<li>Evaluate host-level parallelism only if archive restore and ordered physical
+chunking still miss the installation objective.</li>
+<li>Retain one global offset allocator and prove event ordering.</li>
+</ul>
+<h2 id="test-matrix"><a class="header" href="#test-matrix">Test Matrix</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Scenario</th><th>Required result</th></tr>
+</thead>
+<tbody>
+<tr><td>Snapshot array with 1,000 events</td><td>1,000 distinct UUIDv7 logical transaction IDs; every ordinal is 0 and count is 1.</td></tr>
+<tr><td>Same snapshot imported into two clean databases</td><td>UUIDv7 transaction values may differ; manifest-pinned canonical checksums and separate transaction-shape gates match.</td></tr>
+<tr><td>Physical chunk target 100</td><td>Approximately 10 physical commits without changing singleton transaction metadata.</td></tr>
+<tr><td>Event larger than chunk byte target but below hard limit</td><td>One-event physical chunk.</td></tr>
+<tr><td>Event beyond hard size limit</td><td>Import rejected before writes.</td></tr>
+<tr><td>Mode change inside planned chunk</td><td>Prior chunk flushed; next mode starts a new chunk.</td></tr>
+<tr><td>Projection barrier between ordinary events</td><td>Prior chunk committed; required projection wait completes before continuation.</td></tr>
+<tr><td>SQL failure on event 42 of a chunk</td><td>Whole physical chunk rolled back; diagnostic retry identifies event 42.</td></tr>
+<tr><td>Crash before physical commit</td><td>No chunk member visible.</td></tr>
+<tr><td>Crash after a non-final chunk commit</td><td>Destination is not reported ready; installer recreates the empty destination and restarts.</td></tr>
+<tr><td>Two adjacent related CreatedEvents</td><td>Still receive different logical transaction IDs.</td></tr>
+<tr><td>Barrier event at the end of a chunk</td><td>Chunk commits before wait; projector observes it and wait terminates.</td></tr>
+<tr><td>Attempted barrier wait with open transaction</td><td>Coordinator test fails immediately rather than timing out.</td></tr>
+<tr><td>Projection advances between chunks</td><td>Coordinator observes it under <code>READ COMMITTED</code>.</td></tr>
+<tr><td>Direct-mode failure after nonce reservation</td><td>Chunk rollback restores nonce, event, outbox, and notification state.</td></tr>
+<tr><td>Two concurrent bootstrap importers</td><td>Second importer fails before the empty check or any write.</td></tr>
+<tr><td>Chunk target 500 with graph/identity-heavy fixture</td><td>No lock-table exhaustion; lock waits, WAL, memory, and rollback time remain within the qualified ceiling.</td></tr>
+<tr><td>Rust <code>--batch-size 500</code> parity test</td><td>500 singleton transaction IDs, not one 500-member transaction.</td></tr>
+<tr><td>Archive schema or PostgreSQL mismatch</td><td>Restore refused; clean fallback to snapshot-event import.</td></tr>
+<tr><td>Archive checksum mismatch</td><td>Restore refused before database mutation.</td></tr>
+<tr><td>Archive rebuilt from the same baseline</td><td>Dump bytes may differ; schema digest, table counts, canonical checksums, and transaction invariants match.</td></tr>
+<tr><td>Archive restore role absent from dump source</td><td><code>--no-owner --no-acl</code> restore plus explicit grants succeeds and application-role access verification passes.</td></tr>
+<tr><td>Restored archive before <code>ANALYZE</code></td><td>Database-ready remains false.</td></tr>
+<tr><td>Public archive with unchanged seed verifier</td><td>Publication or pre-listener readiness gate fails according to the credential policy.</td></tr>
+<tr><td>Delta after archive baseline</td><td>Manifest order and checksum, aggregate effects, counters, and projection convergence pass before database-ready.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="rejected-alternatives"><a class="header" href="#rejected-alternatives">Rejected Alternatives</a></h2>
+<h3 id="enrich-snapshot-events-with-original-transaction-ids"><a class="header" href="#enrich-snapshot-events-with-original-transaction-ids">Enrich snapshot events with original transaction IDs</a></h3>
+<p>The snapshot excludes canonical event and outbox history, and converted events
+do not map one-to-one to historical events. Any inferred ID would be false.</p>
+<h3 id="run-the-java-jar-outside-a-container"><a class="header" href="#run-the-java-jar-outside-a-container">Run the Java JAR outside a container</a></h3>
+<p>This removes container startup and image-mount overhead but retains one commit
+per event. It remains a useful development option, not the primary solution.</p>
+<h3 id="select-rust-solely-for-speed"><a class="header" href="#select-rust-solely-for-speed">Select Rust solely for speed</a></h3>
+<p>The current Rust path does not yet preserve singleton logical transaction,
+guarded bootstrap, and projection semantics. Language selection cannot replace
+parity.</p>
+<h3 id="arbitrary---batch-size-n-as-one-transaction"><a class="header" href="#arbitrary---batch-size-n-as-one-transaction">Arbitrary <code>--batch-size N</code> as one transaction</a></h3>
+<p>This invents business transaction membership from file adjacency and merges
+unrelated failures into one DLQ/replay group. Chunk size may control physical
+commits only.</p>
+<h3 id="parallel-event-workers"><a class="header" href="#parallel-event-workers">Parallel event workers</a></h3>
+<p>This introduces ordering, nonce, offset, aggregate, and graph races before the
+measured serial bottlenecks and archive path are exhausted.</p>
+<h3 id="one-transaction-id-for-the-entire-file"><a class="header" href="#one-transaction-id-for-the-entire-file">One transaction ID for the entire file</a></h3>
+<p>This creates one false logical failure domain and changes replay semantics even
+if the database write is fast.</p>
+<h3 id="one-physical-transaction-for-the-entire-file"><a class="header" href="#one-physical-transaction-for-the-entire-file">One physical transaction for the entire file</a></h3>
+<p>Even with singleton logical IDs, this creates excessive rollback scope, delayed
+visibility, large lock and WAL pressure, and poor failure diagnostics.</p>
+<h3 id="reserve-nonce-or-offset-ranges-in-a-separate-transaction"><a class="header" href="#reserve-nonce-or-offset-ranges-in-a-separate-transaction">Reserve nonce or offset ranges in a separate transaction</a></h3>
+<p>This makes counter state visible before canonical/outbox rows. In particular,
+the database consumer claims through <code>log_counter.next_offset - 1</code> and advances
+its cursor to that tip. A separately committed range could therefore make it
+skip uncommitted rows permanently. Any future set-based reservation remains on
+the same physical connection and transaction as the rows it reserves.</p>
+<h3 id="direct-copy-into-canonical-tables"><a class="header" href="#direct-copy-into-canonical-tables">Direct <code>COPY</code> into canonical tables</a></h3>
+<p>Raw <code>COPY</code> is fast but bypasses append validation, policy selection, graph
+stamping, nonce allocation, recovery projection markers, notification behavior,
+and identity materialization. It is not a valid bootstrap import path.</p>
+<h3 id="preserve-only-a-postgresql-physical-volume"><a class="header" href="#preserve-only-a-postgresql-physical-volume">Preserve only a PostgreSQL physical volume</a></h3>
+<p>Physical storage snapshots are too tightly coupled for the initial public
+installation artifact. The portable archive is slower than a physical copy but
+has an explicit compatibility and verification contract.</p>
+<h3 id="assume-a-storage-tuning-lever-without-measurement"><a class="header" href="#assume-a-storage-tuning-lever-without-measurement">Assume a storage tuning lever without measurement</a></h3>
+<p>Transaction-local <code>synchronous_commit=off</code>, WAL/checkpoint tuning, deferred
+projection indexes, and temporary unlogged projections may be useful on an
+empty disposable destination, but each changes a different cost and some add a
+rewrite or recovery penalty. P0 measures them independently. None may bypass
+the canonical append path or remain active after the readiness gate.</p>
+<h2 id="open-questions-2"><a class="header" href="#open-questions-2">Open Questions</a></h2>
+<ol>
+<li>Which validator read-model dependencies, beyond graph-root resolution, need
+an initial barrier-registry entry?</li>
+<li>Which operational tables and cursors are normalized versus retained in the
+bootstrap archive?</li>
+<li>Do the P0 graph-barrier count, mean wait, p95 wait, and total barrier share
+show that adaptive polling meets the target, or do they justify a dedicated
+projection-advance notification channel?</li>
+<li>After Java qualification, is Rust replacement still valuable, or is the
+release-built archive sufficient for installation performance?</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="light-gateway-1"><a class="header" href="#light-gateway-1">Light Gateway</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="local-model-provider-transport-for-llm-gateway"><a class="header" href="#local-model-provider-transport-for-llm-gateway">Local Model Provider Transport For LLM Gateway</a></h1>
-<h2 id="status-8"><a class="header" href="#status-8">Status</a></h2>
+<h2 id="status-10"><a class="header" href="#status-10">Status</a></h2>
 <p>Proposed design for implementation and qualification.</p>
 <p>This design extends the completed OpenAI-compatible LLM gateway and the
 Embedding Space Contract. It does not change the public <code>/v1</code> client contract.</p>
-<h2 id="decision-summary-8"><a class="header" href="#decision-summary-8">Decision Summary</a></h2>
+<h2 id="decision-summary-9"><a class="header" href="#decision-summary-9">Decision Summary</a></h2>
 <p>The LLM gateway must support self-hosted model servers running on the same
 machine, in the same Kubernetes cluster, or elsewhere on an organization’s
 private network. Self-hosted models are a first-class production deployment,
@@ -19655,7 +21054,7 @@ model-serving deployment.</p>
 production compiler and Portal control plane impose the stronger policy. This
 design replaces that single policy with explicit trust profiles rather than
 using <code>developmentFixtures</code> or adding an unrestricted <code>allowHttp</code> flag.</p>
-<h2 id="terminology-5"><a class="header" href="#terminology-5">Terminology</a></h2>
+<h2 id="terminology-6"><a class="header" href="#terminology-6">Terminology</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -19677,7 +21076,7 @@ using <code>developmentFixtures</code> or adding an unrestricted <code>allowHttp
 </tbody>
 </table>
 </div>
-<h2 id="goals-21"><a class="header" href="#goals-21">Goals</a></h2>
+<h2 id="goals-22"><a class="header" href="#goals-22">Goals</a></h2>
 <ul>
 <li>Make Ollama, llama.cpp, vLLM, and other OpenAI-compatible self-hosted servers
 production-capable Provider Deployments.</li>
@@ -19697,7 +21096,7 @@ verification. Leave mTLS as an optional later enhancement.</li>
 keep protected query, indexing, and standard traffic out of shared capacity
 domains when isolation is required.</li>
 </ul>
-<h2 id="non-goals-24"><a class="header" href="#non-goals-24">Non-Goals</a></h2>
+<h2 id="non-goals-25"><a class="header" href="#non-goals-25">Non-Goals</a></h2>
 <ul>
 <li>This design does not let callers submit provider URLs.</li>
 <li>It does not make <code>light-gateway</code> an Alias router or LLM protocol translator.</li>
@@ -20509,7 +21908,7 @@ expected generation and digest; and</li>
 <p>Certificate failures must not be hidden as ordinary congestion. Audit and
 metrics identify the public deployment and network profile without exposing
 private keys, prompts, vectors, or unnecessary internal topology.</p>
-<h2 id="observability-1"><a class="header" href="#observability-1">Observability</a></h2>
+<h2 id="observability-2"><a class="header" href="#observability-2">Observability</a></h2>
 <p>Record or expose:</p>
 <ul>
 <li>network profile mode and termination type;</li>
@@ -20794,7 +22193,7 @@ and the gateway verifies producer authenticity and endpoint binding.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-workflow-tool-access-approval"><a class="header" href="#light-workflow-tool-access-approval">Light Workflow Tool Access Approval</a></h1>
-<h2 id="status-9"><a class="header" href="#status-9">Status</a></h2>
+<h2 id="status-11"><a class="header" href="#status-11">Status</a></h2>
 <p>Proposed.</p>
 <p>The design reuses the Portal Workflow application, <code>ask</code> tasks, role-based
 worklists, and the existing workflow Tool grant events. It changes the
@@ -20825,7 +22224,7 @@ acknowledgement task to the original author.</p>
 <li><a href="#endpoint-tools-and-workflow-access">Endpoint Tools and Workflow Access</a></li>
 <li><a href="#workflow-version-and-publication">Workflow Version and Publication</a></li>
 </ul>
-<h2 id="decision-summary-9"><a class="header" href="#decision-summary-9">Decision Summary</a></h2>
+<h2 id="decision-summary-10"><a class="header" href="#decision-summary-10">Decision Summary</a></h2>
 <ol>
 <li>Runtime authorization remains an explicit Tool grant scoped to one workflow
 definition. Version-scoped grants are deferred because the current active
@@ -20848,7 +22247,7 @@ grants in the same transaction as task completion.</li>
 <li>The editor enables testing when it observes committed grants. The author’s
 acknowledgement task is informational and is not an authorization gate.</li>
 </ol>
-<h2 id="goals-22"><a class="header" href="#goals-22">Goals</a></h2>
+<h2 id="goals-23"><a class="header" href="#goals-23">Goals</a></h2>
 <ul>
 <li>Keep the workflow author inside the Workflow Editor.</li>
 <li>Allow an author to compose a complete draft while access is pending.</li>
@@ -20861,7 +22260,7 @@ locations, and justification instead of requiring raw ID exchange.</li>
 authorization authority.</li>
 <li>Fail closed when a Tool changes between request and approval.</li>
 </ul>
-<h2 id="non-goals-25"><a class="header" href="#non-goals-25">Non-Goals</a></h2>
+<h2 id="non-goals-26"><a class="header" href="#non-goals-26">Non-Goals</a></h2>
 <ul>
 <li>Do not grant a Tool to every workflow on the host by default.</li>
 <li>Do not let a pending request satisfy runtime authorization.</li>
@@ -21333,7 +22732,7 @@ the workflow.</li>
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="claim-org-role-bootstrap"><a class="header" href="#claim-org-role-bootstrap">Claim Org Role Bootstrap</a></h1>
-<h2 id="problem-10"><a class="header" href="#problem-10">Problem</a></h2>
+<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
 <p>The Claim Org action lets a signed-in user create an organization and its default host from the profile menu. The <code>createOrg</code> form captures the organization owner, default subdomain, host description, and host owner. The backend create-org flow then creates the organization, the default host, and user-host membership rows in one transaction.</p>
 <p>That transaction is not sufficient for a usable tenant. A new host membership without role assignments can leave the owner unable to authorize after switching to the newly claimed host. The user profile/login query joins roles through <code>role_user_t</code> by the current <code>user_host_t.host_id</code>; if the current host has no active role rows for that user, role-dependent reads can return no user context.</p>
 <p>The Claim Org bootstrap must create the minimum administration roles and assignments for the default host at the same time as the organization and host.</p>
@@ -21363,7 +22762,7 @@ the workflow.</li>
 <li><code>role_permission_t</code></li>
 </ul>
 <p>The <code>role_user_t</code> table has a foreign key to <code>(host_id, role_id)</code> in <code>role_t</code>, so role rows must exist before the user-role assignments are inserted.</p>
-<h2 id="goals-23"><a class="header" href="#goals-23">Goals</a></h2>
+<h2 id="goals-24"><a class="header" href="#goals-24">Goals</a></h2>
 <ol>
 <li>A claimed organization must be immediately usable by the selected organization owner and host owner.</li>
 <li>The default host must receive deterministic administrative roles.</li>
@@ -21371,7 +22770,7 @@ the workflow.</li>
 <li>The event stream and projections must remain replayable and idempotent.</li>
 <li>The implementation must use the canonical role IDs already used by the portal data: <code>org-admin</code> and <code>host-admin</code>.</li>
 </ol>
-<h2 id="non-goals-26"><a class="header" href="#non-goals-26">Non-Goals</a></h2>
+<h2 id="non-goals-27"><a class="header" href="#non-goals-27">Non-Goals</a></h2>
 <p>This design does not introduce a new global organization-role table. Existing roles are host-scoped through <code>role_t.host_id</code>, so the organization administrator role for a claimed organization is represented as a role on the default host.</p>
 <p>This design also does not merge organization and host administration into one broad role. Organization ownership and host ownership are separate responsibilities, and the system should grant both roles only when the same user is selected for both owner fields.</p>
 <h2 id="role-model-1"><a class="header" href="#role-model-1">Role Model</a></h2>
@@ -21484,7 +22883,7 @@ the workflow.</li>
 <p>The owner-transfer role policy also remains open. The system should decide whether owner changes imply role grants, role revokes, both, or neither before adding role side effects to <code>UpdateOrg</code> or <code>UpdateHost</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="master-oauth-host-tenant-login"><a class="header" href="#master-oauth-host-tenant-login">Master OAuth Host Tenant Login</a></h1>
-<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
+<h2 id="problem-12"><a class="header" href="#problem-12">Problem</a></h2>
 <p>In a deployed portal instance, <code>dev.lightapi.net</code> is the master host for the instance. Its host ID is:</p>
 <pre><code class="language-text">01964b05-552a-7c4b-9184-6857e7f3dc5f
 </code></pre>
@@ -21508,7 +22907,7 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 <p>The new tenant host does not and should not have duplicate OAuth provider/client rows. The FK therefore rejects login with:</p>
 <pre><code class="language-text">auth_session_t_host_id_client_id_provider_id_fkey
 </code></pre>
-<h2 id="goals-24"><a class="header" href="#goals-24">Goals</a></h2>
+<h2 id="goals-25"><a class="header" href="#goals-25">Goals</a></h2>
 <ol>
 <li>Keep <code>dev.lightapi.net</code> as the single master OAuth host for the instance.</li>
 <li>Allow users whose current host is a tenant host to log in through the master host’s provider/client.</li>
@@ -21517,11 +22916,11 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 <li>Allow Claim Org to switch the host owner to the new host and require logout/login for fresh claims.</li>
 <li>Keep session, auth-code, refresh-token, and audit lifecycle behavior deterministic and queryable.</li>
 </ol>
-<h2 id="non-goals-27"><a class="header" href="#non-goals-27">Non-Goals</a></h2>
+<h2 id="non-goals-28"><a class="header" href="#non-goals-28">Non-Goals</a></h2>
 <p>This design does not introduce tenant-specific OAuth provider IDs, client IDs, redirect URIs, or BFF configuration.</p>
 <p>This design does not change the portal UI or BFF to select a different OAuth provider per tenant host.</p>
 <p>This design does not remove database referential integrity. The provider-client relationship should remain enforced, but it should be enforced against the master OAuth host instead of the tenant host.</p>
-<h2 id="terminology-6"><a class="header" href="#terminology-6">Terminology</a></h2>
+<h2 id="terminology-7"><a class="header" href="#terminology-7">Terminology</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -21904,7 +23303,7 @@ service yet. The main gaps are:</p>
 <li>tests for schema CRUD, tenant/global lookup, versioning, and config
 validation are incomplete</li>
 </ul>
-<h2 id="goals-25"><a class="header" href="#goals-25">Goals</a></h2>
+<h2 id="goals-26"><a class="header" href="#goals-26">Goals</a></h2>
 <ul>
 <li>Store JSON Schema documents with clear tenant/global ownership.</li>
 <li>Support immutable published schema versions.</li>
@@ -21921,7 +23320,7 @@ and loading schema bodies lazily.</li>
 JSON path.</li>
 <li>Categorize and tag schemas for easier discovery and filtering.</li>
 </ul>
-<h2 id="non-goals-28"><a class="header" href="#non-goals-28">Non-Goals</a></h2>
+<h2 id="non-goals-29"><a class="header" href="#non-goals-29">Non-Goals</a></h2>
 <ul>
 <li>Do not build a full schema compatibility engine in the first release.</li>
 <li>Do not require every config property to have a schema.</li>
@@ -23526,7 +24925,7 @@ GROUP BY
 <p>This approach provides a seamless experience while maintaining compatibility with applications requiring roles for authorization or UI customization.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="private-messages"><a class="header" href="#private-messages">Private Messages</a></h1>
-<h2 id="problem-12"><a class="header" href="#problem-12">Problem</a></h2>
+<h2 id="problem-13"><a class="header" href="#problem-13">Problem</a></h2>
 <p>Portal users need a way to exchange private messages from the user profile
 without exposing email addresses to each other. The sender should only need a
 recipient user id or a display-safe user label. The backend can resolve email
@@ -23561,7 +24960,7 @@ model conversations, read state, participant visibility, or per-user delete.</li
 messages page should load its own data from the query API.</li>
 <li>The existing private-message tests are disabled stubs.</li>
 </ul>
-<h2 id="goals-26"><a class="header" href="#goals-26">Goals</a></h2>
+<h2 id="goals-27"><a class="header" href="#goals-27">Goals</a></h2>
 <ul>
 <li>Let one logged-in user send a message to another portal user without knowing
 or seeing the recipient email.</li>
@@ -23576,7 +24975,7 @@ recipient email internally.</li>
 <li>Provide a path from the existing <code>message_t</code> skeleton to a conversation-based
 model without breaking existing UI routes immediately.</li>
 </ul>
-<h2 id="non-goals-29"><a class="header" href="#non-goals-29">Non-Goals</a></h2>
+<h2 id="non-goals-30"><a class="header" href="#non-goals-30">Non-Goals</a></h2>
 <ul>
 <li>Do not build group chat in the first phase.</li>
 <li>Do not expose email addresses in message APIs, events, UI state, or task
@@ -23883,7 +25282,7 @@ retention and keeps visible, partially deleted, and recently deleted messages.</
 <li>Reply pre-populates recipient context without email.</li>
 <li>Empty and error states do not produce JSON parse failures.</li>
 </ul>
-<h2 id="open-questions-2"><a class="header" href="#open-questions-2">Open Questions</a></h2>
+<h2 id="open-questions-3"><a class="header" href="#open-questions-3">Open Questions</a></h2>
 <ul>
 <li>Should users be able to send messages to themselves as private notes?</li>
 <li>Should profile pages expose a “Message” action only for users in the same
@@ -25716,7 +27115,7 @@ public class ConfigRollbackService {
 <p>This approach provides a clean and relatively robust way to restore the specific override state from your snapshots using the DELETE/INSERT strategy. Remember to test thoroughly!</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="sid-and-host-verification"><a class="header" href="#sid-and-host-verification">SID and Host Verification</a></h1>
-<h2 id="problem-13"><a class="header" href="#problem-13">Problem</a></h2>
+<h2 id="problem-14"><a class="header" href="#problem-14">Problem</a></h2>
 <p>GitHub issue https://github.com/lightapi/portal-service/issues/39 reports that
 <code>config-server</code> accepted a valid JWT whose service identity did not match the
 requested service configuration.</p>
@@ -25833,7 +27232,7 @@ should not be forced to match <code>sid</code> until the product-level authoriza
 is explicitly designed.</p>
 <p>The same exception does not apply to controller registry registration because
 <code>service/register</code> always carries a requested <code>serviceId</code>.</p>
-<h2 id="goals-27"><a class="header" href="#goals-27">Goals</a></h2>
+<h2 id="goals-28"><a class="header" href="#goals-28">Goals</a></h2>
 <ul>
 <li>Prevent one service token from downloading another service’s config, certs,
 or files.</li>
@@ -25879,7 +27278,7 @@ helper.</p>
 <p>The focused implementation tests cover missing and mismatched <code>host</code>, missing
 and mismatched <code>sid</code>, missing and mismatched <code>env</code> when <code>envTag</code> is requested,
 blank values, whitespace trimming, and case-sensitive identifier comparison.</p>
-<h2 id="non-goals-30"><a class="header" href="#non-goals-30">Non-Goals</a></h2>
+<h2 id="non-goals-31"><a class="header" href="#non-goals-31">Non-Goals</a></h2>
 <ul>
 <li>Do not replace JWT verification middleware.</li>
 <li>Do not redesign OAuth token issuance.</li>
@@ -26211,7 +27610,7 @@ service identity.</li>
 <li>expired token</li>
 </ul>
 <p>This keeps authentication failures separate from service authorization failures.</p>
-<h2 id="observability-2"><a class="header" href="#observability-2">Observability</a></h2>
+<h2 id="observability-3"><a class="header" href="#observability-3">Observability</a></h2>
 <p>On rejection, log:</p>
 <pre><code class="language-text">requestedServiceId
 tokenSid
@@ -26270,7 +27669,7 @@ cargo test microservice_registration_uses_jwt_env_when_request_omits_env_tag
 mvn -q -Dtest=ControllerWebSocketIntegrationTest#rejectsMicroserviceJwtWhenHostClaimIsMissing+rejectsMicroserviceJwtWhenHostClaimDiffersFromControllerHostId+rejectsMicroserviceJwtWhenSidIsMissing+rejectsMicroserviceJwtWhenSidDiffersFromServiceId+rejectsMicroserviceJwtWhenEnvClaimIsMissingAndEnvTagIsRequested+rejectsMicroserviceJwtWhenEnvClaimDiffersFromEnvTag+registersMicroserviceWhenEnvTagAndEnvClaimAreOmitted test
 mvn -q -Dtest=ServiceIdAuthorizationUtilTest test
 </code></pre>
-<h2 id="open-questions-3"><a class="header" href="#open-questions-3">Open Questions</a></h2>
+<h2 id="open-questions-4"><a class="header" href="#open-questions-4">Open Questions</a></h2>
 <p>No open questions for SID, host, and environment binding in this phase.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="instance-clone"><a class="header" href="#instance-clone">Instance Clone</a></h1>
@@ -26296,7 +27695,7 @@ copies the current active state of this graph and lets the administrator change
 the target identity and environment-specific configuration.</p>
 <p>This is a same-host operation. Cross-host or cross-database copying remains an
 event-promotion/import concern.</p>
-<h2 id="goals-28"><a class="header" href="#goals-28">Goals</a></h2>
+<h2 id="goals-29"><a class="header" href="#goals-29">Goals</a></h2>
 <ul>
 <li>Clone an active instance and its selected active children with one command.</li>
 <li>Require a target instance name and environment tag while allowing other
@@ -26313,7 +27712,7 @@ omit it without exposing values unnecessarily.</li>
 transaction when requested.</li>
 <li>Report durable projection and snapshot status after command acceptance.</li>
 </ul>
-<h2 id="non-goals-31"><a class="header" href="#non-goals-31">Non-goals</a></h2>
+<h2 id="non-goals-32"><a class="header" href="#non-goals-32">Non-goals</a></h2>
 <ul>
 <li>Copy raw historical events or preserve source aggregate versions.</li>
 <li>Copy an existing configuration snapshot, runtime registration, deployment
@@ -26712,7 +28111,7 @@ plan contains only properties whose parents remain selected.</p>
 <p>The immediate response is <code>ACCEPTED</code>, not completed. It contains the clone
 request ID, target instance ID, transaction ID, terminal event ID, event counts,
 and status URL/action.</p>
-<h3 id="status-10"><a class="header" href="#status-10">Status</a></h3>
+<h3 id="status-12"><a class="header" href="#status-12">Status</a></h3>
 <p><code>getInstanceCloneStatus</code> accepts <code>hostId</code> and <code>cloneRequestId</code> in a POST query
 and returns one of:</p>
 <ul>
@@ -27191,7 +28590,7 @@ retries return a retryable conflict with no committed clone state.</li>
 <li>Non-standard instance files are copied into <code>snapshot_instance_file_t</code>.</li>
 </ul>
 <p>The <code>/config-server/files</code> endpoint must return both sets. It already filters standard files by <code>config_phase</code> through <code>config_snapshot_property_t.config_phase</code>, but <code>instance_file_t</code> and <code>snapshot_instance_file_t</code> do not currently carry <code>config_phase</code>. That makes it impossible to union the two sources while preserving runtime, deployment, and generator phase semantics.</p>
-<h2 id="problem-14"><a class="header" href="#problem-14">Problem</a></h2>
+<h2 id="problem-15"><a class="header" href="#problem-15">Problem</a></h2>
 <p>When a service starts through <code>DefaultConfigLoader</code>, it calls <code>/config-server/files</code> with <code>host</code>, <code>serviceId</code>, and <code>envTag</code>. The endpoint resolves the current snapshot and returns the files that should be written into <code>/config</code>.</p>
 <p>For the sidecar case, <code>openapi.yaml</code> exists in both <code>instance_file_t</code> and <code>snapshot_instance_file_t</code>, but it does not exist in <code>config_snapshot_property_t</code>. Since the current <code>/files</code> query reads only <code>config_snapshot_property_t</code>, the response does not include <code>openapi.yaml</code>, and the sidecar cannot write it to <code>/config</code>.</p>
 <p>The correct endpoint behavior is:</p>
@@ -27892,7 +29291,7 @@ public class UuidUtil {
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="entity-creation-uniqueness"><a class="header" href="#entity-creation-uniqueness">Entity Creation Uniqueness</a></h1>
-<h2 id="status-11"><a class="header" href="#status-11">Status</a></h2>
+<h2 id="status-13"><a class="header" href="#status-13">Status</a></h2>
 <p>Implemented through Phase 5 for Role/Rule stream births and Category/Tag semantic
 identity, client retries, lifecycle alignment, verified historical materialization,
 snapshot/import guards, and policy-aware retry-ledger cleanup. Later aggregate
@@ -27922,7 +29321,7 @@ name are equal.</p>
 <code>entity_identity_t</code> reservation table. The identity reservation, event-store
 append, outbox write, nonce allocation, and idempotency record must commit in one
 PostgreSQL transaction.</p>
-<h2 id="problem-15"><a class="header" href="#problem-15">Problem</a></h2>
+<h2 id="problem-16"><a class="header" href="#problem-16">Problem</a></h2>
 <p>Issue 691 demonstrates the same-aggregate form of the defect:</p>
 <ol>
 <li>A role such as <code>abc-123</code> already exists at aggregate version 1.</li>
@@ -27956,7 +29355,7 @@ the second event reaches a projection unique constraint.</li>
 </ul>
 <p>The failure is not specific to role or rule. It is a missing write-side creation
 contract shared by many command services.</p>
-<h2 id="goals-29"><a class="header" href="#goals-29">Goals</a></h2>
+<h2 id="goals-30"><a class="header" href="#goals-30">Goals</a></h2>
 <ul>
 <li>Reject a second create for an existing aggregate without changing its event
 stream.</li>
@@ -27968,7 +29367,7 @@ stream.</li>
 <li>Provide one reusable implementation rather than handler-specific query checks.</li>
 <li>Return an actionable conflict to the UI without exposing another tenant’s data.</li>
 </ul>
-<h2 id="non-goals-32"><a class="header" href="#non-goals-32">Non-goals</a></h2>
+<h2 id="non-goals-33"><a class="header" href="#non-goals-33">Non-goals</a></h2>
 <ul>
 <li>Treating all equal request payloads as the same entity.</li>
 <li>Preventing valid multiplicity for events such as audit records, workflow runs,
@@ -27978,7 +29377,7 @@ messages, or orders.</li>
 <li>Turning create into an upsert or silently changing an existing entity.</li>
 <li>Automatically allowing an identity to be reused after delete or rename.</li>
 </ul>
-<h2 id="terminology-7"><a class="header" href="#terminology-7">Terminology</a></h2>
+<h2 id="terminology-8"><a class="header" href="#terminology-8">Terminology</a></h2>
 <h3 id="aggregate-id"><a class="header" href="#aggregate-id">Aggregate ID</a></h3>
 <p>The event-stream subject. It may be a natural composite ID such as
 <code>hostId|roleId</code>, or a generated UUID.</p>
@@ -29108,7 +30507,7 @@ never as one global TTL, and require this worker before enabling a public
 <code>ALLOW_MULTIPLE</code> create endpoint. Phase 5 implements this in the operational
 cleanup worker; deployments that disable it must not enable such an endpoint.</li>
 </ul>
-<h2 id="test-matrix"><a class="header" href="#test-matrix">Test Matrix</a></h2>
+<h2 id="test-matrix-1"><a class="header" href="#test-matrix-1">Test Matrix</a></h2>
 <p>The shared implementation must cover at least:</p>
 <div class="table-wrapper">
 <table>
@@ -29186,7 +30585,7 @@ cleanup worker; deployments that disable it must not enable such an endpoint.</l
 </div>
 <p>PostgreSQL-backed concurrency tests are required. Mock-only tests cannot prove the
 unique constraint, advisory-lock, and rollback behavior.</p>
-<h2 id="observability-3"><a class="header" href="#observability-3">Observability</a></h2>
+<h2 id="observability-4"><a class="header" href="#observability-4">Observability</a></h2>
 <p>Add bounded metrics without identity values:</p>
 <ul>
 <li><code>entity_create_accepted_total{aggregateType}</code></li>
@@ -33128,7 +34527,7 @@ scale well if every Java or Rust release requires a hand-maintained set of
 mapping events across all portal instances. This design proposes a release
 mapping automation model that keeps the existing event-sourced write path and
 removes the need to manually recreate mapping files for every product release.</p>
-<h2 id="problem-16"><a class="header" href="#problem-16">Problem</a></h2>
+<h2 id="problem-17"><a class="header" href="#problem-17">Problem</a></h2>
 <p>Product versions are released often. Each new release can introduce a new
 <code>productVersionId</code>, and the config update page only knows which configs and
 properties are applicable when mappings exist for that exact product version.</p>
@@ -33229,7 +34628,7 @@ unchanged products and to the new <code>productVersionId</code> for rebuilt prod
 </tbody>
 </table>
 </div>
-<h2 id="goals-30"><a class="header" href="#goals-30">Goals</a></h2>
+<h2 id="goals-31"><a class="header" href="#goals-31">Goals</a></h2>
 <ul>
 <li>Auto-populate config mappings for every new Java or Rust product release.</li>
 <li>Preserve event replay, auditability, and projection rebuild behavior.</li>
@@ -33242,7 +34641,7 @@ event amplification.</li>
 <li>Detect missing config and property definitions before a release appears
 complete.</li>
 </ul>
-<h2 id="non-goals-33"><a class="header" href="#non-goals-33">Non-Goals</a></h2>
+<h2 id="non-goals-34"><a class="header" href="#non-goals-34">Non-Goals</a></h2>
 <ul>
 <li>Do not change the config override hierarchy.</li>
 <li>Do not write directly to config mapping projection tables.</li>
@@ -33784,7 +35183,7 @@ through the command API.</p>
 profile to that product version. Avoid negative host-specific overrides in the
 MVP because they make query resolution and audit history harder to reason
 about.</p>
-<h2 id="observability-4"><a class="header" href="#observability-4">Observability</a></h2>
+<h2 id="observability-5"><a class="header" href="#observability-5">Observability</a></h2>
 <p>The generator or command should publish a structured summary:</p>
 <ul>
 <li>release set</li>
@@ -33844,7 +35243,7 @@ mappings.</li>
 <code>config_property_t</code>.</li>
 <li>Add a portal-view diagnostics link from the config update page.</li>
 </ul>
-<h2 id="open-questions-4"><a class="header" href="#open-questions-4">Open Questions</a></h2>
+<h2 id="open-questions-5"><a class="header" href="#open-questions-5">Open Questions</a></h2>
 <ul>
 <li>Should <code>ProductVersionCreatedEvent</code> optionally carry a <code>configProfileRef</code>,
 or should profile linking remain a separate release step?</li>
@@ -33878,7 +35277,7 @@ event-sourced product release model without duplicating standard mappings for
 every tenant.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="release-workflow"><a class="header" href="#release-workflow">Release Workflow</a></h1>
-<h2 id="status-12"><a class="header" href="#status-12">Status</a></h2>
+<h2 id="status-14"><a class="header" href="#status-14">Status</a></h2>
 <p>Proposed design.</p>
 <p>Light Portal should use <code>light-workflow</code> as the durable release orchestrator
 for Java and Rust releases. The workflow should coordinate repository checkout,
@@ -33888,7 +35287,7 @@ artifact publishing, AI-assisted failure diagnosis, and human approval.</p>
 portal service process. Command execution belongs in a sandboxed release
 runner, with <code>light-workflow</code> owning state, task routing, retries, approvals,
 and audit history.</p>
-<h2 id="problem-17"><a class="header" href="#problem-17">Problem</a></h2>
+<h2 id="problem-18"><a class="header" href="#problem-18">Problem</a></h2>
 <p>Java releases currently depend on <code>light-bot</code>, while Rust releases are handled
 through separate command-line and repository-specific steps. This works, but it
 keeps release knowledge outside the same workflow model used by Light Portal
@@ -33907,7 +35306,7 @@ and who approved publication.</li>
 <p>The release workflow should be flexible enough to call existing command-line
 tools, but controlled enough that it does not become an unrestricted shell
 inside Light Portal.</p>
-<h2 id="goals-31"><a class="header" href="#goals-31">Goals</a></h2>
+<h2 id="goals-32"><a class="header" href="#goals-32">Goals</a></h2>
 <ul>
 <li>Replace the current Java <code>light-bot</code> release path with <code>light-workflow</code> once
 parity is proven.</li>
@@ -33925,7 +35324,7 @@ reporting into the release gate.</li>
 behind explicit approval.</li>
 <li>Preserve release auditability and reproducibility.</li>
 </ul>
-<h2 id="non-goals-34"><a class="header" href="#non-goals-34">Non-Goals</a></h2>
+<h2 id="non-goals-35"><a class="header" href="#non-goals-35">Non-Goals</a></h2>
 <ul>
 <li>Do not run arbitrary release commands in the Light Portal service process.</li>
 <li>Do not replace Maven, Cargo, Docker, GitHub CLI, or existing release scripts
@@ -35283,7 +36682,7 @@ SELECT start_offset, end_offset FROM upd;
 <li><strong>No Blocking</strong>: The consumer never gets stuck on a single bad event.</li>
 <li><strong>Debuggability</strong>: The DLQ table preserves the full context (payload, exception, transaction_id) for manual investigation and replay.</li>
 </ul>
-<h2 id="configuration-1"><a class="header" href="#configuration-1">Configuration</a></h2>
+<h2 id="configuration-2"><a class="header" href="#configuration-2">Configuration</a></h2>
 <p>The consumer is configured via <code>db-event-consumer.yml</code> and runs in a Java 21 <strong>Virtual Thread</strong>. This ensures that the frequent <code>Thread.sleep</code> (during retries) and the blocking <code>pgConn.getNotifications()</code> (waiting for wake-ups) do not tie up native system threads, making the consumer extremely lightweight.</p>
 <pre><code class="language-yaml"># Postgres pub/sub event processor configuration
 # Consumer group id and it is default to user-query-group. Please only change it if you
@@ -35498,7 +36897,7 @@ if (transactionId == null) {
 <li>Framework exceptions during polling</li>
 <li>Fatal errors in fallback processing (after DLQ attempt)</li>
 </ul>
-<h2 id="configuration-2"><a class="header" href="#configuration-2">Configuration</a></h2>
+<h2 id="configuration-3"><a class="header" href="#configuration-3">Configuration</a></h2>
 <p>Consumer configuration in <code>kafka-consumer.yml</code>:</p>
 <pre><code class="language-yaml"># Kafka consumer properties
 topic: portal-event
@@ -35623,7 +37022,7 @@ aggregate version for that subject.</li>
 </li>
 </ol>
 <p>The generated JSON is then imported through import mode.</p>
-<h2 id="goals-32"><a class="header" href="#goals-32">Goals</a></h2>
+<h2 id="goals-33"><a class="header" href="#goals-33">Goals</a></h2>
 <ul>
 <li>Preserve Java CLI compatibility for existing scripts and runbooks.</li>
 <li>Preserve event-store, outbox, notification, nonce, offset, and transaction
@@ -35635,7 +37034,7 @@ into testable modules.</li>
 <li>Support large migration workflows with stdin/stdout piping, bounded-memory
 conversion options, aggregate-version caching, and configurable batch imports.</li>
 </ul>
-<h2 id="non-goals-35"><a class="header" href="#non-goals-35">Non-Goals</a></h2>
+<h2 id="non-goals-36"><a class="header" href="#non-goals-36">Non-Goals</a></h2>
 <ul>
 <li>No online REST service in the first version.</li>
 <li>No schema migration management.</li>
@@ -35663,9 +37062,11 @@ importer --convert --filename snapshot.json --targetHostId ... --adminUserId ...
 <li><code>--enrichment</code>, <code>-e</code>: JSON string or <code>@file</code> containing enrichment rules.</li>
 <li><code>--dry-run</code>: parse, mutate, validate, and report without writing.</li>
 <li><code>--fail-fast</code>: stop on the first failed event. Default is continue.</li>
-<li><code>--batch-size</code>: number of events per transaction. Default is <code>1</code> for Java
-compatibility. Snapshot imports should use a larger value, such as <code>500</code>,
-after validation passes.</li>
+<li><code>--batch-size</code>: soft event-count target for one physical database commit.
+It never defines logical transaction membership. Every event in the
+snapshot-derived JSON array receives a distinct singleton logical
+transaction. See
+<a href="#fast-snapshot-derived-database-bootstrap">Fast Snapshot-Derived Database Bootstrap</a>.</li>
 <li><code>--summary-json</code>: print machine-readable summary.</li>
 </ul>
 <h3 id="convert-options"><a class="header" href="#convert-options">Convert Options</a></h3>
@@ -35681,7 +37082,7 @@ checked-in dependency graph generated from portal DDL. Database mode uses
 PostgreSQL metadata and is useful for parity checks and dependency-graph
 refresh validation.</li>
 </ul>
-<h3 id="configuration-3"><a class="header" href="#configuration-3">Configuration</a></h3>
+<h3 id="configuration-4"><a class="header" href="#configuration-4">Configuration</a></h3>
 <p>Use environment-first configuration:</p>
 <pre><code class="language-bash">DATABASE_URL=postgres://postgres:secret@localhost:5432/configserver importer import -f events.json
 </code></pre>
@@ -35889,14 +37290,15 @@ SET next_offset = next_offset + $1
 WHERE id = 1
 RETURNING next_offset - $1
 </code></pre>
-<p>For import mode, keep Java’s isolation behavior by default: one event per
-transaction and one <code>transaction_id</code> per event. When <code>--batch-size</code> is greater
-than <code>1</code>, reserve enough offsets for the batch and write the batch in one
-transaction with one <code>transaction_id</code>.</p>
-<p>If a batched transaction fails because of a validation or constraint error, roll
-back the batch and retry its events one at a time unless <code>--fail-fast</code> is set.
-This keeps fast-path imports efficient without losing the Java tool’s ability to
-identify the bad event and continue later events.</p>
+<p>The supported snapshot-derived array contains synthetic events without source
+transaction metadata. Preserve Java’s isolation semantics by assigning one
+singleton logical transaction per event, with ordinal <code>0</code> and count <code>1</code>.</p>
+<p><code>--batch-size</code> may place several singleton append requests in one physical
+PostgreSQL commit, but it must retain a distinct generated <code>transaction_id</code> for
+every event. If a physical commit chunk fails, roll it back and retry its events
+individually for diagnosis unless <code>--fail-fast</code> is set. Import of true canonical
+event history with original multi-event transaction membership is outside this
+snapshot-import design.</p>
 <h3 id="insert-sql"><a class="header" href="#insert-sql">Insert SQL</a></h3>
 <p>Write both event rows in one transaction:</p>
 <pre><code class="language-sql">INSERT INTO event_store_t
@@ -36139,12 +37541,13 @@ target is PostgreSQL-specific SQL and JSONB.</p>
 <li>Verify failed event rolls back without blocking later events.</li>
 <li>Verify unique-constraint collisions are categorized as exact duplicate or
 failed conflict.</li>
-<li>Verify <code>--batch-size</code> imports multiple events in one transaction and falls
-back to one-event isolation when a batch fails.</li>
+<li>Verify <code>--batch-size</code> packs singleton append requests into physical commit
+chunks while retaining a distinct transaction ID, ordinal <code>0</code>, and count <code>1</code>
+for every event, then falls back to per-event diagnostics when a chunk fails.</li>
 <li>Convert a snapshot and import the resulting event list into an empty DB.</li>
 <li>Compare embedded table dependency order against live PostgreSQL metadata.</li>
 </ol>
-<h2 id="rollout-plan-7"><a class="header" href="#rollout-plan-7">Rollout Plan</a></h2>
+<h2 id="rollout-plan-8"><a class="header" href="#rollout-plan-8">Rollout Plan</a></h2>
 <h3 id="phase-1-rust-project-skeleton"><a class="header" href="#phase-1-rust-project-skeleton">Phase 1: Rust Project Skeleton</a></h3>
 <ul>
 <li>Add Cargo project in <code>importer</code>.</li>
@@ -36182,8 +37585,9 @@ snapshot conversion and import scenarios.</li>
 <ul>
 <li>Include an embedded table dependency graph in the first release and keep
 database metadata mode as a validation/refresh path.</li>
-<li>Implement <code>--batch-size</code> during import parity work. Default to <code>1</code> for Java
-behavior, but support larger batches for initial snapshot imports.</li>
+<li>Implement <code>--batch-size</code> as a physical commit target during import parity
+work. Default conservatively and treat every snapshot-derived event as a
+singleton logical transaction.</li>
 <li>Support stdin/stdout in both modes so operators can run
 <code>importer convert ... --output - | importer import --filename -</code>.</li>
 <li>Formalize replacement/enrichment as versioned <code>serde</code> schemas while accepting
@@ -36191,7 +37595,7 @@ Java-compatible unversioned arrays for migration compatibility.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="event-replay"><a class="header" href="#event-replay">Event Replay</a></h1>
-<h2 id="status-13"><a class="header" href="#status-13">Status</a></h2>
+<h2 id="status-15"><a class="header" href="#status-15">Status</a></h2>
 <p>This document defines the revised target design for event replay during the
 early development stage of light-portal. The implementation still contains
 legacy-backfill, staged-rollout, feature-gate, mandatory-encryption, and
@@ -36231,7 +37635,7 @@ transactions first;</li>
 <p>Event replay therefore operates on complete canonical failure transactions,
 not individual notification or DLQ rows. It invokes the same projection
 executor as live processing without rewinding PostgreSQL or Kafka offsets.</p>
-<h2 id="goals-33"><a class="header" href="#goals-33">Goals</a></h2>
+<h2 id="goals-34"><a class="header" href="#goals-34">Goals</a></h2>
 <ul>
 <li>Capture every new failed projection transaction in a replayable canonical
 form.</li>
@@ -36256,7 +37660,7 @@ schema is present.</li>
 <li>Keep configuration small enough that a developer can understand the entire
 replay setup from one screen.</li>
 </ul>
-<h2 id="non-goals-36"><a class="header" href="#non-goals-36">Non-Goals</a></h2>
+<h2 id="non-goals-37"><a class="header" href="#non-goals-37">Non-Goals</a></h2>
 <ul>
 <li>Historical or legacy <code>dead_letter_queue</code> rows are not imported. They remain
 diagnostic history only.</li>
@@ -37234,7 +38638,7 @@ provision those roles and credentials outside this schema before promotion.</li>
 <li>Application-level encryption is an optional production hardening control,
 not a prerequisite for development replay.</li>
 </ul>
-<h2 id="observability-5"><a class="header" href="#observability-5">Observability</a></h2>
+<h2 id="observability-6"><a class="header" href="#observability-6">Observability</a></h2>
 <p>Recommended bounded-cardinality metrics are:</p>
 <ul>
 <li>canonical failures captured, open, resolved, repaired, and waived;</li>
@@ -37960,7 +39364,7 @@ Location: https://portal.lightapi.net/authorization?code=auth_code_abc&amp;state
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="auth-client-secret-regeneration"><a class="header" href="#auth-client-secret-regeneration">Auth Client Secret Regeneration</a></h1>
-<h2 id="problem-18"><a class="header" href="#problem-18">Problem</a></h2>
+<h2 id="problem-19"><a class="header" href="#problem-19">Problem</a></h2>
 <p>An OAuth auth client receives a <code>client_id</code> and <code>client_secret</code> when it is
 created. The clear text <code>client_secret</code> is intentionally a one-time value. The
 database projection stores only a verifier value in <code>auth_client_t.client_secret</code>
@@ -38794,7 +40198,7 @@ Kubernetes cluster from the Instance Admin page.</p>
 <p>The goal is to provide a production-like deployment path for small businesses
 and enterprise tenants without requiring Light Portal to have direct network
 access to every customer cluster.</p>
-<h2 id="problem-19"><a class="header" href="#problem-19">Problem</a></h2>
+<h2 id="problem-20"><a class="header" href="#problem-20">Problem</a></h2>
 <p>Each API or application repository can contain a <code>k8s/</code> folder with Kubernetes
 deployment templates. The templates contain variables in the following format:</p>
 <pre><code class="language-text">${key:defaultValue}
@@ -39315,7 +40719,7 @@ later.</li>
 <li>Rollback is a redeploy of a previous Light Portal deployment snapshot, not a
 native Kubernetes rollout undo.</li>
 </ul>
-<h2 id="open-questions-5"><a class="header" href="#open-questions-5">Open Questions</a></h2>
+<h2 id="open-questions-6"><a class="header" href="#open-questions-6">Open Questions</a></h2>
 <ul>
 <li>Which object storage providers should enterprise artifact mode support first?</li>
 <li>What retention policies should be available for encrypted rendered manifest
@@ -39336,7 +40740,7 @@ deployment intent and history, while the deployer owns safe cluster-local
 execution.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-oauth-and-oauth-kafka-agentcore-oidc-discovery"><a class="header" href="#light-oauth-and-oauth-kafka-agentcore-oidc-discovery">Light OAuth and OAuth Kafka AgentCore OIDC Discovery</a></h1>
-<h2 id="problem-20"><a class="header" href="#problem-20">Problem</a></h2>
+<h2 id="problem-21"><a class="header" href="#problem-21">Problem</a></h2>
 <p>Issue https://github.com/lightapi/portal-service/issues/44 asks whether
 <code>portal-service/apps/light-oauth</code> can support AWS AgentCore JWT inbound
 authorization.</p>
@@ -39466,7 +40870,7 @@ the provider <code>jwk</code> from <code>auth_provider_t</code>. The implementat
 that the JWT header <code>kid</code> is present in the returned JWKS for the same provider.
 That guarantee matters more once external AWS services cache the discovery and
 JWKS responses.</p>
-<h2 id="goals-34"><a class="header" href="#goals-34">Goals</a></h2>
+<h2 id="goals-35"><a class="header" href="#goals-35">Goals</a></h2>
 <ul>
 <li>Let AWS AgentCore use Rust <code>light-oauth</code> or Java <code>oauth-kafka</code> as a JWT
 bearer token issuer.</li>
@@ -39478,7 +40882,7 @@ claims working.</li>
 <li>Keep issuer, audience, and discovery URLs deterministic across environments.</li>
 <li>Add tests that prove discovery, JWKS, and signed token claims line up.</li>
 </ul>
-<h2 id="non-goals-37"><a class="header" href="#non-goals-37">Non-Goals</a></h2>
+<h2 id="non-goals-38"><a class="header" href="#non-goals-38">Non-Goals</a></h2>
 <ul>
 <li>Do not implement full OIDC identity-provider behavior in the first phase.</li>
 <li>Do not add dynamic client registration.</li>
@@ -39550,7 +40954,7 @@ return <code>404</code> to avoid publishing metadata for the wrong tenant or pro
 many discovery consumers expect it, even if <code>light-oauth</code> does not issue ID
 tokens yet. The design should document this as discovery compatibility metadata,
 not as a promise that ID-token grant flows are complete.</p>
-<h3 id="configuration-4"><a class="header" href="#configuration-4">Configuration</a></h3>
+<h3 id="configuration-5"><a class="header" href="#configuration-5">Configuration</a></h3>
 <p>Add explicit public URL configuration:</p>
 <pre><code class="language-yaml">oidcDiscoveryEnabled: ${oidc_discovery_enabled:true}
 publicIssuerBaseUrl: ${public_issuer_base_url}
@@ -45310,7 +46714,7 @@ IMPORT_EVENTS=true \
 </ul>
 </li>
 </ul>
-<h2 id="light-gateway-1"><a class="header" href="#light-gateway-1">Light Gateway</a></h2>
+<h2 id="light-gateway-2"><a class="header" href="#light-gateway-2">Light Gateway</a></h2>
 <p>The light-gateway instance acts as a BFF and it has a routing rule to route any request with prefix /oauth2 to kafka-oauth server.</p>
 <h2 id="oauth-kafka-1"><a class="header" href="#oauth-kafka-1">OAuth Kafka</a></h2>
 <ul>
@@ -45862,9 +47266,9 @@ const defaultUrl =
 <li>The user is immediately signed out of the application.</li>
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="configuration-5"><a class="header" href="#configuration-5">Configuration</a></h1>
+<h1 id="configuration-6"><a class="header" href="#configuration-6">Configuration</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="light-gateway-2"><a class="header" href="#light-gateway-2">light-gateway</a></h1>
+<h1 id="light-gateway-3"><a class="header" href="#light-gateway-3">light-gateway</a></h1>
 <h2 id="client-credentials-token"><a class="header" href="#client-credentials-token">Client Credentials Token</a></h2>
 <p>All the accesses from the light-gateway to the downstream APIs should have at least one token in the Authorization header. If there is an authorization code token in the Authorization header, then a client credentials token will be added to the X-Scope-Token header by the TokenHandler.</p>
 <p>Since all light portal services have the same scopes (portal.r and portal.w), one token should be enough for accessing all APIs.</p>
@@ -46021,7 +47425,7 @@ steps:
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="tutorial"><a class="header" href="#tutorial">Tutorial</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="light-gateway-3"><a class="header" href="#light-gateway-3">light-gateway</a></h1>
+<h1 id="light-gateway-4"><a class="header" href="#light-gateway-4">light-gateway</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="onboard-an-llm-through-llm-gateway"><a class="header" href="#onboard-an-llm-through-llm-gateway">Onboard an LLM Through <code>llm-gateway</code></a></h1>
 <p>This tutorial onboards a hosted model into the Light Portal LLM control plane,
@@ -47672,7 +49076,7 @@ limit of this simplified demo. Do not present it as the customer’s required
 partial-response behavior; that needs the planned try/error-capture extension
 before failed branches can be appended beside successful responses.</p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="light-knowledge"><a class="header" href="#light-knowledge">light-knowledge</a></h1>
+<h1 id="light-knowledge-1"><a class="header" href="#light-knowledge-1">light-knowledge</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-fabric-document-ingest"><a class="header" href="#light-fabric-document-ingest">light-fabric-document-ingest</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
