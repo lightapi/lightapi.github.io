@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-52340d02.js";
+            window.path_to_searchindex_js = "searchindex-1022a511.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9ec42f54.js"></script>
@@ -1516,6 +1516,9 @@ Rust config servers. The Java services share one codec; the Rust service
 implements the same contract against the same golden test vectors.</li>
 <li>Let users compare two, three, or four snapshots in a semantic property
 matrix. Two snapshots remain the normal and simplest case.</li>
+<li>Add a key-by-key detail view that recursively aligns nested map keys and list
+indexes across the selected snapshots. Large structured values link directly
+from the property matrix into this view.</li>
 <li>Offer a literal side-by-side YAML diff only when exactly two snapshots are
 selected. Three or four full YAML panes are too narrow to read reliably.</li>
 <li>Compare effective typed values by default and show source-only changes
@@ -1972,9 +1975,15 @@ cards. The initial baseline is the oldest selected snapshot, using
 </tbody>
 </table>
 </div>
-<p>Each value cell renders scalars compactly and maps/lists in an expandable
-formatted block. It also shows <code>valueType</code> and <code>sourceLevel</code> as secondary text.
-Use typed deep equality after canonicalizing map keys; never compare JSON or
+<p>Each value cell renders scalars compactly and summarizes maps/lists by their
+size. A <code>Compare nested keys</code> action opens the key-by-key detail view filtered
+to that property. The detail view recursively flattens maps into stable paths,
+builds the union of those paths, and renders values from every snapshot in the
+same table row. Lists remain order-sensitive and use their numeric index in the
+path. Empty maps, empty lists, and null values remain explicit rows rather than
+disappearing during flattening. Both views show <code>valueType</code> and <code>sourceLevel</code>
+as secondary text.</p>
+<p>Use typed deep equality after canonicalizing map keys; never compare JSON or
 YAML strings. Equal-looking values with different types remain changes: for
 example, integer <code>1</code> differs from float <code>1.0</code>, and string <code>"true"</code> differs from
 boolean <code>true</code>.</p>
@@ -1993,10 +2002,19 @@ relative to the baseline.</p>
 search. Default to Changed + Missing so the first view focuses on drift. Keep
 unchanged rows available because users also need to prove that a critical
 property did not change.</p>
-<h3 id="two-snapshot-yaml-diff"><a class="header" href="#two-snapshot-yaml-diff">Two-Snapshot YAML Diff</a></h3>
-<p>When exactly two snapshots are selected, add a <code>YAML diff</code> tab with synchronized
-left and right panes. Both panes use canonical YAML, so line differences are
-meaningful. Support wrapping, next/previous difference, copy, and download.</p>
+<h3 id="key-by-key-and-two-snapshot-yaml-diff"><a class="header" href="#key-by-key-and-two-snapshot-yaml-diff">Key-by-Key and Two-Snapshot YAML Diff</a></h3>
+<p>The <code>Key-by-key diff</code> tab is the semantic view for maps or lists whose row
+counts differ. It is available for two to four snapshots, supports the same
+status filters as the property matrix, and can be filtered to one top-level
+property or searched by its complete nested path. A map key is matched by key,
+not by its source row number. A list item is matched by index because list
+order is part of the configuration contract.</p>
+<p>When exactly two snapshots are selected, add a <code>YAML text diff</code> tab with synchronized
+left and right panes. This remains an exact text comparison of the canonical
+artifacts rather than a structural YAML comparison. Both panes use canonical
+YAML, so line differences are meaningful. Support wrapping, next/previous
+difference, copy, and download. The UI directs users to <code>Key-by-key diff</code> when
+different map/list lengths make the text diff too coarse.</p>
 <p>Use the official <a href="https://codemirror.net/docs/ref/#merge.MergeView">CodeMirror <code>MergeView</code>
 API</a> from
 <code>@codemirror/merge</code> as the preferred implementation because the application
@@ -2160,12 +2178,16 @@ while a later authoritative <code>413</code> still produces actionable guidance.
 <li>Different-service selections are rejected; same-service cross-instance
 selections show a warning.</li>
 <li>Two, three, and four snapshot matrices use the complete key union.</li>
+<li>Nested map keys align by their complete path, and keys present in only one
+snapshot appear as missing only in the other snapshot columns.</li>
+<li>Lists align by numeric index without shifting later configuration paths;
+empty maps, empty lists, and nulls remain visible.</li>
 <li>Value, missing, and source-only changes are classified correctly.</li>
 <li>Map key order does not create a false change and list order does.</li>
 <li>Equal-looking cross-type values are marked changed and display their types.</li>
 <li>Worst-case permitted comparison computation runs in the worker, ignores stale
 replies, and terminates on selection change or unmount.</li>
-<li>The YAML diff tab appears only for exactly two snapshots.</li>
+<li>The YAML text diff tab appears only for exactly two snapshots.</li>
 <li>The merge view is read-only, uses bounded diff work, and is destroyed on
 unmount.</li>
 <li>Every download revokes its Blob URL and removes its temporary anchor on
