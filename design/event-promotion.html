@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-dfe12113.js";
+            window.path_to_searchindex_js = "../searchindex-bd98db03.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9ec42f54.js"></script>
@@ -362,9 +362,9 @@ Before append, revalidate every planned aggregate version in the canonical event
 <li><strong>Same-Instance (Data Table):</strong> Use <code>promotion_t</code> and <code>promotion_item_t</code> tables for tracking promotions between hosts within the same database. Source and target hosts share the same database.</li>
 </ol>
 <h3 id="database-promotion-tracking-tables"><a class="header" href="#database-promotion-tracking-tables">Database: Promotion Tracking Tables</a></h3>
-<p>These tables are for <strong>same-instance</strong> promotions to persist the authoritative plan and its items. The canonical DDL is <code>portal-db/postgres/ddl.sql</code>; deployment <code>init.sql</code> files are generated from it. Existing databases must apply the release-packaged <code>portal-db/postgres/patch_20260828_01_product_version_promotion.sql</code> before the services are deployed.</p>
-<p><code>promotion_t</code> stores the immutable source snapshot and digest, plan version and summary, dependency blockers, lifecycle status, and accepted event transaction. <code>promotion_item_t</code> stores deterministic plan order, aggregate identity and expected target version, source/target snapshots, diff, event identity, and per-item execution status.</p>
-<p>The P0-P3 lifecycle values are <code>PLANNED</code>, <code>BLOCKED</code>, <code>APPEND_ACCEPTED</code>, and <code>FAILED</code>. <code>APPEND_ACCEPTED</code> deliberately means the event-store/outbox transaction committed; it does not claim that asynchronous projections are complete.</p>
+<p>These tables are for <strong>same-instance</strong> promotions to persist the authoritative plan and its items. The canonical DDL is <code>portal-db/postgres/ddl.sql</code>; deployment <code>init.sql</code> files are generated from it. Existing databases must apply <code>patch_20260828_01_product_version_promotion.sql</code> followed by <code>patch_20260828_02_promotion_lifecycle.sql</code> before the services are deployed.</p>
+<p><code>promotion_t</code> stores the immutable source snapshot and digest, plan version and summary, dependency blockers, append transaction, projection lifecycle, timestamps, and failure diagnostics. <code>promotion_item_t</code> stores deterministic plan order, aggregate identity, expected and observed projection versions, source/target snapshots, diff, event identity, and per-item status. <code>promotion_recovery_t</code> is an append-only audit ledger for recheck, reconcile, and replan requests.</p>
+<p>The append lifecycle starts with <code>PLANNED</code> or <code>BLOCKED</code>, then reaches <code>APPEND_ACCEPTED</code>. The independent projection lifecycle is <code>NOT_STARTED</code>, <code>PENDING</code>, <code>COMPLETED</code>, <code>FAILED</code>, or <code>TIMED_OUT</code>. A promotion advances from <code>APPEND_ACCEPTED</code> to the terminal promotion status <code>COMPLETED</code>, <code>FAILED</code>, or <code>TIMED_OUT</code> after a durable evidence check. <code>APPEND_ACCEPTED</code> still means only that the event-store/outbox transaction committed.</p>
 <h3 id="service-api-contracts"><a class="header" href="#service-api-contracts">Service API Contracts</a></h3>
 <p>All promotion services are implemented in the <strong><code>user-command</code></strong> module (<code>net.lightapi.portal.user.command.handler</code>) alongside the existing <code>ExportPortalEvent</code> and <code>ImportPortalEvent</code> handlers.</p>
 <h4 id="export-snapshot-query"><a class="header" href="#export-snapshot-query">Export Snapshot (Query)</a></h4>
@@ -489,8 +489,18 @@ fail closed.</p>
 <li><code>orphanItemIds</code> (Array&lt;UUID&gt;) – Required selections for <code>delete</code>; rejected if an ID is not a <code>DELETE</code> item in the plan.</li>
 </ul>
 </li>
-<li><strong>Response:</strong> Global snapshots return their import counts. Selective execution returns <code>promotionStatus: "APPEND_ACCEPTED"</code>, <code>transactionId</code>, <code>appended</code>, and <code>idempotentReplay</code>. Projection completion tracking is P4.</li>
+<li><strong>Response:</strong> Global snapshots return their import counts. Selective execution returns <code>promotionStatus: "APPEND_ACCEPTED"</code>, <code>transactionId</code>, <code>appended</code>, and <code>idempotentReplay</code>. A no-op plan can return <code>COMPLETED</code> immediately.</li>
 </ul>
+<h4 id="promotion-recovery-command"><a class="header" href="#promotion-recovery-command">Promotion Recovery (Command)</a></h4>
+<ul>
+<li><strong>Service:</strong> <code>user</code></li>
+<li><strong>Action:</strong> <code>promotionRecovery</code></li>
+<li><strong>Request:</strong> <code>promotionId</code> plus <code>recoveryAction</code> (<code>RECHECK</code>, <code>RECONCILE</code>, or <code>REPLAN</code>).</li>
+<li><strong>RECHECK:</strong> Locks the promotion, correlates each event with any open <code>event_failure_*</code> record, reads the target projection row, and compares its active state and monotonic <code>aggregate_version</code> with the stored expected version.</li>
+<li><strong>RECONCILE:</strong> Performs the same evidence check and returns actionable replay/corrective-event guidance. It never appends another transaction.</li>
+<li><strong>REPLAN:</strong> Creates a new plan from the immutable stored source snapshot and links it through <code>supersedes_promotion_id</code>. It never executes that plan automatically.</li>
+</ul>
+<p>All three actions require <code>portal.w</code>, record the actor and outcome in <code>promotion_recovery_t</code>, and are safe under repeated or concurrent requests. Projection timeout defaults to five minutes and can be raised with <code>PROMOTION_PROJECTION_TIMEOUT_SECONDS</code> (minimum 30 seconds).</p>
 <h3 id="ui-pages"><a class="header" href="#ui-pages">UI Pages</a></h3>
 <p>All pages are located under <code>portal-view/src/pages/promotion/</code> and accessible via a top-level “Promotion” sidebar menu with children: Export, Import, History.</p>
 <h4 id="promotionexporttsx-apppromotionexport"><a class="header" href="#promotionexporttsx-apppromotionexport">PromotionExport.tsx (<code>/app/promotion/export</code>)</a></h4>
@@ -520,19 +530,43 @@ fail closed.</p>
 <li><strong>Execute:</strong> Platform, Pipeline, and Product Version plans can be executed when <code>executable=true</code>. The UI supports keeping all orphans, deleting selected orphans, or strict synchronization. Other selective entity plans remain disabled. Global migration snapshots bypass the selective dry-run plan and call <code>globalSnapshotImport</code> directly.</li>
 </ol>
 <h4 id="promotionhistorytsx-apppromotionhistory"><a class="header" href="#promotionhistorytsx-apppromotionhistory">PromotionHistory.tsx (<code>/app/promotion/history</code>)</a></h4>
-<p>A standard <code>MaterialReactTable</code> listing past promotions with columns: Source Host, Target Host, Entity Type, Status (color-coded chip), Created By, Timestamp, Promotion ID. Row action: View Details (navigates to diff view).</p>
+<p>A standard <code>MaterialReactTable</code> listing past promotions with append and projection status. Pending rows are rechecked every five seconds through the audited recovery command; an operator can also refresh explicitly.</p>
 <h4 id="promotiondiffviewtsx-apppromotiondiff"><a class="header" href="#promotiondiffviewtsx-apppromotiondiff">PromotionDiffView.tsx (<code>/app/promotion/diff</code>)</a></h4>
-<p>Displays detailed promotion metadata (source/target hosts, status, timestamps) and a table of all promotion items with expandable field-level diffs showing source vs. target values and per-item execution status.</p>
+<p>Displays detailed promotion metadata, projection timestamps and failure diagnostics, expected versus observed item versions, and the recovery controls. Pending detail views follow the promotion to a terminal state every five seconds.</p>
 <h3 id="selective-promotion-delivery-phases"><a class="header" href="#selective-promotion-delivery-phases">Selective Promotion Delivery Phases</a></h3>
 <ol>
 <li><strong>P0 – Contract and safety boundary:</strong> Platform, Pipeline, and Product Version are executable selective types; execution is plan-ID based, idempotent, and fail-closed. <em>(Implemented.)</em></li>
 <li><strong>P1 – Durable plan/history:</strong> Add promotion tables and real history/detail persistence. <em>(Implemented.)</em></li>
 <li><strong>P2 – Selective normalization:</strong> Diff Platform and Pipeline roots plus the Product Version root and five supported child collections, count child actions, validate natural identities and Platform/Pipeline dependencies, and record expected aggregate versions. <em>(Implemented.)</em></li>
 <li><strong>P3 – Event materialization and UI:</strong> Generate ordered Platform, Pipeline, and Product Version domain events, atomically append event store/outbox records with status updates, and enable guarded UI execution/orphan selection. <em>(Implemented; deployment confirmation pending.)</em></li>
-<li><strong>P4 – Projection completion:</strong> Track consumer/projection convergence and distinguish append acceptance from completed application. <em>(Deferred until P0-P3 deployment confirmation.)</em></li>
-<li><strong>P5 – Operational recovery:</strong> Add retry/replan workflows, richer failure diagnostics, and reconciliation controls. <em>(Deferred.)</em></li>
-<li><strong>P6 – Qualification and expansion:</strong> Add production-scale, concurrency, failure-injection, and end-to-end gates, then enable additional entity types only with explicit event/dependency contracts. <em>(Deferred.)</em></li>
+<li><strong>P4 – Projection completion:</strong> Track event-linked failure evidence and per-row projection convergence, persist terminal state/timestamps, and let the UI follow pending work. <em>(Implemented.)</em></li>
+<li><strong>P5 – Operational recovery:</strong> Persist append/stale-plan failures and provide audited recheck, non-appending reconcile guidance, and linked replan controls. Immutable events are corrected through the existing exact-replay or corrective-event workflows. <em>(Implemented.)</em></li>
+<li><strong>P6 – Qualification and expansion:</strong> PostgreSQL gates cover fresh/upgrade schema parity, completion, consumer failure, timeout, duplicate delivery, and concurrent rechecks. Broader entity types remain disabled until their contracts pass the inventory below. <em>(Implemented for the enabled types.)</em></li>
 </ol>
+<h3 id="p6-release-gates-and-entity-inventory"><a class="header" href="#p6-release-gates-and-entity-inventory">P6 Release Gates and Entity Inventory</a></h3>
+<p>Release qualification is fail-closed:</p>
+<ul>
+<li><code>run-product-version-promotion-schema-gate.sh</code> must pass against a disposable PostgreSQL database, including applying both patches twice and proving fresh/upgrade parity.</li>
+<li><code>PromotionPersistencePostgresTest</code> must pass completion, open consumer failure, timeout, repeated delivery, and concurrent recheck cases with <code>PROMOTION_TEST_JDBC_URL</code> configured.</li>
+<li>The existing P0-P3 tests must prove all three orphan policies, stale target versions, single accepted transaction identity, and Platform -&gt; Pipeline -&gt; Product Version dependency order.</li>
+<li>A 10,000-item Product Version qualification fixture must keep dry-run and recheck below 10 seconds each and a 100-row history page below 2 seconds on the release PostgreSQL profile. Any regression above either limit blocks release.</li>
+<li>Alert when a promotion remains <code>PENDING</code> for two minutes, reaches <code>FAILED</code>, or reaches the five-minute default <code>TIMED_OUT</code> deadline. Roll back the service release when failures exceed 1% of executed promotions in 15 minutes or any append/status atomicity test fails. Database rollback is forward-only: retain immutable events and apply a corrective event or approved exact replay.</li>
+</ul>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Entity type</th><th>Create/update/delete events</th><th>Projection evidence key</th><th>Dependency contract</th><th>Selective execution</th></tr>
+</thead>
+<tbody>
+<tr><td>Platform</td><td>Complete</td><td><code>(host_id, platform_id)</code></td><td>none</td><td>Enabled</td></tr>
+<tr><td>Pipeline</td><td>Complete</td><td><code>(host_id, pipeline_id)</code></td><td>Platform</td><td>Enabled</td></tr>
+<tr><td>Product Version and five children</td><td>Complete</td><td>root/child natural keys plus <code>aggregate_version</code></td><td>Pipeline, Config, Config Property</td><td>Enabled</td></tr>
+<tr><td>Instance graph</td><td>Partial and graph-coupled</td><td>multi-table graph revision required</td><td>API/App/deployment closure</td><td>Disabled</td></tr>
+<tr><td>Config and Config Property</td><td>Shared/global ownership unresolved</td><td>shared IDs</td><td>consumer/publication closure</td><td>Disabled</td></tr>
+<tr><td>Remaining exported types</td><td>Not inventoried</td><td>not defined</td><td>not defined</td><td>Disabled</td></tr>
+</tbody>
+</table>
+</div>
 <hr>
 <h2 id="global-migration-export"><a class="header" href="#global-migration-export">Global Migration Export</a></h2>
 <h3 id="motivation"><a class="header" href="#motivation">Motivation</a></h3>
@@ -554,7 +588,7 @@ fail closed.</p>
 <li><code>outbox_message_t</code> — transient consumer outbox</li>
 <li><code>consumer_offsets</code> — operational state</li>
 <li><code>consumer_lock</code> — operational lock</li>
-<li><code>promotion_t</code>, <code>promotion_item_t</code> — promotion tracking (environment-specific)</li>
+<li><code>promotion_t</code>, <code>promotion_item_t</code>, <code>promotion_recovery_t</code> — promotion tracking (environment-specific)</li>
 </ul>
 </li>
 <li><strong>For each discovered table:</strong>
@@ -677,7 +711,7 @@ fail closed.</p>
 <li><strong>Phase 2 – Global Export:</strong> Implement dynamic table discovery via JDBC metadata. <em>(Completed)</em></li>
 <li><strong>Phase 2.5 – Global Migration Step:</strong> Implement Topological Sorting and Snapshot-to-Events conversion for CLI compatibility. <em>(Completed)</em></li>
 <li><strong>Phase 3 – Entity Promotion (Selective):</strong> Platform, Pipeline, and Product Version P0-P3 are implemented; other entity types remain dry-run only pending P6 contracts.</li>
-<li><strong>Phase 4 – Same-Instance Tracking:</strong> Platform, Pipeline, and Product Version plans, items, history, and append acceptance are persisted. Projection-completion state is deferred to selective promotion P4.</li>
+<li><strong>Phase 4 – Same-Instance Tracking:</strong> Platform, Pipeline, and Product Version plans, items, history, append acceptance, projection completion, and audited recovery are persisted.</li>
 </ol>
 
                     </main>
