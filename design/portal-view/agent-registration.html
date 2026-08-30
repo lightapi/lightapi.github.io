@@ -35,10 +35,10 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-bd98db03.js";
+            window.path_to_searchindex_js = "../../searchindex-f50d92b9.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../toc-9ec42f54.js"></script>
+        <script src="../../toc-4c9e9a75.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -349,7 +349,7 @@ agents, skills, tools, memory, and session history.</p>
 <tr><td>Assign skills</td><td>No</td><td><code>/app/genai/AgentSkill</code></td><td>Attach curated skills to the agent.</td></tr>
 <tr><td>Review tools</td><td>No</td><td><code>/app/genai/Tool</code> or <code>/app/genai/SkillTool</code></td><td>Confirm agent-invokable tools through skill-tool assignments.</td></tr>
 <tr><td>Configure access</td><td>No</td><td><code>/app/access/rolePermission</code></td><td>Restrict who can invoke or manage the agent.</td></tr>
-<tr><td>Link runtime instance</td><td>No</td><td><code>/app/instance/InstanceApi</code></td><td>Attach the agent API version to a deployed runtime or gateway if needed.</td></tr>
+<tr><td>Choose runtime deployment</td><td>Yes</td><td><code>/app/tasks/register-ai-agent/runtime</code></td><td>Save a definition-only Agent or deploy it through a compatible native <code>agt</code> runtime.</td></tr>
 </tbody>
 </table>
 </div>
@@ -419,8 +419,35 @@ on one page while still submitting separate commands or a composite command.</p>
 <li>Version identity: version, service ID, environment tag, target host.</li>
 <li>Model profile: provider, model, API key reference, temperature, max tokens.</li>
 <li>Optional skills: selected skill IDs.</li>
-<li>Optional deployment: instance or gateway link.</li>
+<li>Deployment decision: save as definition, use an existing <code>agt</code> runtime, or
+create a new <code>agt</code> runtime.</li>
 </ul>
+<p>The deployment decision is required even though deployment itself is optional.
+A definition-only choice is an explicit completed state, not an inferred
+absence of deployment metadata.</p>
+<p>For native <code>light-agent</code>, deployment uses this canonical relationship:</p>
+<pre><code class="language-text">agt product version
+  -&gt; instance_t runtime
+    -&gt; instance_api_t
+      -&gt; api_version_t with api_type = agt
+        -&gt; agent_definition_t with agent_def_id = api_version_id
+</code></pre>
+<p>The dedicated runtime step must:</p>
+<ul>
+<li>lock newly created runtimes to the current active <code>agt</code> product version;</li>
+<li>prefill the runtime service ID from the Agent API version;</li>
+<li>offer only compatible unbound <code>agt</code> instances for existing-runtime selection;</li>
+<li>create the <code>instance_api_t</code> association through the command/event path;</li>
+<li>verify the active association from the query side before reporting complete;</li>
+<li>never treat a bare <code>instanceId</code> or browser task context as proof of a link.</li>
+</ul>
+<p>The current Rust <code>light-agent</code> projection carries one <code>agentDefId</code>, so the UI
+must enforce one active Agent API association per native Agent runtime. Shared
+or multiplexed Agent hosting requires a separate runtime contract and must not
+be inferred from the generic many-to-many shape of <code>instance_api_t</code>.</p>
+<p>Runtime linking is not runtime activation. Policy compilation, Config Server
+snapshot activation, and runtime acknowledgement remain separate, observable
+stages.</p>
 <h3 id="secret-reference-selection"><a class="header" href="#secret-reference-selection">Secret Reference Selection</a></h3>
 <p><code>apiKeyRef</code> is a secret reference, not a secret value. The UI should not ask
 operators to paste raw provider keys into the agent definition form.</p>

@@ -1,0 +1,919 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Development PostgreSQL Database Topology - Light Portal Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../../css/general-e96d0476.css">
+        <link rel="stylesheet" href="../../css/chrome-d279d366.css">
+        <link rel="stylesheet" href="../../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../../searchindex-f50d92b9.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../../toc-4c9e9a75.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Light Portal Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="development-postgresql-database-topology"><a class="header" href="#development-postgresql-database-topology">Development PostgreSQL Database Topology</a></h1>
+<h2 id="status"><a class="header" href="#status">Status</a></h2>
+<p>Proposed target architecture.</p>
+<p>This document defines the PostgreSQL topology for:</p>
+<ul>
+<li><code>portal-config-loc/all-in-lt</code>;</li>
+<li><code>portal-config-dev</code>; and</li>
+<li><code>light-portal-install</code> development and demonstration profiles.</li>
+</ul>
+<p>It separates Light Portal control-plane data, Knowledge operational data, and
+Host-scoped operational data while keeping the development footprint to one
+PostgreSQL server by default.</p>
+<p>This page complements
+<a href="control-plane-policy-config-server.html">Control-Plane Policy Publication Through Config Server</a>,
+<a href="database-recreation-event-bootstrap.html">Fast Snapshot-Derived Database Bootstrap</a>,
+<a href="knowledge-base.html">Knowledge Base</a>, and
+<a href="../light-portal-install.html">Light Portal Install</a>.</p>
+<h2 id="decision-summary"><a class="header" href="#decision-summary">Decision Summary</a></h2>
+<p>The default development topology uses one PostgreSQL 17 server with three
+separate application databases:</p>
+<pre><code class="language-text">PostgreSQL 17 server or container
+|
++-- configserver
+|   `-- configserver schema
+|       Portal events, CQRS projections, publications, and Config Server
+|       snapshots
+|
++-- knowledge
+|   `-- knowledge schema
+|       Knowledge documents, chunks, embeddings, indexing jobs, and runtime
+|       evidence
+|
+`-- operations
+    |-- operational_meta
+    |-- agent_ops
+    |-- a2a_ops
+    |-- workflow_ops
+    |-- execution_ops
+    |-- gateway_ops
+    |-- audit_ops
+    `-- artifact_ops
+        Host- and environment-scoped runtime state
+</code></pre>
+<p>The databases may share one PostgreSQL server, volume, network, and development
+administrator. Database separation is a logical ownership and migration
+boundary; it is not an independent compute, availability, or physical backup
+boundary while all databases remain on one server.</p>
+<p>The <code>operations</code> database is created and migrated with an idempotent deployment
+job similar to the existing Knowledge bootstrap. It is not created by an Agent,
+Gateway, A2A adapter, Workflow worker, or ordinary Host command handler.</p>
+<p>For the initially installed Host and environment, the deployment bootstrap may
+create the binding automatically. Additional Hosts created in Host Admin need
+an explicit operational-store binding. They must not silently inherit the
+initial Host’s database.</p>
+<h2 id="current-checked-in-topology"><a class="header" href="#current-checked-in-topology">Current Checked-In Topology</a></h2>
+<p>The three deployment repositories already select the separate Knowledge
+topology:</p>
+<pre><code class="language-text">PORTAL_DB_TOPOLOGY=separate
+PORTAL_DB_NAME=configserver
+PORTAL_DB_KNOWLEDGE_NAME=knowledge
+</code></pre>
+<p>The current <code>init-environment.sh</code> implementation creates:</p>
+<ul>
+<li>database <code>configserver</code> with schema <code>configserver</code>; and</li>
+<li>database <code>knowledge</code> with schema <code>knowledge</code>.</li>
+</ul>
+<p>The current development configuration is therefore one PostgreSQL server with
+two application databases, not one application database with two schemas. The
+same scripts also contain a <code>shared</code> compatibility profile that places
+environment-suffixed Config Server and Knowledge schemas in one database, but
+none of these three default Compose profiles selects it.</p>
+<p>The current deployment files are:</p>
+<pre><code class="language-text">portal-config-loc/all-in-lt/postgres-db/init-environment.sh
+portal-config-loc/all-in-lt/docker-compose.yml
+portal-config-loc/all-in-lt/docker-compose-rust.yml
+
+portal-config-dev/postgres-db/init-environment.sh
+portal-config-dev/docker-compose.yml
+
+light-portal-install/postgres-db/init-environment.sh
+light-portal-install/docker-compose.yml
+light-portal-install/install.sh
+</code></pre>
+<p>Several non-Knowledge runtime services still connect to <code>configserver</code>. In
+particular, current Agent and Controller development configuration contains
+transitional direct database connections. Creating <code>operations</code> does not by
+itself authorize redirecting those connections. Tables, constraints, roles,
+migrations, and runtime configuration must move in an owned sequence.</p>
+<h2 id="why-a-database-is-different-from-a-schema"><a class="header" href="#why-a-database-is-different-from-a-schema">Why A Database Is Different From A Schema</a></h2>
+<p>PostgreSQL schemas and databases solve different problems.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Concern</th><th>Separate database</th><th>Separate schema in one database</th></tr>
+</thead>
+<tbody>
+<tr><td>Connection</td><td>Requires a database-specific connection and pool</td><td>One connection can access all schemas</td></tr>
+<tr><td>Transactions</td><td>Ordinary transactions cannot span databases</td><td>One transaction can update several schemas</td></tr>
+<tr><td>Queries</td><td>No ordinary cross-database joins</td><td>Cross-schema joins are direct</td></tr>
+<tr><td>Foreign keys</td><td>Cannot reference another database</td><td>Can reference another schema</td></tr>
+<tr><td>Catalog and extensions</td><td>Database-specific catalog and extension installation</td><td>Shared database catalog and extensions</td></tr>
+<tr><td>Grants</td><td>Database connection plus schema/table grants</td><td>Schema/table grants inside one connection boundary</td></tr>
+<tr><td>Migration</td><td>Independently versioned database contract</td><td>Independently named schemas but one database lifecycle</td></tr>
+<tr><td>Logical dump and restore</td><td>Natural database-level unit</td><td>Schema filtering is possible but more coupled</td></tr>
+<tr><td>Failure and resources on one server</td><td>Shared server failure, WAL, CPU, memory, and storage</td><td>Shared server failure, WAL, CPU, memory, and storage</td></tr>
+</tbody>
+</table>
+</div>
+<p>Separate databases make accidental cross-domain transactions, joins, and
+foreign keys impossible through ordinary SQL. They also make connection
+ownership and migration compatibility visible at runtime.</p>
+<p>Separate databases on one PostgreSQL server do not provide independent high
+availability, resource isolation, or physical point-in-time recovery. A
+deployment that needs those properties must use separate PostgreSQL servers or
+managed database instances. The development topology intentionally tests the
+logical contract without paying that infrastructure cost.</p>
+<h2 id="goals"><a class="header" href="#goals">Goals</a></h2>
+<ul>
+<li>Match the production control/operational ownership boundary in local and
+development environments.</li>
+<li>Keep the normal development footprint to one PostgreSQL container.</li>
+<li>Keep Portal events, projections, and Config Server snapshots out of runtime
+operational databases.</li>
+<li>Keep Knowledge operational content in its dedicated Knowledge database.</li>
+<li>Give Agent, A2A, Workflow, Gateway, audit, and artifact metadata
+service-owned schemas in a Host-scoped operational database.</li>
+<li>Make existing-volume upgrades idempotent and testable.</li>
+<li>Use the same database identity, scope-root, migration, role, and runtime
+binding contracts with and without Light Portal.</li>
+<li>Let the initial development Host start automatically while keeping additional
+Host provisioning explicit.</li>
+<li>Prevent runtime services from using provisioning or schema-owner
+credentials.</li>
+<li>Preserve independent service migration and eventual physical separation.</li>
+</ul>
+<h2 id="non-goals"><a class="header" href="#non-goals">Non-Goals</a></h2>
+<ul>
+<li>Do not run one PostgreSQL container per database by default.</li>
+<li>Do not create a database per logical Agent definition.</li>
+<li>Do not create an operational schema in the <code>configserver</code> database.</li>
+<li>Do not merge Knowledge and ordinary Host operational data.</li>
+<li>Do not move every current <code>DATABASE_URL</code> before its tables and constraints
+are ready.</li>
+<li>Do not let application startup create a database with an elevated runtime
+credential.</li>
+<li>Do not treat the default development credential or database administrator as
+a production secret-management model.</li>
+<li>Do not automatically bind every Host Admin record to the initial development
+Host’s operational data.</li>
+<li>Do not imply that database separation on one server is physical fault
+isolation.</li>
+</ul>
+<h2 id="data-authority"><a class="header" href="#data-authority">Data Authority</a></h2>
+<h3 id="configserver"><a class="header" href="#configserver"><code>configserver</code></a></h3>
+<p>The <code>configserver</code> database is the Light Portal control-plane database. It
+contains:</p>
+<ul>
+<li>canonical Portal command events and outbox records;</li>
+<li>CQRS authoring projections and read models;</li>
+<li>Host, product, API, Agent, skill, Workflow, policy, and instance intended
+state;</li>
+<li>publication records and compatibility metadata;</li>
+<li>mutable instance-property staging state;</li>
+<li>immutable configuration snapshots; and</li>
+<li>Config Server delivery metadata.</li>
+</ul>
+<p>It must not become the durable authority for:</p>
+<ul>
+<li>Agent sessions or turns;</li>
+<li>A2A tasks or callback correlation;</li>
+<li>Workflow executions, timers, attempts, or leases;</li>
+<li>concrete memories or session history;</li>
+<li>artifact bytes or runtime artifact metadata;</li>
+<li>traffic/audit records; or</li>
+<li>Knowledge documents, chunks, embeddings, or indexing work.</li>
+</ul>
+<h3 id="knowledge"><a class="header" href="#knowledge"><code>knowledge</code></a></h3>
+<p>The <code>knowledge</code> database remains a separate Knowledge operational boundary. It
+contains Knowledge-owned data such as:</p>
+<ul>
+<li>ingestion and synchronization jobs;</li>
+<li>documents and versions;</li>
+<li>chunks and embeddings;</li>
+<li>search and index generations;</li>
+<li>graph and derived retrieval state;</li>
+<li>Knowledge runtime ACL replicas admitted from published policy; and</li>
+<li>query and processing evidence.</li>
+</ul>
+<p>Knowledge may be shared across explicitly authorized Hosts in one organization.
+It therefore does not use the ordinary <code>(hostId, envTag)</code> store identity as its
+only boundary. Its scope validation includes the organization, Knowledge-store
+binding, residency policy, and authorized Host membership.</p>
+<p>Knowledge policy remains authored in Portal and published through Config
+Server. Physical placement of operational data does not make the Knowledge
+database a control-plane policy source.</p>
+<h3 id="operations"><a class="header" href="#operations"><code>operations</code></a></h3>
+<p>The <code>operations</code> database is bound to one Host and environment in the default
+development profile. Service-owned schemas include:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Schema</th><th>Initial authority</th></tr>
+</thead>
+<tbody>
+<tr><td><code>operational_meta</code></td><td>Store identity, Host/environment scope root, schema contract generations, migration ledger, and binding evidence</td></tr>
+<tr><td><code>agent_ops</code></td><td>Agent sessions, turns, actions, approvals, idempotency, quotas, and initially Agent-owned memory</td></tr>
+<tr><td><code>a2a_ops</code></td><td>External A2A task facade, callbacks, cancellation, correlation, idempotency, and deletion evidence</td></tr>
+<tr><td><code>workflow_ops</code></td><td>Workflow process/task state, timers, worklists, retries, and service-owned outbox</td></tr>
+<tr><td><code>execution_ops</code></td><td>Shared execution attempts, scheduling requests, leases, and common execution foundations</td></tr>
+<tr><td><code>gateway_ops</code></td><td>Bounded durable Gateway operational state when required; never Agent or Workflow authority</td></tr>
+<tr><td><code>audit_ops</code></td><td>Durable audit delivery outbox/spool and integrity evidence, not the long-term analytics warehouse</td></tr>
+<tr><td><code>artifact_ops</code></td><td>Artifact ownership, immutable digest, scan, retention, hold, and object-store references; not large artifact bytes</td></tr>
+</tbody>
+</table>
+</div>
+<p>Colocation does not grant cross-schema write authority. Cross-service
+relationships use stable identifiers, authenticated APIs, outbox/integration
+events, and reconciliation rather than permanent cross-schema foreign keys.</p>
+<p><code>memory_ops</code> may initially remain part of <code>agent_ops</code>. It becomes a separate
+schema only after the Memory API owns the session-to-bank invariant and no
+cross-schema foreign key is required.</p>
+<h2 id="development-deployment-profiles"><a class="header" href="#development-deployment-profiles">Development Deployment Profiles</a></h2>
+<h3 id="default-single-host-profile"><a class="header" href="#default-single-host-profile">Default Single-Host Profile</a></h3>
+<p>Each of the three development deployments starts with one configured Host and
+environment. The deployment bootstrap creates:</p>
+<pre><code class="language-text">database: operations
+scopeKind: HOST_ENVIRONMENT
+hostId: &lt;configured development Host UUID&gt;
+environment: &lt;configured envTag&gt;
+bindingId: &lt;stable deployment binding UUID&gt;
+</code></pre>
+<p>The Host UUID and <code>envTag</code> are explicit inputs. They are never inferred from a
+subdomain, Compose project name, database name, or Config Server property
+profile such as <code>loc</code> or <code>demo</code>.</p>
+<p>The simple database name <code>operations</code> is acceptable because the scope root is
+authoritative. Production provisioning may generate an opaque database name
+from the binding identifier.</p>
+<h3 id="additional-dedicated-host"><a class="header" href="#additional-dedicated-host">Additional Dedicated Host</a></h3>
+<p>To test the enterprise dedicated profile, an additional runnable Host and
+environment receives another database on the same development PostgreSQL
+server:</p>
+<pre><code class="language-text">operations_&lt;opaque-scope-suffix&gt;
+</code></pre>
+<p>The suffix is generated from a stable binding identifier rather than a
+user-visible Host name. This avoids leaking names and avoids rename coupling.
+The new database gets the same service schemas, distinct scope root, and
+distinct runtime role credentials.</p>
+<h3 id="explicit-pooled-development-profile"><a class="header" href="#explicit-pooled-development-profile">Explicit Pooled Development Profile</a></h3>
+<p>A high-density or Portal-cloud simulation may bind several Hosts to one
+<code>operations</code> database. This is an explicit <code>DEV_POOLED</code> profile, not an
+automatic fallback.</p>
+<p>In pooled mode:</p>
+<ul>
+<li>every tenant-owned primary or unique key includes <code>host_id</code>;</li>
+<li>every query binds Host identity from authenticated runtime state;</li>
+<li>caches, outbox records, object prefixes, audit records, exports, and erasure
+jobs are Host-scoped;</li>
+<li>service runtime roles do not own their tables;</li>
+<li>PostgreSQL Row-Level Security is enabled and forced as defense in depth; and</li>
+<li>cross-Host denial tests are release gates.</li>
+</ul>
+<p>The default single-Host development database must not be relabeled as pooled
+without those contracts.</p>
+<h2 id="host-admin-boundary"><a class="header" href="#host-admin-boundary">Host Admin Boundary</a></h2>
+<p>Host identity and database provisioning are coordinated but separate state
+machines.</p>
+<p>For the initially installed development Host, deployment bootstrap may create
+the Host binding from pinned deployment inputs. For a Host later created in
+Host Admin:</p>
+<ol>
+<li>the existing <code>createHost</code> command creates the control-plane Host identity;</li>
+<li>the administrator selects or defers an operational-store profile;</li>
+<li>a separate binding command records Host, environment, profile, and desired
+generation;</li>
+<li>an asynchronous provisioning worker creates or validates the database;</li>
+<li>the worker installs roles, scope root, and schemas;</li>
+<li>validation moves the binding to <code>READY</code>; and</li>
+<li>only then may Config Server publish the binding to runtime instances.</li>
+</ol>
+<p>Until that control-plane lifecycle exists, development scripts may bootstrap
+only the pinned initial Host. Creating another Host in Portal must not
+implicitly share the <code>operations</code> database or grant runtime activation.</p>
+<p>Host deactivation does not drop the database. Decommissioning is a separate,
+authorized, retention-aware operation.</p>
+<h2 id="bootstrap-and-migration-architecture"><a class="header" href="#bootstrap-and-migration-architecture">Bootstrap And Migration Architecture</a></h2>
+<p>Fresh-volume initialization and existing-volume migration are different
+paths. Both are required.</p>
+<pre><code class="language-text">Fresh PostgreSQL volume
+        |
+        v
+init-environment.sh
+  |-- ensure configserver
+  |-- ensure knowledge
+  `-- ensure operations
+        |
+        v
+versioned schema installers
+
+Every deployment or restart
+        |
+        v
+operational-store-bootstrap
+  |-- discover or create database idempotently
+  |-- validate scope root
+  |-- install/validate roles
+  `-- invoke pinned service migrations
+        |
+        v
+operational-schema-validation
+        |
+        v
+runtime services may start
+</code></pre>
+<p>PostgreSQL entrypoint scripts run only when the data directory is empty.
+Adding <code>operations</code> only to <code>/docker-entrypoint-initdb.d</code> would leave existing
+<code>portal-config-loc</code>, <code>portal-config-dev</code>, and installer volumes unchanged.</p>
+<p>The target therefore has two cooperating jobs:</p>
+<ol>
+<li><code>init-environment.sh</code> creates all three databases during fresh bootstrap;
+and</li>
+<li>an idempotent <code>operational-store-bootstrap</code> one-shot service runs on every
+deployment and can safely bring an existing volume to the desired database
+and schema generation.</li>
+</ol>
+<p>Database creation and schema migration should remain separate checkpoints even
+when one development container performs both. Database creation may require a
+cluster administration role and cannot be assumed to share the application
+migration transaction.</p>
+<h2 id="bootstrap-inputs"><a class="header" href="#bootstrap-inputs">Bootstrap Inputs</a></h2>
+<p>The development bootstrap accepts non-secret identity and topology inputs:</p>
+<pre><code class="language-yaml">PORTAL_DB_TOPOLOGY: separate
+PORTAL_DB_NAME: configserver
+PORTAL_DB_KNOWLEDGE_NAME: knowledge
+PORTAL_DB_OPERATIONAL_NAME: operations
+PORTAL_DB_OPERATIONAL_PROFILE: DEV_DEDICATED
+PORTAL_DB_OPERATIONAL_HOST_ID: &lt;development-host-uuid&gt;
+PORTAL_DB_OPERATIONAL_ENVIRONMENT: dev
+PORTAL_DB_OPERATIONAL_BINDING_ID: &lt;stable-binding-uuid&gt;
+PORTAL_DB_OPERATIONAL_CONTRACT_GENERATION: "1"
+</code></pre>
+<p>The exact environment value differs by deployment and must match the runtime
+<code>envTag</code>. The example <code>dev</code> is not a universal default.</p>
+<p>Production credentials remain secret-provider references or mounted files.
+Development Compose may use generated local credentials, but URLs and passwords
+must not enter Portal events, configuration snapshots, exported <code>values.yml</code>,
+or the operational scope root.</p>
+<h2 id="operational-scope-root"><a class="header" href="#operational-scope-root">Operational Scope Root</a></h2>
+<p>The <code>operational_meta</code> schema contains an immutable root row similar to:</p>
+<pre><code class="language-text">binding_id
+binding_version
+binding_digest
+scope_kind
+scope_id
+host_id
+environment
+database_identity
+deployment_profile
+schema_contract_generation
+created_at
+activated_at
+</code></pre>
+<p>A runtime must validate this row before becoming ready. A syntactically valid
+connection to an <code>operations</code> database for another Host or environment fails
+closed.</p>
+<p>The database name alone is not identity. Copying or restoring a database must
+retain or deliberately replace the scope root under a controlled clone or
+relocation workflow.</p>
+<h2 id="roles-and-privileges"><a class="header" href="#roles-and-privileges">Roles And Privileges</a></h2>
+<p>The development server may have one PostgreSQL administrator for bootstrap,
+but runtime services do not use it.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Role class</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td>Bootstrap administrator</td><td>Create/adopt databases and role classes; used only by the deployment job</td></tr>
+<tr><td>Scope/migration owner</td><td>Own <code>operational_meta</code> or one service schema and apply pinned migrations</td></tr>
+<tr><td>Agent runtime</td><td>Read/write only <code>agent_ops</code> and approved shared interfaces</td></tr>
+<tr><td>A2A runtime</td><td>Read/write only <code>a2a_ops</code> and approved shared interfaces</td></tr>
+<tr><td>Workflow runtime</td><td>Read/write only <code>workflow_ops</code> and approved execution interfaces</td></tr>
+<tr><td>Execution runtime</td><td>Read/write only <code>execution_ops</code></td></tr>
+<tr><td>Gateway runtime</td><td>Read/write only the bounded <code>gateway_ops</code> and audit interfaces it requires</td></tr>
+<tr><td>Audit publisher</td><td>Append/read delivery state needed to publish audit evidence</td></tr>
+<tr><td>Artifact runtime</td><td>Read/write artifact metadata and approved object references</td></tr>
+</tbody>
+</table>
+</div>
+<p>Each role receives <code>CONNECT</code> only to the database it needs and <code>USAGE</code> only on
+its schemas. <code>CREATE</code> on <code>public</code> is revoked. Unqualified <code>search_path</code> use is
+constrained to the owned schema and reviewed shared interfaces.</p>
+<p>Development may initially share a generated password file among transitional
+services, but role separation remains a release gate before the operational
+store is treated as qualified.</p>
+<h2 id="runtime-binding"><a class="header" href="#runtime-binding">Runtime Binding</a></h2>
+<p>Config Server publishes non-secret operational-store metadata to the exact
+Host, service, environment, and instance audience. The runtime combines it
+with a deployment-owned secret file.</p>
+<p>An illustrative projection is:</p>
+<pre><code class="language-yaml">operationalStore:
+  contractVersion: ${operationalStore.contractVersion:1}
+  bindingId: ${operationalStore.bindingId:}
+  bindingDigest: ${operationalStore.bindingDigest:}
+  profileId: ${operationalStore.profileId:dev-dedicated-postgres-v1}
+  deploymentProfile: ${operationalStore.deploymentProfile:DEV_DEDICATED}
+  scopeKind: ${operationalStore.scopeKind:HOST_ENVIRONMENT}
+  scopeId: ${operationalStore.scopeId:}
+  hostId: ${operationalStore.hostId:}
+  environment: ${operationalStore.environment:}
+  serviceOwner: ${operationalStore.serviceOwner:}
+  schema: ${operationalStore.schema:}
+  minimumSchemaVersion: ${operationalStore.minimumSchemaVersion:1}
+  expectedDatabase: ${operationalStore.expectedDatabase:operations}
+  databaseUrlFile: ${operationalStore.databaseUrlFile:/run/secrets/operational-database-url}
+  objectStoreProfileId: ${operationalStore.objectStoreProfileId:}
+  auditSinkProfileId: ${operationalStore.auditSinkProfileId:}
+</code></pre>
+<p>This is a common semantic contract, not one file copied between products:</p>
+<ul>
+<li>native <code>light-agent</code> receives it in its Agent audience projection;</li>
+<li><code>light-a2a</code> receives it in the A2A audience projection;</li>
+<li>Workflow receives its Workflow/execution schema bindings;</li>
+<li>Gateway receives only its bounded operational and audit bindings; and</li>
+<li>Knowledge continues using its separately scoped Knowledge connection and
+policy projection.</li>
+</ul>
+<p>The actual database URL remains a deployment secret. Config Server publishes
+the expected file path and binding identity, not the credential.</p>
+<h2 id="service-connection-matrix"><a class="header" href="#service-connection-matrix">Service Connection Matrix</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Service class</th><th>Target database</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td>Portal command/event processors</td><td><code>configserver</code></td><td>Event-sourced control-plane writes and projections</td></tr>
+<tr><td>Portal query services</td><td><code>configserver</code></td><td>Control-plane and authoring read models only</td></tr>
+<tr><td>Config Server</td><td><code>configserver</code></td><td>Immutable audience snapshot delivery</td></tr>
+<tr><td>Knowledge admin/API/worker</td><td><code>knowledge</code></td><td>Separate service-owned roles; policy still arrives through Config Server</td></tr>
+<tr><td>Native Agent runtime</td><td><code>operations.agent_ops</code></td><td>Move only after Agent operational tables and constraints are migrated</td></tr>
+<tr><td>External A2A integration</td><td><code>operations.a2a_ops</code></td><td>Production durability begins after schema and scope gates</td></tr>
+<tr><td>Workflow runtime</td><td><code>operations.workflow_ops</code> and approved <code>execution_ops</code> interfaces</td><td>Move after shared execution foundations are decoupled</td></tr>
+<tr><td>Gateway</td><td>Usually no database; otherwise owned <code>gateway_ops</code>/audit interfaces</td><td>Never owns Agent, A2A, or Workflow state</td></tr>
+<tr><td>Portal View</td><td>None</td><td>Uses authenticated command, query, and operational APIs</td></tr>
+</tbody>
+</table>
+</div>
+<p>Controller/runtime-registry tables require a separate ownership decision. The
+development rollout must not replace every <code>configserver</code> URL mechanically.
+Each connection changes only when its table ownership and compatibility gate
+are explicit.</p>
+<h2 id="schema-migration-ownership"><a class="header" href="#schema-migration-ownership">Schema Migration Ownership</a></h2>
+<p>The deployment repository orchestrates migrations but does not become the
+semantic owner of every schema.</p>
+<ul>
+<li>A common operational-store package owns <code>operational_meta</code> and scope
+validation.</li>
+<li>Agent-owned migrations own <code>agent_ops</code>.</li>
+<li>A2A-owned migrations own <code>a2a_ops</code>.</li>
+<li>Workflow and execution packages own their respective schemas.</li>
+<li>Gateway, audit, and artifact packages own their schemas or interfaces.</li>
+<li>Deployment repositories pin exact migration artifact versions and checksums.</li>
+</ul>
+<p>The bootstrap job applies migrations in a declared dependency order and records
+checksum, schema version, compatibility generation, owner, start/completion,
+and failure evidence. It never edits an old migration in place.</p>
+<p>No target schema migration may introduce a foreign key to <code>configserver</code>,
+<code>knowledge</code>, or another service-owned database. Required references are stable
+identifiers validated at admission and reconciled through APIs or integration
+events.</p>
+<h2 id="existing-volume-upgrade"><a class="header" href="#existing-volume-upgrade">Existing Volume Upgrade</a></h2>
+<p>The first release adding <code>operations</code> must work for both fresh and persistent
+development volumes.</p>
+<h3 id="fresh-volume"><a class="header" href="#fresh-volume">Fresh volume</a></h3>
+<ol>
+<li>PostgreSQL initializes.</li>
+<li><code>init-environment.sh</code> creates <code>configserver</code>, <code>knowledge</code>, and <code>operations</code>.</li>
+<li>Pinned schema installers and baseline import run.</li>
+<li>Validation proves all three database identities.</li>
+<li>Runtime services start only after their required database is ready.</li>
+</ol>
+<h3 id="existing-volume"><a class="header" href="#existing-volume">Existing volume</a></h3>
+<ol>
+<li>PostgreSQL starts without rerunning entrypoint initialization.</li>
+<li><code>operational-store-bootstrap</code> discovers that <code>operations</code> is absent.</li>
+<li>It creates the database idempotently and records the development binding.</li>
+<li>It applies service migrations that are ready for the current phase.</li>
+<li>It validates roles and scope identity.</li>
+<li>It leaves existing services on <code>configserver</code> until each cutover phase is
+explicitly activated.</li>
+</ol>
+<p>The database may exist before any runtime table moves. Empty provisioned
+schemas and migration ledgers are a valid preparatory state.</p>
+<p>Recreating a development database remains explicit. Normal deployment scripts
+must not drop <code>operations</code>, <code>knowledge</code>, or <code>configserver</code> merely to repair a
+failed migration. Clean-volume flags may remove all three only after showing
+that development data will be lost.</p>
+<h2 id="reset-backup-and-restore"><a class="header" href="#reset-backup-and-restore">Reset, Backup, And Restore</a></h2>
+<p>Development needs both convenient reset and production-shaped identity checks.</p>
+<ul>
+<li>A full clean reset removes the PostgreSQL volume and recreates all databases.</li>
+<li>A control-plane reset rebuilds <code>configserver</code> from the supported event and
+snapshot bootstrap without treating operational rows as events.</li>
+<li>A Knowledge reset follows Knowledge’s source/reindex contracts.</li>
+<li>An operational reset is scoped to the selected Host/environment binding and
+uses service-owned cleanup or database recreation.</li>
+<li>Logical <code>pg_dump</code> artifacts may be produced per database.</li>
+<li>Physical backup and point-in-time recovery remain server-wide while all
+databases share one PostgreSQL server.</li>
+<li>Restores validate the scope root before runtimes reconnect.</li>
+</ul>
+<p>Configuration export and operational export remain separate formats and
+endpoints. Downloaded <code>values.yml</code> contains intended runtime configuration and
+binding references, not Agent sessions, memories, A2A tasks, Workflow state, or
+database credentials.</p>
+<h2 id="failure-semantics"><a class="header" href="#failure-semantics">Failure Semantics</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Failure</th><th>Required development behavior</th></tr>
+</thead>
+<tbody>
+<tr><td><code>operations</code> is missing</td><td>Bootstrap creates it idempotently; runtime stays unready until validation passes</td></tr>
+<tr><td>Database exists with a different scope root</td><td>Fail closed; never rewrite the Host/environment silently</td></tr>
+<tr><td>Service migration fails</td><td>Preserve diagnostics and last completed migration; do not start that service</td></tr>
+<tr><td>Existing service still needs <code>configserver</code> tables</td><td>Keep its old connection during the declared transitional phase</td></tr>
+<tr><td>Runtime receives the wrong schema binding</td><td>Reject readiness before traffic</td></tr>
+<tr><td>Config Server is unavailable</td><td>An already started runtime follows last-known-good binding validity rules</td></tr>
+<tr><td>Portal is unavailable</td><td>Runtime operational writes continue directly to the accepted database</td></tr>
+<tr><td>Knowledge is unavailable</td><td>Knowledge-dependent work follows its own availability policy; ordinary operational authority does not move to <code>configserver</code></td></tr>
+<tr><td>One database is dropped manually</td><td>Other databases may remain present, but all dependent services fail their own readiness gates</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="repository-change-matrix"><a class="header" href="#repository-change-matrix">Repository Change Matrix</a></h2>
+<p>The implementation should land coherently in all three deployment repositories.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Repository</th><th>Required target changes</th></tr>
+</thead>
+<tbody>
+<tr><td><code>portal-config-loc/all-in-lt</code></td><td>Add operational database inputs, bootstrap/migration service, secret mount, role/schema validation, and local reset/qualification coverage</td></tr>
+<tr><td><code>portal-config-dev</code></td><td>Mirror the local contract with development Host/environment inputs and existing-volume upgrade coverage</td></tr>
+<tr><td><code>light-portal-install</code></td><td>Include operational bootstrap artifact, installer validation, secret materialization, clean-install/reset behavior, and customer-managed override points</td></tr>
+</tbody>
+</table>
+</div>
+<p>The SQL and migration artifacts should come from one versioned release source.
+Copying independently edited schema files into all three repositories is not an
+acceptable long-term source-of-truth model. Deployment repositories may stage
+verified release artifacts for offline installation, with checksums proving
+parity.</p>
+<h2 id="implementation-sequence"><a class="header" href="#implementation-sequence">Implementation Sequence</a></h2>
+<h3 id="phase-0-contract-and-empty-database"><a class="header" href="#phase-0-contract-and-empty-database">Phase 0: Contract And Empty Database</a></h3>
+<p>Deliver:</p>
+<ul>
+<li><code>PORTAL_DB_OPERATIONAL_*</code> bootstrap inputs;</li>
+<li>common scope-root schema and validation contract;</li>
+<li>idempotent database creation for fresh and existing volumes;</li>
+<li>migration ledger and role conventions;</li>
+<li>empty service schemas or explicitly versioned initial migrations; and</li>
+<li>three-repository parity tests.</li>
+</ul>
+<p>No production runtime is redirected in this phase.</p>
+<h3 id="phase-1-constraint-decoupling"><a class="header" href="#phase-1-constraint-decoupling">Phase 1: Constraint Decoupling</a></h3>
+<p>Classify existing operational tables and remove cross-database foreign keys.
+Replace them with pinned identity/digest admission checks, stable references,
+authenticated APIs, outbox/integration events, and reconciliation tests.</p>
+<p>Shared execution foundations move before Agent and Workflow dependents when
+their current constraints require that ordering.</p>
+<h3 id="phase-2-agent-and-embedded-memory"><a class="header" href="#phase-2-agent-and-embedded-memory">Phase 2: Agent And Embedded Memory</a></h3>
+<p>Move Agent session, turn, action, approval, idempotency, quota, and initially
+embedded Memory authority to <code>agent_ops</code>. Publish the binding through Config
+Server and change Agent readiness to validate it.</p>
+<p>Remove Agent’s Config Server database credential only after the new store is
+authoritative and rollback is bounded.</p>
+<h3 id="phase-3-a2a-and-workflow"><a class="header" href="#phase-3-a2a-and-workflow">Phase 3: A2A And Workflow</a></h3>
+<p>Create production-qualified <code>a2a_ops</code>, move Workflow-owned execution state,
+and enable governed inbound/outbound A2A durability only after restart,
+idempotency, cancellation, artifact, and audit recovery gates pass.</p>
+<h3 id="phase-4-gateway-audit-and-artifact-completion"><a class="header" href="#phase-4-gateway-audit-and-artifact-completion">Phase 4: Gateway, Audit, And Artifact Completion</a></h3>
+<p>Move bounded durable Gateway state, audit outboxes, and artifact metadata to
+their owned schemas. Long-term traffic analytics and artifact bytes remain in
+approved external sinks/object storage.</p>
+<h3 id="phase-5-multi-host-development-profiles"><a class="header" href="#phase-5-multi-host-development-profiles">Phase 5: Multi-Host Development Profiles</a></h3>
+<p>Enable Host Admin provisioning for <code>DEV_DEDICATED</code> and <code>DEV_POOLED</code>, including
+asynchronous status, secret references, cleanup, retention, and cross-Host
+isolation tests.</p>
+<h2 id="verification-gates"><a class="header" href="#verification-gates">Verification Gates</a></h2>
+<h3 id="topology"><a class="header" href="#topology">Topology</a></h3>
+<ul>
+<li>one PG17 server exposes separate <code>configserver</code>, <code>knowledge</code>, and
+<code>operations</code> databases;</li>
+<li>each database has the expected schema and database identity;</li>
+<li><code>PORTAL_DB_TOPOLOGY=shared</code> does not activate accidentally;</li>
+<li>no operational service schema exists in <code>configserver</code>; and</li>
+<li>fresh and existing-volume paths converge on the same topology.</li>
+</ul>
+<h3 id="authority"><a class="header" href="#authority">Authority</a></h3>
+<ul>
+<li>Portal events, authoring projections, and configuration snapshots remain in
+<code>configserver</code>;</li>
+<li>Knowledge content remains in <code>knowledge</code>;</li>
+<li>operational runtime writes land only in the owning <code>operations</code> schema;</li>
+<li>Portal View uses APIs rather than database access; and</li>
+<li>Config Server projections contain bindings but no operational rows or
+credentials.</li>
+</ul>
+<h3 id="isolation"><a class="header" href="#isolation">Isolation</a></h3>
+<ul>
+<li>a runtime rejects the wrong Host, environment, database identity, binding
+digest, schema owner, or schema generation;</li>
+<li>service roles cannot write other service schemas;</li>
+<li>no cross-database foreign key remains;</li>
+<li>pooled tests prevent cross-Host reads and writes through queries, caches,
+outboxes, artifacts, exports, and cleanup; and</li>
+<li>runtime roles cannot create databases, roles, or schemas.</li>
+</ul>
+<h3 id="lifecycle"><a class="header" href="#lifecycle">Lifecycle</a></h3>
+<ul>
+<li>duplicate bootstrap runs are safe;</li>
+<li>a crash after database creation resumes without creating another database;</li>
+<li>migration checksum drift fails before runtime startup;</li>
+<li>a Host can exist without an operational binding;</li>
+<li>disabling a Host does not destroy operational data; and</li>
+<li>full reset requires an explicit destructive-development option.</li>
+</ul>
+<h3 id="repository-parity"><a class="header" href="#repository-parity">Repository Parity</a></h3>
+<ul>
+<li>all three repositories use the same topology contract and pinned migration
+artifact generation;</li>
+<li>Compose configuration renders successfully;</li>
+<li>fresh-volume and existing-volume integration tests pass;</li>
+<li>checked-in secrets contain no production credential; and</li>
+<li>documentation, scripts, and runtime examples use the same database names and
+scope semantics.</li>
+</ul>
+<h2 id="resolved-decisions"><a class="header" href="#resolved-decisions">Resolved Decisions</a></h2>
+<ol>
+<li>Development uses one PostgreSQL server with three application databases by
+default.</li>
+<li><code>configserver</code> remains the event-sourced control-plane and Config Server
+snapshot database.</li>
+<li><code>knowledge</code> remains the separately governed Knowledge operational database.</li>
+<li><code>operations</code> is the ordinary Host/environment operational database.</li>
+<li>Service-owned operational domains use separate schemas and runtime roles
+inside <code>operations</code>.</li>
+<li>Separate databases on one server are logical boundaries, not independent
+infrastructure failure domains.</li>
+<li>The initial configured Host may be bootstrapped automatically.</li>
+<li>Additional Hosts require explicit bindings and do not inherit the initial
+database silently.</li>
+<li>Fresh initialization and persistent-volume migration are both supported.</li>
+<li>Runtime services never provision databases with application credentials.</li>
+<li>Creating <code>operations</code> precedes, but does not itself perform, table cutover.</li>
+<li>Existing service connections move only after ownership, constraint,
+migration, rollback, and readiness gates pass.</li>
+<li>Config Server publishes non-secret bindings; deployment-owned files or
+secret providers supply credentials.</li>
+<li>Knowledge’s organization-sharing rules remain distinct from ordinary
+Host/environment scope validation.</li>
+<li>Deployment repositories orchestrate pinned service-owned migrations rather
+than independently owning divergent schema copies.</li>
+</ol>
+<h2 id="open-questions"><a class="header" href="#open-questions">Open Questions</a></h2>
+<ol>
+<li>Which repository publishes the first versioned <code>operational_meta</code> migration
+artifact?</li>
+<li>Is <code>operational-store-bootstrap</code> initially a <code>light-deployer</code> profile, a
+dedicated executable, or a thin deployment script over shared tooling?</li>
+<li>Which exact Agent and Workflow tables define the first cutover slice?</li>
+<li>Which Controller/runtime-registration tables are control-plane evidence and
+which are operational authority?</li>
+<li>Do initial development credentials use one transitional runtime role or
+require all service-specific roles in Phase 0?</li>
+<li>Is <code>DEV_POOLED</code> required in the first implementation, or can it wait until
+dedicated single-Host cutover is qualified?</li>
+<li>Which release artifact and checksum manifest is consumed consistently by
+<code>portal-config-loc</code>, <code>portal-config-dev</code>, and <code>light-portal-install</code>?</li>
+<li>Which clean-reset flags and warnings should be standardized across the three
+deployment repositories?</li>
+</ol>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../../design/light-portal/control-plane-policy-config-server.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../../design/light-portal/global-tenant-entity-scope.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../../design/light-portal/control-plane-policy-config-server.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../../design/light-portal/global-tenant-entity-scope.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../../mark-09e88c2c.min.js"></script>
+        <script src="../../searcher-09f2665d.js"></script>
+
+        <script src="../../clipboard-1626706a.min.js"></script>
+        <script src="../../highlight-abc7f01d.js"></script>
+        <script src="../../book-609e4cb8.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../../mermaid-3a6b472a.min.js"></script>
+        <script src="../../mermaid-init-025d9952.js"></script>
+
+
+
+    </div>
+    </body>
+</html>
