@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-5bd9007d.js";
+            window.path_to_searchindex_js = "searchindex-042800a8.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-4c9e9a75.js"></script>
+        <script src="toc-beca83cc.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -5580,7 +5580,7 @@ registration bundles.</li>
 <tr><td>Cross-service registration tests</td><td>Required for production</td><td>Cover ordered API-version and Agent-definition events, projection lag/failure, repair, runtime linking, snapshot activation, reload, and last-known-good rejection.</td></tr>
 <tr><td>Composite <code>registerAiAgent</code> command</td><td>Deferred</td><td>Add before a one-click production wizard or when automation requires one validation boundary.</td></tr>
 <tr><td>Dedicated <code>/app/genai/register-agent</code> wizard</td><td>Deferred UX enhancement</td><td>Build on the proven commands and publication lifecycle; do not create a second publisher.</td></tr>
-<tr><td>A2A publication</td><td>Separate optional follow-up</td><td>Reuse the Agent publisher and add the Gateway and A2A-specific projections described by the A2A Gateway design.</td></tr>
+<tr><td>A2A publication</td><td>Implemented optional follow-up</td><td>Portal View provides structured A2A authoring, binding, and publication actions. The publisher stages the Gateway route/policy/handler configuration and the native <code>a2aPolicy</code> or external <code>light-a2a</code> projection into immutable snapshots. Keep A2A activation separate from base Agent registration.</td></tr>
 </tbody>
 </table>
 </div>
@@ -43257,6 +43257,755 @@ path. Keep the deployer small, policy-bound, and auditable. Let Light Portal own
 deployment intent and history, while the deployer owns safe cluster-local
 execution.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="enterprise-ai-assisted-bootstrap-and-eks-deployment"><a class="header" href="#enterprise-ai-assisted-bootstrap-and-eks-deployment">Enterprise AI-Assisted Bootstrap and EKS Deployment</a></h1>
+<h2 id="status-19"><a class="header" href="#status-19">Status</a></h2>
+<p>Proposed customer deployment and qualification design.</p>
+<h2 id="executive-decision-1"><a class="header" href="#executive-decision-1">Executive Decision</a></h2>
+<p>Create a dedicated Linux VM that continuously proves a complete Light Portal
+and Light Fabric environment before promoting an immutable, reviewed release to
+Amazon EKS. The VM should be based on the <code>portal-config-dev</code> topology, use
+enterprise SSO, use a customer-specific public hostname and redirect URI, and
+connect to an approved Amazon Bedrock or local model through the LLM Gateway.</p>
+<p>This is a good approach because it turns a complicated, multi-service EKS
+installation into a repeatable promotion pipeline with a known-good reference
+environment. It also gives developers and operators a safe place to build
+deployment workflows, configuration snapshots, Kubernetes overlays, health
+checks, and diagnostic automation before those assets can affect the cluster.</p>
+<p>The design works only if the VM is treated as a disposable integration and
+qualification environment. It is not the production control plane, a second
+production database, or an unrestricted AI administration host. Production
+changes remain immutable, policy checked, auditable, and approval gated.</p>
+<pre class="mermaid">flowchart LR
+    OSS[Open-source repositories] --&gt; REL[Daily release pipeline]
+    REL --&gt; ART[Immutable artifacts and image digests]
+    ART --&gt; VM[Linux bootstrap and qualification VM]
+    IDP[Enterprise identity provider] --&gt; VM
+    MODEL[Amazon Bedrock or approved local model] --&gt; VM
+    VM --&gt; GATE{Qualification gates passed?}
+    GATE -- No --&gt; FIX[Diagnose, patch, and rerun]
+    FIX --&gt; REL
+    GATE -- Yes --&gt; APPROVE[Human promotion approval]
+    APPROVE --&gt; DEPLOY[Light Workflow and Light Deployer]
+    DEPLOY --&gt; EKS[Customer Amazon EKS]
+    EKS --&gt; VERIFY[Post-deployment verification]
+    VERIFY --&gt; EVIDENCE[Audit and release evidence]
+</pre>
+
+<h2 id="business-value"><a class="header" href="#business-value">Business Value</a></h2>
+<p>The bootstrap environment reduces enterprise deployment risk and lead time in
+four ways:</p>
+<ul>
+<li>Developers validate the complete service topology without waiting for an EKS
+change window.</li>
+<li>Customer-specific SSO, certificates, redirect URIs, DNS, configuration, and
+database bootstrap are tested as one release rather than as independent
+tickets.</li>
+<li>The same versioned snapshots and Kubernetes inputs that pass on the VM become
+the inputs promoted to EKS.</li>
+<li>AI-assisted diagnosis can correlate source, configuration, logs, health,
+Kubernetes state, and approved database queries while keeping every
+mutating action behind policy and approval.</li>
+</ul>
+<p>This does not make the platform intrinsically simple. It makes the complexity
+visible, repeatable, testable, and supportable.</p>
+<h2 id="goals-37"><a class="header" href="#goals-37">Goals</a></h2>
+<ul>
+<li>Maintain a complete, customer-shaped Light Portal and Light Fabric reference
+environment on a Linux VM.</li>
+<li>Refresh and recreate that environment after a verified daily open-source
+release.</li>
+<li>Replace the local login experience with enterprise SSO while retaining Light
+OAuth tokens and fine-grained Light Portal authorization claims.</li>
+<li>Support Amazon Bedrock or an approved local model without exposing provider
+credentials to agents, workflows, source repositories, or logs.</li>
+<li>Generate immutable configuration snapshots, database bootstrap artifacts,
+Kubernetes manifests, and deployment evidence.</li>
+<li>Use <code>light-workflow</code> for durable orchestration and approval gates.</li>
+<li>Use <code>light-deployer</code> for bounded Kubernetes render, dry-run, diff, apply,
+status, and rollback operations.</li>
+<li>Use AI to accelerate diagnosis and propose bounded repairs.</li>
+<li>Preserve a conventional, fully documented operator path when AI is disabled
+or unavailable.</li>
+</ul>
+<h2 id="non-goals-40"><a class="header" href="#non-goals-40">Non-Goals</a></h2>
+<ul>
+<li>Do not make the Linux VM a production runtime or production database.</li>
+<li>Do not deploy unverified output directly from the daily development branch.</li>
+<li>Do not give an LLM unrestricted shell, <code>kubectl</code>, AWS, Git, database, or
+secret-manager access.</li>
+<li>Do not grant <code>cluster-admin</code> to <code>light-deployer</code>.</li>
+<li>Do not let AI publish releases, change production data, approve its own
+patch, or bypass customer change management.</li>
+<li>Do not copy the VM database volume into EKS. Production is recreated from
+versioned schema, valid events, snapshots, and controlled migrations.</li>
+<li>Do not assume a successful container start proves application readiness.</li>
+</ul>
+<h2 id="important-sso-clarification"><a class="header" href="#important-sso-clarification">Important SSO Clarification</a></h2>
+<p>“SSO instead of OAuth authorization code” is not the precise protocol
+boundary. Microsoft Entra ID, Okta, Ping Identity, and similar enterprise
+identity providers normally use OIDC on top of OAuth 2.0, commonly with the
+authorization-code flow and PKCE.</p>
+<p>The recommended change is:</p>
+<ol>
+<li>The enterprise identity provider authenticates the user through SSO.</li>
+<li>The browser returns only to the customer-approved HTTPS redirect URI.</li>
+<li>The Light Gateway BFF validates the external identity and performs a
+backend-mediated token exchange.</li>
+<li>Light OAuth issues the internal token containing Light Portal host, user,
+role, group, environment, and fine-grained authorization claims.</li>
+<li>The BFF keeps security tokens in secure cookies and protects mutations with
+CSRF controls.</li>
+</ol>
+<p>This preserves enterprise authentication and Light Portal authorization as
+separate concerns. It also avoids a second interactive login and avoids
+putting tokens or client secrets in browser URLs.</p>
+<pre class="mermaid">sequenceDiagram
+    actor User
+    participant Browser
+    participant IdP as Enterprise IdP
+    participant BFF as Light Gateway BFF
+    participant OAuth as Light OAuth
+    participant Portal as Light Portal APIs
+
+    User-&gt;&gt;Browser: Open customer Portal URL
+    Browser-&gt;&gt;IdP: OIDC authorization request with PKCE
+    IdP-&gt;&gt;User: Enterprise SSO and conditional access
+    IdP--&gt;&gt;Browser: Authorization response to registered redirect URI
+    Browser-&gt;&gt;BFF: Customer HTTPS callback
+    BFF-&gt;&gt;IdP: Validate or redeem external identity
+    BFF-&gt;&gt;OAuth: Backend token exchange
+    OAuth--&gt;&gt;BFF: Internal JWT with Portal claims
+    BFF--&gt;&gt;Browser: Secure session cookies
+    Browser-&gt;&gt;BFF: Portal request plus CSRF protection
+    BFF-&gt;&gt;Portal: Internal JWT
+    Portal--&gt;&gt;Browser: Authorized response
+</pre>
+
+<p>The customer must provide the identity-provider tenant, issuer, client
+registration, exact redirect and logout URIs, allowed groups, claim mapping,
+conditional-access expectations, and a non-human test identity. Wildcard
+redirect URIs should not be used.</p>
+<h2 id="recommended-architecture-2"><a class="header" href="#recommended-architecture-2">Recommended Architecture</a></h2>
+<h3 id="management-view"><a class="header" href="#management-view">Management View</a></h3>
+<pre class="mermaid">flowchart TB
+    subgraph Customer[Customer enterprise boundary]
+        IDP[Enterprise IdP]
+        SEC[Secrets and certificate services]
+        VM[Bootstrap Linux VM]
+        subgraph EKS[Amazon EKS]
+            INGRESS[Ingress or Gateway]
+            PORTAL[Light Portal services]
+            FABRIC[Light Fabric services]
+            DEPLOYER[In-cluster Light Deployer]
+            DATA[(Managed data services)]
+        end
+        OBS[Enterprise observability and audit]
+    end
+
+    subgraph Supply[Approved software supply chain]
+        SOURCE[Source repositories]
+        CI[Build, test, scan, and sign]
+        REG[Artifact and image registries]
+    end
+
+    SOURCE --&gt; CI --&gt; REG
+    REG --&gt; VM
+    IDP --&gt; VM
+    SEC --&gt; VM
+    VM --&gt;|approved deployment request| DEPLOYER
+    REG --&gt; EKS
+    DEPLOYER --&gt; PORTAL
+    DEPLOYER --&gt; FABRIC
+    INGRESS --&gt; PORTAL
+    PORTAL --&gt; DATA
+    FABRIC --&gt; DATA
+    VM --&gt; OBS
+    EKS --&gt; OBS
+</pre>
+
+<h3 id="environment-topology-and-promotion-order"><a class="header" href="#environment-topology-and-promotion-order">Environment Topology and Promotion Order</a></h3>
+<p>Use three named environments with intentionally different stability and data
+lifecycle contracts.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Environment</th><th>Runtime</th><th>Audience</th><th>Update cadence</th><th>Database contract</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Bootstrap</strong></td><td>Dedicated Linux VM</td><td>Platform engineers and selected customer engineers</td><td>Daily after the open-source release is verified</td><td>Disposable; recreate from the CDN baseline and a preserved customer-host package</td><td>Fast integration, feature validation, deployment authoring, and AI-assisted diagnosis</td></tr>
+<tr><td><strong>POC</strong></td><td>Amazon EKS</td><td>Customer project team and approvers</td><td>Frequently, but only after Bootstrap qualification</td><td>Persistent by default; backup plus forward-only migration for every deployment</td><td>Official customer proving environment for EKS, SSO, networking, operations, and rollout</td></tr>
+<tr><td><strong>DEV</strong></td><td>Amazon EKS</td><td>Customer developers and integration partners</td><td>Scheduled and less frequent than POC</td><td>Persistent; mandatory compatibility checks, backup, schema patches, and event deltas</td><td>Stable shared environment for instance authoring, application development, and integration</td></tr>
+</tbody>
+</table>
+</div>
+<p>The promotion direction is <strong>Bootstrap -&gt; POC -&gt; DEV</strong>. This naming is
+deliberate: POC receives qualified changes earlier and proves the complete EKS
+shape, while DEV favors partner stability. A future TEST, UAT, or production
+environment can consume the same immutable release contract after the customer
+accepts this operating model.</p>
+<pre class="mermaid">flowchart LR
+    DAILY[Verified daily open-source release] --&gt; BOOT[Bootstrap Linux VM]
+    BOOT --&gt; BGATE{Bootstrap gates}
+    BGATE -- Fail --&gt; REPAIR[Diagnose and repair]
+    REPAIR --&gt; DAILY
+    BGATE -- Pass --&gt; PAPP[POC approval]
+    PAPP --&gt; POC[POC on EKS]
+    POC --&gt; PGATE{EKS and feature gates}
+    PGATE -- Fail --&gt; ROLLBACK[Rollback or fix forward]
+    PGATE -- Pass --&gt; DAPP[DEV change approval]
+    DAPP --&gt; DEV[Partner DEV on EKS]
+    DEV --&gt; STABLE[Stable integration window]
+</pre>
+
+<p>Bootstrap and POC must not automatically push every successful daily release
+into DEV. DEV advances only when the selected POC release has completed its
+stabilization window and the partner-impact review is approved.</p>
+<p>The Portal host and the deployment environment are separate dimensions. In
+Bootstrap, the database contains the canonical global entities and the default
+<code>dev.lightapi.net</code> host from the CDN baseline, plus a customer-managed logical
+host such as <code>dev.yourcompany.com</code>. Instances under that customer host carry
+an explicit environment such as <code>bootstrap</code>, <code>poc</code>, or <code>dev</code>. Public runtime
+URLs, SSO redirect URIs, certificates, Config Server environment tags, and
+gateway instance identities remain environment-specific; they must not be
+inferred from the logical host name or reused across simultaneous VM and EKS
+runtimes.</p>
+<h3 id="bootstrap-vm"><a class="header" href="#bootstrap-vm">Bootstrap VM</a></h3>
+<p>The VM is a customer-specific integration appliance built from code and
+automation. Name this environment <strong>Bootstrap</strong>. Its topology should start from
+<code>portal-config-dev</code> and retain the default <code>dev.lightapi.net</code> host needed by the
+published baseline. Add <code>dev.yourcompany.com</code> as the customer-managed logical
+host, and create all customer-specific service instances under that host. It
+contains:</p>
+<ul>
+<li>the Light Portal command, query, OAuth, configuration, controller, gateway,
+Portal UI, and database dependencies needed for an end-to-end test;</li>
+<li>the required Light Fabric gateway, LLM Gateway, Workflow, Agent, Knowledge,
+and Deployer development services selected for the customer scope;</li>
+<li>customer SSO configuration and test-only credentials;</li>
+<li>local copies of deployment repositories and generated artifacts;</li>
+<li>sandboxed workflow runners for builds, tests, rendering, and diagnostics;</li>
+<li>log and metric forwarding to the enterprise observability platform.</li>
+</ul>
+<p>The VM should use internal DNS and an enterprise-issued certificate even when
+it is accessible only inside the corporate network. The hostname, cookie
+domain, issuer, audience, redirect URI, logout URI, CORS origin, CSRF origin,
+and Portal host records must be configured as one reviewed set.</p>
+<h3 id="eks-runtime"><a class="header" href="#eks-runtime">EKS Runtime</a></h3>
+<p>POC and DEV run on EKS. Use separate namespaces and separate application data
+stores at minimum; separate clusters or AWS accounts are preferred when the
+customer’s isolation policy requires them. Neither environment is a copy of
+Docker Compose. Kubernetes resources should be intentionally designed for:</p>
+<ul>
+<li>namespaces and Kubernetes service accounts;</li>
+<li>Deployments, Services, ingress or Gateway API, ConfigMaps, and secret
+references;</li>
+<li>PodDisruptionBudgets, topology spread, resource requests and limits;</li>
+<li>readiness, liveness, and startup probes;</li>
+<li>network policies and approved egress;</li>
+<li>persistent storage and managed database connectivity;</li>
+<li>horizontal scaling, backup, restore, and disaster recovery;</li>
+<li>centralized logs, metrics, traces, alerts, and audit retention.</li>
+</ul>
+<p>Stateful data should normally use customer-approved managed services such as
+Amazon RDS for PostgreSQL and the enterprise Kafka offering. Exact products
+and high-availability profiles are customer architecture decisions, but they
+must be fixed before the production qualification run.</p>
+<h2 id="component-responsibilities"><a class="header" href="#component-responsibilities">Component Responsibilities</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Component</th><th>Responsibility</th><th>Explicit boundary</th></tr>
+</thead>
+<tbody>
+<tr><td>Daily release pipeline</td><td>Build, test, package, scan, and publish a candidate release</td><td>Does not authorize customer promotion</td></tr>
+<tr><td>Bootstrap VM</td><td>Recreate and qualify the complete customer-shaped stack</td><td>Is disposable and contains no production authority</td></tr>
+<tr><td>LLM Gateway</td><td>Route requests to Bedrock or a local model under model, cost, privacy, and audit policy</td><td>Provider credentials remain outside prompts and agent context</td></tr>
+<tr><td><code>light-agent</code></td><td>Analyze evidence and propose bounded diagnostic or repair steps</td><td>Does not directly receive broad host or cluster credentials</td></tr>
+<tr><td><code>light-workflow</code></td><td>Persist orchestration state, retries, evidence, and approvals</td><td>Delegates effectful work to approved runners or services</td></tr>
+<tr><td>Workflow runner</td><td>Execute allowlisted command templates in an isolated workspace</td><td>No arbitrary command supplied by a model or workflow input</td></tr>
+<tr><td><code>light-deployer</code></td><td>Render, policy check, dry-run, diff, apply, status, prune, and rollback</td><td>Enforces its own namespace, repository, registry, kind, and action policy</td></tr>
+<tr><td>Enterprise IdP</td><td>Authenticate users and enforce corporate access policy</td><td>Does not define Light Portal resource authorization by itself</td></tr>
+<tr><td>Light OAuth</td><td>Exchange trusted identity for internal Portal claims</td><td>Does not replace enterprise authentication</td></tr>
+<tr><td>Human approver</td><td>Accept release, infrastructure diff, deployment, and rollback decisions</td><td>AI cannot approve its own work</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>light-deployer</code> already implements a useful Phase 1 Kubernetes slice,
+including <code>kube-rs</code> server-side dry-run and apply. It remains a partial product:
+controller integration, immutable config references, complete rollback
+integration, EKS recovery, and production qualification must be closed in this
+program. <code>light-workflow</code>, <code>light-agent</code>, and the LLM Gateway also remain under
+staged production qualification. The pilot should prove them incrementally
+rather than present all development functionality as production-ready.</p>
+<h2 id="release-and-daily-rebuild-model"><a class="header" href="#release-and-daily-rebuild-model">Release and Daily Rebuild Model</a></h2>
+<p>The daily recreation is valuable when it separates three states:</p>
+<ol>
+<li><strong>Candidate:</strong> Open-source daily output that has completed its normal build
+and test pipeline.</li>
+<li><strong>Qualified:</strong> An immutable candidate that passed the customer bootstrap VM
+gates.</li>
+<li><strong>Promoted:</strong> A qualified candidate approved for a named EKS environment.</li>
+</ol>
+<p>Use image digests, repository commit SHAs, artifact checksums, schema version,
+event-baseline checksum, workflow-definition version, configuration snapshot
+IDs, and Kubernetes bundle digest as one release manifest. Never promote a
+floating <code>latest</code> tag.</p>
+<pre class="mermaid">stateDiagram-v2
+    [*] --&gt; Candidate: daily release completes
+    Candidate --&gt; Rejected: supply-chain or bootstrap gate fails
+    Rejected --&gt; Candidate: corrected daily release
+    Candidate --&gt; Qualified: VM recreation and tests pass
+    Qualified --&gt; Pilot: change approval
+    Pilot --&gt; Rejected: pilot verification fails
+    Pilot --&gt; Promoted: smoke, soak, and SLO gates pass
+    Promoted --&gt; RolledBack: rollback criteria met
+    RolledBack --&gt; Candidate: fix forward
+</pre>
+
+<h3 id="daily-vm-lifecycle"><a class="header" href="#daily-vm-lifecycle">Daily VM Lifecycle</a></h3>
+<ol>
+<li>Read the published release manifest and verify signatures, checksums, image
+digests, vulnerability policy, and required artifacts.</li>
+<li>Quiesce customer-host mutations and export an active, host-scoped global
+snapshot for the exact <code>dev.yourcompany.com</code> host UUID with
+<code>exportScope=host</code>. Record its source host, last-event consistency marker,
+table counts, warnings, checksum, export tool version, and schema version.</li>
+<li>Convert and preflight the customer-host snapshot as a dependency-ordered
+event package. Reject the reset if conversion, portability checks, parent
+references, duplicate aggregate/version checks, or a disposable round-trip
+test fails.</li>
+<li>Preserve the previous successful release manifest, customer-host snapshot,
+generated event package, qualification evidence, and database directory for
+rollback.</li>
+<li>Destroy only the explicitly disposable Bootstrap data and runtime.</li>
+<li>Recreate the database schema from the canonical release artifacts.</li>
+<li>Import the pinned CDN <code>events.json</code> baseline to recreate global entities and
+the canonical <code>dev.lightapi.net</code> entities.</li>
+<li>Wait for asynchronous projection consumers to reach the required cursors.
+Import completion alone is not Portal readiness.</li>
+<li>Recreate the <code>dev.yourcompany.com</code> host root from its reviewed,
+version-controlled <code>HostCreatedEvent</code> bootstrap artifact, preserving its
+stable host UUID. Then import the validated host-scoped event package into
+that target host.</li>
+<li>Wait for customer-host projections to converge, verify expected entity
+counts and relationships, refresh Config Server snapshots, and confirm that
+no unexplained DLQ entry exists.</li>
+<li>Start services in dependency order and require service-specific readiness.</li>
+<li>Apply the customer Bootstrap configuration snapshot.</li>
+<li>Run SSO, API, gateway, workflow, agent, model, database, and observability
+tests.</li>
+<li>Produce a signed qualification report and mark the manifest qualified only
+when every mandatory gate passes.</li>
+</ol>
+<p>The current global snapshot contract supports <code>host</code>, <code>global</code>, and <code>both</code>
+scopes. Use <code>host</code> for the customer preservation package. Do not use <code>both</code>
+and then re-import shared rows already supplied by the CDN baseline. Host scope
+selects active host-owned rows, including specialized user-membership and
+relationship handling, but intentionally omits true global tables and tables
+without <code>host_id</code>.</p>
+<p><code>host_t</code> is intentionally excluded from snapshot export and conversion, so the
+customer host root is not silently included in the host package. Its stable,
+reviewed creation event is a separate prerequisite imported after the CDN
+baseline and before the host-owned package. This makes the parent identity and
+import order explicit.</p>
+<p>The snapshot is a portable representation of active event-backed projections,
+not a copy of <code>event_store_t</code> and not a complete audit-history backup.
+Operational or derived state such as authorization codes, refresh tokens,
+outbox rows, notifications, projection cursors, runtime workflow state,
+selected Knowledge state, and generated configuration snapshots is excluded or
+rebuilt. The export manifest must list every excluded family so an operator
+cannot mistake host preservation for a full database backup.</p>
+<p>If the new release changes the schema or event contract so the prior day’s
+host package cannot pass conversion or import preflight, keep or restore the
+previous Bootstrap database. Add a compatible converter, migration, or
+forward event before retrying; never bypass the failed portability gate with
+direct projection-table inserts.</p>
+<p>Recreating the database every day is appropriate for this disposable VM and
+is strong evidence that the deployment has no undocumented manual seed step.
+It is not a POC or DEV upgrade strategy. Both EKS environments use forward-only
+migrations, versioned event deltas, backups, compatibility gates, and tested
+rollback or fix-forward procedures.</p>
+<h3 id="poc-and-dev-persistent-data-lifecycle"><a class="header" href="#poc-and-dev-persistent-data-lifecycle">POC and DEV Persistent Data Lifecycle</a></h3>
+<p>POC is official even though it changes frequently. DEV is partner-facing and
+more stable. Both preserve their databases across normal deployments.</p>
+<p>For every POC or DEV deployment:</p>
+<ol>
+<li>Bind the target to an immutable release manifest and record the current
+schema, event-delta, configuration-snapshot, and deployment revisions.</li>
+<li>Verify a recent backup and the restore procedure before crossing a schema
+boundary.</li>
+<li>Run compatibility and migration preflight against a production-shaped copy
+of the target data.</li>
+<li>Apply immutable, forward-only SQL patches before the dependent application
+version and record their checksums.</li>
+<li>Import immutable, ordered Portal event deltas through the supported event
+path; never edit a delta after it has reached either environment.</li>
+<li>Refresh or publish immutable configuration snapshots only after their
+underlying projections are ready.</li>
+<li>Deploy services in dependency order, prove projection convergence, and run
+environment-specific smoke and authorization tests.</li>
+<li>Observe the stabilization window and retain the exact migration and rollout
+evidence.</li>
+</ol>
+<p>Database patches and event deltas must be safe for both upgrade paths: an
+existing preserved database and a fresh database built from the current
+baseline. The pipeline should test both paths before POC. A service release
+that has no required data change still records an explicit no-migration result.</p>
+<p>DEV should normally trail POC by a defined stabilization interval. Schedule
+partner-impacting maintenance, publish release notes and compatibility changes,
+and provide a rollback or fix-forward decision window. Partner-created
+instances and integration data are durable DEV assets and must never be
+replaced by Bootstrap exports.</p>
+<h2 id="configuration-and-snapshot-authority"><a class="header" href="#configuration-and-snapshot-authority">Configuration and Snapshot Authority</a></h2>
+<p>Configuration must not drift independently between the VM and EKS. Store
+authoring inputs in version control and compile them into immutable,
+environment-bound snapshots.</p>
+<pre class="mermaid">flowchart LR
+    GIT[Reviewed source configuration] --&gt; BUILD[Validate and compile]
+    BUILD --&gt; BASE[Portable baseline]
+    BASE --&gt; VMOV[Bootstrap VM overlay]
+    BASE --&gt; EKSOV[EKS environment overlay]
+    VMOV --&gt; VMSNAP[Immutable VM snapshot]
+    EKSOV --&gt; EKSSNAP[Immutable EKS snapshot]
+    VMSNAP --&gt; TEST[Qualification tests]
+    TEST --&gt;|evidence and approval| EKSSNAP
+    EKSSNAP --&gt; DEPLOY[Deployment bundle]
+</pre>
+
+<p>The portable baseline may contain product versions, API definitions, workflow
+definitions, non-secret configuration, and schema/event bootstrap assets.
+Overlays contain environment-specific hostnames, instance IDs, environment
+tags, capacity, database endpoints, identity-provider references, certificate
+references, and network policy.</p>
+<p>Secrets are references, not snapshot values. Resolve them at runtime from the
+customer-approved secret service, such as AWS Secrets Manager through an
+approved Kubernetes integration. No generated bundle, workflow context,
+diagnostic attachment, or AI prompt should contain secret values.</p>
+<h2 id="model-connectivity"><a class="header" href="#model-connectivity">Model Connectivity</a></h2>
+<p>Both Bedrock and a local model can work behind the LLM Gateway.</p>
+<h3 id="amazon-bedrock"><a class="header" href="#amazon-bedrock">Amazon Bedrock</a></h3>
+<ul>
+<li>Prefer workload identity and short-lived AWS credentials rather than static
+access keys.</li>
+<li>Restrict IAM to approved model actions, model IDs, regions, and accounts.</li>
+<li>Use private connectivity when the customer requires it.</li>
+<li>Apply model allowlists, token and cost budgets, timeouts, retry policy,
+conformance tests, and audit policy in the LLM Gateway.</li>
+</ul>
+<h3 id="local-model"><a class="header" href="#local-model">Local Model</a></h3>
+<ul>
+<li>Place the model endpoint in an approved network zone.</li>
+<li>Require an authenticated, encrypted endpoint unless a formally approved
+same-host loopback profile is used.</li>
+<li>Enforce destination allowlists, redirect blocking, DNS-rebinding protection,
+request-size limits, and health/conformance tests.</li>
+<li>Record the model artifact, server version, quantization, context window, and
+qualification result because “local model” is not a stable deployment
+identity.</li>
+</ul>
+<p>The deployment workflow must not depend on a particular model to be correct.
+If the model is unavailable, deterministic validation, deployment, rollback,
+and operator diagnostics must remain functional.</p>
+<h2 id="ai-assisted-diagnosis"><a class="header" href="#ai-assisted-diagnosis">AI-Assisted Diagnosis</a></h2>
+<p>AI is most effective when it receives a structured evidence bundle instead of
+open-ended infrastructure access. The bundle may include:</p>
+<ul>
+<li>release manifest, commit SHAs, image digests, and snapshot IDs;</li>
+<li>failed workflow task and bounded command output;</li>
+<li>redacted Kubernetes events, resource status, and selected logs;</li>
+<li>readiness, metrics, trace, and dependency-check results;</li>
+<li>schema version, projection cursors, and results from approved read-only SQL;</li>
+<li>relevant source files and configuration with secrets removed;</li>
+<li>the last-known-good deployment diff.</li>
+</ul>
+<pre class="mermaid">flowchart TB
+    ALERT[Failed gate or production alert] --&gt; COLLECT[Deterministic evidence collector]
+    COLLECT --&gt; REDACT[Redact, size bound, and classify]
+    REDACT --&gt; AGENT[Light Agent analysis]
+    AGENT --&gt; READ[Approved read-only follow-up tools]
+    READ --&gt; AGENT
+    AGENT --&gt; PROPOSE[Root-cause report and proposed action]
+    PROPOSE --&gt; CLASS{Action class}
+    CLASS -- Read only --&gt; EXEC[Policy-controlled execution]
+    CLASS -- VM-only reversible --&gt; REVIEW[Operator review]
+    CLASS -- EKS or data mutation --&gt; APPROVE[Human change approval]
+    REVIEW --&gt; EXEC
+    APPROVE --&gt; WORKFLOW[Light Workflow]
+    WORKFLOW --&gt; EXEC
+    EXEC --&gt; VERIFY[Deterministic verification]
+    VERIFY --&gt; AUDIT[Evidence and audit record]
+</pre>
+
+<p>The first release should expose only allowlisted read operations to AI:</p>
+<ul>
+<li><code>kubectl get</code>, <code>describe</code>, events, rollout status, and bounded logs through a
+wrapper or Kubernetes API tool;</li>
+<li>repository search and read access to an exact checkout;</li>
+<li>bounded health, metrics, and trace queries;</li>
+<li>named, parameterized, read-only database queries;</li>
+<li>configuration snapshot inspection with secret redaction.</li>
+</ul>
+<p>Write operations should be invoked by a versioned workflow step or
+<code>light-deployer</code>, never by passing model-produced shell text to Bash. A model
+may propose a patch in an isolated branch, but tests, diff review, and human
+approval decide whether it advances.</p>
+<h2 id="eks-deployment-workflow"><a class="header" href="#eks-deployment-workflow">EKS Deployment Workflow</a></h2>
+<p>The preferred production pattern runs <code>light-deployer</code> inside the EKS cluster
+with a dedicated service account. It connects outbound to the control plane or
+accepts requests through a private, authenticated endpoint. It should not
+depend on a broad kubeconfig stored on the VM.</p>
+<pre class="mermaid">sequenceDiagram
+    participant Operator
+    participant Portal as Light Portal
+    participant Workflow as Light Workflow
+    participant Deployer as In-cluster Light Deployer
+    participant API as EKS API Server
+    participant Verify as Verification Suite
+
+    Operator-&gt;&gt;Portal: Select qualified release and target
+    Portal-&gt;&gt;Workflow: Start versioned deployment workflow
+    Workflow-&gt;&gt;Deployer: Render immutable bundle
+    Deployer--&gt;&gt;Workflow: Redacted manifest summary and digest
+    Workflow-&gt;&gt;Deployer: Server-side dry-run and diff
+    Deployer-&gt;&gt;API: Kubernetes dry-run
+    API--&gt;&gt;Deployer: Admission result
+    Deployer--&gt;&gt;Workflow: Policy result and blast-radius summary
+    Workflow--&gt;&gt;Operator: Approval task with exact diff
+    Operator-&gt;&gt;Workflow: Approve
+    Workflow-&gt;&gt;Deployer: Apply approved digest
+    Deployer-&gt;&gt;API: Server-side apply
+    API--&gt;&gt;Deployer: Resource status
+    Workflow-&gt;&gt;Verify: Run smoke and dependency gates
+    Verify--&gt;&gt;Workflow: Evidence
+    Workflow--&gt;&gt;Operator: Complete or request rollback
+</pre>
+
+<p>The approved digest must bind the template commit, rendered manifest,
+configuration snapshot, image digests, target cluster, namespace, and deployer
+policy. If any bound input changes after approval, approval is invalid and the
+workflow returns to dry-run and diff.</p>
+<h3 id="eks-access-policy"><a class="header" href="#eks-access-policy">EKS Access Policy</a></h3>
+<ul>
+<li>Use namespace-scoped <code>Role</code> and <code>RoleBinding</code> wherever possible.</li>
+<li>Separate deployer identities for development, test, and production.</li>
+<li>Allow only required resource kinds and verbs.</li>
+<li>Block cluster-scoped resources, CRDs, admission webhooks, RBAC changes, and
+namespace creation from the normal application deployer.</li>
+<li>Use a separately approved infrastructure pipeline for cluster foundations.</li>
+<li>Restrict Git hosts, repositories, refs, image registries, namespaces, and
+prune thresholds in deployer policy.</li>
+<li>Require server-side dry-run before apply.</li>
+<li>Redact Secret and sealed-secret data from diffs and logs.</li>
+<li>Record Kubernetes audit events and the Light Workflow request ID together.</li>
+</ul>
+<h2 id="qualification-gates"><a class="header" href="#qualification-gates">Qualification Gates</a></h2>
+<p>A customer release is qualified only when all mandatory gates are green.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Gate</th><th>Required evidence</th></tr>
+</thead>
+<tbody>
+<tr><td>Supply chain</td><td>Signed/checksummed artifacts, pinned image digests, SBOM, vulnerability-policy result</td></tr>
+<tr><td>Database bootstrap</td><td>Empty database recreated; schema validated; canonical events imported; projection cursors converged; no unexplained DLQ</td></tr>
+<tr><td>Service topology</td><td>Every required service ready; dependency and registration checks pass; no placeholder health check accepted</td></tr>
+<tr><td>Enterprise SSO</td><td>Login, token exchange, claim mapping, refresh, logout, CSRF, negative-user, and redirect-URI tests</td></tr>
+<tr><td>Authorization</td><td>Host, user, role/group, environment, endpoint, workflow, tool, and row/field policy tests</td></tr>
+<tr><td>Model</td><td>Provider conformance, timeout, fallback, budget, audit, privacy, and failure-mode tests</td></tr>
+<tr><td>Configuration</td><td>Snapshot audience, service, environment, digest, validity, and rollback tests</td></tr>
+<tr><td>Workflow</td><td>Persistence, retry, approval, runner fencing, idempotency, recovery, and audit tests</td></tr>
+<tr><td>Deployment</td><td>Render, policy, server-side dry-run, diff, apply, prune protection, rollout, and rollback rehearsal</td></tr>
+<tr><td>Reliability</td><td>Restart, dependency loss, database recovery, scaling, backup/restore, and selected soak tests</td></tr>
+<tr><td>Operations</td><td>Logs, metrics, traces, alerts, dashboards, runbooks, ownership, and evidence retention</td></tr>
+</tbody>
+</table>
+</div>
+<p>Passing the VM gates does not automatically prove EKS networking, admission,
+IAM, storage, autoscaling, or load-balancer behavior. The first EKS pilot must
+repeat the EKS-specific gates in POC. DEV promotion occurs only after those
+gates and the agreed POC stabilization interval pass.</p>
+<h2 id="rollback-and-recovery"><a class="header" href="#rollback-and-recovery">Rollback and Recovery</a></h2>
+<p>Rollback redeploys a previous immutable Light Portal deployment snapshot. It
+must restore the compatible image set, runtime configuration, deployment
+values, and manifests together. Kubernetes native Deployment rollback alone is
+insufficient because it does not restore related ConfigMaps, secret references,
+Services, or other resources.</p>
+<p>Database changes require a separate recovery decision:</p>
+<ul>
+<li>prefer backward-compatible, forward-only migrations;</li>
+<li>take and verify backups before a production schema boundary;</li>
+<li>rehearse restore in an isolated environment;</li>
+<li>never automatically reverse a data migration merely because pods rolled
+back;</li>
+<li>define fix-forward and restore criteria in the change record.</li>
+</ul>
+<p>The previous qualified release, its artifacts, snapshots, manifests, workflow
+definition, and evidence must remain available for the customer retention
+period.</p>
+<h2 id="failure-containment"><a class="header" href="#failure-containment">Failure Containment</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Failure</th><th>Containment and response</th></tr>
+</thead>
+<tbody>
+<tr><td>Daily release fails</td><td>Keep the previous qualified VM and EKS release; publish no candidate</td></tr>
+<tr><td>VM recreation fails</td><td>Mark candidate rejected; collect evidence; do not deploy</td></tr>
+<tr><td>SSO unavailable</td><td>Preserve break-glass operator procedure under customer control; do not weaken token validation</td></tr>
+<tr><td>Model unavailable</td><td>Continue deterministic deployment and diagnostics; route to approved fallback only when policy allows</td></tr>
+<tr><td>AI gives a wrong diagnosis</td><td>Deterministic gates and human approval prevent promotion; retain evidence for review</td></tr>
+<tr><td>Dry-run or admission fails</td><td>Apply nothing; return exact redacted result to the workflow</td></tr>
+<tr><td>Partial EKS rollout</td><td>Stop promotion, collect status, and invoke the approved rollback or fix-forward path</td></tr>
+<tr><td>Projection lag</td><td>Hold readiness until cursors converge; investigate DLQ and consumer health</td></tr>
+<tr><td>Secret appears in evidence</td><td>Stop the workflow, revoke or rotate as required, sanitize storage, and audit access</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="delivery-phases"><a class="header" href="#delivery-phases">Delivery Phases</a></h2>
+<h3 id="phase-0-customer-decisions-and-threat-model"><a class="header" href="#phase-0-customer-decisions-and-threat-model">Phase 0: Customer Decisions and Threat Model</a></h3>
+<ul>
+<li>Confirm customer domains, redirect URIs, identity provider, claim mapping,
+AWS accounts, EKS clusters, namespaces, data services, network boundaries,
+certificate authority, secret service, registries, and observability stack.</li>
+<li>Classify data allowed to reach Bedrock or a local model.</li>
+<li>Define human approval roles, break-glass procedure, retention, and change
+management.</li>
+<li>Produce the initial threat model and responsibility matrix.</li>
+</ul>
+<p>Exit: architecture and security owners approve the boundaries; no cluster
+mutation is enabled.</p>
+<h3 id="phase-1-reproducible-bootstrap-vm"><a class="header" href="#phase-1-reproducible-bootstrap-vm">Phase 1: Reproducible Bootstrap VM</a></h3>
+<ul>
+<li>Create the customer-specific <code>portal-config-dev</code> derivative without forking
+application code.</li>
+<li>Implement daily immutable release consumption and complete database
+recreation.</li>
+<li>Establish readiness, projection convergence, smoke tests, evidence capture,
+and rollback to the previous VM release.</li>
+<li>Keep AI read-only.</li>
+</ul>
+<p>Exit: five consecutive daily recreations pass without manual database or
+container repair.</p>
+<h3 id="phase-2-enterprise-sso-and-model"><a class="header" href="#phase-2-enterprise-sso-and-model">Phase 2: Enterprise SSO and Model</a></h3>
+<ul>
+<li>Configure enterprise OIDC SSO and backend token exchange.</li>
+<li>Prove claim mapping, negative access, refresh, and logout.</li>
+<li>Connect the LLM Gateway to one approved Bedrock or local deployment.</li>
+<li>Prove provider conformance, privacy, budget, timeout, audit, and failure
+behavior.</li>
+</ul>
+<p>Exit: security tests pass and provider credentials never appear in logs,
+snapshots, workflow context, or prompts.</p>
+<h3 id="phase-3-workflow-and-diagnostic-automation"><a class="header" href="#phase-3-workflow-and-diagnostic-automation">Phase 3: Workflow and Diagnostic Automation</a></h3>
+<ul>
+<li>Encode build, qualification, evidence, approval, and diagnosis flows in
+versioned Light Workflow definitions.</li>
+<li>Use allowlisted runner templates and structured diagnostic tools.</li>
+<li>Add bounded AI patch proposals in disposable branches.</li>
+<li>Retain a manual operator path and test model outage.</li>
+</ul>
+<p>Exit: repeated injected failures produce actionable evidence and cannot bypass
+approval or mutate EKS.</p>
+<h3 id="phase-4-official-eks-poc"><a class="header" href="#phase-4-official-eks-poc">Phase 4: Official EKS POC</a></h3>
+<ul>
+<li>Install the namespace-scoped in-cluster deployer.</li>
+<li>Render the complete Kubernetes bundle and pass policy, dry-run, admission,
+apply, smoke, observability, restart, and rollback gates.</li>
+<li>Validate RDS/Kafka connectivity, ingress, DNS, TLS, IdP callbacks, storage,
+autoscaling, and network policy in EKS.</li>
+<li>Preserve the POC database and prove the forward-only patch and event-delta
+path against production-shaped data.</li>
+</ul>
+<p>Exit: the customer accepts the official POC deployment, data migration, and
+rollback rehearsal.</p>
+<h3 id="phase-5-partner-dev-environment"><a class="header" href="#phase-5-partner-dev-environment">Phase 5: Partner DEV Environment</a></h3>
+<ul>
+<li>Create the isolated DEV namespaces and persistent data services.</li>
+<li>Promote the exact POC-qualified digests after the stabilization and
+partner-impact review.</li>
+<li>Prove partner SSO/access, instance authoring, integration endpoints,
+application workflows, migration compatibility, backup, and recovery.</li>
+<li>Establish a predictable maintenance calendar, release notes, and support
+channel for partners.</li>
+</ul>
+<p>Exit: partners can develop and integrate without daily resets or unannounced
+release movement.</p>
+<h3 id="phase-6-future-production-promotion"><a class="header" href="#phase-6-future-production-promotion">Phase 6: Future Production Promotion</a></h3>
+<ul>
+<li>Promote the exact qualified digests through the customer change process.</li>
+<li>Use canary or staged rollout where service behavior permits.</li>
+<li>Observe the agreed stabilization window and SLOs.</li>
+<li>Transfer runbooks, dashboards, evidence, and ownership to operations.</li>
+</ul>
+<p>Exit: production acceptance criteria and the support handoff are signed.</p>
+<h2 id="success-measures"><a class="header" href="#success-measures">Success Measures</a></h2>
+<ul>
+<li>Five consecutive unattended VM recreations before the EKS pilot.</li>
+<li>One release manifest identifies every deployed artifact and configuration
+input without a floating tag.</li>
+<li>No undocumented manual database seed or post-start configuration step.</li>
+<li>Every Bootstrap reset preserves and verifies the customer host through a
+checksummed host-scoped package plus the explicit stable host-root event.</li>
+<li>POC and DEV pass both preserved-database upgrade and fresh-database tests for
+every promoted release.</li>
+<li>DEV advances only from a POC-qualified digest after the defined stabilization
+interval.</li>
+<li>Every EKS mutation maps to a workflow request, approval, deployer identity,
+manifest digest, and Kubernetes audit record.</li>
+<li>POC, DEV, and production deployer permissions are namespace scoped with documented
+exceptions.</li>
+<li>SSO success and negative tests cover the exact customer redirect URI and
+claim mappings.</li>
+<li>Mean time to produce a root-cause evidence bundle is measured and reduced.</li>
+<li>A model outage does not block deterministic deployment or rollback.</li>
+<li>Backup restore and immutable deployment rollback are both rehearsed.</li>
+</ul>
+<h2 id="customer-responsibilities"><a class="header" href="#customer-responsibilities">Customer Responsibilities</a></h2>
+<p>The customer supplies or approves:</p>
+<ul>
+<li>enterprise IdP application registration and test users;</li>
+<li>DNS, certificates, ingress, firewall, proxy, and private connectivity;</li>
+<li>AWS accounts, IAM roles, EKS baseline, managed data services, and backups;</li>
+<li>secrets management, container and artifact registries, and vulnerability
+policy;</li>
+<li>logging, monitoring, audit, SIEM, retention, and incident-response
+integration;</li>
+<li>data classification and model-use policy;</li>
+<li>change approvers, production operators, and support escalation paths.</li>
+</ul>
+<p>The Light platform team supplies:</p>
+<ul>
+<li>versioned service artifacts and release manifest;</li>
+<li>bootstrap automation and database/event baseline;</li>
+<li>configuration and deployment snapshot generation;</li>
+<li>workflow definitions, deployment policies, tests, and runbooks;</li>
+<li>product-level defect diagnosis and fixes;</li>
+<li>evidence describing which capabilities are implemented, qualified, partial,
+or deferred.</li>
+</ul>
+<h2 id="recommendation-17"><a class="header" href="#recommendation-17">Recommendation</a></h2>
+<p>Proceed with the Linux VM bootstrap environment as the first delivery
+milestone. It is the fastest practical way to discover enterprise-specific
+SSO, network, certificate, configuration, database, and service-topology gaps
+before EKS change windows become the debugging loop.</p>
+<p>Do not sell the VM as proof that production is automatic. Sell it as a
+repeatable qualification factory: the daily release creates a candidate, the
+VM proves the candidate against the customer shape, humans approve an exact
+immutable bundle, <code>light-workflow</code> preserves the process, and the in-cluster
+<code>light-deployer</code> performs only the Kubernetes actions allowed by customer
+policy. This gives developers speed while preserving the controls enterprise
+security and operations teams require.</p>
+<h2 id="related-designs-1"><a class="header" href="#related-designs-1">Related Designs</a></h2>
+<ul>
+<li><a href="#deployment-workflow">Deployment Workflow</a></li>
+<li><a href="#release-workflow">Release Workflow</a></li>
+<li><a href="#msal-light-oauth-integration">MSAL Light OAuth Integration</a></li>
+<li><a href="#rust-product-and-portal-service-inventory">Rust Product And Portal Service Inventory</a></li>
+<li><a href="#fast-snapshot-derived-database-bootstrap">Fast Snapshot-Derived Database Bootstrap</a></li>
+<li><a href="#llm-gateway-configuration-topology">LLM Gateway Topology Per Host And Environment</a></li>
+<li><a href="#local-model-provider-transport-for-llm-gateway">Local Model Provider Transport For LLM Gateway</a></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-oauth-and-oauth-kafka-agentcore-oidc-discovery"><a class="header" href="#light-oauth-and-oauth-kafka-agentcore-oidc-discovery">Light OAuth and OAuth Kafka AgentCore OIDC Discovery</a></h1>
 <h2 id="problem-21"><a class="header" href="#problem-21">Problem</a></h2>
 <p>Issue https://github.com/lightapi/portal-service/issues/44 asks whether
@@ -43388,7 +44137,7 @@ the provider <code>jwk</code> from <code>auth_provider_t</code>. The implementat
 that the JWT header <code>kid</code> is present in the returned JWKS for the same provider.
 That guarantee matters more once external AWS services cache the discovery and
 JWKS responses.</p>
-<h2 id="goals-37"><a class="header" href="#goals-37">Goals</a></h2>
+<h2 id="goals-38"><a class="header" href="#goals-38">Goals</a></h2>
 <ul>
 <li>Let AWS AgentCore use Rust <code>light-oauth</code> or Java <code>oauth-kafka</code> as a JWT
 bearer token issuer.</li>
@@ -43400,7 +44149,7 @@ claims working.</li>
 <li>Keep issuer, audience, and discovery URLs deterministic across environments.</li>
 <li>Add tests that prove discovery, JWKS, and signed token claims line up.</li>
 </ul>
-<h2 id="non-goals-40"><a class="header" href="#non-goals-40">Non-Goals</a></h2>
+<h2 id="non-goals-41"><a class="header" href="#non-goals-41">Non-Goals</a></h2>
 <ul>
 <li>Do not implement full OIDC identity-provider behavior in the first phase.</li>
 <li>Do not add dynamic client registration.</li>
