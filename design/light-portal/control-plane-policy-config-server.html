@@ -35,7 +35,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-3dec35d5.js";
+            window.path_to_searchindex_js = "../../searchindex-5915fdb6.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-3f26e04f.js"></script>
@@ -1118,6 +1118,129 @@ loader and service-owned operational database roles.</li>
 <li>Prove configuration delivery across independently operated environments.</li>
 <li>Run rollback, partial outage, stale snapshot, and mixed-generation exercises.</li>
 </ul>
+<h2 id="executable-agent-publisher-implementation-plan"><a class="header" href="#executable-agent-publisher-implementation-plan">Executable Agent Publisher Implementation Plan</a></h2>
+<p>The generic phases above remain the target architecture. The following track
+closes the concrete bootstrap failure in which an imported Agent snapshot
+contains only bootstrap and <code>operationalStore.*</code> values while <code>light-agent</code>
+requires a complete immutable <code>runtimePolicy</code>, <code>portalAssociation</code>, and
+<code>agentPolicy</code> projection. This track is deliberately Agent-first; it must not
+invent a local-only policy format or bypass the Config Server snapshot
+authority.</p>
+<h3 id="p0-freeze-the-cross-language-contract-and-fail-before-compose"><a class="header" href="#p0-freeze-the-cross-language-contract-and-fail-before-compose">P0: Freeze the cross-language contract and fail before Compose</a></h3>
+<p>Owners: <code>light-fabric</code>, <code>light-portal</code>, <code>portal-config-loc</code>, and
+<code>light-portal-install</code>.</p>
+<ul>
+<li>Freeze one machine-checked manifest of the Agent property names, value types,
+required/non-empty fields, UUID fields, digest fields, identity equalities,
+and validity-window ordering accepted by <code>light-agent</code>.</li>
+<li>Add a Java/Rust fixture proving the two existing digest contracts exactly:
+RFC 8785 for <code>runtimePolicy.contentDigest</code>, and the deployed ordered
+<code>PolicySnapshot</code> JSON representation for <code>runtimePolicy.policyDigest</code>.</li>
+<li>Make local and installer bootstrap query each current Agent snapshot for the
+complete mandatory projection. Report the service ID and missing properties
+before starting application services. The existing 15-property
+operational-store check is necessary but not sufficient.</li>
+<li>Record the current incomplete 21-property snapshot as a negative fixture so
+a future validation regression cannot again report it as ready.</li>
+</ul>
+<p>Exit gate: both deployment paths reject the current incomplete baseline with a
+bounded missing-property diagnostic, and accept a cross-language full-policy
+fixture.</p>
+<h3 id="p1-compile-the-base-agent-audience-projection"><a class="header" href="#p1-compile-the-base-agent-audience-projection">P1: Compile the base Agent audience projection</a></h3>
+<p>Owner: <code>light-portal</code>.</p>
+<ul>
+<li>Add an <code>AgentPolicyProjectionCompiler</code> that resolves one active native Agent
+runtime through <code>instance_t -&gt; instance_api_t -&gt; api_version_t -&gt; agent_definition_t</code> and rejects missing, duplicate, read-only, cross-host, or
+environment-mismatched links.</li>
+<li>Resolve the selected <code>llm_public_alias_t</code>, Agent definition limits, assigned
+<code>agent_skill_t</code>/<code>skill_t</code> records, and the existing operational-store
+projection. Prompt text comes from the registered Agent/API description;
+provider credentials never enter the Agent projection.</li>
+<li>Compile safe empty collections for optional quota, rate, runner, Knowledge,
+A2A, channel, data-boundary, and delegation policy only when no authoring
+record grants them. Absence must never widen authority.</li>
+<li>Produce every component digest, the ordered policy-snapshot digest, the
+canonical Agent content digest, source aggregate versions, schema version,
+compatibility generation, and the canonical workload identity
+<code>(host, serviceId, envTag)</code>.</li>
+<li>Use an explicit <code>LOCAL_DEMO</code> lease profile for <code>local.localhost</code> installations
+so downloadable release baselines do not expire before evaluation. Production
+profiles retain bounded leases; changing a lease profile creates a new
+publication.</li>
+</ul>
+<p>Exit gate: real-PostgreSQL compiler tests cover all three local Agent instances,
+model-alias mismatch, duplicate runtime links, stale Skills, digest parity, and
+deny-safe optional defaults.</p>
+<h3 id="p2-persist-an-event-backed-atomic-publication"><a class="header" href="#p2-persist-an-event-backed-atomic-publication">P2: Persist an event-backed atomic publication</a></h3>
+<p>Owners: <code>light-portal</code>, <code>genai-command</code>, and <code>genai-query</code>.</p>
+<ul>
+<li>Add an Agent publication-candidate query and an explicit publish command.
+Publishing emits one immutable <code>AgentPolicyPublishedEvent</code> whose manifest
+contains the exact property writes, expected property versions, source
+versions, lease profile, policy/content digests, publication ID, and Config
+snapshot ID.</li>
+<li>Project the event idempotently in one database transaction into
+<code>instance_property_t</code>, <code>agent_policy_snapshot_t</code>, and the immutable Config
+snapshot, then move the logical current pointer. No incomplete intermediate
+snapshot is observable. Bootstrap projection reconstructs the same desired
+properties and snapshot without calling external services or consulting
+wall-clock time. Operational repair replay is excluded, matching the Config
+snapshot events, so an obsolete publication cannot become current later.</li>
+<li>Reject stale expected versions and property ownership conflicts. Updates and
+removals are explicit; a second publisher cannot silently take ownership.</li>
+<li>Register the events in aggregate identity, replay policy, global snapshot
+dependency, export, and import contracts.</li>
+</ul>
+<p>Exit gate: live command execution and bootstrap reconstruction produce
+byte-identical property sets and digests, and global snapshot export contains
+all authority needed to rebuild them.</p>
+<h3 id="p3-snapshot-validation-and-atomic-activation"><a class="header" href="#p3-snapshot-validation-and-atomic-activation">P3: Snapshot validation and atomic activation</a></h3>
+<p>Owners: <code>light-portal</code>, Config Server, and <code>light-fabric</code>.</p>
+<ul>
+<li>Validate the candidate digest and expected property versions before applying
+any write. Create and activate the Agent configuration snapshot in the same
+projection transaction; any validation, write, evidence, or snapshot failure
+rolls the entire publication back.</li>
+<li>The compiler renders the exact Agent values accepted by the frozen Rust
+contract before event creation. The projector stores the policy and content
+digests as immutable evidence and activates any compatible staged A2A overlay
+only after the new snapshot contains all of its proposed properties.</li>
+<li>A2A publication may overlay an already active base Agent generation but may
+not create or repair that base generation.</li>
+<li>Preserve last-known-good behavior and return the publication, policy,
+content, and snapshot identities in Config Server metadata.</li>
+</ul>
+<p>Exit gate: an incomplete snapshot, wrong identity, bad digest, expired lease,
+or mixed property generation never becomes current.</p>
+<h3 id="p4-release-and-operator-workflow"><a class="header" href="#p4-release-and-operator-workflow">P4: Release and operator workflow</a></h3>
+<p>Owners: Portal View, release automation, and <code>portal-config-loc</code>.</p>
+<ul>
+<li>Expose <code>Current</code> or <code>Ready to publish</code> for each linked native Agent, including
+candidate validation failures. Publication is an explicit action after Agent
+registration or policy changes.</li>
+<li>Before <code>daily-release.sh</code> exports the global snapshot, require active and
+applied base publications for the Account, Advisor, and Tech Support local
+Agents. Release generation fails if any required Agent is missing or stale.</li>
+<li>Export the publication events before their <code>ConfigSnapshotCreatedEvent</code>
+dependencies. Never export derived snapshot-property rows as replacement
+authority.</li>
+</ul>
+<p>Exit gate: a release artifact recreated into an empty database yields the same
+three active Agent policy generations without manual SQL or retained container
+caches.</p>
+<h3 id="p5-local-and-installer-end-to-end-qualification"><a class="header" href="#p5-local-and-installer-end-to-end-qualification">P5: Local and installer end-to-end qualification</a></h3>
+<p>Owners: <code>portal-config-loc</code> and <code>light-portal-install</code>.</p>
+<ul>
+<li>Run identical full Agent snapshot preflight in both repositories.</li>
+<li>Qualify every required Agent container through health/readiness, then verify
+its reported snapshot and content digest against Config Server.</li>
+<li>Exercise fresh Docker and Podman/Silverblue installs, database recreation,
+update over an existing last-known-good cache, and rollback.</li>
+<li>Keep only the user-supplied LLM provider API key in <code>.env</code>; Agent publication
+identifiers, database URLs, and local demo policy are non-secret configuration.</li>
+</ul>
+<p>Exit gate: both repositories recreate from the same signed release bundle and
+all required Agents remain healthy with matching publication evidence.</p>
 <h2 id="acceptance-criteria"><a class="header" href="#acceptance-criteria">Acceptance Criteria</a></h2>
 <p>The design is complete when:</p>
 <ol>
