@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-042800a8.js";
+            window.path_to_searchindex_js = "searchindex-3dec35d5.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-beca83cc.js"></script>
+        <script src="toc-3f26e04f.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -23578,14 +23578,904 @@ projection-advance notification channel?</li>
 release-built archive sufficient for installation performance?</li>
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="composable-multi-host-snapshot-export-and-bootstrap"><a class="header" href="#composable-multi-host-snapshot-export-and-bootstrap">Composable Multi-Host Snapshot Export And Bootstrap</a></h1>
+<h2 id="status-13"><a class="header" href="#status-13">Status</a></h2>
+<p>Accepted design. Phases 0 through 4 are implemented in the working
+repositories. The Phase 4 release cut-over requires signed v2 archives and
+trusted public-key publication; final release qualification still requires a
+production-schema two-host empty-database restore and a baseline-plus-delta
+composition exercise.</p>
+<p>This design extends
+<a href="#fast-snapshot-derived-database-bootstrap">Fast Snapshot-Derived Database Bootstrap</a>.
+That design defines how one generated <code>events.json</code> is imported efficiently;
+this design defines which user, membership, profile, and access events may be
+generated when the source environment contains more than one host.</p>
+<h2 id="decision-summary-10"><a class="header" href="#decision-summary-10">Decision Summary</a></h2>
+<ol>
+<li>Treat <code>user_t</code> identity as environment-wide and emit at most one user birth
+event for each <code>user_id</code> in a complete environment bundle.</li>
+<li>Treat employee/customer profile as authoritative per active membership. A
+host switch changes session selection only and never moves profile rows.</li>
+<li>Treat <code>user_host_t.current</code> as session-selection state, not ownership or
+membership. <code>active = TRUE</code> determines whether a membership exists.</li>
+<li>Generate a complete multi-host restore from one coordinated snapshot over
+an explicit set of hosts. Do not concatenate independently converted
+self-contained host exports.</li>
+<li>Introduce explicit bundle modes: <code>environment</code>, <code>host-delta</code>, and
+<code>standalone-host</code>. Only the first two are composable under their declared
+dependency contracts.</li>
+<li>Keep <code>UserCreatedEvent</code> and add schema v2 for shared identity only. Emit one
+<code>UserHostCreatedEvent</code> stream birth for every active membership, including
+the membership associated with any compatibility user birth.</li>
+<li>Export host-scoped access rows only when their user is either provided by
+the same bundle or declared as a required identity dependency.</li>
+<li>Fail export before publication when the selected rows are not
+referentially closed. Never publish an incomplete <code>UserCreatedEvent</code> or an
+access event whose user cannot exist at its import point.</li>
+<li>Preserve current-host selection only after all included memberships exist.
+A <code>UserHostSwitchedEvent</code> follows the version-one
+<code>UserHostCreatedEvent</code> in the same <code>userId|hostId</code> stream.</li>
+<li>Repair <code>switchUserHost</code> and <code>deleteUserHost</code> before coordinated export:
+switching must require active memberships and must not move profiles;
+deletion must clear <code>current</code> and deactivate all host access children.</li>
+<li>Classify every exportable table in one conversion-coverage registry as
+standalone-event, folded-into-parent, or intentionally excluded. Any
+exported row with no declared conversion disposition blocks publication.</li>
+<li>Keep existing single-host release behavior available during migration, but
+mark a self-contained <code>standalone-host</code> bundle as non-composable and
+normalize exactly one membership as current.</li>
+</ol>
+<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
+<p>The current snapshot exporter selects active users through active
+<code>user_host_t</code> membership for one source host. It intentionally includes an
+active membership even when <code>current = FALSE</code>. This is correct for a user who
+belongs to several hosts and merely selects a different host for the current
+session.</p>
+<p>The current converter then folds <code>user_host_t</code>, <code>employee_t</code>, and <code>customer_t</code>
+data into <code>UserCreatedEvent</code>. Those child tables do not produce standalone
+events. Each conversion run also creates a new event UUID and starts aggregate
+version allocation at one for every aggregate subject.</p>
+<p>These rules make independently converted host snapshots non-composable. Given
+one user who belongs to Host A and Host B:</p>
+<ul>
+<li>the Host A conversion emits <code>UserCreatedEvent(subject = userId, version = 1)</code>;</li>
+<li>the Host B conversion emits another
+<code>UserCreatedEvent(subject = userId, version = 1)</code>;</li>
+<li>the event IDs differ, so event-ID idempotency cannot identify them as the
+same event;</li>
+<li>canonical event storage rejects the duplicate <code>(aggregate_id, aggregate_version)</code> pair; and</li>
+<li>later host-scoped access events may fail or leave an incomplete membership
+projection, depending on transaction and DLQ boundaries.</li>
+</ul>
+<p>Host switching exposes a second inconsistency. The current switch projection:</p>
+<ul>
+<li>changes every currently selected membership to <code>current = FALSE</code>;</li>
+<li>sets the selected membership to <code>current = TRUE</code>; and</li>
+<li>moves the user’s <code>employee_t</code> or <code>customer_t</code> row to the selected host.</li>
+</ul>
+<p>It does not deactivate the old membership or the old host’s access grants. A
+later Host A snapshot can therefore select the active user and Host A roles
+while failing to find the employee/customer data required by the generated
+<code>UserCreatedEvent</code>.</p>
+<p>The switch SQL also lacks active-membership predicates. It can select an
+inactive target membership, and its profile updates have no source-host
+predicate: every employee/customer row for the user is moved. This both
+destroys valid per-membership state and can collide with an existing target
+profile primary key.</p>
+<p>Deletion has the complementary defect. <code>UserHostDeletedEvent</code> currently
+soft-deletes only <code>user_host_t</code>; it neither clears <code>current</code> nor deactivates the
+host’s user access children. The source projection can therefore retain an
+inactive current membership and active grants that no longer have an active
+membership parent.</p>
+<p>The observed failure is not an isolated bad-row case. It is evidence that a
+host-filtered projection snapshot does not yet define a closed, composable
+user-identity boundary.</p>
+<h2 id="goals-24"><a class="header" href="#goals-24">Goals</a></h2>
+<ul>
+<li>Recreate a selected multi-host environment without duplicate user births.</li>
+<li>Preserve every included active membership and its host-scoped access state.</li>
+<li>Support a user who switches the currently selected host without treating the
+old membership as deleted.</li>
+<li>Support an explicit leave or transfer workflow that deactivates old-host
+membership and access state.</li>
+<li>Make bundle dependencies and composition rules machine-verifiable.</li>
+<li>Reject malformed export candidates before they reach release storage or a
+destination event store.</li>
+<li>Preserve canonical aggregate-version and event-ID invariants.</li>
+<li>Give <code>portal-config-loc</code>, development, installation, backup, and tenant
+migration workflows one documented contract.</li>
+<li>Provide an incremental migration path from the existing
+<code>UserCreatedEvent</code> projection behavior.</li>
+</ul>
+<h2 id="non-goals-27"><a class="header" href="#non-goals-27">Non-Goals</a></h2>
+<ul>
+<li>Reconstruct original business history from projection snapshots.</li>
+<li>Make two legacy self-contained host exports composable by ignoring duplicate
+event-store errors.</li>
+<li>Use <code>current = FALSE</code> as a synonym for inactive membership.</li>
+<li>Repair a published baseline by editing canonical event-store or DLQ payloads.</li>
+<li>Preserve access assignments for a host that is intentionally outside a
+standalone export when the required identity cannot be represented safely.</li>
+<li>Define cross-environment user-ID or email conflict resolution for tenant
+migration. That remains a separate mapping and approval concern.</li>
+</ul>
+<h2 id="terminology-6"><a class="header" href="#terminology-6">Terminology</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Term</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td>Environment-wide identity</td><td>One <code>user_t</code> row identified by <code>user_id</code>, shared by all memberships in one Portal environment.</td></tr>
+<tr><td>Membership</td><td>One active or inactive <code>(host_id, user_id)</code> relationship in <code>user_host_t</code>.</td></tr>
+<tr><td>Current host</td><td>The active membership selected for the user’s current session. It is not an ownership marker.</td></tr>
+<tr><td>Host profile</td><td>Host-scoped employee or customer identity data owned by one active membership.</td></tr>
+<tr><td>Access child</td><td>A host-scoped role, group, attribute, position, permission, column-filter, or row-filter assignment that references a user.</td></tr>
+<tr><td>Global user child</td><td>A user-owned row without <code>host_id</code>, such as <code>user_crypto_wallet_t</code>.</td></tr>
+<tr><td>Soft-linked user child</td><td>A row carrying <code>user_id</code> without an enforced FK, such as <code>agent_memory_bank_t</code>; it still requires an explicit conversion dependency.</td></tr>
+<tr><td>Included host set</td><td>The complete set of source hosts selected for one coordinated environment export.</td></tr>
+<tr><td>Provided identity</td><td>A user birth emitted by the current bundle.</td></tr>
+<tr><td>Required identity</td><td>A user that must already exist before a host-delta bundle is imported.</td></tr>
+<tr><td>Referential closure</td><td>Every emitted child has its required parent in the bundle or in an explicit prerequisite manifest.</td></tr>
+<tr><td>Authority host</td><td>The host stamped into the CloudEvent <code>host</code> extension for authorization and append routing when the aggregate itself is environment-wide. It is not aggregate ownership.</td></tr>
+<tr><td>Conversion coverage registry</td><td>The authoritative disposition and dependency declaration for every exportable table.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="current-implementation-findings-1"><a class="header" href="#current-implementation-findings-1">Current Implementation Findings</a></h2>
+<h3 id="user-identity-and-membership-have-different-scopes"><a class="header" href="#user-identity-and-membership-have-different-scopes">User identity and membership have different scopes</a></h3>
+<p><code>user_t</code> is keyed by <code>user_id</code> and has no <code>host_id</code>. <code>user_host_t</code> is keyed by
+<code>(host_id, user_id)</code>. The projection already allows a <code>UserCreatedEvent</code> to
+find an existing shared user and ensure another host membership, but the event
+stream remains one user aggregate keyed by <code>user_id</code>.</p>
+<p>Consequently, projection-level upsert behavior cannot make two version-one
+user birth events valid. Event append correctness is decided before or
+independently of projection idempotency.</p>
+<h3 id="host-scoped-user-export-includes-non-current-membership"><a class="header" href="#host-scoped-user-export-includes-non-current-membership">Host-scoped user export includes non-current membership</a></h3>
+<p>The specialized <code>user_t</code> exporter selects an active user when an active
+membership exists for the selected host. It does not require
+<code>user_host_t.current = TRUE</code>. The specialized <code>user_host_t</code> exporter likewise
+includes active current and non-current memberships.</p>
+<p>This is the correct base rule for multi-host membership. Excluding every
+non-current membership would silently remove valid users and access grants
+from all hosts other than the currently selected one.</p>
+<h3 id="access-children-are-selected-independently"><a class="header" href="#access-children-are-selected-independently">Access children are selected independently</a></h3>
+<p><code>role_user_t</code>, <code>group_user_t</code>, <code>attribute_user_t</code>, <code>user_position_t</code>,
+<code>user_permission_t</code>, <code>user_col_filter_t</code>, and <code>user_row_filter_t</code> use generic
+host-and-active selection rather than one authoritative membership closure.
+The permission and filter rows also depend on <code>(host_id, endpoint_id)</code>, so they
+must follow their API endpoint parents as well as user identity and membership.</p>
+<p>This permits an access child to be exported even when its user birth is absent
+or malformed. The database foreign key is a last line of defense, not an
+export-selection policy.</p>
+<p>FK discovery is insufficient on its own. <code>agent_memory_bank_t</code> carries
+<code>user_id</code>, but its user FK was intentionally removed as part of operational
+constraint decoupling. The conversion registry must retain this semantic
+dependency even when database metadata cannot discover it.</p>
+<h3 id="membership-and-profile-rows-are-folded-into-user-birth"><a class="header" href="#membership-and-profile-rows-are-folded-into-user-birth">Membership and profile rows are folded into user birth</a></h3>
+<p><code>user_host_t</code>, <code>employee_t</code>, and <code>customer_t</code> are conversion-skip tables.
+Their selected values are merged into <code>UserCreatedEvent</code>. This makes a
+single-host bootstrap convenient, but it prevents two host conversions from
+being composed without repeating the shared user birth.</p>
+<p><code>user_crypto_wallet_t</code> exposes a separate coverage failure. It is exported for
+users selected through host membership and is also listed as a conversion-skip
+table, but it is not folded into <code>UserCreatedEvent</code> and no standalone event is
+emitted. A successful conversion therefore loses wallet rows silently. The
+coverage registry and row-accounting gate in this design make that state a
+publication failure until a portable wallet event or explicit parent fold is
+implemented.</p>
+<h3 id="membership-projection-implementation-status"><a class="header" href="#membership-projection-implementation-status">Membership projection implementation status</a></h3>
+<p>The Phase 2 <code>createUserHost</code> schema-v2 path honors the event payload’s
+<code>current</code> value and updates older active memberships monotonically. The legacy
+schema-v1 path retains destination-derived current selection for compatibility.</p>
+<p>The Phase 0.5 implementation establishes employee/customer profiles as
+authoritative per active membership. <code>switchUserHost</code> validates an active
+target, changes only membership current flags, and never moves profile rows.
+<code>deleteUserHost</code> clears current state and deactivates host-local access rows
+only when the membership delete advances its aggregate version. Controlled
+repair events backfill already-drifted per-membership profiles at sequential
+user aggregate versions.</p>
+<h3 id="one-host-remapping-cannot-represent-an-environment-bundle"><a class="header" href="#one-host-remapping-cannot-represent-an-environment-bundle">One-host remapping cannot represent an environment bundle</a></h3>
+<p>The current converter blindly replaces one <code>sourceHostId</code> string with one
+<code>targetHostId</code> throughout row values and stamps that one target host into every
+CloudEvent <code>host</code> extension. An N-host bundle requires typed N-way mapping and
+per-event envelope-host derivation. Arbitrary string values must not be
+rewritten merely because they equal a source host UUID.</p>
+<p>The existing single-host snapshot method does use one repeatable-read
+connection across all tables in that call. The new requirement is stronger:
+all selected hosts must be read by one coordinated call and one repeatable-read
+transaction, not by invoking the existing method independently for each host.</p>
+<h3 id="separate-conversion-runs-allocate-conflicting-streams"><a class="header" href="#separate-conversion-runs-allocate-conflicting-streams">Separate conversion runs allocate conflicting streams</a></h3>
+<p>Snapshot conversion allocates versions in an in-memory map scoped to one
+conversion call. It generates a random event UUID for each output event. Two
+independent snapshots containing the same user therefore produce distinct
+events with the same <code>subject = userId</code> and <code>aggregateversion = 1</code>.</p>
+<p>The converter also intentionally allocates versions greater than one when
+several CreatedEvents share a subject. Validation must require that the first
+event for each subject is version one and that the subject’s versions are
+contiguous; it must not require every CreatedEvent to have version one.</p>
+<h2 id="authority-and-state-rules"><a class="header" href="#authority-and-state-rules">Authority And State Rules</a></h2>
+<p>The design adopts the following authoritative meanings.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>State</th><th>Authority</th><th>Export rule</th></tr>
+</thead>
+<tbody>
+<tr><td>Shared user identity</td><td><code>user_t</code></td><td>Emit once per complete environment bundle.</td></tr>
+<tr><td>Host membership</td><td><code>user_host_t.active</code></td><td>Include when active and its host is selected.</td></tr>
+<tr><td>Current selection</td><td><code>user_host_t.current</code></td><td>Restore after memberships; never use as the membership filter.</td></tr>
+<tr><td>Employee/customer profile</td><td><code>employee_t</code> / <code>customer_t</code></td><td>One profile per applicable active membership; require complete identity fields and preserve its host.</td></tr>
+<tr><td>Roles, groups, attributes, and positions</td><td>Their host-scoped active rows</td><td>Include only when the corresponding membership and user dependency are satisfied.</td></tr>
+<tr><td>User permissions and filters</td><td>Their host-scoped active rows</td><td>Include only after user, membership, API version, and endpoint dependencies are satisfied.</td></tr>
+<tr><td>Crypto wallets</td><td><code>user_crypto_wallet_t</code></td><td>Environment-wide user child; emit through an explicit portable event/fold contract exactly once per user.</td></tr>
+<tr><td>Soft-linked user data</td><td>Explicit registry declaration</td><td>Do not rely on FK discovery; enforce the declared identity and host dependencies.</td></tr>
+<tr><td>User leaves a host</td><td>Explicit membership deactivation event</td><td>Exclude inactive membership and its inactive access children.</td></tr>
+<tr><td>User switches session host</td><td>Explicit switch event</td><td>Preserve memberships and per-membership profiles; change only current selection.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Switching and leaving are different domain operations. If a product workflow
+intends a full transfer, it must emit the events that deactivate old-host
+membership and access. Snapshot export must not infer a leave from
+<code>current = FALSE</code>.</p>
+<p>A transfer uses this event sequence:</p>
+<ol>
+<li><code>UserHostCreatedEvent(newHost)</code> creates the new active membership/profile.</li>
+<li><code>UserHostSwitchedEvent(newHost)</code> selects it as current.</li>
+<li><code>UserHostDeletedEvent(oldHost)</code> clears and deactivates the old membership
+and its access children.</li>
+</ol>
+<p><code>UserHostDeletedEvent</code> remains the correct command. Its projection must be
+extended rather than replaced with a database trigger, so replay reproduces
+the same cascade.</p>
+<h2 id="bundle-modes"><a class="header" href="#bundle-modes">Bundle Modes</a></h2>
+<h3 id="environment-bundle"><a class="header" href="#environment-bundle">Environment bundle</a></h3>
+<p>An <code>environment</code> bundle is the canonical artifact for rebuilding a new
+environment containing one or more selected hosts.</p>
+<p>The exporter receives the complete included host set and reads all relevant
+tables in one repeatable-read transaction. It computes the union of users and
+deduplicates global identities before conversion.</p>
+<p>Properties:</p>
+<ul>
+<li>self-contained for the declared included host set;</li>
+<li>identity-closed: once a user is selected, every active membership and the
+current membership for that user is inside the set;</li>
+<li>exactly one user birth per included user;</li>
+<li>all active included memberships represented;</li>
+<li>all included access children referentially closed;</li>
+<li>safe for empty-database bootstrap;</li>
+<li>not assembled by concatenating host files.</li>
+</ul>
+<p>An exact environment bundle may contain one host only when that host is also
+identity-closed for its selected users. Otherwise the operator must include the
+dependent hosts or choose the explicitly transformative <code>standalone-host</code>
+mode. The release command has no exclude flag.</p>
+<p>Lossy exclusion is available only through a separate operator-only
+<code>extract-tenant</code> workflow. It requires an identified approver and records every
+excluded identity and dependent-row count in its signed manifest. Separating
+the command surface prevents a release pipeline from accidentally enabling a
+lossy flag.</p>
+<h3 id="host-delta-bundle"><a class="header" href="#host-delta-bundle">Host-delta bundle</a></h3>
+<p>A <code>host-delta</code> bundle adds or updates one host in an environment whose shared
+identity baseline already exists.</p>
+<p>Properties:</p>
+<ul>
+<li>does not emit a second birth for a provided destination identity;</li>
+<li>emits host membership/profile and access events;</li>
+<li>declares required user identities and the baseline identity-set digest;</li>
+<li>is rejected before append if any required identity is absent or mismatched;</li>
+<li>is imported only after its required environment baseline.</li>
+</ul>
+<p>A host delta is not a standalone installation artifact.</p>
+<h3 id="standalone-host-bundle"><a class="header" href="#standalone-host-bundle">Standalone-host bundle</a></h3>
+<p>A <code>standalone-host</code> bundle recreates one host without assuming a prior identity
+baseline. It may synthesize user births for users selected into that host.</p>
+<p>Properties:</p>
+<ul>
+<li>self-contained for its declared transformation policy;</li>
+<li>normalizes exactly one included active membership per user to
+<code>current = TRUE</code> when the source current host is outside the package;</li>
+<li>records <code>currentHostNormalized</code> and <code>normalizedCurrentHostId</code> in the
+manifest rather than depending on import order;</li>
+<li>must declare <code>composable: false</code>;</li>
+<li>must not later be concatenated with another standalone-host bundle;</li>
+<li>remains a transitional compatibility mode, not the target multi-host
+backup format.</li>
+</ul>
+<h2 id="recommended-environment-export-flow"><a class="header" href="#recommended-environment-export-flow">Recommended Environment Export Flow</a></h2>
+<pre class="mermaid">flowchart TD
+    A[Select source-to-target host map] --&gt; B[Open one repeatable-read snapshot]
+    B --&gt; C[Export global and all selected host rows]
+    C --&gt; D[Apply conversion coverage registry]
+    D --&gt; E[Build active membership graph]
+    E --&gt; F[Deduplicate users by user_id]
+    F --&gt; G[Emit host and global parent events]
+    G --&gt; H[Emit one schema-v2 user birth per user]
+    H --&gt; I[Emit every membership and profile birth]
+    I --&gt; J[Topologically order profiles and endpoints]
+    J --&gt; K[Emit access and global user-child events]
+    K --&gt; L[Emit current-host selection events]
+    L --&gt; M[Validate row coverage, closure, versions, and ordering]
+    M --&gt; N[Sign and publish bundle archive]
+</pre>
+
+<p>The whole artifact is assembled before publication. Per-host intermediate
+partitions may be used internally for memory or parallel query efficiency, but
+the final identity allocation and event ordering operate over their union. All
+database reads for the selected host set occur on the same repeatable-read
+connection and transaction.</p>
+<h2 id="event-model-2"><a class="header" href="#event-model-2">Event Model</a></h2>
+<h3 id="target-contract"><a class="header" href="#target-contract">Target contract</a></h3>
+<p>The clean target model separates four facts:</p>
+<ol>
+<li>the shared user identity exists;</li>
+<li>the user belongs to a host;</li>
+<li>the user has a host-specific employee/customer profile when required; and</li>
+<li>the user currently selected one of the active memberships.</li>
+</ol>
+<p>The target event family should support:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Event</th><th>Aggregate identity</th><th>Projection responsibility</th></tr>
+</thead>
+<tbody>
+<tr><td><code>UserCreatedEvent</code> schema v2</td><td><code>userId</code></td><td>Insert shared <code>user_t</code> only; payload excludes <code>hostId</code>, <code>current</code>, <code>entityId</code>, <code>managerId</code>, and <code>referralId</code>.</td></tr>
+<tr><td><code>UserHostCreatedEvent</code> schema v2</td><td>`userId</td><td>hostId`</td></tr>
+<tr><td>Portable global user-child event/fold</td><td>Declared by conversion registry</td><td>Recreate wallets and any other environment-wide user children exactly once.</td></tr>
+<tr><td>Host access CreatedEvents</td><td>Existing host-scoped compound IDs</td><td>Insert access rows after identity, membership, and endpoint dependencies.</td></tr>
+<tr><td><code>UserHostSwitchedEvent</code></td><td>`userId</td><td>hostId`</td></tr>
+<tr><td><code>UserHostDeletedEvent</code></td><td>`userId</td><td>hostId`</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>UserCreatedEvent</code> remains the user aggregate birth type. Schema v2 is selected
+through the existing <code>(event type, eventschema)</code> policy registry and avoids a
+new aggregate dispatch path. Its CloudEvent <code>host</code> extension is the bundle’s
+declared authority host for authorization and append routing; that extension
+does not make the identity host-owned.</p>
+<p><code>UserHostCreatedEvent</code> schema v2 should contain enough profile data to
+reconstruct its host relationship without another user birth:</p>
+<pre><code class="language-json">{
+  "hostId": "host-id",
+  "userId": "user-id",
+  "current": false,
+  "userType": "E",
+  "entityId": "employee-id",
+  "managerId": null,
+  "aggregateVersion": 0,
+  "newAggregateVersion": 1
+}
+</code></pre>
+<p>For a customer membership, <code>entityId</code> and optional <code>referralId</code> carry the
+customer profile. A function user has no employee/customer profile.</p>
+<p>Employee/customer profile is per active membership. The schema already models
+this with host-scoped profile keys and a composite profile-to-membership FK.
+The schema-v2 projector creates or restores the profile for that exact
+<code>(hostId, userId)</code> and never relocates another host’s profile.</p>
+<p>The projector must also stop deriving <code>current</code> from import order. Schema v2
+must either honor the explicit payload value or insert memberships non-current
+and rely on the final switch event. An already-active membership with an older
+aggregate version must update monotonically; an equal/newer version remains an
+idempotent no-op. The current <code>active = FALSE</code>-only conflict predicate is not
+the schema-v2 contract.</p>
+<h3 id="compatibility-contract"><a class="header" href="#compatibility-contract">Compatibility contract</a></h3>
+<p>The first implementation may retain the existing <code>UserCreatedEvent</code> behavior:</p>
+<ul>
+<li>choose one included membership as the identity placement host;</li>
+<li>emit exactly one <code>UserCreatedEvent</code> for the user with complete profile data;</li>
+<li>emit a version-one <code>UserHostCreatedEvent</code> for every included membership,
+including the placement membership, so every <code>UserHost</code> stream has a birth;</li>
+<li>emit current-host selection last.</li>
+</ul>
+<p>The placement choice is a conversion mechanism, not user ownership. Prefer the
+included host containing the current employee/customer projection; otherwise
+prefer the current active membership. Ambiguous or missing placement must fail
+export rather than depend on map or query order.</p>
+<p>During compatibility, <code>UserCreatedEvent</code> and the placement
+<code>UserHostCreatedEvent</code> may both touch the same membership projection. The
+membership projection must handle that exact replay case idempotently, while
+the canonical <code>UserHost</code> event stream still begins with its CreatedEvent. Once
+schema-v2 <code>UserCreatedEvent</code> is deployed, it stops creating membership/profile
+rows and the compatibility placement requirement disappears.</p>
+<h3 id="envelope-host-and-n-way-remapping"><a class="header" href="#envelope-host-and-n-way-remapping">Envelope host and N-way remapping</a></h3>
+<p>Every bundle carries an explicit source-to-target host map. Conversion derives
+the CloudEvent <code>host</code> extension per event:</p>
+<ul>
+<li>a host-owned aggregate uses that row’s mapped target host;</li>
+<li>a <code>UserHost</code> or host-access event uses its membership’s mapped target host;</li>
+<li>an environment-wide user identity or global user child uses the declared
+target authority host; and</li>
+<li>a genuinely global non-user aggregate uses its existing platform authority
+rule.</li>
+</ul>
+<p>Remapping is schema-aware. It rewrites declared host fields and host components
+of compound aggregate IDs through the N-way map; it does not perform blind
+string replacement across arbitrary row values.</p>
+<p>Snapshot bootstrap currently appends each generated event as a singleton
+logical transaction, so the append validator’s single-host/single-user rule is
+satisfied per event. Any future multi-event logical transaction must partition
+members by the same <code>(ce_host, ce_user)</code> pair rather than mixing host authority
+inside one append transaction.</p>
+<h2 id="example-user-switched-between-two-hosts"><a class="header" href="#example-user-switched-between-two-hosts">Example: User Switched Between Two Hosts</a></h2>
+<p>Assume Steve has:</p>
+<ul>
+<li>an active non-current membership and roles in <code>dev.lightapi.net</code>;</li>
+<li>an active current membership and roles in <code>dev.networknt.com</code>; and</li>
+<li>an employee profile for each active membership after the projection repair.</li>
+</ul>
+<h3 id="complete-two-host-environment-bundle"><a class="header" href="#complete-two-host-environment-bundle">Complete two-host environment bundle</a></h3>
+<p>The coordinated bundle emits:</p>
+<pre><code class="language-text">HostCreatedEvent(dev.lightapi.net)
+HostCreatedEvent(dev.networknt.com)
+UserCreatedEvent schema v2(Steve)                            exactly once
+UserHostCreatedEvent schema v2(Steve, dev.lightapi.net)      stream v1
+UserHostCreatedEvent schema v2(Steve, dev.networknt.com)     stream v1
+RoleUserCreatedEvent(Steve, dev.lightapi.net, ...)
+RoleUserCreatedEvent(Steve, dev.networknt.com, ...)
+UserHostSwitchedEvent(Steve, dev.networknt.com)              same stream v2
+</code></pre>
+<p>The exact host creation ordering depends on existing global/host bootstrap
+contracts, but both host parents must exist before dependent membership rows.</p>
+<h3 id="primary-only-environment-bundle"><a class="header" href="#primary-only-environment-bundle">Primary-only environment bundle</a></h3>
+<p>After Phase 0.5, Steve still belongs to <code>dev.lightapi.net</code> because that
+membership is active and has its own profile. A coordinated environment export
+cannot claim to be complete for Steve while excluding his current
+<code>dev.networknt.com</code> membership; it must include that host or fail closure.</p>
+<p>An intentional isolated-host transformation uses <code>standalone-host</code> instead. It
+includes Steve’s shared birth, old-host membership/profile, and old-host access
+children, then explicitly normalizes <code>dev.lightapi.net</code> as current and records
+that transformation in the manifest. If Steve should not appear at all, the
+source must contain an explicit old-host <code>UserHostDeletedEvent</code> cascade, or an
+operator-approved <code>extract-tenant</code> workflow must omit Steve and every dependent
+row together.</p>
+<h3 id="secondary-host-delta"><a class="header" href="#secondary-host-delta">Secondary host delta</a></h3>
+<p>If Steve already exists in the destination identity baseline, a
+<code>dev.networknt.com</code> host delta emits the membership/profile and access events,
+not another <code>UserCreatedEvent</code>. Its manifest requires Steve’s <code>user_id</code> and the
+expected identity digest.</p>
+<h2 id="bundle-manifest"><a class="header" href="#bundle-manifest">Bundle Manifest</a></h2>
+<p>Version-two output is a distinct bundle archive, not a bare event array. The
+archive contains <code>bundle-manifest.json</code>, <code>events.json</code>, the applicable identity
+sidecars, and a detached manifest signature. The importer accepts it only
+through a manifest-aware <code>--bundle</code> path. The legacy bare-array path remains
+available only for explicitly legacy standalone imports and cannot claim
+composability.</p>
+<p>This packaging makes the manifest enforceable: a legacy tool cannot be given a
+v2 bundle archive and silently ignore its mode or dependencies. After the
+Phase 4 cut-over, release/bootstrap commands reject bare arrays.</p>
+<pre><code class="language-json">{
+  "formatVersion": 2,
+  "bundleId": "uuid-v7",
+  "mode": "environment",
+  "composable": true,
+  "primaryHostId": "host-a",
+  "authorityHostId": "target-host-a",
+  "hostMap": {
+    "source-host-a": "target-host-a",
+    "source-host-b": "target-host-b"
+  },
+  "sourceSnapshotTs": "2026-08-31T18:00:00Z",
+  "providedIdentityCount": 120,
+  "requiredIdentityCount": 0,
+  "providedIdentityFile": "provided-identities.json",
+  "providedIdentityDigest": "sha256:...",
+  "requiredIdentityFile": null,
+  "requiredIdentityFileSha256": null,
+  "eventCount": 18000,
+  "eventsSha256": "sha256:...",
+  "contentMembers": [
+    {
+      "file": "events.json",
+      "byteLength": 1234567,
+      "sha256": "sha256:..."
+    },
+    {
+      "file": "provided-identities.json",
+      "byteLength": 4567,
+      "sha256": "sha256:..."
+    }
+  ],
+  "closurePolicy": "FAIL",
+  "excludedIdentityCount": 0,
+  "excludedAccessChildCount": 0,
+  "currentHostNormalized": false,
+  "normalizedCurrentHostId": null,
+  "signature": {
+    "algorithm": "Ed25519",
+    "keyId": "portal-release-2026-01",
+    "file": "bundle-manifest.sig"
+  }
+}
+</code></pre>
+<p>Identity inventories contain user IDs only, not emails or mutable profile
+fields. The canonical digest preimage is a UTF-8 JSON array of lowercase
+canonical UUID strings, deduplicated and lexicographically sorted, serialized
+without insignificant whitespace, followed by one LF byte. SHA-256 is computed
+over those exact bytes.</p>
+<p><code>provided-identities.json</code> carries the canonical provided-ID array. For
+<code>host-delta</code>, <code>required-identities.json</code> carries the canonical required-ID
+array. The manifest carries each applicable filename, SHA-256, and count, plus
+the required baseline bundle/digest for a delta. The destination preflight
+verifies IDs and compatible user type separately; a legitimate email change
+does not alter the identity digest.</p>
+<p>The detached signature covers canonical manifest bytes. The manifest’s
+<code>contentMembers</code> list in turn covers every content-member filename, byte
+length, and SHA-256, including <code>events.json</code> and identity sidecars. It does not
+list <code>bundle-manifest.sig</code>, because hashing a signature inside the bytes being
+signed would be circular; the signature file is validated directly against
+the canonical manifest and declared key. Release and tenant-extraction bundles
+must be signed; local developer bundles may use an explicitly configured
+unsigned development policy and cannot be promoted.</p>
+<p><code>sourceSnapshotTs</code> is captured after the coordinated repeatable-read
+transaction begins and identifies that one database snapshot. All global and
+N-host table reads use the same connection and transaction. It must never be
+constructed from timestamps returned by several independent host exports.</p>
+<p>The importer must reject:</p>
+<ul>
+<li>a host delta whose required baseline or identity digest does not match;</li>
+<li>a non-composable bundle requested as part of a composition;</li>
+<li>overlapping provided user identities across composed bundles;</li>
+<li>a composable archive with a missing/invalid manifest or signature;</li>
+<li>an event file whose checksum or count differs from the manifest; and</li>
+<li>a destination that is nonempty when an environment bootstrap requires an
+empty canonical store.</li>
+</ul>
+<h2 id="ordering-and-import-phases"><a class="header" href="#ordering-and-import-phases">Ordering And Import Phases</a></h2>
+<p>The generated event order must satisfy these phases:</p>
+<pre class="mermaid">flowchart LR
+    H[1. Hosts and global parents]
+    U[2. Shared user births]
+    M[3. Memberships and host profiles]
+    E[4. API versions and endpoints]
+    A[5. Host access and global user children]
+    S[6. Current-host selection]
+
+    H --&gt; U --&gt; M --&gt; E --&gt; A --&gt; S
+</pre>
+
+<p>Topological table sorting remains useful inside each phase, but database
+foreign keys alone do not define all event-stream dependencies. The converter
+must add explicit application dependencies for user birth, membership,
+profile, access, and switch events.</p>
+<p>Membership/profile ordering is itself topological. Within each host, an
+employee manager profile precedes every report referencing that
+<code>manager_id</code>, and a customer referral profile precedes every customer
+referencing that <code>referral_id</code>. A cycle or missing parent fails conversion and
+reports the involved host/profile keys; row order must never resolve it
+implicitly.</p>
+<p><code>user_permission_t</code>, <code>user_col_filter_t</code>, and <code>user_row_filter_t</code> follow their
+API endpoint event as well as the user membership. Global user children follow
+the shared user birth. Explicit conversion-registry dependencies supplement
+database FK metadata for soft-linked tables.</p>
+<p>Every generated aggregate stream must remain monotonic. Across the final
+assembled artifact:</p>
+<ul>
+<li>event IDs are unique;</li>
+<li><code>(subject, aggregateversion)</code> is unique;</li>
+<li>the first emitted event for each subject is version one;</li>
+<li>versions for each subject are contiguous and ordered, including intentional
+version-two-or-later CreatedEvents that share a subject; and</li>
+<li>composition never renumbers events already published in another bundle.</li>
+</ul>
+<h2 id="conversion-coverage-registry"><a class="header" href="#conversion-coverage-registry">Conversion Coverage Registry</a></h2>
+<p>One registry is authoritative for export-to-event disposition. Each discovered
+table declares:</p>
+<pre><code class="language-text">tableName
+scopeResolver                 global, host, parent-derived, or operational
+disposition                   STANDALONE_EVENT, FOLD_INTO_PARENT, or EXCLUDE
+eventType / parentEventType   when applicable
+identityDependencies          enforced and soft-linked
+hostDependencies
+orderingDependencies
+rowAccountingRule
+exclusionReason               required for EXCLUDE
+</code></pre>
+<p><code>CONVERSION_SKIP_TABLES</code> must be generated from or validated against this
+registry. A hand-maintained skip entry without a fold/exclusion declaration is
+invalid.</p>
+<p>For every exported non-excluded table, conversion reconciles row counts:</p>
+<pre><code class="language-text">exported rows = standalone-event consumed rows + parent-fold consumed rows
+</code></pre>
+<p>A one-to-many fold records the exact consumed child keys. Missing, duplicate,
+or unconsumed rows fail publication. This gate detects the present
+<code>user_crypto_wallet_t</code> loss and protects soft-linked tables such as
+<code>agent_memory_bank_t</code>, regardless of FK metadata.</p>
+<p>Operational/runtime rows remain excluded only through a named registry entry
+with rationale and an owner. Adding a newly discovered table defaults to
+publication failure until its disposition is reviewed.</p>
+<p>Bundle mode also makes every selected-table query failure fatal. The current
+best-effort behavior that logs one table’s SQL exception and continues is not
+allowed for a release, environment, host-delta, or extraction artifact because
+it defeats row coverage before conversion begins.</p>
+<h2 id="referential-closure-algorithm"><a class="header" href="#referential-closure-algorithm">Referential Closure Algorithm</a></h2>
+<p>For an environment bundle:</p>
+<ol>
+<li>Read active memberships for every included host.</li>
+<li>Build <code>includedMemberships[(hostId, userId)]</code>.</li>
+<li>Read active users for the distinct membership user IDs.</li>
+<li>Resolve one required host profile for each applicable active membership and
+reject missing, duplicate, or ambiguous state.</li>
+<li>Build <code>providedUsers[userId]</code> exactly once.</li>
+<li>Apply the conversion coverage registry to every exported table and row.</li>
+<li>Select host access children by joining to <code>includedMemberships</code>,
+<code>providedUsers</code>, and any endpoint parents.</li>
+<li>Select global and soft-linked user children through explicit registry
+dependencies.</li>
+<li>Validate that every selected child has its provided/required identity and
+all other declared parents.</li>
+<li>Topologically order self-referencing profiles and cross-family children.</li>
+<li>Allocate event streams and ordering over the complete union.</li>
+</ol>
+<p>For a host delta, step 5 partitions user IDs into <code>providedUsers</code> and
+<code>requiredUsers</code> according to the package contract. Steps 6 and 7 accept either
+a provided user or a verified required user.</p>
+<p>The exporter should specialize queries for all user-dependent tables rather
+than relying on the generic <code>active</code> plus <code>host_id</code> filter.</p>
+<h2 id="validation-gates"><a class="header" href="#validation-gates">Validation Gates</a></h2>
+<p>Publication must fail unless all applicable gates pass.</p>
+<h3 id="structural-gates"><a class="header" href="#structural-gates">Structural gates</a></h3>
+<ul>
+<li>Exactly one user birth exists for each provided <code>user_id</code>.</li>
+<li>No two output events share <code>(subject, aggregateversion)</code>.</li>
+<li>No two output events share an event ID.</li>
+<li>Every event has a derivable aggregate type and aggregate ID.</li>
+<li>The first emitted event for every subject is version one and all later
+versions for that subject are contiguous.</li>
+<li>Every exported non-excluded row is consumed exactly once by a standalone
+event or declared parent fold.</li>
+<li>Every conversion-skip table has an explicit folded or excluded registry
+disposition.</li>
+<li>Manifest event count and SHA-256 match the artifact.</li>
+<li>Manifest signature and every member checksum verify.</li>
+</ul>
+<h3 id="user-closure-gates"><a class="header" href="#user-closure-gates">User-closure gates</a></h3>
+<ul>
+<li>Every active exported membership references a provided or required user.</li>
+<li>Every access child references an included membership and a provided or
+required user.</li>
+<li>Every permission/filter child also references an included endpoint parent.</li>
+<li>Every global or soft-linked user child references a provided or required
+user through the conversion registry.</li>
+<li>No access child is emitted for an excluded user.</li>
+<li>Every applicable active membership has exactly one employee/customer profile
+with a nonblank entity ID.</li>
+<li>Employee manager and customer referral graphs are acyclic and complete
+within each host.</li>
+<li>When schema-v1 compatibility is enabled, the selected birth placement has
+all legacy <code>UserCreatedEvent</code> fields required by its projector.</li>
+<li>A complete environment bundle preserves at most one current membership per
+user and reports users with none.</li>
+<li>A standalone bundle declares and produces exactly one normalized current
+membership per included user.</li>
+</ul>
+<h3 id="import-qualification-gates"><a class="header" href="#import-qualification-gates">Import qualification gates</a></h3>
+<ul>
+<li>Import the environment bundle into an empty database.</li>
+<li>Wait for every relevant consumer cursor to converge.</li>
+<li>Require zero DLQ rows attributable to the bundle.</li>
+<li>Compare normalized source and destination projections for users,
+memberships, profiles, access children, global user children, and
+soft-linked declared children.</li>
+<li>For every current employee/customer membership, verify the effective JWT
+<code>uid</code> derivation resolves to the restored host-profile entity ID.</li>
+<li>Export the recreated environment again and compare normalized semantic
+inventories, ignoring generated event UUIDs and timestamps.</li>
+<li>Test one user active in two hosts, current in the secondary host, with roles
+in both.</li>
+<li>Test a complete transfer where old membership and roles are inactive.</li>
+<li>Test switch rejection for an inactive target membership and prove profile
+rows never move.</li>
+<li>Test <code>UserHostDeletedEvent</code> clearing <code>current</code> and deactivating every declared
+host access child.</li>
+<li>Test wallet row round-trip and failure on an intentionally unclassified
+conversion-skip table.</li>
+<li>Test manager/referral ordering, missing parents, and cycles.</li>
+<li>Test primary plus secondary composition and prove that the user birth appears
+once.</li>
+<li>Test rejection of two legacy standalone bundles containing the same user.</li>
+</ul>
+<h2 id="api-and-cli-direction"><a class="header" href="#api-and-cli-direction">API And CLI Direction</a></h2>
+<p>The snapshot exporter should accept an explicit bundle request rather than
+only one source host:</p>
+<pre><code class="language-text">--bundle-mode environment
+--host-map source-host-a=target-host-a
+--host-map source-host-b=target-host-b
+--primary-host-id target-host-a
+--authority-host-id target-host-a
+--bundle-output portal-events-v2.zip
+</code></pre>
+<p>Repeated <code>--host-map</code> values form one coordinated host set and define every
+source-to-target mapping. A future API may accept the equivalent JSON request.
+<code>--sourceHostId</code> and <code>--targetHostId</code> remain a one-pair compatibility alias
+during migration. The release verb has an unconditional <code>FAIL</code> closure policy.</p>
+<p>For host delta generation:</p>
+<pre><code class="language-text">--bundle-mode host-delta
+--host-map source-host-b=target-host-b
+--authority-host-id target-host-a
+--requires-identity-manifest base-identities.json
+--bundle-output host-b-v2.zip
+</code></pre>
+<p>Lossy extraction is a separate command and authorization boundary:</p>
+<pre><code class="language-text">extract-tenant \
+  --host-map source-host-a=target-host-a \
+  --approved-by operator-id \
+  --bundle-output host-a-extraction-v2.zip
+</code></pre>
+<p>The release workflow must sign and publish the complete archive atomically.
+The importer uses <code>--bundle portal-events-v2.zip</code>; it never discovers a
+sidecar opportunistically beside a bare <code>events.json</code>.</p>
+<h2 id="migration-plan-2"><a class="header" href="#migration-plan-2">Migration Plan</a></h2>
+<h3 id="phase-0-stop-malformed-publication"><a class="header" href="#phase-0-stop-malformed-publication">Phase 0: Stop malformed publication</a></h3>
+<ul>
+<li>Add pre-publication checks for blank employee/customer entity IDs.</li>
+<li>Validate that every user-dependent child references an exported user.</li>
+<li>Detect duplicate user births and aggregate-version pairs when artifacts are
+assembled or appended.</li>
+<li>Introduce the conversion coverage registry and validate every
+<code>CONVERSION_SKIP_TABLES</code> entry against it.</li>
+<li>Reconcile every exported non-excluded row to one emitted event or declared
+parent fold; treat current wallet rows as a blocking uncovered family until
+their conversion contract is implemented.</li>
+<li>Add the switched-user regression fixture.</li>
+<li>Keep current production output unchanged when all checks pass.</li>
+</ul>
+<p>Exit gate: the currently observed switched-user snapshot fails during export,
+not later in the development DLQ, and no exported row can disappear silently
+during conversion.</p>
+<h3 id="phase-05-repair-membership-projections-and-existing-drift"><a class="header" href="#phase-05-repair-membership-projections-and-existing-drift">Phase 0.5: Repair membership projections and existing drift</a></h3>
+<ul>
+<li>Rewrite <code>switchUserHost</code> to deactivate only active current memberships,
+require the target membership to be active, and update only current flags.</li>
+<li>Remove all employee/customer host-move SQL from the switch projection.</li>
+<li>Enforce or validate at most one active current membership per user.</li>
+<li>Extend <code>deleteUserHost</code> to set <code>current = FALSE</code> and soft-deactivate active
+<code>role_user_t</code>, <code>group_user_t</code>, <code>attribute_user_t</code>, <code>user_position_t</code>,
+<code>user_permission_t</code>, <code>user_col_filter_t</code>, and <code>user_row_filter_t</code> rows for the
+same <code>(host_id, user_id)</code> in the projection transaction.</li>
+<li>Define transfer as create-new, switch-new, delete-old.</li>
+<li>Inventory active memberships missing their per-membership employee/customer
+profile. Generate controlled repair events at the next valid aggregate
+version; do not make an unrecorded direct-SQL correction the canonical fix.</li>
+<li>Dry-run profile ID, manager, referral, and target-primary-key conflicts.
+Quarantine ambiguous rows for operator resolution instead of inventing data.</li>
+<li>Replay the repaired event history into an empty projection and compare it to
+the repaired source state.</li>
+</ul>
+<p>Exit gate: switch, delete, repair, and replay tests prove that active
+memberships retain host-local profiles, inactive memberships are never
+current, and no active access child survives membership deletion.</p>
+<h3 id="phase-1-coordinated-environment-assembly"><a class="header" href="#phase-1-coordinated-environment-assembly">Phase 1: Coordinated environment assembly</a></h3>
+<ul>
+<li>Add an N-way host-map request and read all selected hosts through one
+repeatable-read connection and transaction.</li>
+<li>Replace blind string substitution with schema-aware host remapping and
+per-event CloudEvent authority-host derivation.</li>
+<li>Deduplicate <code>user_t</code> rows across the selected host union.</li>
+<li>Introduce the signed v2 bundle archive, manifest, and environment mode.</li>
+<li>Select all access, global-user, and soft-linked children through the complete
+conversion registry and dependency closure.</li>
+<li>Keep one compatibility <code>UserCreatedEvent</code> per user and emit a version-one
+<code>UserHostCreatedEvent</code> for every included membership, including placement.</li>
+<li>Topologically order manager/referral profiles and endpoint-dependent access
+rows; fail on cycles or missing parents.</li>
+</ul>
+<p>Exit gate: a two-host empty-database restore produces one user birth and exact
+normalized projections for both hosts, every <code>UserHost</code> stream has a
+version-one birth, and all bundle row counts reconcile.</p>
+<h3 id="phase-2-membershipprofile-event-separation"><a class="header" href="#phase-2-membershipprofile-event-separation">Phase 2: Membership/profile event separation</a></h3>
+<ul>
+<li>Register <code>UserCreatedEvent</code> schema v2 for shared <code>user_t</code> identity only; drop
+host, current, entity, manager, and referral fields from its payload.</li>
+<li>Add <code>UserHostCreatedEvent</code> schema v2 with per-membership profile data.</li>
+<li>Stop treating every selected <code>user_host_t</code> row as hidden data merged only
+into user birth.</li>
+<li>Emit all memberships independently after the one user birth.</li>
+<li>Rewrite <code>createUserHost</code> schema-v2 projection to honor explicit current state
+or deterministic final-switch semantics and to apply monotonic updates to
+active rows; do not call <code>determineCurrentFlag</code> for v2.</li>
+<li>Implement a portable wallet contract and any other uncovered registry
+families before removing their publication blockers.</li>
+<li>Update Java projection, replay, importer validation, policy registry, event
+schemas, and tests for the schema-versioned contracts.</li>
+</ul>
+<p>Exit gate: adding a secondary host never emits another user birth for an
+existing user, and schema-v2 replay reconstructs every membership/profile
+without compatibility folding.</p>
+<h3 id="phase-3-host-delta-composition"><a class="header" href="#phase-3-host-delta-composition">Phase 3: Host delta composition</a></h3>
+<ul>
+<li>Add canonical checksummed provided/required user-ID sidecars and digest
+verification.</li>
+<li>Add destination preflight for host-delta imports.</li>
+<li>Reject missing identity dependencies before canonical append.</li>
+<li>Sign manifests and verify every archive member before reading events.</li>
+<li>Add composition qualification covering several host import orders permitted
+by the manifest dependency graph.</li>
+</ul>
+<p>Exit gate: a published environment baseline plus a compatible host delta
+recreates the same normalized state as one coordinated environment bundle.</p>
+<h3 id="phase-4-retire-ambiguous-standalone-composition"><a class="header" href="#phase-4-retire-ambiguous-standalone-composition">Phase 4: Retire ambiguous standalone composition</a></h3>
+<ul>
+<li>Mark legacy standalone exports as <code>composable: false</code>.</li>
+<li>Reject attempts to concatenate or compose them.</li>
+<li>Require the v2 archive/manifest import path for release and host-delta
+bundles; reject bare arrays on those paths after the published cut-over.</li>
+<li>Remove documentation and scripts that imply arbitrary host exports can be
+combined safely.</li>
+<li>Retain standalone mode only for an intentional isolated-host transformation
+with exactly one declared normalized current membership per user.</li>
+</ul>
+<p>Exit gate: every supported restore path has an explicit bundle mode,
+dependency contract, and conformance test.</p>
+<h2 id="operational-handling"><a class="header" href="#operational-handling">Operational Handling</a></h2>
+<p>For an explicitly invoked historical recovery tool outside the release and
+bootstrap wrappers:</p>
+<ul>
+<li>treat one legacy <code>events.json</code> as one non-composable standalone target only;</li>
+<li>do not concatenate independently converted host snapshots;</li>
+<li>do not replay a malformed DLQ event unchanged;</li>
+<li>do not use host switching as a temporary way to make a release exportable;
+deploy the Phase 0.5 projection repair and repair source drift through
+replayable events before regenerating the canonical baseline;</li>
+<li>use a coordinated original-history export only when the complete selected
+history and its dependencies can be preserved and deduplicated by original
+event ID; and</li>
+<li>never use it for secondary-host restore into an existing environment. Use a
+signed <code>host-delta</code> archive whose baseline and identity dependencies pass
+destination preflight.</li>
+</ul>
+<h2 id="risks-and-mitigations-4"><a class="header" href="#risks-and-mitigations-4">Risks And Mitigations</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Risk</th><th>Mitigation</th></tr>
+</thead>
+<tbody>
+<tr><td>Current-host state is mistaken for membership ownership</td><td>Make <code>active</code> the membership rule and restore <code>current</code> in the last phase.</td></tr>
+<tr><td>Switch or delete creates unexportable source state</td><td>Repair both projections in Phase 0.5 and qualify event-backed drift repair through replay.</td></tr>
+<tr><td>A single-host export silently loses active cross-host access</td><td>Release always fails closure; lossy extraction is a separate approved command with signed counts.</td></tr>
+<tr><td>Two bundles create the same user</td><td>One coordinated identity allocation; manifest-provided and required identity sets; importer preflight.</td></tr>
+<tr><td>A required user ID resolves to an incompatible user</td><td>Digest stable user IDs only; validate user type separately and require operator resolution without treating email changes as identity changes.</td></tr>
+<tr><td>A converted table is silently dropped</td><td>Require registry disposition and exact row accounting for every exported non-excluded table.</td></tr>
+<tr><td>Random synthetic IDs prevent deduplication</td><td>Deduplicate before event generation and checksum the final assembled artifact.</td></tr>
+<tr><td>Access events arrive before identity, membership, profile, or endpoint</td><td>Enforce explicit phases, registry dependencies, and topological ordering.</td></tr>
+<tr><td>Legacy tools ignore the manifest</td><td>Package v2 as a distinct signed archive accepted only by the manifest-aware bundle path; hard-reject bare arrays after cut-over.</td></tr>
+<tr><td>A partial batch leaves confusing DLQs</td><td>Validate the complete bundle before append and retain singleton logical transaction/DLQ isolation.</td></tr>
+<tr><td>Multi-host export leaks tenant data</td><td>Require explicit host mappings, authorization for every source host, signed scope, and an auditable approver for extraction.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="settled-decisions"><a class="header" href="#settled-decisions">Settled Decisions</a></h2>
+<ol>
+<li>Employee/customer profile is per active membership. Switching current host
+never moves a profile row.</li>
+<li>Shared identity continues to use <code>UserCreatedEvent</code>; schema v2 makes the
+payload host-independent and projects only <code>user_t</code>.</li>
+<li>Host deltas use a separate checksummed required-user-ID sidecar referenced
+and signed through the bundle manifest. The digest contains sorted canonical
+UUIDs only.</li>
+<li>Standalone export normalizes exactly one membership to current and records
+the transformation in the manifest.</li>
+<li>Release closure always fails. Lossy exclusion exists only in a separate
+operator-approved <code>extract-tenant</code> workflow.</li>
+<li><code>UserHostDeletedEvent</code> is extended to clear current state and cascade soft
+deactivation through host access projections. Transfer is create-new,
+switch-new, then delete-old.</li>
+</ol>
+<p>These decisions retain the immediate safety rule: one environment restore
+cannot contain two user births for the same <code>user_id</code>, every active membership
+has a version-one <code>UserHost</code> stream birth, and no child row may be published
+without a satisfiable declared dependency and conversion disposition.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-gateway-1"><a class="header" href="#light-gateway-1">Light Gateway</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="local-model-provider-transport-for-llm-gateway"><a class="header" href="#local-model-provider-transport-for-llm-gateway">Local Model Provider Transport For LLM Gateway</a></h1>
-<h2 id="status-13"><a class="header" href="#status-13">Status</a></h2>
+<h2 id="status-14"><a class="header" href="#status-14">Status</a></h2>
 <p>Proposed design for implementation and qualification.</p>
 <p>This design extends the completed OpenAI-compatible LLM gateway and the
 Embedding Space Contract. It does not change the public <code>/v1</code> client contract.</p>
-<h2 id="decision-summary-10"><a class="header" href="#decision-summary-10">Decision Summary</a></h2>
+<h2 id="decision-summary-11"><a class="header" href="#decision-summary-11">Decision Summary</a></h2>
 <p>The LLM gateway must support self-hosted model servers running on the same
 machine, in the same Kubernetes cluster, or elsewhere on an organization’s
 private network. Self-hosted models are a first-class production deployment,
@@ -23635,7 +24525,7 @@ model-serving deployment.</p>
 production compiler and Portal control plane impose the stronger policy. This
 design replaces that single policy with explicit trust profiles rather than
 using <code>developmentFixtures</code> or adding an unrestricted <code>allowHttp</code> flag.</p>
-<h2 id="terminology-6"><a class="header" href="#terminology-6">Terminology</a></h2>
+<h2 id="terminology-7"><a class="header" href="#terminology-7">Terminology</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -23657,7 +24547,7 @@ using <code>developmentFixtures</code> or adding an unrestricted <code>allowHttp
 </tbody>
 </table>
 </div>
-<h2 id="goals-24"><a class="header" href="#goals-24">Goals</a></h2>
+<h2 id="goals-25"><a class="header" href="#goals-25">Goals</a></h2>
 <ul>
 <li>Make Ollama, llama.cpp, vLLM, and other OpenAI-compatible self-hosted servers
 production-capable Provider Deployments.</li>
@@ -23677,7 +24567,7 @@ verification. Leave mTLS as an optional later enhancement.</li>
 keep protected query, indexing, and standard traffic out of shared capacity
 domains when isolation is required.</li>
 </ul>
-<h2 id="non-goals-27"><a class="header" href="#non-goals-27">Non-Goals</a></h2>
+<h2 id="non-goals-28"><a class="header" href="#non-goals-28">Non-Goals</a></h2>
 <ul>
 <li>This design does not let callers submit provider URLs.</li>
 <li>It does not make <code>light-gateway</code> an Alias router or LLM protocol translator.</li>
@@ -24774,7 +25664,7 @@ and the gateway verifies producer authenticity and endpoint binding.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-workflow-tool-access-approval"><a class="header" href="#light-workflow-tool-access-approval">Light Workflow Tool Access Approval</a></h1>
-<h2 id="status-14"><a class="header" href="#status-14">Status</a></h2>
+<h2 id="status-15"><a class="header" href="#status-15">Status</a></h2>
 <p>Proposed.</p>
 <p>The design reuses the Portal Workflow application, <code>ask</code> tasks, role-based
 worklists, and the existing workflow Tool grant events. It changes the
@@ -24805,7 +25695,7 @@ acknowledgement task to the original author.</p>
 <li><a href="#endpoint-tools-and-workflow-access">Endpoint Tools and Workflow Access</a></li>
 <li><a href="#workflow-version-and-publication">Workflow Version and Publication</a></li>
 </ul>
-<h2 id="decision-summary-11"><a class="header" href="#decision-summary-11">Decision Summary</a></h2>
+<h2 id="decision-summary-12"><a class="header" href="#decision-summary-12">Decision Summary</a></h2>
 <ol>
 <li>Runtime authorization remains an explicit Tool grant scoped to one workflow
 definition. Version-scoped grants are deferred because the current active
@@ -24828,7 +25718,7 @@ grants in the same transaction as task completion.</li>
 <li>The editor enables testing when it observes committed grants. The author’s
 acknowledgement task is informational and is not an authorization gate.</li>
 </ol>
-<h2 id="goals-25"><a class="header" href="#goals-25">Goals</a></h2>
+<h2 id="goals-26"><a class="header" href="#goals-26">Goals</a></h2>
 <ul>
 <li>Keep the workflow author inside the Workflow Editor.</li>
 <li>Allow an author to compose a complete draft while access is pending.</li>
@@ -24841,7 +25731,7 @@ locations, and justification instead of requiring raw ID exchange.</li>
 authorization authority.</li>
 <li>Fail closed when a Tool changes between request and approval.</li>
 </ul>
-<h2 id="non-goals-28"><a class="header" href="#non-goals-28">Non-Goals</a></h2>
+<h2 id="non-goals-29"><a class="header" href="#non-goals-29">Non-Goals</a></h2>
 <ul>
 <li>Do not grant a Tool to every workflow on the host by default.</li>
 <li>Do not let a pending request satisfy runtime authorization.</li>
@@ -25313,7 +26203,7 @@ the workflow.</li>
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="claim-org-role-bootstrap"><a class="header" href="#claim-org-role-bootstrap">Claim Org Role Bootstrap</a></h1>
-<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
+<h2 id="problem-12"><a class="header" href="#problem-12">Problem</a></h2>
 <p>The Claim Org action lets a signed-in user create an organization and its default host from the profile menu. The <code>createOrg</code> form captures the organization owner, default subdomain, host description, and host owner. The backend create-org flow then creates the organization, the default host, and user-host membership rows in one transaction.</p>
 <p>That transaction is not sufficient for a usable tenant. A new host membership without role assignments can leave the owner unable to authorize after switching to the newly claimed host. The user profile/login query joins roles through <code>role_user_t</code> by the current <code>user_host_t.host_id</code>; if the current host has no active role rows for that user, role-dependent reads can return no user context.</p>
 <p>The Claim Org bootstrap must create the minimum administration roles and assignments for the default host at the same time as the organization and host.</p>
@@ -25343,7 +26233,7 @@ the workflow.</li>
 <li><code>role_permission_t</code></li>
 </ul>
 <p>The <code>role_user_t</code> table has a foreign key to <code>(host_id, role_id)</code> in <code>role_t</code>, so role rows must exist before the user-role assignments are inserted.</p>
-<h2 id="goals-26"><a class="header" href="#goals-26">Goals</a></h2>
+<h2 id="goals-27"><a class="header" href="#goals-27">Goals</a></h2>
 <ol>
 <li>A claimed organization must be immediately usable by the selected organization owner and host owner.</li>
 <li>The default host must receive deterministic administrative roles.</li>
@@ -25351,7 +26241,7 @@ the workflow.</li>
 <li>The event stream and projections must remain replayable and idempotent.</li>
 <li>The implementation must use the canonical role IDs already used by the portal data: <code>org-admin</code> and <code>host-admin</code>.</li>
 </ol>
-<h2 id="non-goals-29"><a class="header" href="#non-goals-29">Non-Goals</a></h2>
+<h2 id="non-goals-30"><a class="header" href="#non-goals-30">Non-Goals</a></h2>
 <p>This design does not introduce a new global organization-role table. Existing roles are host-scoped through <code>role_t.host_id</code>, so the organization administrator role for a claimed organization is represented as a role on the default host.</p>
 <p>This design also does not merge organization and host administration into one broad role. Organization ownership and host ownership are separate responsibilities, and the system should grant both roles only when the same user is selected for both owner fields.</p>
 <h2 id="role-model-1"><a class="header" href="#role-model-1">Role Model</a></h2>
@@ -25464,7 +26354,7 @@ the workflow.</li>
 <p>The owner-transfer role policy also remains open. The system should decide whether owner changes imply role grants, role revokes, both, or neither before adding role side effects to <code>UpdateOrg</code> or <code>UpdateHost</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="master-oauth-host-tenant-login"><a class="header" href="#master-oauth-host-tenant-login">Master OAuth Host Tenant Login</a></h1>
-<h2 id="problem-12"><a class="header" href="#problem-12">Problem</a></h2>
+<h2 id="problem-13"><a class="header" href="#problem-13">Problem</a></h2>
 <p>In a deployed portal instance, <code>dev.lightapi.net</code> is the master host for the instance. Its host ID is:</p>
 <pre><code class="language-text">01964b05-552a-7c4b-9184-6857e7f3dc5f
 </code></pre>
@@ -25488,7 +26378,7 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 <p>The new tenant host does not and should not have duplicate OAuth provider/client rows. The FK therefore rejects login with:</p>
 <pre><code class="language-text">auth_session_t_host_id_client_id_provider_id_fkey
 </code></pre>
-<h2 id="goals-27"><a class="header" href="#goals-27">Goals</a></h2>
+<h2 id="goals-28"><a class="header" href="#goals-28">Goals</a></h2>
 <ol>
 <li>Keep <code>dev.lightapi.net</code> as the single master OAuth host for the instance.</li>
 <li>Allow users whose current host is a tenant host to log in through the master host’s provider/client.</li>
@@ -25497,11 +26387,11 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 <li>Allow Claim Org to switch the host owner to the new host and require logout/login for fresh claims.</li>
 <li>Keep session, auth-code, refresh-token, and audit lifecycle behavior deterministic and queryable.</li>
 </ol>
-<h2 id="non-goals-30"><a class="header" href="#non-goals-30">Non-Goals</a></h2>
+<h2 id="non-goals-31"><a class="header" href="#non-goals-31">Non-Goals</a></h2>
 <p>This design does not introduce tenant-specific OAuth provider IDs, client IDs, redirect URIs, or BFF configuration.</p>
 <p>This design does not change the portal UI or BFF to select a different OAuth provider per tenant host.</p>
 <p>This design does not remove database referential integrity. The provider-client relationship should remain enforced, but it should be enforced against the master OAuth host instead of the tenant host.</p>
-<h2 id="terminology-7"><a class="header" href="#terminology-7">Terminology</a></h2>
+<h2 id="terminology-8"><a class="header" href="#terminology-8">Terminology</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -25884,7 +26774,7 @@ service yet. The main gaps are:</p>
 <li>tests for schema CRUD, tenant/global lookup, versioning, and config
 validation are incomplete</li>
 </ul>
-<h2 id="goals-28"><a class="header" href="#goals-28">Goals</a></h2>
+<h2 id="goals-29"><a class="header" href="#goals-29">Goals</a></h2>
 <ul>
 <li>Store JSON Schema documents with clear tenant/global ownership.</li>
 <li>Support immutable published schema versions.</li>
@@ -25901,7 +26791,7 @@ and loading schema bodies lazily.</li>
 JSON path.</li>
 <li>Categorize and tag schemas for easier discovery and filtering.</li>
 </ul>
-<h2 id="non-goals-31"><a class="header" href="#non-goals-31">Non-Goals</a></h2>
+<h2 id="non-goals-32"><a class="header" href="#non-goals-32">Non-Goals</a></h2>
 <ul>
 <li>Do not build a full schema compatibility engine in the first release.</li>
 <li>Do not require every config property to have a schema.</li>
@@ -27506,7 +28396,7 @@ GROUP BY
 <p>This approach provides a seamless experience while maintaining compatibility with applications requiring roles for authorization or UI customization.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="private-messages"><a class="header" href="#private-messages">Private Messages</a></h1>
-<h2 id="problem-13"><a class="header" href="#problem-13">Problem</a></h2>
+<h2 id="problem-14"><a class="header" href="#problem-14">Problem</a></h2>
 <p>Portal users need a way to exchange private messages from the user profile
 without exposing email addresses to each other. The sender should only need a
 recipient user id or a display-safe user label. The backend can resolve email
@@ -27541,7 +28431,7 @@ model conversations, read state, participant visibility, or per-user delete.</li
 messages page should load its own data from the query API.</li>
 <li>The existing private-message tests are disabled stubs.</li>
 </ul>
-<h2 id="goals-29"><a class="header" href="#goals-29">Goals</a></h2>
+<h2 id="goals-30"><a class="header" href="#goals-30">Goals</a></h2>
 <ul>
 <li>Let one logged-in user send a message to another portal user without knowing
 or seeing the recipient email.</li>
@@ -27556,7 +28446,7 @@ recipient email internally.</li>
 <li>Provide a path from the existing <code>message_t</code> skeleton to a conversation-based
 model without breaking existing UI routes immediately.</li>
 </ul>
-<h2 id="non-goals-32"><a class="header" href="#non-goals-32">Non-Goals</a></h2>
+<h2 id="non-goals-33"><a class="header" href="#non-goals-33">Non-Goals</a></h2>
 <ul>
 <li>Do not build group chat in the first phase.</li>
 <li>Do not expose email addresses in message APIs, events, UI state, or task
@@ -27652,7 +28542,7 @@ CREATE INDEX idx_private_message_state_unread
 bridge only. Add <code>from_user_id</code>, <code>to_user_id</code>, <code>message_id</code>, <code>read_ts</code>, and
 per-user delete columns, then migrate to the conversation tables once the API
 contract is stable.</p>
-<h2 id="event-model-2"><a class="header" href="#event-model-2">Event Model</a></h2>
+<h2 id="event-model-3"><a class="header" href="#event-model-3">Event Model</a></h2>
 <p>Keep the event-driven command/query pattern. A message send should create a
 CloudEvent and the query-side projection should update the private-message
 tables.</p>
@@ -27808,7 +28698,7 @@ confusing recipient identity with the current user.</li>
 </ul>
 <p>The first UI can be an inbox plus conversation thread. Real-time typing,
 presence, attachments, and rich-text editing are later enhancements.</p>
-<h2 id="migration-plan-2"><a class="header" href="#migration-plan-2">Migration Plan</a></h2>
+<h2 id="migration-plan-3"><a class="header" href="#migration-plan-3">Migration Plan</a></h2>
 <h3 id="phase-0-stop-the-broken-behavior"><a class="header" href="#phase-0-stop-the-broken-behavior">Phase 0: Stop the Broken Behavior</a></h3>
 <ul>
 <li>Make <code>GetPrivateMessage</code> return valid JSON even before the new model is
@@ -29696,7 +30586,7 @@ public class ConfigRollbackService {
 <p>This approach provides a clean and relatively robust way to restore the specific override state from your snapshots using the DELETE/INSERT strategy. Remember to test thoroughly!</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="sid-and-host-verification"><a class="header" href="#sid-and-host-verification">SID and Host Verification</a></h1>
-<h2 id="problem-14"><a class="header" href="#problem-14">Problem</a></h2>
+<h2 id="problem-15"><a class="header" href="#problem-15">Problem</a></h2>
 <p>GitHub issue https://github.com/lightapi/portal-service/issues/39 reports that
 <code>config-server</code> accepted a valid JWT whose service identity did not match the
 requested service configuration.</p>
@@ -29813,7 +30703,7 @@ should not be forced to match <code>sid</code> until the product-level authoriza
 is explicitly designed.</p>
 <p>The same exception does not apply to controller registry registration because
 <code>service/register</code> always carries a requested <code>serviceId</code>.</p>
-<h2 id="goals-30"><a class="header" href="#goals-30">Goals</a></h2>
+<h2 id="goals-31"><a class="header" href="#goals-31">Goals</a></h2>
 <ul>
 <li>Prevent one service token from downloading another service’s config, certs,
 or files.</li>
@@ -29859,7 +30749,7 @@ helper.</p>
 <p>The focused implementation tests cover missing and mismatched <code>host</code>, missing
 and mismatched <code>sid</code>, missing and mismatched <code>env</code> when <code>envTag</code> is requested,
 blank values, whitespace trimming, and case-sensitive identifier comparison.</p>
-<h2 id="non-goals-33"><a class="header" href="#non-goals-33">Non-Goals</a></h2>
+<h2 id="non-goals-34"><a class="header" href="#non-goals-34">Non-Goals</a></h2>
 <ul>
 <li>Do not replace JWT verification middleware.</li>
 <li>Do not redesign OAuth token issuance.</li>
@@ -30276,7 +31166,7 @@ copies the current active state of this graph and lets the administrator change
 the target identity and environment-specific configuration.</p>
 <p>This is a same-host operation. Cross-host or cross-database copying remains an
 event-promotion/import concern.</p>
-<h2 id="goals-31"><a class="header" href="#goals-31">Goals</a></h2>
+<h2 id="goals-32"><a class="header" href="#goals-32">Goals</a></h2>
 <ul>
 <li>Clone an active instance and its selected active children with one command.</li>
 <li>Require a target instance name and environment tag while allowing other
@@ -30293,7 +31183,7 @@ omit it without exposing values unnecessarily.</li>
 transaction when requested.</li>
 <li>Report durable projection and snapshot status after command acceptance.</li>
 </ul>
-<h2 id="non-goals-34"><a class="header" href="#non-goals-34">Non-goals</a></h2>
+<h2 id="non-goals-35"><a class="header" href="#non-goals-35">Non-goals</a></h2>
 <ul>
 <li>Copy raw historical events or preserve source aggregate versions.</li>
 <li>Copy an existing configuration snapshot, runtime registration, deployment
@@ -30692,7 +31582,7 @@ plan contains only properties whose parents remain selected.</p>
 <p>The immediate response is <code>ACCEPTED</code>, not completed. It contains the clone
 request ID, target instance ID, transaction ID, terminal event ID, event counts,
 and status URL/action.</p>
-<h3 id="status-15"><a class="header" href="#status-15">Status</a></h3>
+<h3 id="status-16"><a class="header" href="#status-16">Status</a></h3>
 <p><code>getInstanceCloneStatus</code> accepts <code>hostId</code> and <code>cloneRequestId</code> in a POST query
 and returns one of:</p>
 <ul>
@@ -31171,7 +32061,7 @@ retries return a retryable conflict with no committed clone state.</li>
 <li>Non-standard instance files are copied into <code>snapshot_instance_file_t</code>.</li>
 </ul>
 <p>The <code>/config-server/files</code> endpoint must return both sets. It already filters standard files by <code>config_phase</code> through <code>config_snapshot_property_t.config_phase</code>, but <code>instance_file_t</code> and <code>snapshot_instance_file_t</code> do not currently carry <code>config_phase</code>. That makes it impossible to union the two sources while preserving runtime, deployment, and generator phase semantics.</p>
-<h2 id="problem-15"><a class="header" href="#problem-15">Problem</a></h2>
+<h2 id="problem-16"><a class="header" href="#problem-16">Problem</a></h2>
 <p>When a service starts through <code>DefaultConfigLoader</code>, it calls <code>/config-server/files</code> with <code>host</code>, <code>serviceId</code>, and <code>envTag</code>. The endpoint resolves the current snapshot and returns the files that should be written into <code>/config</code>.</p>
 <p>For the sidecar case, <code>openapi.yaml</code> exists in both <code>instance_file_t</code> and <code>snapshot_instance_file_t</code>, but it does not exist in <code>config_snapshot_property_t</code>. Since the current <code>/files</code> query reads only <code>config_snapshot_property_t</code>, the response does not include <code>openapi.yaml</code>, and the sidecar cannot write it to <code>/config</code>.</p>
 <p>The correct endpoint behavior is:</p>
@@ -31537,7 +32427,7 @@ light-portal/releases/
 <li>sign-in and portal static assets load through gateway.</li>
 <li>health checks pass for the Rust services.</li>
 </ul>
-<h2 id="settled-decisions"><a class="header" href="#settled-decisions">Settled Decisions</a></h2>
+<h2 id="settled-decisions-1"><a class="header" href="#settled-decisions-1">Settled Decisions</a></h2>
 <ul>
 <li>Include <code>light-agent</code> in the default <code>docker-compose.yml</code> as the AI agent service for local demos.</li>
 <li>Include the demo customer profile and offer decision APIs in the default local stack.</li>
@@ -31870,7 +32760,7 @@ public class UuidUtil {
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="entity-creation-uniqueness"><a class="header" href="#entity-creation-uniqueness">Entity Creation Uniqueness</a></h1>
-<h2 id="status-16"><a class="header" href="#status-16">Status</a></h2>
+<h2 id="status-17"><a class="header" href="#status-17">Status</a></h2>
 <p>Implemented through Phase 5 for Role/Rule stream births and Category/Tag semantic
 identity, client retries, lifecycle alignment, verified historical materialization,
 snapshot/import guards, and policy-aware retry-ledger cleanup. Later aggregate
@@ -31900,7 +32790,7 @@ name are equal.</p>
 <code>entity_identity_t</code> reservation table. The identity reservation, event-store
 append, outbox write, nonce allocation, and idempotency record must commit in one
 PostgreSQL transaction.</p>
-<h2 id="problem-16"><a class="header" href="#problem-16">Problem</a></h2>
+<h2 id="problem-17"><a class="header" href="#problem-17">Problem</a></h2>
 <p>Issue 691 demonstrates the same-aggregate form of the defect:</p>
 <ol>
 <li>A role such as <code>abc-123</code> already exists at aggregate version 1.</li>
@@ -31934,7 +32824,7 @@ the second event reaches a projection unique constraint.</li>
 </ul>
 <p>The failure is not specific to role or rule. It is a missing write-side creation
 contract shared by many command services.</p>
-<h2 id="goals-32"><a class="header" href="#goals-32">Goals</a></h2>
+<h2 id="goals-33"><a class="header" href="#goals-33">Goals</a></h2>
 <ul>
 <li>Reject a second create for an existing aggregate without changing its event
 stream.</li>
@@ -31946,7 +32836,7 @@ stream.</li>
 <li>Provide one reusable implementation rather than handler-specific query checks.</li>
 <li>Return an actionable conflict to the UI without exposing another tenant’s data.</li>
 </ul>
-<h2 id="non-goals-35"><a class="header" href="#non-goals-35">Non-goals</a></h2>
+<h2 id="non-goals-36"><a class="header" href="#non-goals-36">Non-goals</a></h2>
 <ul>
 <li>Treating all equal request payloads as the same entity.</li>
 <li>Preventing valid multiplicity for events such as audit records, workflow runs,
@@ -31956,7 +32846,7 @@ messages, or orders.</li>
 <li>Turning create into an upsert or silently changing an existing entity.</li>
 <li>Automatically allowing an identity to be reused after delete or rename.</li>
 </ul>
-<h2 id="terminology-8"><a class="header" href="#terminology-8">Terminology</a></h2>
+<h2 id="terminology-9"><a class="header" href="#terminology-9">Terminology</a></h2>
 <h3 id="aggregate-id"><a class="header" href="#aggregate-id">Aggregate ID</a></h3>
 <p>The event-stream subject. It may be a natural composite ID such as
 <code>hostId|roleId</code>, or a generated UUID.</p>
@@ -33257,7 +34147,7 @@ normalized value, and a resolution-rule change uses normalizer migration.</li>
 bounded age/cardinality telemetry, and is deployed before any public
 <code>ALLOW_MULTIPLE</code> create endpoint is enabled.</li>
 </ol>
-<h2 id="settled-decisions-1"><a class="header" href="#settled-decisions-1">Settled Decisions</a></h2>
+<h2 id="settled-decisions-2"><a class="header" href="#settled-decisions-2">Settled Decisions</a></h2>
 <ul>
 <li>The authoritative check belongs in the database-backed command append path.</li>
 <li>UUIDs remain surrogate storage IDs; semantic uniqueness is separate.</li>
@@ -37106,7 +37996,7 @@ scale well if every Java or Rust release requires a hand-maintained set of
 mapping events across all portal instances. This design proposes a release
 mapping automation model that keeps the existing event-sourced write path and
 removes the need to manually recreate mapping files for every product release.</p>
-<h2 id="problem-17"><a class="header" href="#problem-17">Problem</a></h2>
+<h2 id="problem-18"><a class="header" href="#problem-18">Problem</a></h2>
 <p>Product versions are released often. Each new release can introduce a new
 <code>productVersionId</code>, and the config update page only knows which configs and
 properties are applicable when mappings exist for that exact product version.</p>
@@ -37207,7 +38097,7 @@ unchanged products and to the new <code>productVersionId</code> for rebuilt prod
 </tbody>
 </table>
 </div>
-<h2 id="goals-33"><a class="header" href="#goals-33">Goals</a></h2>
+<h2 id="goals-34"><a class="header" href="#goals-34">Goals</a></h2>
 <ul>
 <li>Auto-populate config mappings for every new Java or Rust product release.</li>
 <li>Preserve event replay, auditability, and projection rebuild behavior.</li>
@@ -37220,7 +38110,7 @@ event amplification.</li>
 <li>Detect missing config and property definitions before a release appears
 complete.</li>
 </ul>
-<h2 id="non-goals-36"><a class="header" href="#non-goals-36">Non-Goals</a></h2>
+<h2 id="non-goals-37"><a class="header" href="#non-goals-37">Non-Goals</a></h2>
 <ul>
 <li>Do not change the config override hierarchy.</li>
 <li>Do not write directly to config mapping projection tables.</li>
@@ -37856,7 +38746,7 @@ event-sourced product release model without duplicating standard mappings for
 every tenant.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="release-workflow"><a class="header" href="#release-workflow">Release Workflow</a></h1>
-<h2 id="status-17"><a class="header" href="#status-17">Status</a></h2>
+<h2 id="status-18"><a class="header" href="#status-18">Status</a></h2>
 <p>Proposed design.</p>
 <p>Light Portal should use <code>light-workflow</code> as the durable release orchestrator
 for Java and Rust releases. The workflow should coordinate repository checkout,
@@ -37866,7 +38756,7 @@ artifact publishing, AI-assisted failure diagnosis, and human approval.</p>
 portal service process. Command execution belongs in a sandboxed release
 runner, with <code>light-workflow</code> owning state, task routing, retries, approvals,
 and audit history.</p>
-<h2 id="problem-18"><a class="header" href="#problem-18">Problem</a></h2>
+<h2 id="problem-19"><a class="header" href="#problem-19">Problem</a></h2>
 <p>Java releases currently depend on <code>light-bot</code>, while Rust releases are handled
 through separate command-line and repository-specific steps. This works, but it
 keeps release knowledge outside the same workflow model used by Light Portal
@@ -37885,7 +38775,7 @@ and who approved publication.</li>
 <p>The release workflow should be flexible enough to call existing command-line
 tools, but controlled enough that it does not become an unrestricted shell
 inside Light Portal.</p>
-<h2 id="goals-34"><a class="header" href="#goals-34">Goals</a></h2>
+<h2 id="goals-35"><a class="header" href="#goals-35">Goals</a></h2>
 <ul>
 <li>Replace the current Java <code>light-bot</code> release path with <code>light-workflow</code> once
 parity is proven.</li>
@@ -37903,7 +38793,7 @@ reporting into the release gate.</li>
 behind explicit approval.</li>
 <li>Preserve release auditability and reproducibility.</li>
 </ul>
-<h2 id="non-goals-37"><a class="header" href="#non-goals-37">Non-Goals</a></h2>
+<h2 id="non-goals-38"><a class="header" href="#non-goals-38">Non-Goals</a></h2>
 <ul>
 <li>Do not run arbitrary release commands in the Light Portal service process.</li>
 <li>Do not replace Maven, Cargo, Docker, GitHub CLI, or existing release scripts
@@ -39601,7 +40491,7 @@ aggregate version for that subject.</li>
 </li>
 </ol>
 <p>The generated JSON is then imported through import mode.</p>
-<h2 id="goals-35"><a class="header" href="#goals-35">Goals</a></h2>
+<h2 id="goals-36"><a class="header" href="#goals-36">Goals</a></h2>
 <ul>
 <li>Preserve Java CLI compatibility for existing scripts and runbooks.</li>
 <li>Preserve event-store, outbox, notification, nonce, offset, and transaction
@@ -39613,7 +40503,7 @@ into testable modules.</li>
 <li>Support large migration workflows with stdin/stdout piping, bounded-memory
 conversion options, aggregate-version caching, and configurable batch imports.</li>
 </ul>
-<h2 id="non-goals-38"><a class="header" href="#non-goals-38">Non-Goals</a></h2>
+<h2 id="non-goals-39"><a class="header" href="#non-goals-39">Non-Goals</a></h2>
 <ul>
 <li>No online REST service in the first version.</li>
 <li>No schema migration management.</li>
@@ -40174,7 +41064,7 @@ Java-compatible unversioned arrays for migration compatibility.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="event-replay"><a class="header" href="#event-replay">Event Replay</a></h1>
-<h2 id="status-18"><a class="header" href="#status-18">Status</a></h2>
+<h2 id="status-19"><a class="header" href="#status-19">Status</a></h2>
 <p>This document defines the revised target design for event replay during the
 early development stage of light-portal. The implementation still contains
 legacy-backfill, staged-rollout, feature-gate, mandatory-encryption, and
@@ -40214,7 +41104,7 @@ transactions first;</li>
 <p>Event replay therefore operates on complete canonical failure transactions,
 not individual notification or DLQ rows. It invokes the same projection
 executor as live processing without rewinding PostgreSQL or Kafka offsets.</p>
-<h2 id="goals-36"><a class="header" href="#goals-36">Goals</a></h2>
+<h2 id="goals-37"><a class="header" href="#goals-37">Goals</a></h2>
 <ul>
 <li>Capture every new failed projection transaction in a replayable canonical
 form.</li>
@@ -40239,7 +41129,7 @@ only from an explicit operator request.</li>
 <li>Keep configuration small enough that a developer can understand the entire
 replay setup from one screen.</li>
 </ul>
-<h2 id="non-goals-39"><a class="header" href="#non-goals-39">Non-Goals</a></h2>
+<h2 id="non-goals-40"><a class="header" href="#non-goals-40">Non-Goals</a></h2>
 <ul>
 <li>Historical or legacy <code>dead_letter_queue</code> rows are not imported. They remain
 diagnostic history only.</li>
@@ -41875,7 +42765,7 @@ Location: https://portal.lightapi.net/authorization?code=auth_code_abc&amp;state
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="auth-client-secret-regeneration"><a class="header" href="#auth-client-secret-regeneration">Auth Client Secret Regeneration</a></h1>
-<h2 id="problem-19"><a class="header" href="#problem-19">Problem</a></h2>
+<h2 id="problem-20"><a class="header" href="#problem-20">Problem</a></h2>
 <p>An OAuth auth client receives a <code>client_id</code> and <code>client_secret</code> when it is
 created. The clear text <code>client_secret</code> is intentionally a one-time value. The
 database projection stores only a verifier value in <code>auth_client_t.client_secret</code>
@@ -42716,7 +43606,7 @@ Kubernetes cluster from the Instance Admin page.</p>
 <p>The goal is to provide a production-like deployment path for small businesses
 and enterprise tenants without requiring Light Portal to have direct network
 access to every customer cluster.</p>
-<h2 id="problem-20"><a class="header" href="#problem-20">Problem</a></h2>
+<h2 id="problem-21"><a class="header" href="#problem-21">Problem</a></h2>
 <p>Each API or application repository can contain a <code>k8s/</code> folder with Kubernetes
 deployment templates. The templates contain variables in the following format:</p>
 <pre><code class="language-text">${key:defaultValue}
@@ -43258,7 +44148,7 @@ deployment intent and history, while the deployer owns safe cluster-local
 execution.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="enterprise-ai-assisted-bootstrap-and-eks-deployment"><a class="header" href="#enterprise-ai-assisted-bootstrap-and-eks-deployment">Enterprise AI-Assisted Bootstrap and EKS Deployment</a></h1>
-<h2 id="status-19"><a class="header" href="#status-19">Status</a></h2>
+<h2 id="status-20"><a class="header" href="#status-20">Status</a></h2>
 <p>Proposed customer deployment and qualification design.</p>
 <h2 id="executive-decision-1"><a class="header" href="#executive-decision-1">Executive Decision</a></h2>
 <p>Create a dedicated Linux VM that continuously proves a complete Light Portal
@@ -43308,7 +44198,7 @@ mutating action behind policy and approval.</li>
 </ul>
 <p>This does not make the platform intrinsically simple. It makes the complexity
 visible, repeatable, testable, and supportable.</p>
-<h2 id="goals-37"><a class="header" href="#goals-37">Goals</a></h2>
+<h2 id="goals-38"><a class="header" href="#goals-38">Goals</a></h2>
 <ul>
 <li>Maintain a complete, customer-shaped Light Portal and Light Fabric reference
 environment on a Linux VM.</li>
@@ -43327,7 +44217,7 @@ status, and rollback operations.</li>
 <li>Preserve a conventional, fully documented operator path when AI is disabled
 or unavailable.</li>
 </ul>
-<h2 id="non-goals-40"><a class="header" href="#non-goals-40">Non-Goals</a></h2>
+<h2 id="non-goals-41"><a class="header" href="#non-goals-41">Non-Goals</a></h2>
 <ul>
 <li>Do not make the Linux VM a production runtime or production database.</li>
 <li>Do not deploy unverified output directly from the daily development branch.</li>
@@ -44007,7 +44897,7 @@ security and operations teams require.</p>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-oauth-and-oauth-kafka-agentcore-oidc-discovery"><a class="header" href="#light-oauth-and-oauth-kafka-agentcore-oidc-discovery">Light OAuth and OAuth Kafka AgentCore OIDC Discovery</a></h1>
-<h2 id="problem-21"><a class="header" href="#problem-21">Problem</a></h2>
+<h2 id="problem-22"><a class="header" href="#problem-22">Problem</a></h2>
 <p>Issue https://github.com/lightapi/portal-service/issues/44 asks whether
 <code>portal-service/apps/light-oauth</code> can support AWS AgentCore JWT inbound
 authorization.</p>
@@ -44137,7 +45027,7 @@ the provider <code>jwk</code> from <code>auth_provider_t</code>. The implementat
 that the JWT header <code>kid</code> is present in the returned JWKS for the same provider.
 That guarantee matters more once external AWS services cache the discovery and
 JWKS responses.</p>
-<h2 id="goals-38"><a class="header" href="#goals-38">Goals</a></h2>
+<h2 id="goals-39"><a class="header" href="#goals-39">Goals</a></h2>
 <ul>
 <li>Let AWS AgentCore use Rust <code>light-oauth</code> or Java <code>oauth-kafka</code> as a JWT
 bearer token issuer.</li>
@@ -44149,7 +45039,7 @@ claims working.</li>
 <li>Keep issuer, audience, and discovery URLs deterministic across environments.</li>
 <li>Add tests that prove discovery, JWKS, and signed token claims line up.</li>
 </ul>
-<h2 id="non-goals-41"><a class="header" href="#non-goals-41">Non-Goals</a></h2>
+<h2 id="non-goals-42"><a class="header" href="#non-goals-42">Non-Goals</a></h2>
 <ul>
 <li>Do not implement full OIDC identity-provider behavior in the first phase.</li>
 <li>Do not add dynamic client registration.</li>
