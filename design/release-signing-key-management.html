@@ -1,0 +1,589 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Release Signing Key Management and Rotation - Light Portal Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-e96d0476.css">
+        <link rel="stylesheet" href="../css/chrome-d279d366.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex-740964cd.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc-1b9109f0.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Light Portal Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="release-signing-key-management-and-rotation"><a class="header" href="#release-signing-key-management-and-rotation">Release Signing Key Management and Rotation</a></h1>
+<h2 id="status"><a class="header" href="#status">Status</a></h2>
+<p>Normative design. Implementation is partial.</p>
+<p><code>portal-config-dev</code> currently verifies the signed environment bundle before
+extracting its editable <code>events.json</code>. The other deployment repositories do
+not yet implement every requirement in this document. The implementation
+status table identifies those gaps explicitly.</p>
+<p>This design consolidates the release-key rules previously embedded in
+<a href="enterprise-ai-assisted-bootstrap-eks.html">Enterprise AI-Assisted Bootstrap and EKS Deployment</a>
+and the bundle signature contract in
+<a href="light-portal/composable-multi-host-snapshot-export.html">Composable Multi-Host Snapshot Export and Bootstrap</a>.</p>
+<h2 id="problem"><a class="header" href="#problem">Problem</a></h2>
+<p>Light Portal release artifacts are consumed through several paths:</p>
+<ul>
+<li><code>portal-config-loc</code> recreates disposable development databases;</li>
+<li><code>portal-config-dev</code> prepares and imports the development baseline;</li>
+<li><code>portal-config-bootstrap</code> installs a customer bootstrap environment; and</li>
+<li><code>light-portal-install</code> provides a low-friction local evaluation stack.</li>
+</ul>
+<p>Those consumers must agree on which release keys they trust, how a key arrives,
+when a new key becomes active, how long the old key remains valid, and what to
+do if a key is compromised. A public key copied ad hoc after an installation
+failure is operationally fragile. Downloading the key beside the artifact it
+verifies also fails to establish an independent root of trust.</p>
+<p>The platform additionally has more than one signed-artifact domain. The
+Ed25519 key used for <code>events.zip</code> is not automatically the same identity as the
+key used for the optional PostgreSQL bootstrap archive manifest. Treating
+unrelated keys as one unnamed “release key” makes rotation and revocation
+ambiguous.</p>
+<h2 id="goals"><a class="header" href="#goals">Goals</a></h2>
+<ul>
+<li>Establish explicit signing-key trust domains and ownership.</li>
+<li>Deliver public trust anchors independently of the artifacts they verify.</li>
+<li>Keep all private signing keys confined to approved release infrastructure.</li>
+<li>Make normal rotation non-disruptive through an intentional overlap period.</li>
+<li>Support emergency revocation without silently trusting a replacement key.</li>
+<li>Give every consumer the same fail-closed verification contract.</li>
+<li>Preserve an auditable release and key-rotation history.</li>
+<li>Keep local installation simple: public keys are configuration, not secrets.</li>
+</ul>
+<h2 id="non-goals"><a class="header" href="#non-goals">Non-Goals</a></h2>
+<ul>
+<li>This design does not make an edited environment-specific <code>events.json</code>
+immutable or signed. The downloaded global bundle is verified before
+extraction; approved customization is recorded separately.</li>
+<li>This design does not define OAuth token-signing, TLS certificate, customer
+SSO, provider API-key, or workload-identity rotation.</li>
+<li>This design does not place release private keys in Portal, Config Server,
+Compose, a source repository, a container image, or a public object store.</li>
+<li>This design does not treat HTTPS from the CDN as artifact authenticity.</li>
+<li>This design does not require public keys to be stored in a secrets manager.</li>
+</ul>
+<h2 id="trust-domains"><a class="header" href="#trust-domains">Trust Domains</a></h2>
+<p>Each signed-artifact family has its own key namespace and lifecycle.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Trust domain</th><th>Artifact</th><th>Current algorithm</th><th>Public-key location</th><th>Private-key owner</th></tr>
+</thead>
+<tbody>
+<tr><td>Environment event bundle</td><td><code>events.zip</code> and <code>bundle-manifest.sig</code></td><td>Ed25519</td><td><code>release-keys/&lt;keyId&gt;.pem</code></td><td>Daily-release signing runner</td></tr>
+<tr><td>Database bootstrap archive</td><td>Release <code>manifest.json</code>, <code>manifest.sig</code>, and <code>portal-bootstrap.dump</code></td><td>Algorithm declared by the bootstrap release contract</td><td><code>bootstrap/release-public.pem</code> or a future key-ID directory</td><td>Bootstrap-archive release runner</td></tr>
+<tr><td>Future top-level release manifest</td><td>CDN archive digests and OCI image digests</td><td>To be selected by the release-manifest design</td><td>Dedicated release-manifest trust directory</td><td>Release orchestration service</td></tr>
+</tbody>
+</table>
+</div>
+<p>Keys from different trust domains must not be reused merely for convenience.
+If a deliberate migration uses one cryptographic key in two domains, both
+registries and release records must still name the domains independently so a
+later revocation can be scoped correctly.</p>
+<h2 id="security-invariants"><a class="header" href="#security-invariants">Security Invariants</a></h2>
+<ol>
+<li>A private signing key exists only in approved release infrastructure.</li>
+<li>A public trust anchor arrives through Git, an approved package, internal
+PKI, or another authenticated channel independent of the artifact download.</li>
+<li>A consumer never automatically trusts a key fetched from the same CDN path
+as the artifact being verified.</li>
+<li>The manifest <code>signature.keyId</code> selects an already trusted key. It never
+enrolls a new key.</li>
+<li>Unknown, malformed, expired, or revoked key IDs fail closed.</li>
+<li>Signature and member-digest verification completes before extraction,
+database deletion, database replacement, or import.</li>
+<li>Key IDs are immutable and never reused for different public-key bytes.</li>
+<li>Multiple public keys may be trusted during a bounded rotation overlap.</li>
+<li>Removing an old key is a separate, later release from activating its
+replacement.</li>
+<li>Environment customization occurs only after the immutable source bundle is
+verified. The customized JSON is imported with <code>--filename</code>, without an
+import-time signing requirement.</li>
+</ol>
+<h2 id="key-naming-and-fingerprints"><a class="header" href="#key-naming-and-fingerprints">Key Naming and Fingerprints</a></h2>
+<p>Environment-bundle key IDs must satisfy the importer’s safe filename contract
+and should encode purpose and activation period, for example:</p>
+<pre><code class="language-text">portal-release-2026-01
+portal-release-2027-01
+</code></pre>
+<p>The trusted PEM path is:</p>
+<pre><code class="language-text">release-keys/&lt;keyId&gt;.pem
+</code></pre>
+<p>The authoritative fingerprint is SHA-256 over the DER-encoded SubjectPublicKeyInfo:</p>
+<pre><code class="language-bash">openssl pkey -pubin -in "release-keys/$key_id.pem" -outform DER | sha256sum
+</code></pre>
+<p>A key ID, fingerprint, algorithm, trust domain, activation release, retirement
+release, and revocation status form one key record. A public key file without
+that release record is not sufficient evidence of an approved rotation.</p>
+<h2 id="public-key-delivery"><a class="header" href="#public-key-delivery">Public-Key Delivery</a></h2>
+<p>For the public and developer distributions, the Git repository is the primary
+trust-anchor delivery channel. The key is small, public, reviewable, and
+available before the installer downloads <code>events.zip</code> from R2.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Consumer</th><th>Required delivery</th><th>Runtime behavior</th></tr>
+</thead>
+<tbody>
+<tr><td><code>portal-config-loc</code></td><td>Commit approved event-bundle public keys under <code>release-keys/</code>. Permit <code>EVENT_BUNDLE_KEY_DIR</code> for controlled overrides.</td><td>Verify the signed bundle before bootstrap import. A missing key stops the import.</td></tr>
+<tr><td><code>portal-config-dev</code></td><td>Commit approved keys for reproducibility. The authenticated SSH deploy path may stage the same key, but it must compare with the pinned fingerprint and fail on mismatch instead of silently replacing trust.</td><td>Verify and extract before customization. Record the source-bundle digest.</td></tr>
+<tr><td><code>portal-config-bootstrap</code></td><td>Commit approved keys under <code>release-keys/</code> or provision them through the customer’s approved configuration channel.</td><td>Verify the downloaded bundle before extraction or any destructive database action.</td></tr>
+<tr><td><code>light-portal-install</code></td><td>Ship approved keys in the GitHub repository/archive used by the installer.</td><td>Verify <code>events.zip</code> before extracting the fallback <code>events.json</code>. Keep the database-bootstrap trust key separate.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The CDN may publish public keys and fingerprints for inspection and disaster
+recovery, but the normal runtime must not enroll those copies automatically.</p>
+<h2 id="verification-and-customization-flow"><a class="header" href="#verification-and-customization-flow">Verification and Customization Flow</a></h2>
+<pre class="mermaid">flowchart TD
+    A[Trusted Git release or approved key package] --&gt; B[Local trust directory]
+    C[Download events.zip from CDN to temporary path] --&gt; D[Read manifest keyId]
+    B --&gt; E[Select previously trusted public key]
+    D --&gt; E
+    E --&gt; F{Signature and all member digests valid?}
+    F -- No --&gt; G[Stop before extraction or database change]
+    F -- Yes --&gt; H[Atomically retain verified events.zip]
+    H --&gt; I[Extract editable events.json]
+    I --&gt; J[Record source bundle SHA-256]
+    J --&gt; K[Apply allowlisted environment customization]
+    K --&gt; L[Validate customized event graph]
+    L --&gt; M[Import with --filename]
+</pre>
+
+<p>The release signature authenticates the immutable bundle at the download
+boundary. It does not claim that later environment-specific edits were signed
+by the release service. Installation evidence must therefore record both the
+verified source-bundle digest and the final customized JSON digest.</p>
+<h2 id="key-lifecycle"><a class="header" href="#key-lifecycle">Key Lifecycle</a></h2>
+<pre class="mermaid">stateDiagram-v2
+    [*] --&gt; Generated
+    Generated --&gt; Enrolled: fingerprint approved and public key distributed
+    Enrolled --&gt; Active: signer begins producing artifacts
+    Active --&gt; Retiring: replacement key active
+    Retiring --&gt; Removed: overlap and rollback window complete
+    Generated --&gt; Revoked: compromise before activation
+    Enrolled --&gt; Revoked: compromise or approval withdrawn
+    Active --&gt; Revoked: emergency response
+    Retiring --&gt; Revoked: emergency response
+    Revoked --&gt; Removed: evidence and recovery window complete
+</pre>
+
+<ul>
+<li><strong>Generated</strong>: The private key is created in approved release infrastructure;
+the public key and fingerprint are derived.</li>
+<li><strong>Enrolled</strong>: Consumers trust the public key, but release artifacts are not
+yet signed with it.</li>
+<li><strong>Active</strong>: The release signer uses the key ID for new artifacts.</li>
+<li><strong>Retiring</strong>: A replacement key is active, while the old key remains trusted
+for rollback and previously published artifacts.</li>
+<li><strong>Revoked</strong>: Consumers reject the key even if its PEM is still retained for
+audit evidence.</li>
+<li><strong>Removed</strong>: Runtime distributions no longer include the key. Historical
+records retain its ID, fingerprint, and lifecycle dates.</li>
+</ul>
+<h2 id="normal-rotation-procedure"><a class="header" href="#normal-rotation-procedure">Normal Rotation Procedure</a></h2>
+<h3 id="1-generate-and-record"><a class="header" href="#1-generate-and-record">1. Generate and record</a></h3>
+<p>Generate the new private key on the approved release runner or HSM-backed
+service. Derive its public key and SPKI fingerprint. Create a rotation record
+containing:</p>
+<ul>
+<li>trust domain;</li>
+<li>old and new key IDs;</li>
+<li>old and new fingerprints;</li>
+<li>algorithm;</li>
+<li>approving change or release record;</li>
+<li>enrollment release;</li>
+<li>activation release;</li>
+<li>minimum overlap period;</li>
+<li>planned retirement and removal releases; and</li>
+<li>rollback owner.</li>
+</ul>
+<h3 id="2-enroll-before-activation"><a class="header" href="#2-enroll-before-activation">2. Enroll before activation</a></h3>
+<p>Add the new public key alongside the old key in every consumer. CI must prove
+that all required repositories contain identical bytes for the new key ID and
+that no private key was committed. Release and deploy those consumers before
+the signer changes.</p>
+<h3 id="3-activate"><a class="header" href="#3-activate">3. Activate</a></h3>
+<p>Configure the release runner to sign new artifacts with the new key ID. Publish
+one qualification bundle, verify it through every supported consumer, and
+retain the immediately preceding old-key bundle for rollback.</p>
+<h3 id="4-observe-overlap"><a class="header" href="#4-observe-overlap">4. Observe overlap</a></h3>
+<p>During overlap, consumers accept both key IDs. New releases use only the new
+key. Monitor signature failures, unknown-key failures, stale installers, and
+unexpected use of the old key.</p>
+<h3 id="5-retire-and-remove"><a class="header" href="#5-retire-and-remove">5. Retire and remove</a></h3>
+<p>Mark the old key retiring after the rollback window. Remove it only after all
+supported artifacts signed by it have expired or been withdrawn and all
+supported consumers include the new key. Removal requires its own reviewed
+change; it must not occur in the activation commit.</p>
+<h2 id="emergency-revocation"><a class="header" href="#emergency-revocation">Emergency Revocation</a></h2>
+<p>If a private key may be compromised:</p>
+<ol>
+<li>Stop signing and publishing in the affected trust domain.</li>
+<li>Record the last known-good artifact and the suspected exposure window.</li>
+<li>Mark the key revoked in the release record and consumer trust metadata.</li>
+<li>Distribute the replacement public key through the original independent
+enrollment channel. Do not authorize it solely with the compromised key.</li>
+<li>Release consumer updates that reject the compromised key.</li>
+<li>Re-sign and republish affected artifacts with new bundle IDs and immutable
+release identifiers.</li>
+<li>Invalidate CDN caches or aliases that could continue serving compromised
+artifacts.</li>
+<li>Re-qualify every clean-install and database-recreation path.</li>
+<li>Preserve the revoked public key and incident evidence outside the active
+trust set for forensic use.</li>
+</ol>
+<p>Availability does not override revocation. A consumer with only a revoked key
+must stop with an actionable error instead of accepting an unsigned artifact
+or downloading a replacement trust anchor from the artifact CDN.</p>
+<h2 id="rollback"><a class="header" href="#rollback">Rollback</a></h2>
+<p>During normal overlap, rollback means selecting the last qualified artifact
+signed by either still-trusted key. It does not mean changing a manifest’s
+<code>keyId</code>, replacing the signature file, or re-enrolling an old removed key
+without review.</p>
+<p>If the new signer fails but is not compromised, the release owner may
+temporarily resume signing with the retiring key during the documented overlap.
+That action must be recorded. After the old key is removed or revoked, using it
+again requires a new enrollment decision and is not an ordinary rollback.</p>
+<h2 id="release-runner-key-custody"><a class="header" href="#release-runner-key-custody">Release-Runner Key Custody</a></h2>
+<ul>
+<li>Store private keys outside source trees and build artifacts.</li>
+<li>Grant signing access only to the bounded signing step, not the general build
+workspace.</li>
+<li>Prevent private-key bytes from appearing in logs, command traces, CI caches,
+container layers, or generated bundles.</li>
+<li>Back up private keys only through the approved encrypted recovery mechanism.</li>
+<li>Record who or what invoked each signing operation, the key ID, artifact
+digest, bundle ID, release ID, and timestamp.</li>
+<li>Require explicit approval for activation, rotation, revocation, recovery, or
+export of a private key.</li>
+<li>Derive public keys on the release runner and compare their fingerprints to
+the enrolled records before publication.</li>
+</ul>
+<h2 id="repository-responsibilities-and-current-gaps"><a class="header" href="#repository-responsibilities-and-current-gaps">Repository Responsibilities and Current Gaps</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Repository</th><th>Target responsibility</th><th>Current status</th></tr>
+</thead>
+<tbody>
+<tr><td><code>event-importer</code></td><td>Enforce signature, algorithm, key-ID filename safety, manifest canonicalization, and member digests.</td><td>Signed v2 bundle verification is implemented. Lifecycle metadata such as expiry and revocation is not yet a shared machine-readable contract.</td></tr>
+<tr><td><code>devops</code></td><td>Protect private keys, derive public keys, sign artifacts, write release evidence, and prevent activation before consumer enrollment.</td><td>Environment-bundle signing and public-key derivation are implemented. Cross-repository enrollment and rotation gates are incomplete.</td></tr>
+<tr><td><code>portal-config-loc</code></td><td>Ship the pinned public key and verify a clean-install bundle before removing preserved volumes.</td><td>Verification exists, but the repository does not currently track the release key and full deployment can remove volumes before bundle verification runs.</td></tr>
+<tr><td><code>portal-config-dev</code></td><td>Verify before extraction, preserve the immutable bundle, and bind editable JSON to its source digest.</td><td>Implemented. The deploy path copies the key over SSH but does not enforce equality with a repository-pinned fingerprint.</td></tr>
+<tr><td><code>portal-config-bootstrap</code></td><td>Verify before extraction and before database backup/replacement.</td><td>Not implemented; the current recreate path downloads and extracts directly.</td></tr>
+<tr><td><code>light-portal-install</code></td><td>Verify the event bundle before fallback extraction/import and independently verify the optional database-bootstrap manifest.</td><td>Database-bootstrap signature support exists but its default public key is not shipped. Event-bundle fallback verification is not implemented.</td></tr>
+<tr><td><code>light-portal-doc</code></td><td>Publish the trust, rotation, revocation, and operational evidence contract.</td><td>This document establishes the platform-wide contract.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="machine-readable-trust-metadata"><a class="header" href="#machine-readable-trust-metadata">Machine-Readable Trust Metadata</a></h2>
+<p>The current event importer discovers trusted keys from PEM filenames. A later
+implementation phase should add a reviewed trust registry without changing the
+manifest’s <code>keyId</code> selection rule. A representative record is:</p>
+<pre><code class="language-json">{
+  "schemaVersion": 1,
+  "trustDomain": "environment-event-bundle",
+  "keys": [
+    {
+      "keyId": "portal-release-2026-01",
+      "algorithm": "Ed25519",
+      "spkiSha256": "sha256:&lt;hex&gt;",
+      "state": "ACTIVE",
+      "enrollmentRelease": "&lt;release-id&gt;",
+      "activationRelease": "&lt;release-id&gt;",
+      "retirementRelease": null,
+      "revocationTs": null
+    }
+  ]
+}
+</code></pre>
+<p>Until the importer enforces this metadata directly, repository review and
+release automation must enforce lifecycle state. A PEM file must never silently
+override an explicit revocation record.</p>
+<h2 id="qualification-gates"><a class="header" href="#qualification-gates">Qualification Gates</a></h2>
+<p>Every key-management change must pass:</p>
+<ol>
+<li><strong>Key material checks</strong>: Every PEM parses as a public key; no private-key
+markers or private-key files are present.</li>
+<li><strong>Fingerprint consistency</strong>: The same key ID has identical SPKI bytes and
+fingerprint in every required consumer.</li>
+<li><strong>Known-good verification</strong>: Each consumer accepts a qualification bundle
+signed by every active key.</li>
+<li><strong>Negative verification</strong>: Each consumer rejects a tampered manifest,
+tampered member, missing key, unknown key ID, wrong algorithm, and invalid
+signature.</li>
+<li><strong>Rotation overlap</strong>: Both old and new keys verify their own bundles during
+the overlap; new releases name only the new key.</li>
+<li><strong>Revocation</strong>: A revoked key is rejected even if its PEM remains available
+for evidence.</li>
+<li><strong>Ordering</strong>: Verification failure occurs before extraction, customization,
+volume deletion, database replacement, or import.</li>
+<li><strong>Clean-install coverage</strong>: <code>portal-config-loc</code>,
+<code>portal-config-bootstrap</code>, and <code>light-portal-install</code> recreate an empty
+database from the qualified release. <code>portal-config-dev</code> prepares and
+recreates its baseline through the managed deploy path.</li>
+<li><strong>Rollback coverage</strong>: The last old-key artifact remains usable only during
+the documented overlap and is rejected after revocation or removal.</li>
+</ol>
+<h2 id="implementation-sequence"><a class="header" href="#implementation-sequence">Implementation Sequence</a></h2>
+<ol>
+<li>Commit the current event-bundle public key to the consumer repositories and
+add fingerprint-consistency tests.</li>
+<li>Move <code>portal-config-loc</code> clean-deployment verification ahead of Compose
+<code>down -v</code>, so a missing key or invalid bundle preserves the existing
+database.</li>
+<li>Port <code>portal-config-dev</code>’s verify-before-extract behavior to
+<code>portal-config-bootstrap</code>.</li>
+<li>Make <code>light-portal-install</code> verify <code>events.zip</code> before fallback extraction
+and ship the independently approved database-bootstrap public key when that
+archive feature is enabled.</li>
+<li>Change the dev deploy path from unconditional key replacement to pinned-key
+comparison and explicit enrollment.</li>
+<li>Add machine-readable lifecycle metadata and importer enforcement for
+expired and revoked keys.</li>
+<li>Add release-workflow gates that prevent signer activation until every
+supported consumer has enrolled the new public key.</li>
+<li>Bind CDN archive checksums and OCI image digests through the future signed
+top-level release manifest.</li>
+</ol>
+<h2 id="operational-evidence"><a class="header" href="#operational-evidence">Operational Evidence</a></h2>
+<p>Retain the following for every activation, rotation, retirement, or revocation:</p>
+<ul>
+<li>trust domain and key ID;</li>
+<li>SPKI fingerprint and algorithm;</li>
+<li>approving change record;</li>
+<li>affected repository commits and released versions;</li>
+<li>signer activation configuration change;</li>
+<li>qualification bundle ID and digest;</li>
+<li>verification results for every consumer;</li>
+<li>overlap start and end;</li>
+<li>retirement, revocation, and removal timestamps;</li>
+<li>rollback decision and outcome, if used; and</li>
+<li>incident reference for emergency revocation.</li>
+</ul>
+<p>This evidence contains no private-key material.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../design/deployment-workflow.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../design/enterprise-ai-assisted-bootstrap-eks.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../design/deployment-workflow.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../design/enterprise-ai-assisted-bootstrap-eks.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-09f2665d.js"></script>
+
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-609e4cb8.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../mermaid-3a6b472a.min.js"></script>
+        <script src="../mermaid-init-025d9952.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

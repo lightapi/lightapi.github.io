@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-5915fdb6.js";
+            window.path_to_searchindex_js = "searchindex-740964cd.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-3f26e04f.js"></script>
+        <script src="toc-1b9109f0.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -44270,8 +44270,362 @@ path. Keep the deployer small, policy-bound, and auditable. Let Light Portal own
 deployment intent and history, while the deployer owns safe cluster-local
 execution.</p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="enterprise-ai-assisted-bootstrap-and-eks-deployment"><a class="header" href="#enterprise-ai-assisted-bootstrap-and-eks-deployment">Enterprise AI-Assisted Bootstrap and EKS Deployment</a></h1>
+<h1 id="release-signing-key-management-and-rotation"><a class="header" href="#release-signing-key-management-and-rotation">Release Signing Key Management and Rotation</a></h1>
 <h2 id="status-20"><a class="header" href="#status-20">Status</a></h2>
+<p>Normative design. Implementation is partial.</p>
+<p><code>portal-config-dev</code> currently verifies the signed environment bundle before
+extracting its editable <code>events.json</code>. The other deployment repositories do
+not yet implement every requirement in this document. The implementation
+status table identifies those gaps explicitly.</p>
+<p>This design consolidates the release-key rules previously embedded in
+<a href="#enterprise-ai-assisted-bootstrap-and-eks-deployment">Enterprise AI-Assisted Bootstrap and EKS Deployment</a>
+and the bundle signature contract in
+<a href="#composable-multi-host-snapshot-export-and-bootstrap">Composable Multi-Host Snapshot Export and Bootstrap</a>.</p>
+<h2 id="problem-22"><a class="header" href="#problem-22">Problem</a></h2>
+<p>Light Portal release artifacts are consumed through several paths:</p>
+<ul>
+<li><code>portal-config-loc</code> recreates disposable development databases;</li>
+<li><code>portal-config-dev</code> prepares and imports the development baseline;</li>
+<li><code>portal-config-bootstrap</code> installs a customer bootstrap environment; and</li>
+<li><code>light-portal-install</code> provides a low-friction local evaluation stack.</li>
+</ul>
+<p>Those consumers must agree on which release keys they trust, how a key arrives,
+when a new key becomes active, how long the old key remains valid, and what to
+do if a key is compromised. A public key copied ad hoc after an installation
+failure is operationally fragile. Downloading the key beside the artifact it
+verifies also fails to establish an independent root of trust.</p>
+<p>The platform additionally has more than one signed-artifact domain. The
+Ed25519 key used for <code>events.zip</code> is not automatically the same identity as the
+key used for the optional PostgreSQL bootstrap archive manifest. Treating
+unrelated keys as one unnamed “release key” makes rotation and revocation
+ambiguous.</p>
+<h2 id="goals-38"><a class="header" href="#goals-38">Goals</a></h2>
+<ul>
+<li>Establish explicit signing-key trust domains and ownership.</li>
+<li>Deliver public trust anchors independently of the artifacts they verify.</li>
+<li>Keep all private signing keys confined to approved release infrastructure.</li>
+<li>Make normal rotation non-disruptive through an intentional overlap period.</li>
+<li>Support emergency revocation without silently trusting a replacement key.</li>
+<li>Give every consumer the same fail-closed verification contract.</li>
+<li>Preserve an auditable release and key-rotation history.</li>
+<li>Keep local installation simple: public keys are configuration, not secrets.</li>
+</ul>
+<h2 id="non-goals-41"><a class="header" href="#non-goals-41">Non-Goals</a></h2>
+<ul>
+<li>This design does not make an edited environment-specific <code>events.json</code>
+immutable or signed. The downloaded global bundle is verified before
+extraction; approved customization is recorded separately.</li>
+<li>This design does not define OAuth token-signing, TLS certificate, customer
+SSO, provider API-key, or workload-identity rotation.</li>
+<li>This design does not place release private keys in Portal, Config Server,
+Compose, a source repository, a container image, or a public object store.</li>
+<li>This design does not treat HTTPS from the CDN as artifact authenticity.</li>
+<li>This design does not require public keys to be stored in a secrets manager.</li>
+</ul>
+<h2 id="trust-domains"><a class="header" href="#trust-domains">Trust Domains</a></h2>
+<p>Each signed-artifact family has its own key namespace and lifecycle.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Trust domain</th><th>Artifact</th><th>Current algorithm</th><th>Public-key location</th><th>Private-key owner</th></tr>
+</thead>
+<tbody>
+<tr><td>Environment event bundle</td><td><code>events.zip</code> and <code>bundle-manifest.sig</code></td><td>Ed25519</td><td><code>release-keys/&lt;keyId&gt;.pem</code></td><td>Daily-release signing runner</td></tr>
+<tr><td>Database bootstrap archive</td><td>Release <code>manifest.json</code>, <code>manifest.sig</code>, and <code>portal-bootstrap.dump</code></td><td>Algorithm declared by the bootstrap release contract</td><td><code>bootstrap/release-public.pem</code> or a future key-ID directory</td><td>Bootstrap-archive release runner</td></tr>
+<tr><td>Future top-level release manifest</td><td>CDN archive digests and OCI image digests</td><td>To be selected by the release-manifest design</td><td>Dedicated release-manifest trust directory</td><td>Release orchestration service</td></tr>
+</tbody>
+</table>
+</div>
+<p>Keys from different trust domains must not be reused merely for convenience.
+If a deliberate migration uses one cryptographic key in two domains, both
+registries and release records must still name the domains independently so a
+later revocation can be scoped correctly.</p>
+<h2 id="security-invariants"><a class="header" href="#security-invariants">Security Invariants</a></h2>
+<ol>
+<li>A private signing key exists only in approved release infrastructure.</li>
+<li>A public trust anchor arrives through Git, an approved package, internal
+PKI, or another authenticated channel independent of the artifact download.</li>
+<li>A consumer never automatically trusts a key fetched from the same CDN path
+as the artifact being verified.</li>
+<li>The manifest <code>signature.keyId</code> selects an already trusted key. It never
+enrolls a new key.</li>
+<li>Unknown, malformed, expired, or revoked key IDs fail closed.</li>
+<li>Signature and member-digest verification completes before extraction,
+database deletion, database replacement, or import.</li>
+<li>Key IDs are immutable and never reused for different public-key bytes.</li>
+<li>Multiple public keys may be trusted during a bounded rotation overlap.</li>
+<li>Removing an old key is a separate, later release from activating its
+replacement.</li>
+<li>Environment customization occurs only after the immutable source bundle is
+verified. The customized JSON is imported with <code>--filename</code>, without an
+import-time signing requirement.</li>
+</ol>
+<h2 id="key-naming-and-fingerprints"><a class="header" href="#key-naming-and-fingerprints">Key Naming and Fingerprints</a></h2>
+<p>Environment-bundle key IDs must satisfy the importer’s safe filename contract
+and should encode purpose and activation period, for example:</p>
+<pre><code class="language-text">portal-release-2026-01
+portal-release-2027-01
+</code></pre>
+<p>The trusted PEM path is:</p>
+<pre><code class="language-text">release-keys/&lt;keyId&gt;.pem
+</code></pre>
+<p>The authoritative fingerprint is SHA-256 over the DER-encoded SubjectPublicKeyInfo:</p>
+<pre><code class="language-bash">openssl pkey -pubin -in "release-keys/$key_id.pem" -outform DER | sha256sum
+</code></pre>
+<p>A key ID, fingerprint, algorithm, trust domain, activation release, retirement
+release, and revocation status form one key record. A public key file without
+that release record is not sufficient evidence of an approved rotation.</p>
+<h2 id="public-key-delivery"><a class="header" href="#public-key-delivery">Public-Key Delivery</a></h2>
+<p>For the public and developer distributions, the Git repository is the primary
+trust-anchor delivery channel. The key is small, public, reviewable, and
+available before the installer downloads <code>events.zip</code> from R2.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Consumer</th><th>Required delivery</th><th>Runtime behavior</th></tr>
+</thead>
+<tbody>
+<tr><td><code>portal-config-loc</code></td><td>Commit approved event-bundle public keys under <code>release-keys/</code>. Permit <code>EVENT_BUNDLE_KEY_DIR</code> for controlled overrides.</td><td>Verify the signed bundle before bootstrap import. A missing key stops the import.</td></tr>
+<tr><td><code>portal-config-dev</code></td><td>Commit approved keys for reproducibility. The authenticated SSH deploy path may stage the same key, but it must compare with the pinned fingerprint and fail on mismatch instead of silently replacing trust.</td><td>Verify and extract before customization. Record the source-bundle digest.</td></tr>
+<tr><td><code>portal-config-bootstrap</code></td><td>Commit approved keys under <code>release-keys/</code> or provision them through the customer’s approved configuration channel.</td><td>Verify the downloaded bundle before extraction or any destructive database action.</td></tr>
+<tr><td><code>light-portal-install</code></td><td>Ship approved keys in the GitHub repository/archive used by the installer.</td><td>Verify <code>events.zip</code> before extracting the fallback <code>events.json</code>. Keep the database-bootstrap trust key separate.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The CDN may publish public keys and fingerprints for inspection and disaster
+recovery, but the normal runtime must not enroll those copies automatically.</p>
+<h2 id="verification-and-customization-flow"><a class="header" href="#verification-and-customization-flow">Verification and Customization Flow</a></h2>
+<pre class="mermaid">flowchart TD
+    A[Trusted Git release or approved key package] --&gt; B[Local trust directory]
+    C[Download events.zip from CDN to temporary path] --&gt; D[Read manifest keyId]
+    B --&gt; E[Select previously trusted public key]
+    D --&gt; E
+    E --&gt; F{Signature and all member digests valid?}
+    F -- No --&gt; G[Stop before extraction or database change]
+    F -- Yes --&gt; H[Atomically retain verified events.zip]
+    H --&gt; I[Extract editable events.json]
+    I --&gt; J[Record source bundle SHA-256]
+    J --&gt; K[Apply allowlisted environment customization]
+    K --&gt; L[Validate customized event graph]
+    L --&gt; M[Import with --filename]
+</pre>
+
+<p>The release signature authenticates the immutable bundle at the download
+boundary. It does not claim that later environment-specific edits were signed
+by the release service. Installation evidence must therefore record both the
+verified source-bundle digest and the final customized JSON digest.</p>
+<h2 id="key-lifecycle"><a class="header" href="#key-lifecycle">Key Lifecycle</a></h2>
+<pre class="mermaid">stateDiagram-v2
+    [*] --&gt; Generated
+    Generated --&gt; Enrolled: fingerprint approved and public key distributed
+    Enrolled --&gt; Active: signer begins producing artifacts
+    Active --&gt; Retiring: replacement key active
+    Retiring --&gt; Removed: overlap and rollback window complete
+    Generated --&gt; Revoked: compromise before activation
+    Enrolled --&gt; Revoked: compromise or approval withdrawn
+    Active --&gt; Revoked: emergency response
+    Retiring --&gt; Revoked: emergency response
+    Revoked --&gt; Removed: evidence and recovery window complete
+</pre>
+
+<ul>
+<li><strong>Generated</strong>: The private key is created in approved release infrastructure;
+the public key and fingerprint are derived.</li>
+<li><strong>Enrolled</strong>: Consumers trust the public key, but release artifacts are not
+yet signed with it.</li>
+<li><strong>Active</strong>: The release signer uses the key ID for new artifacts.</li>
+<li><strong>Retiring</strong>: A replacement key is active, while the old key remains trusted
+for rollback and previously published artifacts.</li>
+<li><strong>Revoked</strong>: Consumers reject the key even if its PEM is still retained for
+audit evidence.</li>
+<li><strong>Removed</strong>: Runtime distributions no longer include the key. Historical
+records retain its ID, fingerprint, and lifecycle dates.</li>
+</ul>
+<h2 id="normal-rotation-procedure"><a class="header" href="#normal-rotation-procedure">Normal Rotation Procedure</a></h2>
+<h3 id="1-generate-and-record"><a class="header" href="#1-generate-and-record">1. Generate and record</a></h3>
+<p>Generate the new private key on the approved release runner or HSM-backed
+service. Derive its public key and SPKI fingerprint. Create a rotation record
+containing:</p>
+<ul>
+<li>trust domain;</li>
+<li>old and new key IDs;</li>
+<li>old and new fingerprints;</li>
+<li>algorithm;</li>
+<li>approving change or release record;</li>
+<li>enrollment release;</li>
+<li>activation release;</li>
+<li>minimum overlap period;</li>
+<li>planned retirement and removal releases; and</li>
+<li>rollback owner.</li>
+</ul>
+<h3 id="2-enroll-before-activation"><a class="header" href="#2-enroll-before-activation">2. Enroll before activation</a></h3>
+<p>Add the new public key alongside the old key in every consumer. CI must prove
+that all required repositories contain identical bytes for the new key ID and
+that no private key was committed. Release and deploy those consumers before
+the signer changes.</p>
+<h3 id="3-activate"><a class="header" href="#3-activate">3. Activate</a></h3>
+<p>Configure the release runner to sign new artifacts with the new key ID. Publish
+one qualification bundle, verify it through every supported consumer, and
+retain the immediately preceding old-key bundle for rollback.</p>
+<h3 id="4-observe-overlap"><a class="header" href="#4-observe-overlap">4. Observe overlap</a></h3>
+<p>During overlap, consumers accept both key IDs. New releases use only the new
+key. Monitor signature failures, unknown-key failures, stale installers, and
+unexpected use of the old key.</p>
+<h3 id="5-retire-and-remove"><a class="header" href="#5-retire-and-remove">5. Retire and remove</a></h3>
+<p>Mark the old key retiring after the rollback window. Remove it only after all
+supported artifacts signed by it have expired or been withdrawn and all
+supported consumers include the new key. Removal requires its own reviewed
+change; it must not occur in the activation commit.</p>
+<h2 id="emergency-revocation"><a class="header" href="#emergency-revocation">Emergency Revocation</a></h2>
+<p>If a private key may be compromised:</p>
+<ol>
+<li>Stop signing and publishing in the affected trust domain.</li>
+<li>Record the last known-good artifact and the suspected exposure window.</li>
+<li>Mark the key revoked in the release record and consumer trust metadata.</li>
+<li>Distribute the replacement public key through the original independent
+enrollment channel. Do not authorize it solely with the compromised key.</li>
+<li>Release consumer updates that reject the compromised key.</li>
+<li>Re-sign and republish affected artifacts with new bundle IDs and immutable
+release identifiers.</li>
+<li>Invalidate CDN caches or aliases that could continue serving compromised
+artifacts.</li>
+<li>Re-qualify every clean-install and database-recreation path.</li>
+<li>Preserve the revoked public key and incident evidence outside the active
+trust set for forensic use.</li>
+</ol>
+<p>Availability does not override revocation. A consumer with only a revoked key
+must stop with an actionable error instead of accepting an unsigned artifact
+or downloading a replacement trust anchor from the artifact CDN.</p>
+<h2 id="rollback-1"><a class="header" href="#rollback-1">Rollback</a></h2>
+<p>During normal overlap, rollback means selecting the last qualified artifact
+signed by either still-trusted key. It does not mean changing a manifest’s
+<code>keyId</code>, replacing the signature file, or re-enrolling an old removed key
+without review.</p>
+<p>If the new signer fails but is not compromised, the release owner may
+temporarily resume signing with the retiring key during the documented overlap.
+That action must be recorded. After the old key is removed or revoked, using it
+again requires a new enrollment decision and is not an ordinary rollback.</p>
+<h2 id="release-runner-key-custody"><a class="header" href="#release-runner-key-custody">Release-Runner Key Custody</a></h2>
+<ul>
+<li>Store private keys outside source trees and build artifacts.</li>
+<li>Grant signing access only to the bounded signing step, not the general build
+workspace.</li>
+<li>Prevent private-key bytes from appearing in logs, command traces, CI caches,
+container layers, or generated bundles.</li>
+<li>Back up private keys only through the approved encrypted recovery mechanism.</li>
+<li>Record who or what invoked each signing operation, the key ID, artifact
+digest, bundle ID, release ID, and timestamp.</li>
+<li>Require explicit approval for activation, rotation, revocation, recovery, or
+export of a private key.</li>
+<li>Derive public keys on the release runner and compare their fingerprints to
+the enrolled records before publication.</li>
+</ul>
+<h2 id="repository-responsibilities-and-current-gaps"><a class="header" href="#repository-responsibilities-and-current-gaps">Repository Responsibilities and Current Gaps</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Repository</th><th>Target responsibility</th><th>Current status</th></tr>
+</thead>
+<tbody>
+<tr><td><code>event-importer</code></td><td>Enforce signature, algorithm, key-ID filename safety, manifest canonicalization, and member digests.</td><td>Signed v2 bundle verification is implemented. Lifecycle metadata such as expiry and revocation is not yet a shared machine-readable contract.</td></tr>
+<tr><td><code>devops</code></td><td>Protect private keys, derive public keys, sign artifacts, write release evidence, and prevent activation before consumer enrollment.</td><td>Environment-bundle signing and public-key derivation are implemented. Cross-repository enrollment and rotation gates are incomplete.</td></tr>
+<tr><td><code>portal-config-loc</code></td><td>Ship the pinned public key and verify a clean-install bundle before removing preserved volumes.</td><td>Verification exists, but the repository does not currently track the release key and full deployment can remove volumes before bundle verification runs.</td></tr>
+<tr><td><code>portal-config-dev</code></td><td>Verify before extraction, preserve the immutable bundle, and bind editable JSON to its source digest.</td><td>Implemented. The deploy path copies the key over SSH but does not enforce equality with a repository-pinned fingerprint.</td></tr>
+<tr><td><code>portal-config-bootstrap</code></td><td>Verify before extraction and before database backup/replacement.</td><td>Not implemented; the current recreate path downloads and extracts directly.</td></tr>
+<tr><td><code>light-portal-install</code></td><td>Verify the event bundle before fallback extraction/import and independently verify the optional database-bootstrap manifest.</td><td>Database-bootstrap signature support exists but its default public key is not shipped. Event-bundle fallback verification is not implemented.</td></tr>
+<tr><td><code>light-portal-doc</code></td><td>Publish the trust, rotation, revocation, and operational evidence contract.</td><td>This document establishes the platform-wide contract.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="machine-readable-trust-metadata"><a class="header" href="#machine-readable-trust-metadata">Machine-Readable Trust Metadata</a></h2>
+<p>The current event importer discovers trusted keys from PEM filenames. A later
+implementation phase should add a reviewed trust registry without changing the
+manifest’s <code>keyId</code> selection rule. A representative record is:</p>
+<pre><code class="language-json">{
+  "schemaVersion": 1,
+  "trustDomain": "environment-event-bundle",
+  "keys": [
+    {
+      "keyId": "portal-release-2026-01",
+      "algorithm": "Ed25519",
+      "spkiSha256": "sha256:&lt;hex&gt;",
+      "state": "ACTIVE",
+      "enrollmentRelease": "&lt;release-id&gt;",
+      "activationRelease": "&lt;release-id&gt;",
+      "retirementRelease": null,
+      "revocationTs": null
+    }
+  ]
+}
+</code></pre>
+<p>Until the importer enforces this metadata directly, repository review and
+release automation must enforce lifecycle state. A PEM file must never silently
+override an explicit revocation record.</p>
+<h2 id="qualification-gates"><a class="header" href="#qualification-gates">Qualification Gates</a></h2>
+<p>Every key-management change must pass:</p>
+<ol>
+<li><strong>Key material checks</strong>: Every PEM parses as a public key; no private-key
+markers or private-key files are present.</li>
+<li><strong>Fingerprint consistency</strong>: The same key ID has identical SPKI bytes and
+fingerprint in every required consumer.</li>
+<li><strong>Known-good verification</strong>: Each consumer accepts a qualification bundle
+signed by every active key.</li>
+<li><strong>Negative verification</strong>: Each consumer rejects a tampered manifest,
+tampered member, missing key, unknown key ID, wrong algorithm, and invalid
+signature.</li>
+<li><strong>Rotation overlap</strong>: Both old and new keys verify their own bundles during
+the overlap; new releases name only the new key.</li>
+<li><strong>Revocation</strong>: A revoked key is rejected even if its PEM remains available
+for evidence.</li>
+<li><strong>Ordering</strong>: Verification failure occurs before extraction, customization,
+volume deletion, database replacement, or import.</li>
+<li><strong>Clean-install coverage</strong>: <code>portal-config-loc</code>,
+<code>portal-config-bootstrap</code>, and <code>light-portal-install</code> recreate an empty
+database from the qualified release. <code>portal-config-dev</code> prepares and
+recreates its baseline through the managed deploy path.</li>
+<li><strong>Rollback coverage</strong>: The last old-key artifact remains usable only during
+the documented overlap and is rejected after revocation or removal.</li>
+</ol>
+<h2 id="implementation-sequence-1"><a class="header" href="#implementation-sequence-1">Implementation Sequence</a></h2>
+<ol>
+<li>Commit the current event-bundle public key to the consumer repositories and
+add fingerprint-consistency tests.</li>
+<li>Move <code>portal-config-loc</code> clean-deployment verification ahead of Compose
+<code>down -v</code>, so a missing key or invalid bundle preserves the existing
+database.</li>
+<li>Port <code>portal-config-dev</code>’s verify-before-extract behavior to
+<code>portal-config-bootstrap</code>.</li>
+<li>Make <code>light-portal-install</code> verify <code>events.zip</code> before fallback extraction
+and ship the independently approved database-bootstrap public key when that
+archive feature is enabled.</li>
+<li>Change the dev deploy path from unconditional key replacement to pinned-key
+comparison and explicit enrollment.</li>
+<li>Add machine-readable lifecycle metadata and importer enforcement for
+expired and revoked keys.</li>
+<li>Add release-workflow gates that prevent signer activation until every
+supported consumer has enrolled the new public key.</li>
+<li>Bind CDN archive checksums and OCI image digests through the future signed
+top-level release manifest.</li>
+</ol>
+<h2 id="operational-evidence"><a class="header" href="#operational-evidence">Operational Evidence</a></h2>
+<p>Retain the following for every activation, rotation, retirement, or revocation:</p>
+<ul>
+<li>trust domain and key ID;</li>
+<li>SPKI fingerprint and algorithm;</li>
+<li>approving change record;</li>
+<li>affected repository commits and released versions;</li>
+<li>signer activation configuration change;</li>
+<li>qualification bundle ID and digest;</li>
+<li>verification results for every consumer;</li>
+<li>overlap start and end;</li>
+<li>retirement, revocation, and removal timestamps;</li>
+<li>rollback decision and outcome, if used; and</li>
+<li>incident reference for emergency revocation.</li>
+</ul>
+<p>This evidence contains no private-key material.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="enterprise-ai-assisted-bootstrap-and-eks-deployment"><a class="header" href="#enterprise-ai-assisted-bootstrap-and-eks-deployment">Enterprise AI-Assisted Bootstrap and EKS Deployment</a></h1>
+<h2 id="status-21"><a class="header" href="#status-21">Status</a></h2>
 <p>Proposed customer deployment and qualification design.</p>
 <h2 id="executive-decision-1"><a class="header" href="#executive-decision-1">Executive Decision</a></h2>
 <p>Create a dedicated Linux VM that continuously proves a complete Light Portal
@@ -44335,7 +44689,7 @@ mutating action behind policy and approval.</li>
 </ul>
 <p>This does not make the platform intrinsically simple. It makes the complexity
 visible, repeatable, testable, and supportable.</p>
-<h2 id="goals-38"><a class="header" href="#goals-38">Goals</a></h2>
+<h2 id="goals-39"><a class="header" href="#goals-39">Goals</a></h2>
 <ul>
 <li>Maintain a complete, customer-shaped Light Portal and Light Fabric reference
 environment on a Linux VM.</li>
@@ -44354,7 +44708,7 @@ status, and rollback operations.</li>
 <li>Preserve a conventional, fully documented operator path when AI is disabled
 or unavailable.</li>
 </ul>
-<h2 id="non-goals-41"><a class="header" href="#non-goals-41">Non-Goals</a></h2>
+<h2 id="non-goals-42"><a class="header" href="#non-goals-42">Non-Goals</a></h2>
 <ul>
 <li>Do not make the Linux VM a production runtime or production database.</li>
 <li>Do not deploy unverified output directly from the daily development branch.</li>
@@ -44617,6 +44971,10 @@ itself prove that the bytes are the intended Light release. Artifact
 authenticity comes from a trusted signing key plus the signed manifest; content
 integrity comes from the checksums and OCI digests bound by that manifest.</p>
 <h4 id="establishing-and-verifying-the-signing-key-trust-root"><a class="header" href="#establishing-and-verifying-the-signing-key-trust-root">Establishing and Verifying the Signing-Key Trust Root</a></h4>
+<p>The platform-wide authority for signing-key custody, delivery, rotation,
+revocation, and cross-repository qualification is
+<a href="#release-signing-key-management-and-rotation">Release Signing Key Management and Rotation</a>.
+This section applies that contract to enterprise Bootstrap enrollment.</p>
 <p>The trusted public key must arrive through a channel independent of the
 artifact download. For example, the customer security team can install it from
 an approved change record, internal PKI package, or secrets/configuration
@@ -44973,7 +45331,7 @@ prune thresholds in deployer policy.</li>
 <li>Redact Secret and sealed-secret data from diffs and logs.</li>
 <li>Record Kubernetes audit events and the Light Workflow request ID together.</li>
 </ul>
-<h2 id="qualification-gates"><a class="header" href="#qualification-gates">Qualification Gates</a></h2>
+<h2 id="qualification-gates-1"><a class="header" href="#qualification-gates-1">Qualification Gates</a></h2>
 <p>A customer release is qualified only when all mandatory gates are green.</p>
 <div class="table-wrapper">
 <table>
@@ -45189,7 +45547,7 @@ security and operations teams require.</p>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-oauth-and-oauth-kafka-agentcore-oidc-discovery"><a class="header" href="#light-oauth-and-oauth-kafka-agentcore-oidc-discovery">Light OAuth and OAuth Kafka AgentCore OIDC Discovery</a></h1>
-<h2 id="problem-22"><a class="header" href="#problem-22">Problem</a></h2>
+<h2 id="problem-23"><a class="header" href="#problem-23">Problem</a></h2>
 <p>Issue https://github.com/lightapi/portal-service/issues/44 asks whether
 <code>portal-service/apps/light-oauth</code> can support AWS AgentCore JWT inbound
 authorization.</p>
@@ -45319,7 +45677,7 @@ the provider <code>jwk</code> from <code>auth_provider_t</code>. The implementat
 that the JWT header <code>kid</code> is present in the returned JWKS for the same provider.
 That guarantee matters more once external AWS services cache the discovery and
 JWKS responses.</p>
-<h2 id="goals-39"><a class="header" href="#goals-39">Goals</a></h2>
+<h2 id="goals-40"><a class="header" href="#goals-40">Goals</a></h2>
 <ul>
 <li>Let AWS AgentCore use Rust <code>light-oauth</code> or Java <code>oauth-kafka</code> as a JWT
 bearer token issuer.</li>
@@ -45331,7 +45689,7 @@ claims working.</li>
 <li>Keep issuer, audience, and discovery URLs deterministic across environments.</li>
 <li>Add tests that prove discovery, JWKS, and signed token claims line up.</li>
 </ul>
-<h2 id="non-goals-42"><a class="header" href="#non-goals-42">Non-Goals</a></h2>
+<h2 id="non-goals-43"><a class="header" href="#non-goals-43">Non-Goals</a></h2>
 <ul>
 <li>Do not implement full OIDC identity-provider behavior in the first phase.</li>
 <li>Do not add dynamic client registration.</li>
