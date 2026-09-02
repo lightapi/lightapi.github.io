@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-740964cd.js";
+            window.path_to_searchindex_js = "searchindex-f71e017e.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-1b9109f0.js"></script>
+        <script src="toc-89f2168e.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -13373,7 +13373,7 @@ Knowledge. It also defines how publication identity is shared with the internal
 Workflow service.</p>
 <p>The development placement and migration contract for the Config Server,
 Knowledge, and Host operational databases is defined in
-<a href="#development-postgresql-database-topology">Development PostgreSQL Database Topology</a>.</p>
+<a href="#operational-storage-registration-and-development-postgresql-topology">Operational Storage Registration And Development PostgreSQL Topology</a>.</p>
 <h2 id="decision-summary-2"><a class="header" href="#decision-summary-2">Decision Summary</a></h2>
 <p>Light Portal is the policy authoring and publication control plane. Agent,
 Gateway, Knowledge, and other independently operated application runtimes are
@@ -14195,11 +14195,14 @@ generation. Snapshot creation from mutable instance rows is vulnerable to
 mixing a concurrent change into a publication unless the staged target and
 projected digest are checked.</p>
 <h3 id="current-workflow-database-access"><a class="header" href="#current-workflow-database-access">Current Workflow database access</a></h3>
-<p><code>light-workflow</code> currently creates one SQLx PostgreSQL pool from <code>DATABASE_URL</code>
-and shares it across admission, execution, event consumption, and reconcilers.
-The local composition points it at the same <code>configserver</code> database as Portal;
-the development credential is a database superuser and is not an acceptable
-production role.</p>
+<p><code>light-workflow</code> creates one SQLx PostgreSQL pool from its registered
+operational-store URL and shares it across direct invocation admission,
+execution, and reconcilers. The database is customer-owned and is not the
+Portal <code>configserver</code> database. The service starts its legacy
+<code>WorkflowStartedEvent</code> outbox consumer only when the same database explicitly
+contains the legacy <code>outbox_message_t</code> and <code>log_counter</code> source tables. Normal
+customer-managed deployments use <code>/v1/workflow-invocations</code> and do not receive
+direct Portal database access.</p>
 <p>Its access falls into three categories:</p>
 <div class="table-wrapper">
 <table>
@@ -14207,7 +14210,7 @@ production role.</p>
 <tr><th>Category</th><th>Current tables/path</th><th>Target boundary</th></tr>
 </thead>
 <tbody>
-<tr><td>Portal event consumption</td><td><code>outbox_message_t</code>, <code>consumer_offsets</code>, notification/counter state</td><td>Read event outbox and write only Workflow consumer checkpoint/quarantine state.</td></tr>
+<tr><td>Legacy event consumption</td><td>Optional local <code>outbox_message_t</code>, <code>log_counter</code>, <code>consumer_offsets</code>, and quarantine state</td><td>Compatibility-only. Do not connect a customer runtime directly to the Portal control-plane database.</td></tr>
 <tr><td>Admission projection reads</td><td><code>workflow_tool_binding_t</code>, <code>wf_definition_t</code>, <code>tool_t</code>, dependency/approval projections</td><td>Read-only; validate versions/digests and copy the accepted immutable definition, binding, policy, and endpoint set into invocation-owned state.</td></tr>
 <tr><td>Workflow operational state</td><td><code>process_info_t</code>, <code>task_info_t</code>, <code>workflow_invocation_t</code>, budgets, leases, audit outbox, bounded encrypted invocation credentials</td><td>Workflow-owned writes with explicit grants and retention.</td></tr>
 </tbody>
@@ -14477,689 +14480,784 @@ tables for control-plane policy. The accepted Workflow shared-database topology
 remains an explicit internal contract that can later be replaced by Config
 Server delivery without changing pinned policy identities.</p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="development-postgresql-database-topology"><a class="header" href="#development-postgresql-database-topology">Development PostgreSQL Database Topology</a></h1>
+<h1 id="operational-storage-registration-and-development-postgresql-topology"><a class="header" href="#operational-storage-registration-and-development-postgresql-topology">Operational Storage Registration And Development PostgreSQL Topology</a></h1>
 <h2 id="status-4"><a class="header" href="#status-4">Status</a></h2>
-<p>Proposed target architecture.</p>
-<p>This document defines the PostgreSQL topology for:</p>
+<p>Accepted and implemented target architecture. Phases P0 through P7 are
+complete, including runtime cutover and compatibility closure.</p>
+<p>This document defines the operational-storage boundary for Light Portal and the
+default PostgreSQL topology for:</p>
 <ul>
 <li><code>portal-config-loc/all-in-lt</code>;</li>
-<li><code>portal-config-dev</code>; and</li>
-<li><code>light-portal-install</code> development and demonstration profiles.</li>
+<li><code>portal-config-dev</code>;</li>
+<li><code>portal-config-bootstrap</code>; and</li>
+<li><code>light-portal-install</code>.</li>
 </ul>
-<p>It separates Light Portal control-plane data, Knowledge operational data, and
-Host-scoped operational data while keeping the development footprint to one
-PostgreSQL server by default.</p>
-<p>This page complements
-<a href="#control-plane-policy-publication-through-config-server">Control-Plane Policy Publication Through Config Server</a>,
-<a href="#fast-snapshot-derived-database-bootstrap">Fast Snapshot-Derived Database Bootstrap</a>,
-<a href="#global-and-tenant-knowledge-bases-for-shared-agent-retrieval">Knowledge Base</a>, and
-<a href="#light-portal-install">Light Portal Install</a>.</p>
+<p>The detailed delivery sequence is in
+<a href="#operational-storage-registration-implementation-plan">Operational Storage Registration Implementation Plan</a>.</p>
 <h2 id="decision-summary-3"><a class="header" href="#decision-summary-3">Decision Summary</a></h2>
-<p>The default development topology uses one PostgreSQL 17 server with three
-separate application databases:</p>
-<pre><code class="language-text">PostgreSQL 17 server or container
-|
-+-- configserver
-|   `-- configserver schema
-|       Portal events, CQRS projections, publications, and Config Server
-|       snapshots
-|
-+-- knowledge
-|   `-- knowledge schema
-|       Knowledge documents, chunks, embeddings, indexing jobs, and runtime
-|       evidence
-|
-`-- operations
-    |-- operational_meta
-    |-- agent_ops
-    |-- a2a_ops
-    |-- workflow_ops
-    |-- execution_ops
-    |-- gateway_ops
-    |-- audit_ops
-    `-- artifact_ops
-        Host- and environment-scoped runtime state
-</code></pre>
-<p>The databases may share one PostgreSQL server, volume, network, and development
-administrator. Database separation is a logical ownership and migration
-boundary; it is not an independent compute, availability, or physical backup
-boundary while all databases remain on one server.</p>
-<p>The <code>operations</code> database is created and migrated with an idempotent deployment
-job similar to the existing Knowledge bootstrap. It is not created by an Agent,
-Gateway, A2A adapter, Workflow worker, or ordinary Host command handler.</p>
-<p>For the initially installed Host and environment, the deployment bootstrap may
-create the binding automatically. Additional Hosts created in Host Admin need
-an explicit operational-store binding. They must not silently inherit the
-initial Host’s database.</p>
-<h2 id="current-checked-in-topology"><a class="header" href="#current-checked-in-topology">Current Checked-In Topology</a></h2>
-<p>The three deployment repositories already select the separate Knowledge
-topology:</p>
-<pre><code class="language-text">PORTAL_DB_TOPOLOGY=separate
-PORTAL_DB_NAME=configserver
-PORTAL_DB_KNOWLEDGE_NAME=knowledge
-</code></pre>
-<p>The current <code>init-environment.sh</code> implementation creates:</p>
+<p>The <strong>Operational Storage</strong> page is a registration page. It does not provision,
+create, migrate, rotate, stop, or delete a customer’s database.</p>
+<p>An administrator opens the page from a selected Host and registers the database
+that the Host’s runtime services will use. Portal stores the binding in the
+<code>configserver</code> control-plane database and publishes the connection contract
+through Config Server. Customer runtimes such as Light Gateway, Light Workflow,
+Light Deployer, Light Agent, and Light A2A load their Host-specific configuration
+and connect directly to the registered database.</p>
+<pre class="mermaid">flowchart LR
+    A[Host administrator] --&gt;|register connection| P[Light Portal]
+    P --&gt; C[(configserver)]
+    C --&gt;|Host-audience metadata| CS[Config Server]
+    CS --&gt;|binding and connection descriptor| R[Customer runtimes]
+    SM[Customer secret manager or mounted file] --&gt;|credential| R
+    R --&gt; O[(Customer operational database)]
+    P -. no operational JDBC connection .-&gt; O
+</pre>
+
+<p>Database creation and schema migration belong to the customer’s deployment
+process. The four development/install repositories create their demo databases
+locally because they own their PostgreSQL container, not because Portal is a
+database provisioner.</p>
+<h2 id="portal-and-customer-responsibilities"><a class="header" href="#portal-and-customer-responsibilities">Portal And Customer Responsibilities</a></h2>
+<h3 id="light-portal-2"><a class="header" href="#light-portal-2">Light Portal</a></h3>
+<p>Light Portal owns:</p>
 <ul>
-<li>database <code>configserver</code> with schema <code>configserver</code>; and</li>
-<li>database <code>knowledge</code> with schema <code>knowledge</code>.</li>
+<li>the association between a selected Host and an operational database;</li>
+<li>non-secret connection metadata and the mounted credential-file contract;</li>
+<li>activation, update, publication, and unregistration of the binding;</li>
+<li>immutable Config Server audience projections; and</li>
+<li>audit history for registration changes.</li>
 </ul>
-<p>The current development configuration is therefore one PostgreSQL server with
-two application databases, not one application database with two schemas. The
-same scripts also contain a <code>shared</code> compatibility profile that places
-environment-suffixed Config Server and Knowledge schemas in one database, but
-none of these three default Compose profiles selects it.</p>
-<p>The current deployment files are:</p>
-<pre><code class="language-text">portal-config-loc/all-in-lt/postgres-db/init-environment.sh
-portal-config-loc/all-in-lt/docker-compose.yml
-portal-config-loc/all-in-lt/docker-compose-rust.yml
-
-portal-config-dev/postgres-db/init-environment.sh
-portal-config-dev/docker-compose.yml
-
-light-portal-install/postgres-db/init-environment.sh
-light-portal-install/docker-compose.yml
-light-portal-install/install.sh
-</code></pre>
-<p>Several non-Knowledge runtime services still connect to <code>configserver</code>. In
-particular, current Agent and Controller development configuration contains
-transitional direct database connections. Creating <code>operations</code> does not by
-itself authorize redirecting those connections. Tables, constraints, roles,
-migrations, and runtime configuration must move in an owned sequence.</p>
-<h2 id="why-a-database-is-different-from-a-schema"><a class="header" href="#why-a-database-is-different-from-a-schema">Why A Database Is Different From A Schema</a></h2>
-<p>PostgreSQL schemas and databases solve different problems.</p>
+<p>Light Portal does not:</p>
+<ul>
+<li>connect to the operational database;</li>
+<li>test the supplied credential from the Portal process;</li>
+<li>create PostgreSQL servers, containers, databases, schemas, or roles;</li>
+<li>rotate a customer-owned database password;</li>
+<li>drop or decommission customer data; or</li>
+<li>run a continuously polling provisioning worker.</li>
+</ul>
+<h3 id="customer-or-deployment-owner"><a class="header" href="#customer-or-deployment-owner">Customer Or Deployment Owner</a></h3>
+<p>The customer or deployment owner:</p>
+<ul>
+<li>creates and operates the database;</li>
+<li>installs the versioned operational schemas and migrations;</li>
+<li>creates least-privilege runtime roles;</li>
+<li>manages network reachability, TLS, backup, restore, and retention;</li>
+<li>stores and rotates credentials; and</li>
+<li>mounts or otherwise resolves the credential for its runtime services.</li>
+</ul>
+<p>For production, the operational database can be on a customer-managed
+PostgreSQL server or managed database service inside the customer’s organization.
+Only the customer runtime network requires access to it. The cloud-hosted Portal
+control plane does not require database network access.</p>
+<h2 id="registration-scope"><a class="header" href="#registration-scope">Registration Scope</a></h2>
+<p>The selected Host is the registration scope. The page must not ask the user to
+enter a second Environment value that can contradict that Host.</p>
+<p>For example, opening Operational Storage from <code>dev.networknt.com</code> registers the
+store for <code>dev.networknt.com</code>; it cannot register storage for
+<code>test.networknt.com</code>. To register the latter, the administrator opens the page
+from that Host’s row in Host Admin.</p>
+<p>Runtime configuration still contains its instance <code>environment</code> or <code>envTag</code>
+where required by the wider Config Server contract. That runtime lane is not a
+second user-selected storage owner. The operational-store registration is keyed
+by <code>hostId</code>, with at most one active registration per Host.</p>
+<h2 id="registration-contract"><a class="header" href="#registration-contract">Registration Contract</a></h2>
+<p>The registration form needs enough information to identify and connect to an
+existing database without granting Portal database-administration authority:</p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Concern</th><th>Separate database</th><th>Separate schema in one database</th></tr>
+<tr><th>Field</th><th>Purpose</th></tr>
 </thead>
 <tbody>
-<tr><td>Connection</td><td>Requires a database-specific connection and pool</td><td>One connection can access all schemas</td></tr>
-<tr><td>Transactions</td><td>Ordinary transactions cannot span databases</td><td>One transaction can update several schemas</td></tr>
-<tr><td>Queries</td><td>No ordinary cross-database joins</td><td>Cross-schema joins are direct</td></tr>
-<tr><td>Foreign keys</td><td>Cannot reference another database</td><td>Can reference another schema</td></tr>
-<tr><td>Catalog and extensions</td><td>Database-specific catalog and extension installation</td><td>Shared database catalog and extensions</td></tr>
-<tr><td>Grants</td><td>Database connection plus schema/table grants</td><td>Schema/table grants inside one connection boundary</td></tr>
-<tr><td>Migration</td><td>Independently versioned database contract</td><td>Independently named schemas but one database lifecycle</td></tr>
-<tr><td>Logical dump and restore</td><td>Natural database-level unit</td><td>Schema filtering is possible but more coupled</td></tr>
-<tr><td>Failure and resources on one server</td><td>Shared server failure, WAL, CPU, memory, and storage</td><td>Shared server failure, WAL, CPU, memory, and storage</td></tr>
+<tr><td>Engine</td><td>Initially <code>POSTGRESQL</code></td></tr>
+<tr><td>Server host</td><td>Customer-visible database DNS name or local Compose service name</td></tr>
+<tr><td>Port</td><td>PostgreSQL port, normally <code>5432</code></td></tr>
+<tr><td>Database name</td><td>Exact database identity, for example <code>operations_networknt</code></td></tr>
+<tr><td>TLS mode</td><td>Required connection security policy</td></tr>
+<tr><td>Credential source</td><td>Secret reference or mounted URL/credential file contract</td></tr>
+<tr><td>Minimum schema generation</td><td>Runtime compatibility and readiness requirement</td></tr>
 </tbody>
 </table>
 </div>
-<p>Separate databases make accidental cross-domain transactions, joins, and
-foreign keys impossible through ordinary SQL. They also make connection
-ownership and migration compatibility visible at runtime.</p>
-<p>Separate databases on one PostgreSQL server do not provide independent high
-availability, resource isolation, or physical point-in-time recovery. A
-deployment that needs those properties must use separate PostgreSQL servers or
-managed database instances. The development topology intentionally tests the
-logical contract without paying that infrastructure cost.</p>
-<h2 id="goals-18"><a class="header" href="#goals-18">Goals</a></h2>
-<ul>
-<li>Match the production control/operational ownership boundary in local and
-development environments.</li>
-<li>Keep the normal development footprint to one PostgreSQL container.</li>
-<li>Keep Portal events, projections, and Config Server snapshots out of runtime
-operational databases.</li>
-<li>Keep Knowledge operational content in its dedicated Knowledge database.</li>
-<li>Give Agent, A2A, Workflow, Gateway, audit, and artifact metadata
-service-owned schemas in a Host-scoped operational database.</li>
-<li>Make existing-volume upgrades idempotent and testable.</li>
-<li>Use the same database identity, scope-root, migration, role, and runtime
-binding contracts with and without Light Portal.</li>
-<li>Let the initial development Host start automatically while keeping additional
-Host provisioning explicit.</li>
-<li>Prevent runtime services from using provisioning or schema-owner
-credentials.</li>
-<li>Preserve independent service migration and eventual physical separation.</li>
-</ul>
-<h2 id="non-goals-21"><a class="header" href="#non-goals-21">Non-Goals</a></h2>
-<ul>
-<li>Do not run one PostgreSQL container per database by default.</li>
-<li>Do not create a database per logical Agent definition.</li>
-<li>Do not create an operational schema in the <code>configserver</code> database.</li>
-<li>Do not merge Knowledge and ordinary Host operational data.</li>
-<li>Do not move every current <code>DATABASE_URL</code> before its tables and constraints
-are ready.</li>
-<li>Do not let application startup create a database with an elevated runtime
-credential.</li>
-<li>Do not treat the default development credential or database administrator as
-a production secret-management model.</li>
-<li>Do not automatically bind every Host Admin record to the initial development
-Host’s operational data.</li>
-<li>Do not imply that database separation on one server is physical fault
-isolation.</li>
-</ul>
-<h2 id="data-authority"><a class="header" href="#data-authority">Data Authority</a></h2>
-<h3 id="configserver"><a class="header" href="#configserver"><code>configserver</code></a></h3>
-<p>The <code>configserver</code> database is the Light Portal control-plane database. It
-contains:</p>
-<ul>
-<li>canonical Portal command events and outbox records;</li>
-<li>CQRS authoring projections and read models;</li>
-<li>Host, product, API, Agent, skill, Workflow, policy, and instance intended
-state;</li>
-<li>publication records and compatibility metadata;</li>
-<li>mutable instance-property staging state;</li>
-<li>immutable configuration snapshots; and</li>
-<li>Config Server delivery metadata.</li>
-</ul>
-<p>It must not become the durable authority for:</p>
-<ul>
-<li>Agent sessions or turns;</li>
-<li>A2A tasks or callback correlation;</li>
-<li>Workflow executions, timers, attempts, or leases;</li>
-<li>concrete memories or session history;</li>
-<li>artifact bytes or runtime artifact metadata;</li>
-<li>traffic/audit records; or</li>
-<li>Knowledge documents, chunks, embeddings, or indexing work.</li>
-</ul>
-<h3 id="knowledge"><a class="header" href="#knowledge"><code>knowledge</code></a></h3>
-<p>The <code>knowledge</code> database remains a separate Knowledge operational boundary. It
-contains Knowledge-owned data such as:</p>
-<ul>
-<li>ingestion and synchronization jobs;</li>
-<li>documents and versions;</li>
-<li>chunks and embeddings;</li>
-<li>search and index generations;</li>
-<li>graph and derived retrieval state;</li>
-<li>Knowledge runtime ACL replicas admitted from published policy; and</li>
-<li>query and processing evidence.</li>
-</ul>
-<p>Knowledge may be shared across explicitly authorized Hosts in one organization.
-It therefore does not use the ordinary <code>(hostId, envTag)</code> store identity as its
-only boundary. Its scope validation includes the organization, Knowledge-store
-binding, residency policy, and authorized Host membership.</p>
-<p>Knowledge policy remains authored in Portal and published through Config
-Server. Physical placement of operational data does not make the Knowledge
-database a control-plane policy source.</p>
-<h3 id="operations"><a class="header" href="#operations"><code>operations</code></a></h3>
-<p>The <code>operations</code> database is bound to one Host and environment in the default
-development profile. Service-owned schemas include:</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Schema</th><th>Initial authority</th></tr>
-</thead>
-<tbody>
-<tr><td><code>operational_meta</code></td><td>Store identity, Host/environment scope root, schema contract generations, migration ledger, and binding evidence</td></tr>
-<tr><td><code>agent_ops</code></td><td>Agent sessions, turns, actions, approvals, idempotency, quotas, and initially Agent-owned memory</td></tr>
-<tr><td><code>a2a_ops</code></td><td>External A2A task facade, callbacks, cancellation, correlation, idempotency, and deletion evidence</td></tr>
-<tr><td><code>workflow_ops</code></td><td>Workflow process/task state, timers, worklists, retries, and service-owned outbox</td></tr>
-<tr><td><code>execution_ops</code></td><td>Shared execution attempts, scheduling requests, leases, and common execution foundations</td></tr>
-<tr><td><code>gateway_ops</code></td><td>Bounded durable Gateway operational state when required; never Agent or Workflow authority</td></tr>
-<tr><td><code>audit_ops</code></td><td>Durable audit delivery outbox/spool and integrity evidence, not the long-term analytics warehouse</td></tr>
-<tr><td><code>artifact_ops</code></td><td>Artifact ownership, immutable digest, scan, retention, hold, and object-store references; not large artifact bytes</td></tr>
-</tbody>
-</table>
-</div>
-<p>Colocation does not grant cross-schema write authority. Cross-service
-relationships use stable identifiers, authenticated APIs, outbox/integration
-events, and reconciliation rather than permanent cross-schema foreign keys.</p>
-<p><code>memory_ops</code> may initially remain part of <code>agent_ops</code>. It becomes a separate
-schema only after the Memory API owns the session-to-bank invariant and no
-cross-schema foreign key is required.</p>
-<h2 id="development-deployment-profiles"><a class="header" href="#development-deployment-profiles">Development Deployment Profiles</a></h2>
-<h3 id="default-single-host-profile"><a class="header" href="#default-single-host-profile">Default Single-Host Profile</a></h3>
-<p>Each of the three development deployments starts with one configured Host and
-environment. The deployment bootstrap creates:</p>
-<pre><code class="language-text">database: operations
-scopeKind: HOST_ENVIRONMENT
-hostId: &lt;configured development Host UUID&gt;
-environment: &lt;configured envTag&gt;
-bindingId: &lt;stable deployment binding UUID&gt;
-</code></pre>
-<p>The Host UUID and <code>envTag</code> are explicit inputs. They are never inferred from a
-subdomain, Compose project name, database name, or Config Server property
-profile such as <code>loc</code> or <code>demo</code>.</p>
-<p>The simple database name <code>operations</code> is acceptable because the scope root is
-authoritative. Production provisioning may generate an opaque database name
-from the binding identifier.</p>
-<h3 id="additional-dedicated-host"><a class="header" href="#additional-dedicated-host">Additional Dedicated Host</a></h3>
-<p>To test the enterprise dedicated profile, an additional runnable Host and
-environment receives another database on the same development PostgreSQL
-server:</p>
-<pre><code class="language-text">operations_&lt;opaque-scope-suffix&gt;
-</code></pre>
-<p>The suffix is generated from a stable binding identifier rather than a
-user-visible Host name. This avoids leaking names and avoids rename coupling.
-The new database gets the same service schemas, distinct scope root, and
-distinct runtime role credentials.</p>
-<h3 id="explicit-pooled-development-profile"><a class="header" href="#explicit-pooled-development-profile">Explicit Pooled Development Profile</a></h3>
-<p>A high-density or Portal-cloud simulation may bind several Hosts to one
-<code>operations</code> database. This is an explicit <code>DEV_POOLED</code> profile, not an
-automatic fallback.</p>
-<p>In pooled mode:</p>
-<ul>
-<li>every tenant-owned primary or unique key includes <code>host_id</code>;</li>
-<li>every query binds Host identity from authenticated runtime state;</li>
-<li>caches, outbox records, object prefixes, audit records, exports, and erasure
-jobs are Host-scoped;</li>
-<li>service runtime roles do not own their tables;</li>
-<li>PostgreSQL Row-Level Security is enabled and forced as defense in depth; and</li>
-<li>cross-Host denial tests are release gates.</li>
-</ul>
-<p>The default single-Host development database must not be relabeled as pooled
-without those contracts.</p>
-<h2 id="host-admin-boundary"><a class="header" href="#host-admin-boundary">Host Admin Boundary</a></h2>
-<p>Host identity and database provisioning are coordinated but separate state
-machines.</p>
-<p>For the initially installed development Host, deployment bootstrap may create
-the Host binding from pinned deployment inputs. For a Host later created in
-Host Admin:</p>
+<p>Passwords and URLs containing passwords must not be written to Portal events,
+ordinary Config Server properties, logs, browser history, or exports. Config
+Server publishes the shared endpoint descriptor and credential-source contract.
+Each runtime obtains its own service-specific least-privilege role and credential
+from its deployment-owned secret mechanism; one Host-level username would
+incorrectly collapse the Agent, Workflow, Gateway, A2A, Execution, and Deployer
+roles.</p>
+<p>Development profiles may materialize local secret files automatically. Each
+runtime sees its Host-specific file at the stable path
+<code>/run/secrets/operational-database-url</code>, while the file content selects the
+correct database.</p>
+<h2 id="registration-lifecycle"><a class="header" href="#registration-lifecycle">Registration Lifecycle</a></h2>
+<p>Registration is synchronous control-plane work:</p>
 <ol>
-<li>the existing <code>createHost</code> command creates the control-plane Host identity;</li>
-<li>the administrator selects or defers an operational-store profile;</li>
-<li>a separate binding command records Host, environment, profile, and desired
-generation;</li>
-<li>an asynchronous provisioning worker creates or validates the database;</li>
-<li>the worker installs roles, scope root, and schemas;</li>
-<li>validation moves the binding to <code>READY</code>; and</li>
-<li>only then may Config Server publish the binding to runtime instances.</li>
+<li>Host Admin opens Operational Storage for one Host.</li>
+<li>The administrator enters the existing database connection contract.</li>
+<li><code>registerOperationalStoreBinding</code> validates syntax, Host ownership,
+uniqueness, and allowed credential-source fields.</li>
+<li>Portal appends the registration event and updates the binding projection in
+one transaction.</li>
+<li>Portal publishes the active Host-audience projection to Config Server.</li>
+<li>Runtimes load the projection, resolve the credential locally, and perform
+database identity/schema checks during their own readiness sequence.</li>
 </ol>
-<p>Until that control-plane lifecycle exists, development scripts may bootstrap
-only the pinned initial Host. Creating another Host in Portal must not
-implicitly share the <code>operations</code> database or grant runtime activation.</p>
-<p>Host deactivation does not drop the database. Decommissioning is a separate,
-authorized, retention-aware operation.</p>
-<h2 id="bootstrap-and-migration-architecture"><a class="header" href="#bootstrap-and-migration-architecture">Bootstrap And Migration Architecture</a></h2>
-<p>Fresh-volume initialization and existing-volume migration are different
-paths. Both are required.</p>
-<pre><code class="language-text">Fresh PostgreSQL volume
-        |
-        v
-init-environment.sh
-  |-- ensure configserver
-  |-- ensure knowledge
-  `-- ensure operations
-        |
-        v
-versioned schema installers
-
-Every deployment or restart
-        |
-        v
-operational-store-bootstrap
-  |-- discover or create database idempotently
-  |-- validate scope root
-  |-- install/validate roles
-  `-- invoke pinned service migrations
-        |
-        v
-operational-schema-validation
-        |
-        v
-runtime services may start
-</code></pre>
-<p>PostgreSQL entrypoint scripts run only when the data directory is empty.
-Adding <code>operations</code> only to <code>/docker-entrypoint-initdb.d</code> would leave existing
-<code>portal-config-loc</code>, <code>portal-config-dev</code>, and installer volumes unchanged.</p>
-<p>The target therefore has two cooperating jobs:</p>
-<ol>
-<li><code>init-environment.sh</code> creates all three databases during fresh bootstrap;
-and</li>
-<li>an idempotent <code>operational-store-bootstrap</code> one-shot service runs on every
-deployment and can safely bring an existing volume to the desired database
-and schema generation.</li>
-</ol>
-<p>Database creation and schema migration should remain separate checkpoints even
-when one development container performs both. Database creation may require a
-cluster administration role and cannot be assumed to share the application
-migration transaction.</p>
-<h2 id="bootstrap-inputs"><a class="header" href="#bootstrap-inputs">Bootstrap Inputs</a></h2>
-<p>The development bootstrap accepts non-secret identity and topology inputs:</p>
-<pre><code class="language-yaml">PORTAL_DB_TOPOLOGY: separate
-PORTAL_DB_NAME: configserver
-PORTAL_DB_KNOWLEDGE_NAME: knowledge
-PORTAL_DB_OPERATIONAL_NAME: operations
-PORTAL_DB_OPERATIONAL_PROFILE: DEV_DEDICATED
-PORTAL_DB_OPERATIONAL_HOST_ID: &lt;development-host-uuid&gt;
-PORTAL_DB_OPERATIONAL_ENVIRONMENT: dev
-PORTAL_DB_OPERATIONAL_BINDING_ID: &lt;stable-binding-uuid&gt;
-PORTAL_DB_OPERATIONAL_CONTRACT_GENERATION: "1"
-</code></pre>
-<p>The exact environment value differs by deployment and must match the runtime
-<code>envTag</code>. The example <code>dev</code> is not a universal default.</p>
-<p>Production credentials remain secret-provider references or mounted files.
-Development Compose may use generated local credentials, but URLs and passwords
-must not enter Portal events, configuration snapshots, exported <code>values.yml</code>,
-or the operational scope root.</p>
-<h2 id="operational-scope-root"><a class="header" href="#operational-scope-root">Operational Scope Root</a></h2>
-<p>The <code>operational_meta</code> schema contains an immutable root row similar to:</p>
-<pre><code class="language-text">binding_id
-binding_version
-binding_digest
-scope_kind
-scope_id
-host_id
-environment
-database_identity
-deployment_profile
-schema_contract_generation
-created_at
-activated_at
-</code></pre>
-<p>A runtime must validate this row before becoming ready. A syntactically valid
-connection to an <code>operations</code> database for another Host or environment fails
-closed.</p>
-<p>The database name alone is not identity. Copying or restoring a database must
-retain or deliberately replace the scope root under a controlled clone or
-relocation workflow.</p>
-<h2 id="roles-and-privileges"><a class="header" href="#roles-and-privileges">Roles And Privileges</a></h2>
-<p>The development server may have one PostgreSQL administrator for bootstrap,
-but runtime services do not use it.</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Role class</th><th>Purpose</th></tr>
-</thead>
-<tbody>
-<tr><td>Bootstrap administrator</td><td>Create/adopt databases and role classes; used only by the deployment job</td></tr>
-<tr><td>Scope/migration owner</td><td>Own <code>operational_meta</code> or one service schema and apply pinned migrations</td></tr>
-<tr><td>Agent runtime</td><td>Read/write only <code>agent_ops</code> and approved shared interfaces</td></tr>
-<tr><td>A2A runtime</td><td>Read/write only <code>a2a_ops</code> and approved shared interfaces</td></tr>
-<tr><td>Workflow runtime</td><td>Read/write only <code>workflow_ops</code> and approved execution interfaces</td></tr>
-<tr><td>Execution runtime</td><td>Read/write only <code>execution_ops</code></td></tr>
-<tr><td>Gateway runtime</td><td>Read/write only the bounded <code>gateway_ops</code> and audit interfaces it requires</td></tr>
-<tr><td>Audit publisher</td><td>Append/read delivery state needed to publish audit evidence</td></tr>
-<tr><td>Artifact runtime</td><td>Read/write artifact metadata and approved object references</td></tr>
-</tbody>
-</table>
-</div>
-<p>Each role receives <code>CONNECT</code> only to the database it needs and <code>USAGE</code> only on
-its schemas. <code>CREATE</code> on <code>public</code> is revoked. Unqualified <code>search_path</code> use is
-constrained to the owned schema and reviewed shared interfaces.</p>
-<p>Development may initially share a generated password file among transitional
-services, but role separation remains a release gate before the operational
-store is treated as qualified.</p>
-<h2 id="runtime-binding"><a class="header" href="#runtime-binding">Runtime Binding</a></h2>
-<p>Config Server publishes non-secret operational-store metadata to the exact
-Host, service, environment, and instance audience. The runtime combines it
-with a deployment-owned secret file.</p>
-<p>An illustrative projection is:</p>
+<p>There is no <code>PENDING</code> provisioning job and no attempt counter. A registration
+can be <code>REGISTERED</code>, <code>DEACTIVATED</code>, or <code>UNREGISTERED</code>. Optional runtime health or
+last-validation evidence is observational and must not turn Portal into a
+database provisioner.</p>
+<p>Updating a registration creates a new aggregate version and publication digest.
+Deactivation or unregistration revokes future publication but never deletes the
+customer database. Historical provisioning events remain replayable during the
+migration but cannot schedule infrastructure work.</p>
+<h2 id="config-server-runtime-binding"><a class="header" href="#config-server-runtime-binding">Config Server Runtime Binding</a></h2>
+<p>An illustrative non-secret projection is:</p>
 <pre><code class="language-yaml">operationalStore:
-  contractVersion: ${operationalStore.contractVersion:1}
+  contractVersion: 2
   bindingId: ${operationalStore.bindingId:}
   bindingDigest: ${operationalStore.bindingDigest:}
-  profileId: ${operationalStore.profileId:dev-dedicated-postgres-v1}
-  deploymentProfile: ${operationalStore.deploymentProfile:DEV_DEDICATED}
-  scopeKind: ${operationalStore.scopeKind:HOST_ENVIRONMENT}
-  scopeId: ${operationalStore.scopeId:}
+  scopeKind: HOST
   hostId: ${operationalStore.hostId:}
-  environment: ${operationalStore.environment:}
-  serviceOwner: ${operationalStore.serviceOwner:}
-  schema: ${operationalStore.schema:}
-  minimumSchemaVersion: ${operationalStore.minimumSchemaVersion:1}
-  expectedDatabase: ${operationalStore.expectedDatabase:operations}
+  engine: POSTGRESQL
+  serverHost: ${operationalStore.serverHost:}
+  port: ${operationalStore.port:5432}
+  expectedDatabase: ${operationalStore.expectedDatabase:}
+  tlsMode: ${operationalStore.tlsMode:REQUIRE}
+  minimumSchemaGeneration: ${operationalStore.minimumSchemaGeneration:1}
   databaseUrlFile: ${operationalStore.databaseUrlFile:/run/secrets/operational-database-url}
-  objectStoreProfileId: ${operationalStore.objectStoreProfileId:}
-  auditSinkProfileId: ${operationalStore.auditSinkProfileId:}
+  credentialGeneration: ${operationalStore.credentialGeneration:1}
 </code></pre>
-<p>This is a common semantic contract, not one file copied between products:</p>
-<ul>
-<li>native <code>light-agent</code> receives it in its Agent audience projection;</li>
-<li><code>light-a2a</code> receives it in the A2A audience projection;</li>
-<li>Workflow receives its Workflow/execution schema bindings;</li>
-<li>Gateway receives only its bounded operational and audit bindings; and</li>
-<li>Knowledge continues using its separately scoped Knowledge connection and
-policy projection.</li>
-</ul>
-<p>The actual database URL remains a deployment secret. Config Server publishes
-the expected file path and binding identity, not the credential.</p>
+<p>The same semantic contract is compiled for the exact Host/service/instance
+audience. A service receives only the schemas and privileges it owns. The
+registered <code>credentialReference</code> is an absolute deployment-mounted path and is
+published unchanged as <code>databaseUrlFile</code>, even when Config Server supplies all
+non-secret fields.</p>
+<h2 id="development-and-installer-topology"><a class="header" href="#development-and-installer-topology">Development And Installer Topology</a></h2>
+<p>All four repositories use one PostgreSQL container with five databases:</p>
+<pre><code class="language-text">PostgreSQL server/container
+|
++-- configserver               # Light Portal control plane
++-- knowledge                  # Light Knowledge
++-- operations                 # Host dev.lightapi.net
++-- operations_networknt       # Host dev.networknt.com
+`-- operations_taiji           # Host dev.taiji.io
+</code></pre>
+<p>The three operational databases receive the same pinned operational migration
+bundle but have separate database identities, canonical Host scope roots, and
+runtime credentials. They do not require separate PostgreSQL containers.</p>
+<p>The default registrations are:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Host</th><th>Database</th><th>Compose server</th><th>Port</th></tr>
+</thead>
+<tbody>
+<tr><td><code>dev.lightapi.net</code></td><td><code>operations</code></td><td><code>postgres</code></td><td><code>5432</code></td></tr>
+<tr><td><code>dev.networknt.com</code></td><td><code>operations_networknt</code></td><td><code>postgres</code></td><td><code>5432</code></td></tr>
+<tr><td><code>dev.taiji.io</code></td><td><code>operations_taiji</code></td><td><code>postgres</code></td><td><code>5432</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>The canonical Host UUID comes from the reviewed local Portal export; a
+deployment must not derive or invent it from the database name. The shared P4
+delta orders the three Org events, the three Host events, and then the three
+registration events so the same identifiers are used across all four
+repositories.</p>
+<h2 id="fresh-and-existing-volumes"><a class="header" href="#fresh-and-existing-volumes">Fresh And Existing Volumes</a></h2>
+<p>Fresh PostgreSQL entrypoint scripts run only once. The implementation therefore
+needs both paths:</p>
+<pre class="mermaid">flowchart TD
+    F[Fresh volume] --&gt; I[init-environment.sh]
+    E[Existing volume] --&gt; U[idempotent upgrade job]
+    I --&gt; D[ensure five databases]
+    U --&gt; D
+    D --&gt; M[apply pinned migrations to three operational databases]
+    M --&gt; S[materialize Host-specific local secret files]
+    S --&gt; H[import Host events]
+    H --&gt; B[import registration events]
+    B --&gt; V[validate Config Server publications]
+</pre>
+
+<p>Database initialization and migration may use a PostgreSQL administrator because
+they are deployment operations. Runtime services use least-privilege roles and
+must not create databases or schemas during startup.</p>
+<h2 id="data-authority"><a class="header" href="#data-authority">Data Authority</a></h2>
+<h3 id="configserver"><a class="header" href="#configserver"><code>configserver</code></a></h3>
+<p><code>configserver</code> contains Portal events, CQRS projections, Host records,
+registration metadata, publication records, and Config Server snapshots. It
+contains no operational runtime rows and no plaintext database password.</p>
+<h3 id="knowledge"><a class="header" href="#knowledge"><code>knowledge</code></a></h3>
+<p><code>knowledge</code> contains Light Knowledge documents, chunks, embeddings, indexing
+jobs, and derived retrieval state. Its sharing and residency rules are separate
+from ordinary Host operational storage.</p>
+<h3 id="host-operational-databases"><a class="header" href="#host-operational-databases">Host operational databases</a></h3>
+<p>Each Host operational database contains the service-owned schemas required by
+the pinned bundle, including <code>operational_meta</code>, <code>agent_ops</code>, <code>a2a_ops</code>,
+<code>workflow_ops</code>, <code>execution_ops</code>, <code>gateway_ops</code>, <code>audit_ops</code>, and <code>artifact_ops</code>.
+Colocation in one database does not grant cross-schema write authority.</p>
 <h2 id="service-connection-matrix"><a class="header" href="#service-connection-matrix">Service Connection Matrix</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Service class</th><th>Target database</th><th>Notes</th></tr>
+<tr><th>Service</th><th>Database access</th></tr>
 </thead>
 <tbody>
-<tr><td>Portal command/event processors</td><td><code>configserver</code></td><td>Event-sourced control-plane writes and projections</td></tr>
-<tr><td>Portal query services</td><td><code>configserver</code></td><td>Control-plane and authoring read models only</td></tr>
-<tr><td>Config Server</td><td><code>configserver</code></td><td>Immutable audience snapshot delivery</td></tr>
-<tr><td>Knowledge admin/API/worker</td><td><code>knowledge</code></td><td>Separate service-owned roles; policy still arrives through Config Server</td></tr>
-<tr><td>Native Agent runtime</td><td><code>operations.agent_ops</code></td><td>Move only after Agent operational tables and constraints are migrated</td></tr>
-<tr><td>External A2A integration</td><td><code>operations.a2a_ops</code></td><td>Production durability begins after schema and scope gates</td></tr>
-<tr><td>Workflow runtime</td><td><code>operations.workflow_ops</code> and approved <code>execution_ops</code> interfaces</td><td>Move after shared execution foundations are decoupled</td></tr>
-<tr><td>Gateway</td><td>Usually no database; otherwise owned <code>gateway_ops</code>/audit interfaces</td><td>Never owns Agent, A2A, or Workflow state</td></tr>
-<tr><td>Portal View</td><td>None</td><td>Uses authenticated command, query, and operational APIs</td></tr>
+<tr><td>Portal commands, queries, and Config Server</td><td><code>configserver</code> only</td></tr>
+<tr><td>Light Knowledge</td><td><code>knowledge</code></td></tr>
+<tr><td>Light Gateway</td><td>Registered Host database; bounded Gateway/audit schemas only</td></tr>
+<tr><td>Light Workflow</td><td>Registered Host database; Workflow/execution schemas only</td></tr>
+<tr><td>Light Deployer</td><td>Registered Host database only when its runtime contract requires operational state</td></tr>
+<tr><td>Light Agent and Light A2A</td><td>Registered Host database; owned schemas only</td></tr>
+<tr><td>Browser Portal View</td><td>APIs only; never PostgreSQL</td></tr>
 </tbody>
 </table>
 </div>
-<p>Controller/runtime-registry tables require a separate ownership decision. The
-development rollout must not replace every <code>configserver</code> URL mechanically.
-Each connection changes only when its table ownership and compatibility gate
-are explicit.</p>
-<h2 id="schema-migration-ownership"><a class="header" href="#schema-migration-ownership">Schema Migration Ownership</a></h2>
-<p>The deployment repository orchestrates migrations but does not become the
-semantic owner of every schema.</p>
-<ul>
-<li>A common operational-store package owns <code>operational_meta</code> and scope
-validation.</li>
-<li>Agent-owned migrations own <code>agent_ops</code>.</li>
-<li>A2A-owned migrations own <code>a2a_ops</code>.</li>
-<li>Workflow and execution packages own their respective schemas.</li>
-<li>Gateway, audit, and artifact packages own their schemas or interfaces.</li>
-<li>Deployment repositories pin exact migration artifact versions and checksums.</li>
-</ul>
-<p>The bootstrap job applies migrations in a declared dependency order and records
-checksum, schema version, compatibility generation, owner, start/completion,
-and failure evidence. It never edits an old migration in place.</p>
-<p>No target schema migration may introduce a foreign key to <code>configserver</code>,
-<code>knowledge</code>, or another service-owned database. Required references are stable
-identifiers validated at admission and reconciled through APIs or integration
-events.</p>
-<h2 id="existing-volume-upgrade"><a class="header" href="#existing-volume-upgrade">Existing Volume Upgrade</a></h2>
-<p>The first release adding <code>operations</code> must work for both fresh and persistent
-development volumes.</p>
-<h3 id="fresh-volume"><a class="header" href="#fresh-volume">Fresh volume</a></h3>
-<ol>
-<li>PostgreSQL initializes.</li>
-<li><code>init-environment.sh</code> creates <code>configserver</code>, <code>knowledge</code>, and <code>operations</code>.</li>
-<li>Pinned schema installers and baseline import run.</li>
-<li>Validation proves all three database identities.</li>
-<li>Runtime services start only after their required database is ready.</li>
-</ol>
-<h3 id="existing-volume"><a class="header" href="#existing-volume">Existing volume</a></h3>
-<ol>
-<li>PostgreSQL starts without rerunning entrypoint initialization.</li>
-<li><code>operational-store-bootstrap</code> discovers that <code>operations</code> is absent.</li>
-<li>It creates the database idempotently and records the development binding.</li>
-<li>It applies service migrations that are ready for the current phase.</li>
-<li>It validates roles and scope identity.</li>
-<li>It leaves existing services on <code>configserver</code> until each cutover phase is
-explicitly activated.</li>
-</ol>
-<p>The database may exist before any runtime table moves. Empty provisioned
-schemas and migration ledgers are a valid preparatory state.</p>
-<p>Recreating a development database remains explicit. Normal deployment scripts
-must not drop <code>operations</code>, <code>knowledge</code>, or <code>configserver</code> merely to repair a
-failed migration. Clean-volume flags may remove all three only after showing
-that development data will be lost.</p>
-<h2 id="reset-backup-and-restore"><a class="header" href="#reset-backup-and-restore">Reset, Backup, And Restore</a></h2>
-<p>Development needs both convenient reset and production-shaped identity checks.</p>
-<ul>
-<li>A full clean reset removes the PostgreSQL volume and recreates all databases.</li>
-<li>A control-plane reset rebuilds <code>configserver</code> from the supported event and
-snapshot bootstrap without treating operational rows as events.</li>
-<li>A Knowledge reset follows Knowledge’s source/reindex contracts.</li>
-<li>An operational reset is scoped to the selected Host/environment binding and
-uses service-owned cleanup or database recreation.</li>
-<li>Logical <code>pg_dump</code> artifacts may be produced per database.</li>
-<li>Physical backup and point-in-time recovery remain server-wide while all
-databases share one PostgreSQL server.</li>
-<li>Restores validate the scope root before runtimes reconnect.</li>
-</ul>
-<p>Configuration export and operational export remain separate formats and
-endpoints. Downloaded <code>values.yml</code> contains intended runtime configuration and
-binding references, not Agent sessions, memories, A2A tasks, Workflow state, or
-database credentials.</p>
 <h2 id="failure-semantics"><a class="header" href="#failure-semantics">Failure Semantics</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Failure</th><th>Required development behavior</th></tr>
+<tr><th>Failure</th><th>Required behavior</th></tr>
 </thead>
 <tbody>
-<tr><td><code>operations</code> is missing</td><td>Bootstrap creates it idempotently; runtime stays unready until validation passes</td></tr>
-<tr><td>Database exists with a different scope root</td><td>Fail closed; never rewrite the Host/environment silently</td></tr>
-<tr><td>Service migration fails</td><td>Preserve diagnostics and last completed migration; do not start that service</td></tr>
-<tr><td>Existing service still needs <code>configserver</code> tables</td><td>Keep its old connection during the declared transitional phase</td></tr>
-<tr><td>Runtime receives the wrong schema binding</td><td>Reject readiness before traffic</td></tr>
-<tr><td>Config Server is unavailable</td><td>An already started runtime follows last-known-good binding validity rules</td></tr>
-<tr><td>Portal is unavailable</td><td>Runtime operational writes continue directly to the accepted database</td></tr>
-<tr><td>Knowledge is unavailable</td><td>Knowledge-dependent work follows its own availability policy; ordinary operational authority does not move to <code>configserver</code></td></tr>
-<tr><td>One database is dropped manually</td><td>Other databases may remain present, but all dependent services fail their own readiness gates</td></tr>
+<tr><td>Invalid registration syntax</td><td>Reject before appending an event</td></tr>
+<tr><td>Duplicate active Host registration</td><td>Reject or require an explicit update command</td></tr>
+<tr><td>Database unreachable</td><td>Customer runtime fails readiness; Portal remains available</td></tr>
+<tr><td>Wrong database identity or schema generation</td><td>Runtime fails closed with a bounded diagnostic</td></tr>
+<tr><td>Config Server unavailable</td><td>A running service follows its last-known-good snapshot policy</td></tr>
+<tr><td>Portal unavailable</td><td>Existing runtime database connections continue</td></tr>
+<tr><td>Registration deactivated</td><td>Config Server revokes the active publication; customer data is retained</td></tr>
+<tr><td>Existing local volume lacks a new database</td><td>Idempotent deployment upgrade creates and migrates it</td></tr>
 </tbody>
 </table>
 </div>
-<h2 id="repository-change-matrix"><a class="header" href="#repository-change-matrix">Repository Change Matrix</a></h2>
-<p>The implementation should land coherently in all three deployment repositories.</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Repository</th><th>Required target changes</th></tr>
-</thead>
-<tbody>
-<tr><td><code>portal-config-loc/all-in-lt</code></td><td>Add operational database inputs, bootstrap/migration service, secret mount, role/schema validation, and local reset/qualification coverage</td></tr>
-<tr><td><code>portal-config-dev</code></td><td>Mirror the local contract with development Host/environment inputs and existing-volume upgrade coverage</td></tr>
-<tr><td><code>light-portal-install</code></td><td>Include operational bootstrap artifact, installer validation, secret materialization, clean-install/reset behavior, and customer-managed override points</td></tr>
-</tbody>
-</table>
-</div>
-<p>The SQL and migration artifacts should come from one versioned release source.
-Copying independently edited schema files into all three repositories is not an
-acceptable long-term source-of-truth model. Deployment repositories may stage
-verified release artifacts for offline installation, with checksums proving
-parity.</p>
-<h2 id="implementation-sequence"><a class="header" href="#implementation-sequence">Implementation Sequence</a></h2>
-<h3 id="phase-0-contract-and-empty-database"><a class="header" href="#phase-0-contract-and-empty-database">Phase 0: Contract And Empty Database</a></h3>
-<p>Deliver:</p>
-<ul>
-<li><code>PORTAL_DB_OPERATIONAL_*</code> bootstrap inputs;</li>
-<li>common scope-root schema and validation contract;</li>
-<li>idempotent database creation for fresh and existing volumes;</li>
-<li>migration ledger and role conventions;</li>
-<li>empty service schemas or explicitly versioned initial migrations; and</li>
-<li>three-repository parity tests.</li>
-</ul>
-<p>No production runtime is redirected in this phase.</p>
-<h3 id="phase-1-constraint-decoupling"><a class="header" href="#phase-1-constraint-decoupling">Phase 1: Constraint Decoupling</a></h3>
-<p>Classify existing operational tables and remove cross-database foreign keys.
-Replace them with pinned identity/digest admission checks, stable references,
-authenticated APIs, outbox/integration events, and reconciliation tests.</p>
-<p>Shared execution foundations move before Agent and Workflow dependents when
-their current constraints require that ordering.</p>
-<h3 id="phase-2-agent-and-embedded-memory"><a class="header" href="#phase-2-agent-and-embedded-memory">Phase 2: Agent And Embedded Memory</a></h3>
-<p>Move Agent session, turn, action, approval, idempotency, quota, and initially
-embedded Memory authority to <code>agent_ops</code>. Publish the binding through Config
-Server and change Agent readiness to validate it.</p>
-<p>Remove Agent’s Config Server database credential only after the new store is
-authoritative and rollback is bounded.</p>
-<h3 id="phase-3-a2a-and-workflow"><a class="header" href="#phase-3-a2a-and-workflow">Phase 3: A2A And Workflow</a></h3>
-<p>Create production-qualified <code>a2a_ops</code>, move Workflow-owned execution state,
-and enable governed inbound/outbound A2A durability only after restart,
-idempotency, cancellation, artifact, and audit recovery gates pass.</p>
-<h3 id="phase-4-gateway-audit-and-artifact-completion"><a class="header" href="#phase-4-gateway-audit-and-artifact-completion">Phase 4: Gateway, Audit, And Artifact Completion</a></h3>
-<p>Move bounded durable Gateway state, audit outboxes, and artifact metadata to
-their owned schemas. Long-term traffic analytics and artifact bytes remain in
-approved external sinks/object storage.</p>
-<h3 id="phase-5-multi-host-development-profiles"><a class="header" href="#phase-5-multi-host-development-profiles">Phase 5: Multi-Host Development Profiles</a></h3>
-<p>Enable Host Admin provisioning for <code>DEV_DEDICATED</code> and <code>DEV_POOLED</code>, including
-asynchronous status, secret references, cleanup, retention, and cross-Host
-isolation tests.</p>
 <h2 id="verification-gates"><a class="header" href="#verification-gates">Verification Gates</a></h2>
-<h3 id="topology"><a class="header" href="#topology">Topology</a></h3>
+<h3 id="control-plane"><a class="header" href="#control-plane">Control plane</a></h3>
 <ul>
-<li>one PG17 server exposes separate <code>configserver</code>, <code>knowledge</code>, and
-<code>operations</code> databases;</li>
-<li>each database has the expected schema and database identity;</li>
-<li><code>PORTAL_DB_TOPOLOGY=shared</code> does not activate accidentally;</li>
+<li>the registration command does not enqueue a provisioning job;</li>
+<li>registration publication is atomic with its control-plane projection;</li>
+<li>replay never performs database or container operations;</li>
+<li>Config Server contains no plaintext database password; and</li>
+<li>deactivate/unregister revokes publication without deleting data.</li>
+</ul>
+<h3 id="development-topology"><a class="header" href="#development-topology">Development topology</a></h3>
+<ul>
+<li>each repository exposes exactly one PostgreSQL container by default;</li>
+<li>all five expected databases exist on fresh and existing volumes;</li>
+<li>each Host registration points to its exact database name;</li>
+<li>all three operational databases have the same migration checksum generation;</li>
 <li>no operational service schema exists in <code>configserver</code>; and</li>
-<li>fresh and existing-volume paths converge on the same topology.</li>
+<li>Compose configuration and offline bundle checksum gates pass.</li>
 </ul>
-<h3 id="authority"><a class="header" href="#authority">Authority</a></h3>
+<h3 id="runtime"><a class="header" href="#runtime">Runtime</a></h3>
 <ul>
-<li>Portal events, authoring projections, and configuration snapshots remain in
-<code>configserver</code>;</li>
-<li>Knowledge content remains in <code>knowledge</code>;</li>
-<li>operational runtime writes land only in the owning <code>operations</code> schema;</li>
-<li>Portal View uses APIs rather than database access; and</li>
-<li>Config Server projections contain bindings but no operational rows or
-credentials.</li>
-</ul>
-<h3 id="isolation"><a class="header" href="#isolation">Isolation</a></h3>
-<ul>
-<li>a runtime rejects the wrong Host, environment, database identity, binding
-digest, schema owner, or schema generation;</li>
-<li>service roles cannot write other service schemas;</li>
-<li>no cross-database foreign key remains;</li>
-<li>pooled tests prevent cross-Host reads and writes through queries, caches,
-outboxes, artifacts, exports, and cleanup; and</li>
-<li>runtime roles cannot create databases, roles, or schemas.</li>
-</ul>
-<h3 id="lifecycle"><a class="header" href="#lifecycle">Lifecycle</a></h3>
-<ul>
-<li>duplicate bootstrap runs are safe;</li>
-<li>a crash after database creation resumes without creating another database;</li>
-<li>migration checksum drift fails before runtime startup;</li>
-<li>a Host can exist without an operational binding;</li>
-<li>disabling a Host does not destroy operational data; and</li>
-<li>full reset requires an explicit destructive-development option.</li>
-</ul>
-<h3 id="repository-parity"><a class="header" href="#repository-parity">Repository Parity</a></h3>
-<ul>
-<li>all three repositories use the same topology contract and pinned migration
-artifact generation;</li>
-<li>Compose configuration renders successfully;</li>
-<li>fresh-volume and existing-volume integration tests pass;</li>
-<li>checked-in secrets contain no production credential; and</li>
-<li>documentation, scripts, and runtime examples use the same database names and
-scope semantics.</li>
+<li>each service loads the correct Host-audience binding from Config Server;</li>
+<li><code>dev.networknt.com</code> cannot connect accidentally to <code>operations</code> or
+<code>operations_taiji</code>;</li>
+<li>database identity, binding digest, and schema generation are checked before
+readiness;</li>
+<li>runtime roles cannot create databases, roles, or schemas; and</li>
+<li>restarting Portal or Config Server does not interrupt established operational
+writes.</li>
 </ul>
 <h2 id="resolved-decisions-2"><a class="header" href="#resolved-decisions-2">Resolved Decisions</a></h2>
 <ol>
-<li>Development uses one PostgreSQL server with three application databases by
-default.</li>
-<li><code>configserver</code> remains the event-sourced control-plane and Config Server
-snapshot database.</li>
-<li><code>knowledge</code> remains the separately governed Knowledge operational database.</li>
-<li><code>operations</code> is the ordinary Host/environment operational database.</li>
-<li>Service-owned operational domains use separate schemas and runtime roles
-inside <code>operations</code>.</li>
-<li>Separate databases on one server are logical boundaries, not independent
-infrastructure failure domains.</li>
-<li>The initial configured Host may be bootstrapped automatically.</li>
-<li>Additional Hosts require explicit bindings and do not inherit the initial
-database silently.</li>
-<li>Fresh initialization and persistent-volume migration are both supported.</li>
-<li>Runtime services never provision databases with application credentials.</li>
-<li>Creating <code>operations</code> precedes, but does not itself perform, table cutover.</li>
-<li>Existing service connections move only after ownership, constraint,
-migration, rollback, and readiness gates pass.</li>
-<li>Config Server publishes non-secret bindings; deployment-owned files or
-secret providers supply credentials.</li>
-<li>Knowledge’s organization-sharing rules remain distinct from ordinary
-Host/environment scope validation.</li>
-<li>Deployment repositories orchestrate pinned service-owned migrations rather
-than independently owning divergent schema copies.</li>
+<li>Operational Storage is registration, not provisioning.</li>
+<li>The selected Host is the storage scope; there is no user-entered Environment
+field on the page.</li>
+<li>Portal stores and publishes the binding but never connects to the operational
+database.</li>
+<li>Customers own production database creation, migration, credentials, backup,
+and deletion.</li>
+<li>Local/bootstrap/dev/install deployments create demo databases because the
+deployment owns their one PostgreSQL container.</li>
+<li>The four repositories use the same five database names and the same three
+default Host-to-database mappings.</li>
+<li>Config Server publishes Host-specific connection metadata; credentials remain
+deployment-owned secrets.</li>
+<li>Deactivation or unregistration never drops a database.</li>
+<li>Historical provisioning events remain replay-compatible during migration but
+cannot launch infrastructure work.</li>
+<li>One versioned migration bundle and checksum authority is staged consistently
+across all four deployment repositories.</li>
 </ol>
-<h2 id="open-questions-2"><a class="header" href="#open-questions-2">Open Questions</a></h2>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="operational-storage-registration-implementation-plan"><a class="header" href="#operational-storage-registration-implementation-plan">Operational Storage Registration Implementation Plan</a></h1>
+<h2 id="objective"><a class="header" href="#objective">Objective</a></h2>
+<p>Replace the current asynchronous operational-store provisioning workflow with a
+Host-scoped registration workflow, then make <code>portal-config-loc</code>,
+<code>portal-config-dev</code>, <code>portal-config-bootstrap</code>, and <code>light-portal-install</code>
+create and register the agreed databases in their existing PostgreSQL container.</p>
+<p>This plan implements the decisions in
+<a href="#operational-storage-registration-and-development-postgresql-topology">Operational Storage Registration And Development PostgreSQL Topology</a>.</p>
+<h2 id="baseline-and-migration-principle"><a class="header" href="#baseline-and-migration-principle">Baseline And Migration Principle</a></h2>
+<p>The current implementation has a <code>requestOperationalStoreBinding</code> command,
+provisioning jobs, worker callbacks, a <code>DEV_DEDICATED</code> Docker provider, and UI
+states such as <code>REQUESTED</code>, <code>PENDING</code>, and <code>PROVISIONING</code>. Existing event streams
+and snapshots may contain those records.</p>
+<p>The migration must preserve replay while preventing new infrastructure work:</p>
+<ul>
+<li>add registration contract version 2 before removing version 1 handlers;</li>
+<li>replay historical provisioning events as historical control-plane state only;</li>
+<li>do not start a worker or create a job while replaying;</li>
+<li>migrate an accepted existing binding to a registration only through an
+explicit, idempotent conversion; and</li>
+<li>remove deployment worker wiring only after all default registrations publish
+successfully.</li>
+</ul>
+<h2 id="current-checked-in-delta"><a class="header" href="#current-checked-in-delta">Current Checked-In Delta</a></h2>
+<p>The four deployment repositories already run one PostgreSQL service and their
+current <code>init-environment.sh</code> scripts ensure <code>configserver</code>, <code>knowledge</code>, and one
+<code>operations</code> database. They accept only one <code>PORTAL_DB_OPERATIONAL_NAME</code>, so the
+database manifest/loop is the first deployment change needed for
+<code>operations_networknt</code> and <code>operations_taiji</code>.</p>
+<p><code>portal-config-loc/all-in-lt</code> currently contains the active Compose provisioner
+profile and its supervisor/token handling. The other deployment repositories
+stage the same provisioner/provider assets with the operational migration bundle
+and run the one-shot database bootstrap. Those staged assets must converge with
+the canonical bundle change; they should not be edited independently.</p>
+<p>The checked-in baselines currently contain the bootstrap <code>dev.lightapi.net</code>
+Host, while <code>dev.networknt.com</code> and <code>dev.taiji.io</code> exist only in the operator’s
+current local Portal state. Their canonical Org/Host events and UUIDs must be
+exported and reviewed before the other repositories can register them safely.</p>
+<h2 id="target-user-workflow"><a class="header" href="#target-user-workflow">Target User Workflow</a></h2>
 <ol>
-<li>Which repository publishes the first versioned <code>operational_meta</code> migration
-artifact?</li>
-<li>Is <code>operational-store-bootstrap</code> initially a <code>light-deployer</code> profile, a
-dedicated executable, or a thin deployment script over shared tooling?</li>
-<li>Which exact Agent and Workflow tables define the first cutover slice?</li>
-<li>Which Controller/runtime-registration tables are control-plane evidence and
-which are operational authority?</li>
-<li>Do initial development credentials use one transitional runtime role or
-require all service-specific roles in Phase 0?</li>
-<li>Is <code>DEV_POOLED</code> required in the first implementation, or can it wait until
-dedicated single-Host cutover is qualified?</li>
-<li>Which release artifact and checksum manifest is consumed consistently by
-<code>portal-config-loc</code>, <code>portal-config-dev</code>, and <code>light-portal-install</code>?</li>
-<li>Which clean-reset flags and warnings should be standardized across the three
-deployment repositories?</li>
+<li>A Host administrator selects <strong>Operational Storage</strong> from a Host row.</li>
+<li>The page displays the fully qualified Host name and no Environment field.</li>
+<li>The administrator enters an existing PostgreSQL connection descriptor and
+an absolute mounted credential-file path.</li>
+<li><strong>Register storage</strong> creates and publishes the Host binding synchronously.</li>
+<li><strong>Update registration</strong>, <strong>Deactivate</strong>, and <strong>Unregister</strong> manage only the
+control-plane binding.</li>
+<li>Runtime validation status may be displayed, but there are no provisioning
+jobs, retries, attempts, provider containers, retention holds, or destructive
+database actions on this page.</li>
 </ol>
+<h2 id="p0-freeze-contract-version-2"><a class="header" href="#p0-freeze-contract-version-2">P0: Freeze Contract Version 2</a></h2>
+<p>Status: complete on 2026-09-02.</p>
+<p>Owners: <code>light-portal-doc</code>, <code>host-command</code>, <code>host-query</code>, <code>light-portal</code>,
+<code>portal-view</code>, and runtime consumers in <code>light-fabric</code>.</p>
+<ul>
+<li>Define one active registration per <code>hostId</code>.</li>
+<li>Remove user-supplied <code>environment</code> from the registration request.</li>
+<li>Define fields for engine, server host, port, expected database, TLS mode,
+mounted credential source and absolute reference, minimum schema
+generation, and credential generation.</li>
+<li>Separate non-secret Config Server fields from secret material.</li>
+<li>Define <code>REGISTERED</code>, <code>DEACTIVATED</code>, and <code>UNREGISTERED</code> lifecycle states.</li>
+<li>Define update concurrency through <code>aggregateVersion</code>.</li>
+<li>Define contract-v1 replay and conversion rules.</li>
+</ul>
+<p>Exit gate: Java, TypeScript, Rust, and configuration fixtures agree on property
+names, required fields, digest canonicalization, and rejection cases.</p>
+<p>Delivered contract:</p>
+<ul>
+<li>one active registration key: <code>hostId</code>;</li>
+<li>request fields: <code>targetHostId</code>, <code>engine</code>, <code>serverHost</code>, <code>port</code>,
+<code>expectedDatabase</code>, <code>tlsMode</code>, <code>credentialSource</code>,
+<code>credentialReference</code>, <code>minimumSchemaGeneration</code>, and
+<code>credentialGeneration</code>;</li>
+<li>update-only concurrency field: <code>aggregateVersion</code>;</li>
+<li>registration retries require an idempotency key and derive a stable binding
+identity from the Host plus that key;</li>
+<li>generated projection fields: <code>bindingId</code>, <code>bindingDigest</code>, <code>scopeKind</code>,
+lifecycle, aggregate version, activation, and publication state;</li>
+<li>lifecycle values: <code>REGISTERED</code>, <code>DEACTIVATED</code>, and <code>UNREGISTERED</code>;</li>
+<li>digest: RFC 8785 plus SHA-256 over the frozen 12-field digest subject; and</li>
+<li>version-1 history remains projectable by ordinary consumers and replay, with
+new version-1 commands rejected before append; no automatic conversion is
+performed.</li>
+</ul>
+<p>The P0 artifacts define and test the contract but do not register a handler,
+change a database projection, or alter current runtime configuration. Those
+changes start in P1.</p>
+<h2 id="p1-replace-the-portal-provisioning-api"><a class="header" href="#p1-replace-the-portal-provisioning-api">P1: Replace The Portal Provisioning API</a></h2>
+<p>Status: complete on 2026-09-02.</p>
+<p>Owners: <code>host-command</code>, <code>host-query</code>, <code>light-portal</code>, and <code>portal-db</code>.</p>
+<ul>
+<li>Add <code>registerOperationalStoreBinding</code>, <code>updateOperationalStoreBinding</code>, and
+<code>unregisterOperationalStoreBinding</code> command contracts.</li>
+<li>Keep <code>deactivateOperationalStoreBinding</code>, but redefine it as publication
+revocation only.</li>
+<li>Append version-2 registration events and project/publish them atomically.</li>
+<li>Change the uniqueness constraint from <code>(host_id, environment)</code> to one active
+registration per <code>host_id</code>.</li>
+<li>Store the connection descriptor, binding digest, credential reference, schema
+generation, and audit metadata in <code>configserver</code>.</li>
+<li>Do not create an <code>operational_store_job_t</code> row for version-2 commands.</li>
+<li>Remove new-call access to retry, rotate-through-worker, retention-hold,
+decommission, and worker-report endpoints.</li>
+<li>Retain legacy event constants and replay policies until every supported
+snapshot/event baseline has crossed the compatibility window.</li>
+<li>Update global snapshot export/import so registration records and version-2
+events round-trip without credentials leaking into logs or exports.</li>
+</ul>
+<p>Exit gates:</p>
+<ul>
+<li>PostgreSQL integration tests prove register/update/deactivate/unregister and
+duplicate-Host concurrency behavior;</li>
+<li>replay tests prove old events cannot enqueue work;</li>
+<li>publication tests prove exact Host audience and secret redaction; and</li>
+<li>legacy endpoint removal is covered by authorization and route fixtures.</li>
+</ul>
+<p>Delivered backend:</p>
+<ul>
+<li>four version-2 write actions are exposed at version <code>0.2.0</code>: register,
+update, deactivate, and unregister;</li>
+<li>command append and registration projection/publication share one PostgreSQL
+transaction;</li>
+<li>version-2 registration is Host-scoped, publishes immediately, and is guarded
+by a partial unique index allowing one active registration per Host;</li>
+<li>the projection stores the non-secret connection descriptor, digest,
+credential reference, schema and credential generations, lifecycle, and
+audit metadata;</li>
+<li>version-2 commands and replay create no provisioning jobs;</li>
+<li>legacy provisioning event handlers remain available for historical replay,
+but retry, rotate, retention-hold, decommission, and worker-report actions are
+absent from the current command route specification;</li>
+<li>Host snapshots carry sanitized version-2 registration events, while jobs,
+publications, ownership rows, and legacy profiles remain destination-local or
+derived; and</li>
+<li>live PostgreSQL tests cover the complete lifecycle, replay, publication,
+secret/environment omission, and duplicate-Host rejection.</li>
+</ul>
+<p>The P2 Portal View uses this backend. P1 did not alter deployment topology; P3
+subsequently removed the provisioner and created the five local databases, while
+their Portal registrations remain P4 work.</p>
+<h2 id="p2-convert-portal-view-to-registration"><a class="header" href="#p2-convert-portal-view-to-registration">P2: Convert Portal View To Registration</a></h2>
+<p>Status: complete on 2026-09-02.</p>
+<p>Owner: <code>portal-view</code>.</p>
+<ul>
+<li>Rename page copy from provisioning to registration while retaining the route
+initially for link compatibility.</li>
+<li>Remove Environment and storage-profile selectors.</li>
+<li>Add connection descriptor and credential-source fields.</li>
+<li>Replace <strong>Request provisioning</strong> with <strong>Register storage</strong>.</li>
+<li>Replace job state, attempts, provider resource, retry, credential rotation,
+retention hold, and decommission controls with registration version,
+publication state, database identity, update, deactivate, and unregister.</li>
+<li>Never place a password-bearing URL in query parameters, navigation state,
+telemetry, or browser persistence.</li>
+<li>Update the help page and add component/API tests for all lifecycle states.</li>
+</ul>
+<p>Exit gate: the page cannot invoke a provisioning or destructive database action,
+and it always binds the Host from the selected Host Admin row.</p>
+<p>Delivered Portal View:</p>
+<ul>
+<li>the existing <code>/app/host/operationalStore</code> route now displays the selected
+Host’s fully qualified name and contains no Environment or storage-profile
+selector;</li>
+<li>the form sends only the version-2 PostgreSQL descriptor, credential reference,
+schema/credential generations, and the selected Host ID;</li>
+<li>registration cards expose lifecycle, publication, database identity, digest,
+and aggregate version, with update, deactivate, and unregister actions;</li>
+<li>version-1 provisioning records remain visible as read-only history, with no
+retry, rotation, retention, decommission, job, or provider controls; and</li>
+<li>component/API tests cover register, update/reactivate, deactivate, and
+unregistered-history states and assert omission of environment, profile,
+password, and database URL fields.</li>
+</ul>
+<h2 id="p3-create-the-five-databases-in-one-container"><a class="header" href="#p3-create-the-five-databases-in-one-container">P3: Create The Five Databases In One Container</a></h2>
+<p>Status: complete on 2026-09-02.</p>
+<p>Owners: all four deployment repositories.</p>
+<p>Required databases:</p>
+<pre><code class="language-text">configserver
+knowledge
+operations
+operations_networknt
+operations_taiji
+</code></pre>
+<ul>
+<li>Extend <code>init-environment.sh</code> from one operational database variable to a
+validated list or manifest of three operational databases.</li>
+<li>Ensure all five databases on fresh initialization and on every idempotent
+existing-volume upgrade.</li>
+<li>Apply the same pinned operational migration bundle to <code>operations</code>,
+<code>operations_networknt</code>, and <code>operations_taiji</code>.</li>
+<li>Write a distinct immutable scope root and database identity into each database.</li>
+<li>Generate or materialize Host-specific local runtime URL files.</li>
+<li>Keep one <code>postgres</code> Compose service; do not add per-Host PostgreSQL containers.</li>
+<li>Remove <code>operational-store-provisioner</code> service/profile wiring and Docker socket
+access after registration cutover.</li>
+<li>Keep database bootstrap one-shot and idempotent; it is deployment installation,
+not a Portal background service.</li>
+</ul>
+<p>Exit gate: fresh and existing volumes converge to the same five-database catalog
+and identical operational migration generation.</p>
+<p>Delivered deployment topology:</p>
+<ul>
+<li>all four repositories declare <code>operations</code>, <code>operations_networknt</code>, and
+<code>operations_taiji</code> alongside <code>configserver</code> and <code>knowledge</code> in their single
+PostgreSQL service;</li>
+<li>a shared three-row manifest drives one-shot, idempotent creation and
+validation on both fresh and existing volumes;</li>
+<li>the pinned bundle remains checksum-verified and is rendered only for the
+target database identity and isolated role prefix, preserving identical
+migration IDs and digests in all three ledgers;</li>
+<li>each database records the canonical Portal Host UUID as its immutable scope
+root, binding the database identity to the registration audience;</li>
+<li>each Host/database has separate least-privilege service roles and
+permission-restricted runtime URL files under
+<code>postgres-db/secrets/operational-hosts/&lt;host-name&gt;/</code>;</li>
+<li>validation rejects cross-database <code>CONNECT</code> privilege and checks identities,
+schemas, ledgers, roles, secret modes, and URL targets; and</li>
+<li>the Compose provisioner, Docker socket access, dedicated-container provider,
+worker token handling, and <code>deploy-local.sh</code> provisioner commands are removed.</li>
+</ul>
+<p>The three Portal registration events are delivered in P4 from the reviewed
+canonical Host export.</p>
+<h2 id="p4-canonical-host-data-and-default-registrations"><a class="header" href="#p4-canonical-host-data-and-default-registrations">P4: Canonical Host Data And Default Registrations</a></h2>
+<p>Owners: <code>portal-config-loc</code>, <code>portal-config-dev</code>,
+<code>portal-config-bootstrap</code>, and <code>light-portal-install</code>.</p>
+<p>The canonical mappings are:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Host</th><th>Database</th></tr>
+</thead>
+<tbody>
+<tr><td><code>dev.lightapi.net</code></td><td><code>operations</code></td></tr>
+<tr><td><code>dev.networknt.com</code></td><td><code>operations_networknt</code></td></tr>
+<tr><td><code>dev.taiji.io</code></td><td><code>operations_taiji</code></td></tr>
+</tbody>
+</table>
+</div>
+<ul>
+<li>Export the three Org and Host creations currently present in the local Portal
+as canonical CloudEvents, preserving their UUIDs, owners, and aggregate
+versions.</li>
+<li>Review the export to ensure it contains no unrelated local data.</li>
+<li>Add those events to the shared bootstrap baseline consumed by the four
+repositories.</li>
+<li>Generate three version-2 registration events using the canonical Host UUIDs;
+do not insert registration projection rows directly.</li>
+<li>Import Host events before registration events.</li>
+<li>Make repeated imports idempotent and compatible with existing volumes.</li>
+<li>Assert that the canonical Host FQDN, <code>hostId</code>, expected database, scope root,
+and publication audience all agree.</li>
+</ul>
+<p>Exit gate: a clean installation and an upgraded installation both show three
+published registrations without a running provisioner.</p>
+<p>Delivered implementation:</p>
+<ul>
+<li><code>20260902-001-operational-store-default-registrations.json</code> is byte-identical
+in the four deployment repositories and contains only three Org creations,
+three Host creations, and three registration events in dependency order;</li>
+<li>the export preserves the canonical UUIDs, owners, descriptions, and aggregate
+versions from the local authoring Portal, while portable nonce sentinel <code>0</code>
+is transactionally allocated by the importer;</li>
+<li>all three version-2 registrations publish immediately with
+<code>serverHost=postgres</code>, the exact database-specific Agent runtime role, and
+<code>/run/secrets/operational-database-url</code> as the mounted credential reference;</li>
+<li>database manifests now use the canonical Host UUIDs as scope roots, and a
+contract test validates FQDN, Host ID, database, runtime role, RFC 8785 digest,
+event ordering, UUIDv7 generation, and publication audience;</li>
+<li><code>portal-config-loc</code> applies the registration schema patch on retained volumes
+and imports the delta through the same checksum ledger used by the other
+deployment paths; and</li>
+<li>the provisioner remains absent: registration projection and publication are
+synchronous control-plane work, not a background job.</li>
+</ul>
+<h2 id="p5-publish-and-consume-host-specific-runtime-configuration"><a class="header" href="#p5-publish-and-consume-host-specific-runtime-configuration">P5: Publish And Consume Host-Specific Runtime Configuration</a></h2>
+<p>Status: complete on 2026-09-02.</p>
+<p>Owners: <code>light-portal</code>, Config Server consumers, <code>light-fabric</code>, and deployment
+configuration repositories.</p>
+<ul>
+<li>Compile version-2 operational-store properties into each exact
+Host/service/instance audience.</li>
+<li>Point each local runtime deployment at its Host-specific URL file while keeping
+<code>/run/secrets/operational-database-url</code> as the in-container path.</li>
+<li>Make Light Gateway, Light Workflow, Light Deployer, Light Agent, and Light A2A
+reject Host, binding digest, database identity, or schema-generation mismatch
+before readiness.</li>
+<li>Preserve last-known-good snapshot behavior across Portal/Config Server outages.</li>
+<li>Remove transitional direct operational access to <code>configserver</code> only after the
+owning schema and runtime have passed cutover gates.</li>
+</ul>
+<p>Exit gate: three Host audiences resolve three database identities and negative
+tests prove that swapping any two URL files fails closed.</p>
+<p>Delivered implementation:</p>
+<ul>
+<li>version-2 publication is Host-wide and compiles the registered database into
+each writable instance’s own environment, preserving an exact
+Host/service/instance audience instead of reusing the page environment;</li>
+<li>an importable Config Property delta completes Gateway’s version-2 identity
+fields and adds Deployer’s operational-store audience without publishing any
+credential value;</li>
+<li>the catalog delta assigns the applicable product versions for
+<code>dev.lightapi.net</code> and <code>dev.networknt.com</code>; <code>dev.taiji.io</code> intentionally has
+no assignments because the authoring Config Server currently has no product
+versions or instances for that Host, so future Taiji product onboarding must
+create its property assignments before creating runtime instances;</li>
+<li>a following registration-update delta reconciles all three publications only
+after the catalog assignments exist, preventing preserved databases from
+retaining legacy version-1 instance properties because the registration birth
+was projected first;</li>
+<li>Agent, Workflow, A2A, Gateway, execution, and Deployer startup validation now
+shares one fail-closed verifier for the URL role/database, active binding ID
+and digest, Host identity, database identity, and minimum schema generation;</li>
+<li>Deployer receives a read-only <code>operational_meta</code> audience and cannot start
+against an unregistered or substituted database;</li>
+<li>all four local deployment repositories materialize Host-specific URL files
+from <code>operational-hosts/&lt;fqdn&gt;</code> into per-service volumes, while runtimes see
+only <code>/run/secrets/operational-database-url</code> (or the execution-specific file
+for Controller);</li>
+<li>the database bootstrap records the exact active version-2 binding in each of
+the three operational databases, grants every runtime audience read-only
+access to the database identity row, and creates the least-privilege Deployer
+metadata reader alongside the other service roles;</li>
+<li>the existing atomic Config Server snapshot/cache paths remain the runtime
+authority during an outage: a rejected candidate does not replace the active
+generation, and A2A and Workflow regression tests retain last-known-good
+state; and</li>
+<li>a shared three-Host negative test resolves <code>operations</code>,
+<code>operations_networknt</code>, and <code>operations_taiji</code>, then proves that every
+cross-Host URL substitution is rejected before database readiness.</li>
+</ul>
+<h2 id="p6-repository-specific-work"><a class="header" href="#p6-repository-specific-work">P6: Repository-Specific Work</a></h2>
+<p>Status: complete on 2026-09-02.</p>
+<p>Owners: <code>portal-config-loc</code>, <code>portal-config-dev</code>, <code>portal-config-bootstrap</code>, and
+<code>light-portal-install</code>.</p>
+<h3 id="portal-config-locall-in-lt"><a class="header" href="#portal-config-locall-in-lt"><code>portal-config-loc/all-in-lt</code></a></h3>
+<ul>
+<li>Treat the currently created three Orgs/Hosts as the source for a reviewed
+canonical event export.</li>
+<li>Expand local database initialization and existing-volume upgrade to all five
+databases.</li>
+<li>Register all three Host mappings automatically after baseline import.</li>
+<li>Remove provisioner Compose profile, token instructions, supervisor functions,
+Docker socket mount, and dedicated-child-container tests.</li>
+<li>Add local qualification for catalog, migrations, publications, and Host-to-DB
+isolation.</li>
+</ul>
+<h3 id="portal-config-dev"><a class="header" href="#portal-config-dev"><code>portal-config-dev</code></a></h3>
+<ul>
+<li>Consume the same canonical Host and registration events.</li>
+<li>Mirror the five-database manifest and migration loop.</li>
+<li>Extend restart/startup validation to wait for three registrations and their
+Config Server publications, not for provisioning jobs.</li>
+<li>Add existing-volume upgrade coverage and keep the development gateway default
+on <code>dev.lightapi.net -&gt; operations</code>.</li>
+</ul>
+<h3 id="portal-config-bootstrap"><a class="header" href="#portal-config-bootstrap"><code>portal-config-bootstrap</code></a></h3>
+<ul>
+<li>Place the canonical Org, Host, and registration events in the ordered bootstrap
+artifact after their dependencies.</li>
+<li>Create/migrate the five databases before importing registration events.</li>
+<li>Verify direct bootstrap and replay/bootstrap modes produce identical
+registrations and digests.</li>
+<li>Remove worker endpoint/profile data from the newly generated baseline only
+after compatibility consumers no longer require it.</li>
+</ul>
+<h3 id="light-portal-install"><a class="header" href="#light-portal-install"><code>light-portal-install</code></a></h3>
+<ul>
+<li>Stage the same database manifest, migration bundle, checksums, and registration
+events for offline installation.</li>
+<li>Make install, upgrade, clean-volume, and retained-volume paths converge.</li>
+<li>Materialize local URL files and document production overrides for customer DB
+DNS, TLS, username, and mounted credential-file path.</li>
+<li>Remove staged worker/provider assets, any remaining profile wiring, and related
+token/operator instructions.</li>
+<li>Validate that installer defaults use one PostgreSQL container and no Docker
+socket privilege.</li>
+</ul>
+<p>Exit gate: all four repository paths converge on the same five-database
+topology, canonical registration events and digests, projected publication
+readiness, retained-volume migrations, and fail-closed Host isolation without
+an operational-store provisioner or Docker socket mount.</p>
+<p>Delivered implementation:</p>
+<ul>
+<li>all four repositories consume byte-identical Org/Host/registration events,
+runtime catalog events, operational database manifests, migration order,
+bundle manifest, and bundle checksum files;</li>
+<li>fresh and retained PostgreSQL volumes converge on <code>configserver</code>, <code>knowledge</code>,
+<code>operations</code>, <code>operations_networknt</code>, and <code>operations_taiji</code>, with identical
+migration ledgers in the three operational databases;</li>
+<li>the local, development, bootstrap, and installer lifecycle paths now wait for
+the three exact active version-2 registration/publication pairs after delta
+projection, including matching Host, database, binding ID, and binding digest,
+and reject any legacy provisioning job for those registrations;</li>
+<li>direct event bootstrap and verified archive restore both pass through the same
+release-delta and readiness path, so fresh, upgrade, clean-volume, and
+retained-volume installs converge;</li>
+<li>runtime qualification now swaps two Host-specific URL files and proves the
+database validator fails closed before restoring and revalidating the files;</li>
+<li>the last local provisioner supervisor call is removed, and every Compose stack
+renders with exactly one PostgreSQL service and no operational provisioner or
+Docker socket mount; and</li>
+<li>newly staged registration artifacts contain no worker endpoint, provider
+profile, token, or callback data; version-1 rows remain only as write-guarded
+replay and audit history; and</li>
+<li>installer documentation distinguishes the five local databases from
+customer-owned production databases and specifies DNS, TLS, username, and
+secret-reference overrides without publishing credentials to Config Server.</li>
+</ul>
+<h2 id="p7-removal-and-compatibility-closure"><a class="header" href="#p7-removal-and-compatibility-closure">P7: Removal And Compatibility Closure</a></h2>
+<p>Status: complete on 2026-09-02.</p>
+<p>Owners: all affected repositories.</p>
+<ul>
+<li>Stop generating version-1 provisioning commands and profiles.</li>
+<li>Remove <code>DEV_DEDICATED</code>, <code>DEV_POOLED</code>, job leasing, worker callbacks, and Docker
+provider code after the declared replay window.</li>
+<li>Preserve a read-only representation or migration for historical bindings where
+audit requirements demand it.</li>
+<li>Regenerate API specifications, event bundles, endpoint registrations, access
+rules, release manifests, and checksums from their owning repositories.</li>
+<li>Remove obsolete help text and operator runbooks.</li>
+</ul>
+<p>Exit gate: repository-wide searches find no active provisioning command, worker,
+job poller, Docker socket mount, or page action; replay of the oldest supported
+baseline still succeeds.</p>
+<p>Delivered implementation:</p>
+<ul>
+<li>Host command/query specifications expose only the version-2 registration
+lifecycle, and the API correction delta replaces their endpoint inventory so
+omitted version-1 endpoints and access rows become inactive;</li>
+<li>Portal rejects live version-1 events, retains replay projection without job
+side effects, and exposes historical bindings only through the read path;</li>
+<li>the legacy profile and provisioning-job tables remain for audit but are
+write-guarded, with old provider profiles inactive and outstanding work
+cancelled by the P7 database patch;</li>
+<li>the Docker provider, polling worker, worker callbacks, lease validation,
+profile query, and credential-rotation scripts are removed;</li>
+<li>operational bundle 2.0.0 migrates local metadata to Host-scoped
+<code>CUSTOMER_MANAGED</code> registration and is checksum-identical across the four
+deployment repositories; and</li>
+<li>the P7 closure gates qualify source absence, API/event parity, bundle parity,
+oldest-supported replay, and version-2 registration without provisioning.</li>
+</ul>
+<h2 id="cross-repository-qualification-matrix"><a class="header" href="#cross-repository-qualification-matrix">Cross-Repository Qualification Matrix</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Gate</th><th>loc</th><th>dev</th><th>bootstrap</th><th>install</th></tr>
+</thead>
+<tbody>
+<tr><td>Compose renders with one PostgreSQL container</td><td>Required</td><td>Required</td><td>Required</td><td>Required</td></tr>
+<tr><td>Fresh volume has five databases</td><td>Required</td><td>Required</td><td>Required</td><td>Required</td></tr>
+<tr><td>Existing volume converges</td><td>Required</td><td>Required</td><td>Required</td><td>Required</td></tr>
+<tr><td>Three operational DB migration digests match</td><td>Required</td><td>Required</td><td>Required</td><td>Required</td></tr>
+<tr><td>Three Host registrations publish</td><td>Required</td><td>Required</td><td>Required</td><td>Required</td></tr>
+<tr><td>No provisioning worker starts</td><td>Required</td><td>Required</td><td>Required</td><td>Required</td></tr>
+<tr><td>Swapped Host URL fails readiness</td><td>Required</td><td>Required</td><td>Required</td><td>Required</td></tr>
+<tr><td>Offline bundle checksum parity</td><td>N/A</td><td>Optional</td><td>Required</td><td>Required</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="recommended-delivery-order"><a class="header" href="#recommended-delivery-order">Recommended Delivery Order</a></h2>
+<ol>
+<li>Land contract version 2 and replay compatibility in the Portal backend.</li>
+<li>Land the registration UI behind backend capability detection.</li>
+<li>Export and review canonical Org/Host events from <code>portal-config-loc</code>.</li>
+<li>Land the shared database manifest/bootstrap changes in all four repositories.</li>
+<li>Import default registration events and qualify Config Server publication.</li>
+<li>Cut runtime consumers to the Host-specific bindings.</li>
+<li>Remove the provisioning worker and legacy write endpoints.</li>
+</ol>
+<p>This order prevents a deployment repository from publishing a registration that
+the backend or runtime cannot yet understand and preserves rollback until the
+three Host mappings are qualified.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="global-and-tenant-entity-scope"><a class="header" href="#global-and-tenant-entity-scope">Global And Tenant Entity Scope</a></h1>
 <h2 id="status-5"><a class="header" href="#status-5">Status</a></h2>
@@ -15887,7 +15985,7 @@ Agent’s perspective.</li>
 <p>The workflow schema already has a data-store concept for RAG. Knowledge Bases
 should become the concrete Light Portal resource referenced by that concept
 rather than creating workflow-local copies of documents.</p>
-<h2 id="goals-19"><a class="header" href="#goals-19">Goals</a></h2>
+<h2 id="goals-18"><a class="header" href="#goals-18">Goals</a></h2>
 <ul>
 <li>Let each tenant create and administer multiple Knowledge Bases.</li>
 <li>Let platform administrators create global Knowledge Bases that every tenant
@@ -15916,7 +16014,7 @@ API.</li>
 inputs or contracts changed, while keeping deletion, permission, metadata,
 citation, and retrieval behavior transactionally consistent.</li>
 </ul>
-<h2 id="non-goals-22"><a class="header" href="#non-goals-22">Non-Goals</a></h2>
+<h2 id="non-goals-21"><a class="header" href="#non-goals-21">Non-Goals</a></h2>
 <ul>
 <li>A Knowledge Base is not conversational memory or session history.</li>
 <li>It is not a general file-authoring or content-management system.</li>
@@ -18719,7 +18817,7 @@ embedded or explicitly requested external executors may run concurrently, but
 only one promotion may advance a Knowledge Base from a specific prior active
 generation. The supervisor is considered healthy only while it can observe and
 reconcile the durable queue; it need not have an active build task.</p>
-<h2 id="lifecycle-1"><a class="header" href="#lifecycle-1">Lifecycle</a></h2>
+<h2 id="lifecycle"><a class="header" href="#lifecycle">Lifecycle</a></h2>
 <p>Knowledge Base lifecycle states should include:</p>
 <pre><code class="language-text">DRAFT -&gt; ACTIVE -&gt; DEPRECATED -&gt; INACTIVE -&gt; DELETING -&gt; DELETED
 </code></pre>
@@ -20879,7 +20977,7 @@ them on the Tool form.</li>
 <li>A Gateway change becomes live only after Instance Admin creates a new
 configuration snapshot and selects it as current.</li>
 </ol>
-<h2 id="goals-20"><a class="header" href="#goals-20">Goals</a></h2>
+<h2 id="goals-19"><a class="header" href="#goals-19">Goals</a></h2>
 <ul>
 <li>Let an author iterate frequently without creating duplicate workflow
 identities.</li>
@@ -20895,7 +20993,7 @@ workflow.</li>
 <li>Reuse Config Server snapshots for deployment activation and configuration
 drift prevention.</li>
 </ul>
-<h2 id="non-goals-23"><a class="header" href="#non-goals-23">Non-Goals</a></h2>
+<h2 id="non-goals-22"><a class="header" href="#non-goals-22">Non-Goals</a></h2>
 <ul>
 <li>Publishing a workflow does not deploy it to a Gateway.</li>
 <li>Saving a tool does not change a live Gateway.</li>
@@ -21758,7 +21856,7 @@ activation, and rollback.</li>
 <li>The existing <strong>Sync Config From API</strong> action may remain temporarily as an
 administrator repair path, but it is not the normal publication workflow.</li>
 </ol>
-<h2 id="goals-21"><a class="header" href="#goals-21">Goals</a></h2>
+<h2 id="goals-20"><a class="header" href="#goals-20">Goals</a></h2>
 <ul>
 <li>Reduce a multi-page operation to one API-version-centered publication flow.</li>
 <li>Support intentional parallel API versions and explicit replacement.</li>
@@ -21773,7 +21871,7 @@ snapshots.</li>
 <li>Leave room for future API-level publication sections without moving the
 action to another page.</li>
 </ul>
-<h2 id="non-goals-24"><a class="header" href="#non-goals-24">Non-Goals</a></h2>
+<h2 id="non-goals-23"><a class="header" href="#non-goals-23">Non-Goals</a></h2>
 <ul>
 <li>Access Overview does not become a deployment or publication page.</li>
 <li>Creating or editing an API version does not automatically change a Gateway.</li>
@@ -22427,7 +22525,7 @@ that caused the notification.</p>
 <p>Direct execution is both smaller and more precise: the command names one
 approved request and query processes that request only. Removing the idle
 dispatcher machinery also removes its shutdown delay from <code>hybrid-query</code>.</p>
-<h2 id="goals-22"><a class="header" href="#goals-22">Goals</a></h2>
+<h2 id="goals-21"><a class="header" href="#goals-21">Goals</a></h2>
 <ul>
 <li>Execute only the <code>(hostId, replayRequestId)</code> submitted by the user.</li>
 <li>Pass the user’s existing bearer token from command to query.</li>
@@ -22438,7 +22536,7 @@ gateway route.</li>
 <li>Remove permanent threads and database sessions that exist only to wait for
 replay work.</li>
 </ul>
-<h2 id="non-goals-25"><a class="header" href="#non-goals-25">Non-Goals</a></h2>
+<h2 id="non-goals-24"><a class="header" href="#non-goals-24">Non-Goals</a></h2>
 <ul>
 <li>No queue, scheduler, workflow, Kafka topic, or outbox consumer is added.</li>
 <li>No machine or bootstrap token is introduced for this call.</li>
@@ -22784,7 +22882,7 @@ and cannot preserve the original business transaction IDs.</p>
 passes the parity gates in this document.</p>
 <p>Related designs are <a href="#rust-event-importer-design">Rust Event Importer</a>,
 <a href="#event-replay">Event Replay</a>, and
-<a href="#light-portal-install">Light Portal Install</a>.</p>
+<a href="#light-portal-install-1">Light Portal Install</a>.</p>
 <h2 id="problem-10"><a class="header" href="#problem-10">Problem</a></h2>
 <p>Database recreation currently imports <code>events.json</code> one event at a time. Each
 event opens and commits a PostgreSQL transaction. Guarded graph appends also
@@ -22870,7 +22968,7 @@ advisory lock, and uses <code>READ COMMITTED</code> transactions.</li>
 adaptive low-latency poll and evaluates <code>LISTEN</code>/<code>NOTIFY</code> if polling remains
 material.</li>
 </ol>
-<h2 id="goals-23"><a class="header" href="#goals-23">Goals</a></h2>
+<h2 id="goals-22"><a class="header" href="#goals-22">Goals</a></h2>
 <ul>
 <li>Reduce empty-database recreation time as snapshot event volume grows.</li>
 <li>Preserve the current one-event logical transaction and DLQ isolation
@@ -22886,7 +22984,7 @@ and event baseline.</li>
 <li>Compare Java and Rust importers against the same fixtures and database
 postconditions.</li>
 </ul>
-<h2 id="non-goals-26"><a class="header" href="#non-goals-26">Non-Goals</a></h2>
+<h2 id="non-goals-25"><a class="header" href="#non-goals-25">Non-Goals</a></h2>
 <ul>
 <li>Recovering original history or adding original <code>transaction_id</code> metadata to
 the snapshot/event format.</li>
@@ -23688,7 +23786,7 @@ projection indexes, and temporary unlogged projections may be useful on an
 empty disposable destination, but each changes a different cost and some add a
 rewrite or recovery penalty. P0 measures them independently. None may bypass
 the canonical append path or remain active after the readiness gate.</p>
-<h2 id="open-questions-3"><a class="header" href="#open-questions-3">Open Questions</a></h2>
+<h2 id="open-questions-2"><a class="header" href="#open-questions-2">Open Questions</a></h2>
 <ol>
 <li>Which validator read-model dependencies, beyond graph-root resolution, need
 an initial barrier-registry entry?</li>
@@ -23793,7 +23891,7 @@ membership parent.</p>
 <p>The observed failure is not an isolated bad-row case. It is evidence that a
 host-filtered projection snapshot does not yet define a closed, composable
 user-identity boundary.</p>
-<h2 id="goals-24"><a class="header" href="#goals-24">Goals</a></h2>
+<h2 id="goals-23"><a class="header" href="#goals-23">Goals</a></h2>
 <ul>
 <li>Recreate a selected multi-host environment without duplicate user births.</li>
 <li>Preserve every included active membership and its host-scoped access state.</li>
@@ -23810,7 +23908,7 @@ migration workflows one documented contract.</li>
 <li>Provide an incremental migration path from the existing
 <code>UserCreatedEvent</code> projection behavior.</li>
 </ul>
-<h2 id="non-goals-27"><a class="header" href="#non-goals-27">Non-Goals</a></h2>
+<h2 id="non-goals-26"><a class="header" href="#non-goals-26">Non-Goals</a></h2>
 <ul>
 <li>Reconstruct original business history from projection snapshots.</li>
 <li>Make two legacy self-contained host exports composable by ignoring duplicate
@@ -24670,7 +24768,7 @@ using <code>developmentFixtures</code> or adding an unrestricted <code>allowHttp
 </tbody>
 </table>
 </div>
-<h2 id="goals-25"><a class="header" href="#goals-25">Goals</a></h2>
+<h2 id="goals-24"><a class="header" href="#goals-24">Goals</a></h2>
 <ul>
 <li>Make Ollama, llama.cpp, vLLM, and other OpenAI-compatible self-hosted servers
 production-capable Provider Deployments.</li>
@@ -24690,7 +24788,7 @@ verification. Leave mTLS as an optional later enhancement.</li>
 keep protected query, indexing, and standard traffic out of shared capacity
 domains when isolation is required.</li>
 </ul>
-<h2 id="non-goals-28"><a class="header" href="#non-goals-28">Non-Goals</a></h2>
+<h2 id="non-goals-27"><a class="header" href="#non-goals-27">Non-Goals</a></h2>
 <ul>
 <li>This design does not let callers submit provider URLs.</li>
 <li>It does not make <code>light-gateway</code> an Alias router or LLM protocol translator.</li>
@@ -25841,7 +25939,7 @@ grants in the same transaction as task completion.</li>
 <li>The editor enables testing when it observes committed grants. The author’s
 acknowledgement task is informational and is not an authorization gate.</li>
 </ol>
-<h2 id="goals-26"><a class="header" href="#goals-26">Goals</a></h2>
+<h2 id="goals-25"><a class="header" href="#goals-25">Goals</a></h2>
 <ul>
 <li>Keep the workflow author inside the Workflow Editor.</li>
 <li>Allow an author to compose a complete draft while access is pending.</li>
@@ -25854,7 +25952,7 @@ locations, and justification instead of requiring raw ID exchange.</li>
 authorization authority.</li>
 <li>Fail closed when a Tool changes between request and approval.</li>
 </ul>
-<h2 id="non-goals-29"><a class="header" href="#non-goals-29">Non-Goals</a></h2>
+<h2 id="non-goals-28"><a class="header" href="#non-goals-28">Non-Goals</a></h2>
 <ul>
 <li>Do not grant a Tool to every workflow on the host by default.</li>
 <li>Do not let a pending request satisfy runtime authorization.</li>
@@ -26356,7 +26454,7 @@ the workflow.</li>
 <li><code>role_permission_t</code></li>
 </ul>
 <p>The <code>role_user_t</code> table has a foreign key to <code>(host_id, role_id)</code> in <code>role_t</code>, so role rows must exist before the user-role assignments are inserted.</p>
-<h2 id="goals-27"><a class="header" href="#goals-27">Goals</a></h2>
+<h2 id="goals-26"><a class="header" href="#goals-26">Goals</a></h2>
 <ol>
 <li>A claimed organization must be immediately usable by the selected organization owner and host owner.</li>
 <li>The default host must receive deterministic administrative roles.</li>
@@ -26364,7 +26462,7 @@ the workflow.</li>
 <li>The event stream and projections must remain replayable and idempotent.</li>
 <li>The implementation must use the canonical role IDs already used by the portal data: <code>org-admin</code> and <code>host-admin</code>.</li>
 </ol>
-<h2 id="non-goals-30"><a class="header" href="#non-goals-30">Non-Goals</a></h2>
+<h2 id="non-goals-29"><a class="header" href="#non-goals-29">Non-Goals</a></h2>
 <p>This design does not introduce a new global organization-role table. Existing roles are host-scoped through <code>role_t.host_id</code>, so the organization administrator role for a claimed organization is represented as a role on the default host.</p>
 <p>This design also does not merge organization and host administration into one broad role. Organization ownership and host ownership are separate responsibilities, and the system should grant both roles only when the same user is selected for both owner fields.</p>
 <h2 id="role-model-1"><a class="header" href="#role-model-1">Role Model</a></h2>
@@ -26501,7 +26599,7 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 <p>The new tenant host does not and should not have duplicate OAuth provider/client rows. The FK therefore rejects login with:</p>
 <pre><code class="language-text">auth_session_t_host_id_client_id_provider_id_fkey
 </code></pre>
-<h2 id="goals-28"><a class="header" href="#goals-28">Goals</a></h2>
+<h2 id="goals-27"><a class="header" href="#goals-27">Goals</a></h2>
 <ol>
 <li>Keep <code>dev.lightapi.net</code> as the single master OAuth host for the instance.</li>
 <li>Allow users whose current host is a tenant host to log in through the master host’s provider/client.</li>
@@ -26510,7 +26608,7 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 <li>Allow Claim Org to switch the host owner to the new host and require logout/login for fresh claims.</li>
 <li>Keep session, auth-code, refresh-token, and audit lifecycle behavior deterministic and queryable.</li>
 </ol>
-<h2 id="non-goals-31"><a class="header" href="#non-goals-31">Non-Goals</a></h2>
+<h2 id="non-goals-30"><a class="header" href="#non-goals-30">Non-Goals</a></h2>
 <p>This design does not introduce tenant-specific OAuth provider IDs, client IDs, redirect URIs, or BFF configuration.</p>
 <p>This design does not change the portal UI or BFF to select a different OAuth provider per tenant host.</p>
 <p>This design does not remove database referential integrity. The provider-client relationship should remain enforced, but it should be enforced against the master OAuth host instead of the tenant host.</p>
@@ -26897,7 +26995,7 @@ service yet. The main gaps are:</p>
 <li>tests for schema CRUD, tenant/global lookup, versioning, and config
 validation are incomplete</li>
 </ul>
-<h2 id="goals-29"><a class="header" href="#goals-29">Goals</a></h2>
+<h2 id="goals-28"><a class="header" href="#goals-28">Goals</a></h2>
 <ul>
 <li>Store JSON Schema documents with clear tenant/global ownership.</li>
 <li>Support immutable published schema versions.</li>
@@ -26914,7 +27012,7 @@ and loading schema bodies lazily.</li>
 JSON path.</li>
 <li>Categorize and tag schemas for easier discovery and filtering.</li>
 </ul>
-<h2 id="non-goals-32"><a class="header" href="#non-goals-32">Non-Goals</a></h2>
+<h2 id="non-goals-31"><a class="header" href="#non-goals-31">Non-Goals</a></h2>
 <ul>
 <li>Do not build a full schema compatibility engine in the first release.</li>
 <li>Do not require every config property to have a schema.</li>
@@ -28554,7 +28652,7 @@ model conversations, read state, participant visibility, or per-user delete.</li
 messages page should load its own data from the query API.</li>
 <li>The existing private-message tests are disabled stubs.</li>
 </ul>
-<h2 id="goals-30"><a class="header" href="#goals-30">Goals</a></h2>
+<h2 id="goals-29"><a class="header" href="#goals-29">Goals</a></h2>
 <ul>
 <li>Let one logged-in user send a message to another portal user without knowing
 or seeing the recipient email.</li>
@@ -28569,7 +28667,7 @@ recipient email internally.</li>
 <li>Provide a path from the existing <code>message_t</code> skeleton to a conversation-based
 model without breaking existing UI routes immediately.</li>
 </ul>
-<h2 id="non-goals-33"><a class="header" href="#non-goals-33">Non-Goals</a></h2>
+<h2 id="non-goals-32"><a class="header" href="#non-goals-32">Non-Goals</a></h2>
 <ul>
 <li>Do not build group chat in the first phase.</li>
 <li>Do not expose email addresses in message APIs, events, UI state, or task
@@ -28876,7 +28974,7 @@ retention and keeps visible, partially deleted, and recently deleted messages.</
 <li>Reply pre-populates recipient context without email.</li>
 <li>Empty and error states do not produce JSON parse failures.</li>
 </ul>
-<h2 id="open-questions-4"><a class="header" href="#open-questions-4">Open Questions</a></h2>
+<h2 id="open-questions-3"><a class="header" href="#open-questions-3">Open Questions</a></h2>
 <ul>
 <li>Should users be able to send messages to themselves as private notes?</li>
 <li>Should profile pages expose a “Message” action only for users in the same
@@ -30826,7 +30924,7 @@ should not be forced to match <code>sid</code> until the product-level authoriza
 is explicitly designed.</p>
 <p>The same exception does not apply to controller registry registration because
 <code>service/register</code> always carries a requested <code>serviceId</code>.</p>
-<h2 id="goals-31"><a class="header" href="#goals-31">Goals</a></h2>
+<h2 id="goals-30"><a class="header" href="#goals-30">Goals</a></h2>
 <ul>
 <li>Prevent one service token from downloading another service’s config, certs,
 or files.</li>
@@ -30872,7 +30970,7 @@ helper.</p>
 <p>The focused implementation tests cover missing and mismatched <code>host</code>, missing
 and mismatched <code>sid</code>, missing and mismatched <code>env</code> when <code>envTag</code> is requested,
 blank values, whitespace trimming, and case-sensitive identifier comparison.</p>
-<h2 id="non-goals-34"><a class="header" href="#non-goals-34">Non-Goals</a></h2>
+<h2 id="non-goals-33"><a class="header" href="#non-goals-33">Non-Goals</a></h2>
 <ul>
 <li>Do not replace JWT verification middleware.</li>
 <li>Do not redesign OAuth token issuance.</li>
@@ -31263,7 +31361,7 @@ cargo test microservice_registration_uses_jwt_env_when_request_omits_env_tag
 mvn -q -Dtest=ControllerWebSocketIntegrationTest#rejectsMicroserviceJwtWhenHostClaimIsMissing+rejectsMicroserviceJwtWhenHostClaimDiffersFromControllerHostId+rejectsMicroserviceJwtWhenSidIsMissing+rejectsMicroserviceJwtWhenSidDiffersFromServiceId+rejectsMicroserviceJwtWhenEnvClaimIsMissingAndEnvTagIsRequested+rejectsMicroserviceJwtWhenEnvClaimDiffersFromEnvTag+registersMicroserviceWhenEnvTagAndEnvClaimAreOmitted test
 mvn -q -Dtest=ServiceIdAuthorizationUtilTest test
 </code></pre>
-<h2 id="open-questions-5"><a class="header" href="#open-questions-5">Open Questions</a></h2>
+<h2 id="open-questions-4"><a class="header" href="#open-questions-4">Open Questions</a></h2>
 <p>No open questions for SID, host, and environment binding in this phase.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="instance-clone"><a class="header" href="#instance-clone">Instance Clone</a></h1>
@@ -31289,7 +31387,7 @@ copies the current active state of this graph and lets the administrator change
 the target identity and environment-specific configuration.</p>
 <p>This is a same-host operation. Cross-host or cross-database copying remains an
 event-promotion/import concern.</p>
-<h2 id="goals-32"><a class="header" href="#goals-32">Goals</a></h2>
+<h2 id="goals-31"><a class="header" href="#goals-31">Goals</a></h2>
 <ul>
 <li>Clone an active instance and its selected active children with one command.</li>
 <li>Require a target instance name and environment tag while allowing other
@@ -31306,7 +31404,7 @@ omit it without exposing values unnecessarily.</li>
 transaction when requested.</li>
 <li>Report durable projection and snapshot status after command acceptance.</li>
 </ul>
-<h2 id="non-goals-35"><a class="header" href="#non-goals-35">Non-goals</a></h2>
+<h2 id="non-goals-34"><a class="header" href="#non-goals-34">Non-goals</a></h2>
 <ul>
 <li>Copy raw historical events or preserve source aggregate versions.</li>
 <li>Copy an existing configuration snapshot, runtime registration, deployment
@@ -32370,7 +32468,7 @@ WHERE h.sub_domain || '.' || h.domain = ?
 <p>Deployment service allows users to deploy and manage their configured light products. This service is used by the application and api developers and operations.</p>
 <p>The deployment service contains pipeline management, platform management and deployment management. It also integrates with product management and instance management services.</p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="light-portal-install"><a class="header" href="#light-portal-install">Light Portal Install</a></h1>
+<h1 id="light-portal-install-1"><a class="header" href="#light-portal-install-1">Light Portal Install</a></h1>
 <h2 id="purpose-5"><a class="header" href="#purpose-5">Purpose</a></h2>
 <p><code>light-portal-install</code> provides a one-command local installation path for Light Portal. The target user should only need Docker Compose on the host machine and should not need to clone the individual service repositories, build Java or Rust projects, install Node.js, or manually copy static assets.</p>
 <p>The intended entrypoint is:</p>
@@ -32947,7 +33045,7 @@ the second event reaches a projection unique constraint.</li>
 </ul>
 <p>The failure is not specific to role or rule. It is a missing write-side creation
 contract shared by many command services.</p>
-<h2 id="goals-33"><a class="header" href="#goals-33">Goals</a></h2>
+<h2 id="goals-32"><a class="header" href="#goals-32">Goals</a></h2>
 <ul>
 <li>Reject a second create for an existing aggregate without changing its event
 stream.</li>
@@ -32959,7 +33057,7 @@ stream.</li>
 <li>Provide one reusable implementation rather than handler-specific query checks.</li>
 <li>Return an actionable conflict to the UI without exposing another tenant’s data.</li>
 </ul>
-<h2 id="non-goals-36"><a class="header" href="#non-goals-36">Non-goals</a></h2>
+<h2 id="non-goals-35"><a class="header" href="#non-goals-35">Non-goals</a></h2>
 <ul>
 <li>Treating all equal request payloads as the same entity.</li>
 <li>Preventing valid multiplicity for events such as audit records, workflow runs,
@@ -38220,7 +38318,7 @@ unchanged products and to the new <code>productVersionId</code> for rebuilt prod
 </tbody>
 </table>
 </div>
-<h2 id="goals-34"><a class="header" href="#goals-34">Goals</a></h2>
+<h2 id="goals-33"><a class="header" href="#goals-33">Goals</a></h2>
 <ul>
 <li>Auto-populate config mappings for every new Java or Rust product release.</li>
 <li>Preserve event replay, auditability, and projection rebuild behavior.</li>
@@ -38233,7 +38331,7 @@ event amplification.</li>
 <li>Detect missing config and property definitions before a release appears
 complete.</li>
 </ul>
-<h2 id="non-goals-37"><a class="header" href="#non-goals-37">Non-Goals</a></h2>
+<h2 id="non-goals-36"><a class="header" href="#non-goals-36">Non-Goals</a></h2>
 <ul>
 <li>Do not change the config override hierarchy.</li>
 <li>Do not write directly to config mapping projection tables.</li>
@@ -38835,7 +38933,7 @@ mappings.</li>
 <code>config_property_t</code>.</li>
 <li>Add a portal-view diagnostics link from the config update page.</li>
 </ul>
-<h2 id="open-questions-6"><a class="header" href="#open-questions-6">Open Questions</a></h2>
+<h2 id="open-questions-5"><a class="header" href="#open-questions-5">Open Questions</a></h2>
 <ul>
 <li>Should <code>ProductVersionCreatedEvent</code> optionally carry a <code>configProfileRef</code>,
 or should profile linking remain a separate release step?</li>
@@ -38898,7 +38996,7 @@ and who approved publication.</li>
 <p>The release workflow should be flexible enough to call existing command-line
 tools, but controlled enough that it does not become an unrestricted shell
 inside Light Portal.</p>
-<h2 id="goals-35"><a class="header" href="#goals-35">Goals</a></h2>
+<h2 id="goals-34"><a class="header" href="#goals-34">Goals</a></h2>
 <ul>
 <li>Replace the current Java <code>light-bot</code> release path with <code>light-workflow</code> once
 parity is proven.</li>
@@ -38916,7 +39014,7 @@ reporting into the release gate.</li>
 behind explicit approval.</li>
 <li>Preserve release auditability and reproducibility.</li>
 </ul>
-<h2 id="non-goals-38"><a class="header" href="#non-goals-38">Non-Goals</a></h2>
+<h2 id="non-goals-37"><a class="header" href="#non-goals-37">Non-Goals</a></h2>
 <ul>
 <li>Do not run arbitrary release commands in the Light Portal service process.</li>
 <li>Do not replace Maven, Cargo, Docker, GitHub CLI, or existing release scripts
@@ -40614,7 +40712,7 @@ aggregate version for that subject.</li>
 </li>
 </ol>
 <p>The generated JSON is then imported through import mode.</p>
-<h2 id="goals-36"><a class="header" href="#goals-36">Goals</a></h2>
+<h2 id="goals-35"><a class="header" href="#goals-35">Goals</a></h2>
 <ul>
 <li>Preserve Java CLI compatibility for existing scripts and runbooks.</li>
 <li>Preserve event-store, outbox, notification, nonce, offset, and transaction
@@ -40626,7 +40724,7 @@ into testable modules.</li>
 <li>Support large migration workflows with stdin/stdout piping, bounded-memory
 conversion options, aggregate-version caching, and configurable batch imports.</li>
 </ul>
-<h2 id="non-goals-39"><a class="header" href="#non-goals-39">Non-Goals</a></h2>
+<h2 id="non-goals-38"><a class="header" href="#non-goals-38">Non-Goals</a></h2>
 <ul>
 <li>No online REST service in the first version.</li>
 <li>No schema migration management.</li>
@@ -41227,7 +41325,7 @@ transactions first;</li>
 <p>Event replay therefore operates on complete canonical failure transactions,
 not individual notification or DLQ rows. It invokes the same projection
 executor as live processing without rewinding PostgreSQL or Kafka offsets.</p>
-<h2 id="goals-37"><a class="header" href="#goals-37">Goals</a></h2>
+<h2 id="goals-36"><a class="header" href="#goals-36">Goals</a></h2>
 <ul>
 <li>Capture every new failed projection transaction in a replayable canonical
 form.</li>
@@ -41252,7 +41350,7 @@ only from an explicit operator request.</li>
 <li>Keep configuration small enough that a developer can understand the entire
 replay setup from one screen.</li>
 </ul>
-<h2 id="non-goals-40"><a class="header" href="#non-goals-40">Non-Goals</a></h2>
+<h2 id="non-goals-39"><a class="header" href="#non-goals-39">Non-Goals</a></h2>
 <ul>
 <li>Historical or legacy <code>dead_letter_queue</code> rows are not imported. They remain
 diagnostic history only.</li>
@@ -44250,7 +44348,7 @@ later.</li>
 <li>Rollback is a redeploy of a previous Light Portal deployment snapshot, not a
 native Kubernetes rollout undo.</li>
 </ul>
-<h2 id="open-questions-7"><a class="header" href="#open-questions-7">Open Questions</a></h2>
+<h2 id="open-questions-6"><a class="header" href="#open-questions-6">Open Questions</a></h2>
 <ul>
 <li>Which object storage providers should enterprise artifact mode support first?</li>
 <li>What retention policies should be available for encrypted rendered manifest
@@ -44299,7 +44397,7 @@ Ed25519 key used for <code>events.zip</code> is not automatically the same ident
 key used for the optional PostgreSQL bootstrap archive manifest. Treating
 unrelated keys as one unnamed “release key” makes rotation and revocation
 ambiguous.</p>
-<h2 id="goals-38"><a class="header" href="#goals-38">Goals</a></h2>
+<h2 id="goals-37"><a class="header" href="#goals-37">Goals</a></h2>
 <ul>
 <li>Establish explicit signing-key trust domains and ownership.</li>
 <li>Deliver public trust anchors independently of the artifacts they verify.</li>
@@ -44310,7 +44408,7 @@ ambiguous.</p>
 <li>Preserve an auditable release and key-rotation history.</li>
 <li>Keep local installation simple: public keys are configuration, not secrets.</li>
 </ul>
-<h2 id="non-goals-41"><a class="header" href="#non-goals-41">Non-Goals</a></h2>
+<h2 id="non-goals-40"><a class="header" href="#non-goals-40">Non-Goals</a></h2>
 <ul>
 <li>This design does not make an edited environment-specific <code>events.json</code>
 immutable or signed. The downloaded global bundle is verified before
@@ -44586,7 +44684,7 @@ recreates its baseline through the managed deploy path.</li>
 <li><strong>Rollback coverage</strong>: The last old-key artifact remains usable only during
 the documented overlap and is rejected after revocation or removal.</li>
 </ol>
-<h2 id="implementation-sequence-1"><a class="header" href="#implementation-sequence-1">Implementation Sequence</a></h2>
+<h2 id="implementation-sequence"><a class="header" href="#implementation-sequence">Implementation Sequence</a></h2>
 <ol>
 <li>Commit the current event-bundle public key to the consumer repositories and
 add fingerprint-consistency tests.</li>
@@ -44689,7 +44787,7 @@ mutating action behind policy and approval.</li>
 </ul>
 <p>This does not make the platform intrinsically simple. It makes the complexity
 visible, repeatable, testable, and supportable.</p>
-<h2 id="goals-39"><a class="header" href="#goals-39">Goals</a></h2>
+<h2 id="goals-38"><a class="header" href="#goals-38">Goals</a></h2>
 <ul>
 <li>Maintain a complete, customer-shaped Light Portal and Light Fabric reference
 environment on a Linux VM.</li>
@@ -44708,7 +44806,7 @@ status, and rollback operations.</li>
 <li>Preserve a conventional, fully documented operator path when AI is disabled
 or unavailable.</li>
 </ul>
-<h2 id="non-goals-42"><a class="header" href="#non-goals-42">Non-Goals</a></h2>
+<h2 id="non-goals-41"><a class="header" href="#non-goals-41">Non-Goals</a></h2>
 <ul>
 <li>Do not make the Linux VM a production runtime or production database.</li>
 <li>Do not deploy unverified output directly from the daily development branch.</li>
@@ -45677,7 +45775,7 @@ the provider <code>jwk</code> from <code>auth_provider_t</code>. The implementat
 that the JWT header <code>kid</code> is present in the returned JWKS for the same provider.
 That guarantee matters more once external AWS services cache the discovery and
 JWKS responses.</p>
-<h2 id="goals-40"><a class="header" href="#goals-40">Goals</a></h2>
+<h2 id="goals-39"><a class="header" href="#goals-39">Goals</a></h2>
 <ul>
 <li>Let AWS AgentCore use Rust <code>light-oauth</code> or Java <code>oauth-kafka</code> as a JWT
 bearer token issuer.</li>
@@ -45689,7 +45787,7 @@ claims working.</li>
 <li>Keep issuer, audience, and discovery URLs deterministic across environments.</li>
 <li>Add tests that prove discovery, JWKS, and signed token claims line up.</li>
 </ul>
-<h2 id="non-goals-43"><a class="header" href="#non-goals-43">Non-Goals</a></h2>
+<h2 id="non-goals-42"><a class="header" href="#non-goals-42">Non-Goals</a></h2>
 <ul>
 <li>Do not implement full OIDC identity-provider behavior in the first phase.</li>
 <li>Do not add dynamic client registration.</li>
@@ -46387,6 +46485,7 @@ records are visible, and which common actions are available.</p>
 <li><a href="#llm-model-control-plane">LLM Model Control Plane</a></li>
 <li><a href="#create-llm-model">Create LLM Model</a></li>
 <li><a href="#skill-workspace">Skill Workspace</a></li>
+<li><a href="#operational-storage">Operational Storage</a></li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="task-center-1"><a class="header" href="#task-center-1">Task Center</a></h1>
@@ -47337,6 +47436,100 @@ for the host.</p>
 <li>review linked APIs and apps</li>
 <li>open runtime endpoints and configuration links</li>
 </ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="operational-storage"><a class="header" href="#operational-storage">Operational Storage</a></h1>
+<blockquote>
+<p><strong>Implementation status:</strong> P0 through P7 are complete. Clean installs and
+retained-volume upgrades import the same canonical registration and API
+closure deltas.</p>
+</blockquote>
+<p>The Operational Storage page registers the existing database used by a Host’s
+runtime services. It does not create or provision a database.</p>
+<p>Open <strong>Host Admin</strong>, find the Host, and select its <strong>Operational Storage</strong> row
+action. The heading shows the selected Host’s fully qualified name, such as
+<code>dev.networknt.com</code>.</p>
+<h2 id="access"><a class="header" href="#access">Access</a></h2>
+<p>Users with the <code>host-viewer</code> or <code>host-admin</code> role can inspect the page. A
+<code>host-admin</code> can register, update, deactivate, or unregister storage. These
+actions change the Config Server binding; they never create, alter, or delete
+the customer’s database.</p>
+<h2 id="host-scope"><a class="header" href="#host-scope">Host scope</a></h2>
+<p>The selected Host is the storage scope. There is no separate Environment field.</p>
+<p>When you open this page from <code>dev.networknt.com</code>, the registration belongs to
+<code>dev.networknt.com</code>. It cannot be used to register storage for
+<code>test.networknt.com</code>; return to Host Admin and open that Host instead.</p>
+<h2 id="before-registration"><a class="header" href="#before-registration">Before registration</a></h2>
+<p>The database must already exist. The customer or deployment owner is responsible
+for:</p>
+<ul>
+<li>creating and operating the PostgreSQL database;</li>
+<li>installing the required schemas and migrations;</li>
+<li>creating least-privilege runtime roles;</li>
+<li>configuring network and TLS access; and</li>
+<li>storing the runtime credential in an approved secret mechanism.</li>
+</ul>
+<h2 id="register-storage"><a class="header" href="#register-storage">Register storage</a></h2>
+<p>Enter the PostgreSQL server, port, database name, TLS mode, mounted credential
+file path, and required schema and credential generations.
+Then select <strong>Register storage</strong>.</p>
+<p>The credential reference must be an absolute path visible to each runtime
+service. Portal publishes that exact path as <code>databaseUrlFile</code>; arbitrary secret
+provider identifiers are not accepted until runtime secret-provider resolution
+is implemented. Registration requests use an idempotency key so a retry cannot
+create a second binding.</p>
+<p>Runtime usernames are intentionally not registered at Host scope. Agent,
+Workflow, Gateway, A2A, Execution, and Deployer use separate least-privilege
+roles supplied by their own deployment secrets while sharing this endpoint
+policy.</p>
+<p>Portal stores the Host binding in its control-plane database and publishes the
+connection contract through Config Server. Customer runtime services load their
+Host-specific configuration, resolve the credential from their deployment, and
+connect directly to the operational database. Light Portal does not connect to
+it.</p>
+<p>Passwords and password-bearing database URLs must not be entered into fields
+that are documented as non-secret. Put the URL in the mounted credential file.</p>
+<h2 id="registration-details"><a class="header" href="#registration-details">Registration details</a></h2>
+<p>The registration card shows:</p>
+<ul>
+<li>lifecycle and publication state;</li>
+<li>engine, server, port, and expected database identity;</li>
+<li>minimum schema and credential generations;</li>
+<li>mounted credential-file path;</li>
+<li>binding version and digest; and</li>
+<li>optional runtime validation information when available.</li>
+</ul>
+<p>The page does not show provisioning jobs, attempts, provider containers, or
+database-decommission controls.</p>
+<h2 id="lifecycle-actions"><a class="header" href="#lifecycle-actions">Lifecycle actions</a></h2>
+<ul>
+<li><strong>Update registration</strong> publishes a new version of an active connection contract.</li>
+<li><strong>Reactivate registration</strong> is shown for a deactivated registration and asks
+for confirmation before republishing it.</li>
+<li><strong>Deactivate</strong> revokes runtime publication while retaining the registration
+history and all customer data.</li>
+<li><strong>Unregister</strong> removes the active binding from future Config Server
+publication.</li>
+</ul>
+<p>Neither Deactivate nor Unregister drops the database. Database backup, retention,
+credential rotation, and deletion remain customer or deployment operations.</p>
+<p>Version-1 provisioning records, if present from an older deployment, appear as
+read-only history. The page cannot retry or resume those provisioning jobs.</p>
+<h2 id="local-demonstration-databases"><a class="header" href="#local-demonstration-databases">Local demonstration databases</a></h2>
+<p>The standard local, development, bootstrap, and installer profiles use one
+PostgreSQL container and register these defaults:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Host</th><th>Database</th></tr>
+</thead>
+<tbody>
+<tr><td><code>dev.lightapi.net</code></td><td><code>operations</code></td></tr>
+<tr><td><code>dev.networknt.com</code></td><td><code>operations_networknt</code></td></tr>
+<tr><td><code>dev.taiji.io</code></td><td><code>operations_taiji</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>These databases are created by deployment initialization, not by this page.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="clone-an-instance"><a class="header" href="#clone-an-instance">Clone an Instance</a></h1>
 <p>Instance Clone creates a new instance from the active, projected configuration

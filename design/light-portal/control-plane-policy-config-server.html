@@ -35,10 +35,10 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-740964cd.js";
+            window.path_to_searchindex_js = "../../searchindex-f71e017e.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../toc-1b9109f0.js"></script>
+        <script src="../../toc-89f2168e.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -183,7 +183,7 @@ Knowledge. It also defines how publication identity is shared with the internal
 Workflow service.</p>
 <p>The development placement and migration contract for the Config Server,
 Knowledge, and Host operational databases is defined in
-<a href="development-database-topology.html">Development PostgreSQL Database Topology</a>.</p>
+<a href="development-database-topology.html">Operational Storage Registration And Development PostgreSQL Topology</a>.</p>
 <h2 id="decision-summary"><a class="header" href="#decision-summary">Decision Summary</a></h2>
 <p>Light Portal is the policy authoring and publication control plane. Agent,
 Gateway, Knowledge, and other independently operated application runtimes are
@@ -1005,11 +1005,14 @@ generation. Snapshot creation from mutable instance rows is vulnerable to
 mixing a concurrent change into a publication unless the staged target and
 projected digest are checked.</p>
 <h3 id="current-workflow-database-access"><a class="header" href="#current-workflow-database-access">Current Workflow database access</a></h3>
-<p><code>light-workflow</code> currently creates one SQLx PostgreSQL pool from <code>DATABASE_URL</code>
-and shares it across admission, execution, event consumption, and reconcilers.
-The local composition points it at the same <code>configserver</code> database as Portal;
-the development credential is a database superuser and is not an acceptable
-production role.</p>
+<p><code>light-workflow</code> creates one SQLx PostgreSQL pool from its registered
+operational-store URL and shares it across direct invocation admission,
+execution, and reconcilers. The database is customer-owned and is not the
+Portal <code>configserver</code> database. The service starts its legacy
+<code>WorkflowStartedEvent</code> outbox consumer only when the same database explicitly
+contains the legacy <code>outbox_message_t</code> and <code>log_counter</code> source tables. Normal
+customer-managed deployments use <code>/v1/workflow-invocations</code> and do not receive
+direct Portal database access.</p>
 <p>Its access falls into three categories:</p>
 <div class="table-wrapper">
 <table>
@@ -1017,7 +1020,7 @@ production role.</p>
 <tr><th>Category</th><th>Current tables/path</th><th>Target boundary</th></tr>
 </thead>
 <tbody>
-<tr><td>Portal event consumption</td><td><code>outbox_message_t</code>, <code>consumer_offsets</code>, notification/counter state</td><td>Read event outbox and write only Workflow consumer checkpoint/quarantine state.</td></tr>
+<tr><td>Legacy event consumption</td><td>Optional local <code>outbox_message_t</code>, <code>log_counter</code>, <code>consumer_offsets</code>, and quarantine state</td><td>Compatibility-only. Do not connect a customer runtime directly to the Portal control-plane database.</td></tr>
 <tr><td>Admission projection reads</td><td><code>workflow_tool_binding_t</code>, <code>wf_definition_t</code>, <code>tool_t</code>, dependency/approval projections</td><td>Read-only; validate versions/digests and copy the accepted immutable definition, binding, policy, and endpoint set into invocation-owned state.</td></tr>
 <tr><td>Workflow operational state</td><td><code>process_info_t</code>, <code>task_info_t</code>, <code>workflow_invocation_t</code>, budgets, leases, audit outbox, bounded encrypted invocation credentials</td><td>Workflow-owned writes with explicit grants and retention.</td></tr>
 </tbody>

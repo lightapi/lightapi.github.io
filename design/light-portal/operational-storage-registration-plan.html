@@ -1,0 +1,711 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Implementation Plan - Light Portal Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../../css/general-e96d0476.css">
+        <link rel="stylesheet" href="../../css/chrome-d279d366.css">
+        <link rel="stylesheet" href="../../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../../searchindex-f71e017e.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../../toc-89f2168e.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Light Portal Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="operational-storage-registration-implementation-plan"><a class="header" href="#operational-storage-registration-implementation-plan">Operational Storage Registration Implementation Plan</a></h1>
+<h2 id="objective"><a class="header" href="#objective">Objective</a></h2>
+<p>Replace the current asynchronous operational-store provisioning workflow with a
+Host-scoped registration workflow, then make <code>portal-config-loc</code>,
+<code>portal-config-dev</code>, <code>portal-config-bootstrap</code>, and <code>light-portal-install</code>
+create and register the agreed databases in their existing PostgreSQL container.</p>
+<p>This plan implements the decisions in
+<a href="development-database-topology.html">Operational Storage Registration And Development PostgreSQL Topology</a>.</p>
+<h2 id="baseline-and-migration-principle"><a class="header" href="#baseline-and-migration-principle">Baseline And Migration Principle</a></h2>
+<p>The current implementation has a <code>requestOperationalStoreBinding</code> command,
+provisioning jobs, worker callbacks, a <code>DEV_DEDICATED</code> Docker provider, and UI
+states such as <code>REQUESTED</code>, <code>PENDING</code>, and <code>PROVISIONING</code>. Existing event streams
+and snapshots may contain those records.</p>
+<p>The migration must preserve replay while preventing new infrastructure work:</p>
+<ul>
+<li>add registration contract version 2 before removing version 1 handlers;</li>
+<li>replay historical provisioning events as historical control-plane state only;</li>
+<li>do not start a worker or create a job while replaying;</li>
+<li>migrate an accepted existing binding to a registration only through an
+explicit, idempotent conversion; and</li>
+<li>remove deployment worker wiring only after all default registrations publish
+successfully.</li>
+</ul>
+<h2 id="current-checked-in-delta"><a class="header" href="#current-checked-in-delta">Current Checked-In Delta</a></h2>
+<p>The four deployment repositories already run one PostgreSQL service and their
+current <code>init-environment.sh</code> scripts ensure <code>configserver</code>, <code>knowledge</code>, and one
+<code>operations</code> database. They accept only one <code>PORTAL_DB_OPERATIONAL_NAME</code>, so the
+database manifest/loop is the first deployment change needed for
+<code>operations_networknt</code> and <code>operations_taiji</code>.</p>
+<p><code>portal-config-loc/all-in-lt</code> currently contains the active Compose provisioner
+profile and its supervisor/token handling. The other deployment repositories
+stage the same provisioner/provider assets with the operational migration bundle
+and run the one-shot database bootstrap. Those staged assets must converge with
+the canonical bundle change; they should not be edited independently.</p>
+<p>The checked-in baselines currently contain the bootstrap <code>dev.lightapi.net</code>
+Host, while <code>dev.networknt.com</code> and <code>dev.taiji.io</code> exist only in the operator’s
+current local Portal state. Their canonical Org/Host events and UUIDs must be
+exported and reviewed before the other repositories can register them safely.</p>
+<h2 id="target-user-workflow"><a class="header" href="#target-user-workflow">Target User Workflow</a></h2>
+<ol>
+<li>A Host administrator selects <strong>Operational Storage</strong> from a Host row.</li>
+<li>The page displays the fully qualified Host name and no Environment field.</li>
+<li>The administrator enters an existing PostgreSQL connection descriptor and
+an absolute mounted credential-file path.</li>
+<li><strong>Register storage</strong> creates and publishes the Host binding synchronously.</li>
+<li><strong>Update registration</strong>, <strong>Deactivate</strong>, and <strong>Unregister</strong> manage only the
+control-plane binding.</li>
+<li>Runtime validation status may be displayed, but there are no provisioning
+jobs, retries, attempts, provider containers, retention holds, or destructive
+database actions on this page.</li>
+</ol>
+<h2 id="p0-freeze-contract-version-2"><a class="header" href="#p0-freeze-contract-version-2">P0: Freeze Contract Version 2</a></h2>
+<p>Status: complete on 2026-09-02.</p>
+<p>Owners: <code>light-portal-doc</code>, <code>host-command</code>, <code>host-query</code>, <code>light-portal</code>,
+<code>portal-view</code>, and runtime consumers in <code>light-fabric</code>.</p>
+<ul>
+<li>Define one active registration per <code>hostId</code>.</li>
+<li>Remove user-supplied <code>environment</code> from the registration request.</li>
+<li>Define fields for engine, server host, port, expected database, TLS mode,
+mounted credential source and absolute reference, minimum schema
+generation, and credential generation.</li>
+<li>Separate non-secret Config Server fields from secret material.</li>
+<li>Define <code>REGISTERED</code>, <code>DEACTIVATED</code>, and <code>UNREGISTERED</code> lifecycle states.</li>
+<li>Define update concurrency through <code>aggregateVersion</code>.</li>
+<li>Define contract-v1 replay and conversion rules.</li>
+</ul>
+<p>Exit gate: Java, TypeScript, Rust, and configuration fixtures agree on property
+names, required fields, digest canonicalization, and rejection cases.</p>
+<p>Delivered contract:</p>
+<ul>
+<li>one active registration key: <code>hostId</code>;</li>
+<li>request fields: <code>targetHostId</code>, <code>engine</code>, <code>serverHost</code>, <code>port</code>,
+<code>expectedDatabase</code>, <code>tlsMode</code>, <code>credentialSource</code>,
+<code>credentialReference</code>, <code>minimumSchemaGeneration</code>, and
+<code>credentialGeneration</code>;</li>
+<li>update-only concurrency field: <code>aggregateVersion</code>;</li>
+<li>registration retries require an idempotency key and derive a stable binding
+identity from the Host plus that key;</li>
+<li>generated projection fields: <code>bindingId</code>, <code>bindingDigest</code>, <code>scopeKind</code>,
+lifecycle, aggregate version, activation, and publication state;</li>
+<li>lifecycle values: <code>REGISTERED</code>, <code>DEACTIVATED</code>, and <code>UNREGISTERED</code>;</li>
+<li>digest: RFC 8785 plus SHA-256 over the frozen 12-field digest subject; and</li>
+<li>version-1 history remains projectable by ordinary consumers and replay, with
+new version-1 commands rejected before append; no automatic conversion is
+performed.</li>
+</ul>
+<p>The P0 artifacts define and test the contract but do not register a handler,
+change a database projection, or alter current runtime configuration. Those
+changes start in P1.</p>
+<h2 id="p1-replace-the-portal-provisioning-api"><a class="header" href="#p1-replace-the-portal-provisioning-api">P1: Replace The Portal Provisioning API</a></h2>
+<p>Status: complete on 2026-09-02.</p>
+<p>Owners: <code>host-command</code>, <code>host-query</code>, <code>light-portal</code>, and <code>portal-db</code>.</p>
+<ul>
+<li>Add <code>registerOperationalStoreBinding</code>, <code>updateOperationalStoreBinding</code>, and
+<code>unregisterOperationalStoreBinding</code> command contracts.</li>
+<li>Keep <code>deactivateOperationalStoreBinding</code>, but redefine it as publication
+revocation only.</li>
+<li>Append version-2 registration events and project/publish them atomically.</li>
+<li>Change the uniqueness constraint from <code>(host_id, environment)</code> to one active
+registration per <code>host_id</code>.</li>
+<li>Store the connection descriptor, binding digest, credential reference, schema
+generation, and audit metadata in <code>configserver</code>.</li>
+<li>Do not create an <code>operational_store_job_t</code> row for version-2 commands.</li>
+<li>Remove new-call access to retry, rotate-through-worker, retention-hold,
+decommission, and worker-report endpoints.</li>
+<li>Retain legacy event constants and replay policies until every supported
+snapshot/event baseline has crossed the compatibility window.</li>
+<li>Update global snapshot export/import so registration records and version-2
+events round-trip without credentials leaking into logs or exports.</li>
+</ul>
+<p>Exit gates:</p>
+<ul>
+<li>PostgreSQL integration tests prove register/update/deactivate/unregister and
+duplicate-Host concurrency behavior;</li>
+<li>replay tests prove old events cannot enqueue work;</li>
+<li>publication tests prove exact Host audience and secret redaction; and</li>
+<li>legacy endpoint removal is covered by authorization and route fixtures.</li>
+</ul>
+<p>Delivered backend:</p>
+<ul>
+<li>four version-2 write actions are exposed at version <code>0.2.0</code>: register,
+update, deactivate, and unregister;</li>
+<li>command append and registration projection/publication share one PostgreSQL
+transaction;</li>
+<li>version-2 registration is Host-scoped, publishes immediately, and is guarded
+by a partial unique index allowing one active registration per Host;</li>
+<li>the projection stores the non-secret connection descriptor, digest,
+credential reference, schema and credential generations, lifecycle, and
+audit metadata;</li>
+<li>version-2 commands and replay create no provisioning jobs;</li>
+<li>legacy provisioning event handlers remain available for historical replay,
+but retry, rotate, retention-hold, decommission, and worker-report actions are
+absent from the current command route specification;</li>
+<li>Host snapshots carry sanitized version-2 registration events, while jobs,
+publications, ownership rows, and legacy profiles remain destination-local or
+derived; and</li>
+<li>live PostgreSQL tests cover the complete lifecycle, replay, publication,
+secret/environment omission, and duplicate-Host rejection.</li>
+</ul>
+<p>The P2 Portal View uses this backend. P1 did not alter deployment topology; P3
+subsequently removed the provisioner and created the five local databases, while
+their Portal registrations remain P4 work.</p>
+<h2 id="p2-convert-portal-view-to-registration"><a class="header" href="#p2-convert-portal-view-to-registration">P2: Convert Portal View To Registration</a></h2>
+<p>Status: complete on 2026-09-02.</p>
+<p>Owner: <code>portal-view</code>.</p>
+<ul>
+<li>Rename page copy from provisioning to registration while retaining the route
+initially for link compatibility.</li>
+<li>Remove Environment and storage-profile selectors.</li>
+<li>Add connection descriptor and credential-source fields.</li>
+<li>Replace <strong>Request provisioning</strong> with <strong>Register storage</strong>.</li>
+<li>Replace job state, attempts, provider resource, retry, credential rotation,
+retention hold, and decommission controls with registration version,
+publication state, database identity, update, deactivate, and unregister.</li>
+<li>Never place a password-bearing URL in query parameters, navigation state,
+telemetry, or browser persistence.</li>
+<li>Update the help page and add component/API tests for all lifecycle states.</li>
+</ul>
+<p>Exit gate: the page cannot invoke a provisioning or destructive database action,
+and it always binds the Host from the selected Host Admin row.</p>
+<p>Delivered Portal View:</p>
+<ul>
+<li>the existing <code>/app/host/operationalStore</code> route now displays the selected
+Host’s fully qualified name and contains no Environment or storage-profile
+selector;</li>
+<li>the form sends only the version-2 PostgreSQL descriptor, credential reference,
+schema/credential generations, and the selected Host ID;</li>
+<li>registration cards expose lifecycle, publication, database identity, digest,
+and aggregate version, with update, deactivate, and unregister actions;</li>
+<li>version-1 provisioning records remain visible as read-only history, with no
+retry, rotation, retention, decommission, job, or provider controls; and</li>
+<li>component/API tests cover register, update/reactivate, deactivate, and
+unregistered-history states and assert omission of environment, profile,
+password, and database URL fields.</li>
+</ul>
+<h2 id="p3-create-the-five-databases-in-one-container"><a class="header" href="#p3-create-the-five-databases-in-one-container">P3: Create The Five Databases In One Container</a></h2>
+<p>Status: complete on 2026-09-02.</p>
+<p>Owners: all four deployment repositories.</p>
+<p>Required databases:</p>
+<pre><code class="language-text">configserver
+knowledge
+operations
+operations_networknt
+operations_taiji
+</code></pre>
+<ul>
+<li>Extend <code>init-environment.sh</code> from one operational database variable to a
+validated list or manifest of three operational databases.</li>
+<li>Ensure all five databases on fresh initialization and on every idempotent
+existing-volume upgrade.</li>
+<li>Apply the same pinned operational migration bundle to <code>operations</code>,
+<code>operations_networknt</code>, and <code>operations_taiji</code>.</li>
+<li>Write a distinct immutable scope root and database identity into each database.</li>
+<li>Generate or materialize Host-specific local runtime URL files.</li>
+<li>Keep one <code>postgres</code> Compose service; do not add per-Host PostgreSQL containers.</li>
+<li>Remove <code>operational-store-provisioner</code> service/profile wiring and Docker socket
+access after registration cutover.</li>
+<li>Keep database bootstrap one-shot and idempotent; it is deployment installation,
+not a Portal background service.</li>
+</ul>
+<p>Exit gate: fresh and existing volumes converge to the same five-database catalog
+and identical operational migration generation.</p>
+<p>Delivered deployment topology:</p>
+<ul>
+<li>all four repositories declare <code>operations</code>, <code>operations_networknt</code>, and
+<code>operations_taiji</code> alongside <code>configserver</code> and <code>knowledge</code> in their single
+PostgreSQL service;</li>
+<li>a shared three-row manifest drives one-shot, idempotent creation and
+validation on both fresh and existing volumes;</li>
+<li>the pinned bundle remains checksum-verified and is rendered only for the
+target database identity and isolated role prefix, preserving identical
+migration IDs and digests in all three ledgers;</li>
+<li>each database records the canonical Portal Host UUID as its immutable scope
+root, binding the database identity to the registration audience;</li>
+<li>each Host/database has separate least-privilege service roles and
+permission-restricted runtime URL files under
+<code>postgres-db/secrets/operational-hosts/&lt;host-name&gt;/</code>;</li>
+<li>validation rejects cross-database <code>CONNECT</code> privilege and checks identities,
+schemas, ledgers, roles, secret modes, and URL targets; and</li>
+<li>the Compose provisioner, Docker socket access, dedicated-container provider,
+worker token handling, and <code>deploy-local.sh</code> provisioner commands are removed.</li>
+</ul>
+<p>The three Portal registration events are delivered in P4 from the reviewed
+canonical Host export.</p>
+<h2 id="p4-canonical-host-data-and-default-registrations"><a class="header" href="#p4-canonical-host-data-and-default-registrations">P4: Canonical Host Data And Default Registrations</a></h2>
+<p>Owners: <code>portal-config-loc</code>, <code>portal-config-dev</code>,
+<code>portal-config-bootstrap</code>, and <code>light-portal-install</code>.</p>
+<p>The canonical mappings are:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Host</th><th>Database</th></tr>
+</thead>
+<tbody>
+<tr><td><code>dev.lightapi.net</code></td><td><code>operations</code></td></tr>
+<tr><td><code>dev.networknt.com</code></td><td><code>operations_networknt</code></td></tr>
+<tr><td><code>dev.taiji.io</code></td><td><code>operations_taiji</code></td></tr>
+</tbody>
+</table>
+</div>
+<ul>
+<li>Export the three Org and Host creations currently present in the local Portal
+as canonical CloudEvents, preserving their UUIDs, owners, and aggregate
+versions.</li>
+<li>Review the export to ensure it contains no unrelated local data.</li>
+<li>Add those events to the shared bootstrap baseline consumed by the four
+repositories.</li>
+<li>Generate three version-2 registration events using the canonical Host UUIDs;
+do not insert registration projection rows directly.</li>
+<li>Import Host events before registration events.</li>
+<li>Make repeated imports idempotent and compatible with existing volumes.</li>
+<li>Assert that the canonical Host FQDN, <code>hostId</code>, expected database, scope root,
+and publication audience all agree.</li>
+</ul>
+<p>Exit gate: a clean installation and an upgraded installation both show three
+published registrations without a running provisioner.</p>
+<p>Delivered implementation:</p>
+<ul>
+<li><code>20260902-001-operational-store-default-registrations.json</code> is byte-identical
+in the four deployment repositories and contains only three Org creations,
+three Host creations, and three registration events in dependency order;</li>
+<li>the export preserves the canonical UUIDs, owners, descriptions, and aggregate
+versions from the local authoring Portal, while portable nonce sentinel <code>0</code>
+is transactionally allocated by the importer;</li>
+<li>all three version-2 registrations publish immediately with
+<code>serverHost=postgres</code>, the exact database-specific Agent runtime role, and
+<code>/run/secrets/operational-database-url</code> as the mounted credential reference;</li>
+<li>database manifests now use the canonical Host UUIDs as scope roots, and a
+contract test validates FQDN, Host ID, database, runtime role, RFC 8785 digest,
+event ordering, UUIDv7 generation, and publication audience;</li>
+<li><code>portal-config-loc</code> applies the registration schema patch on retained volumes
+and imports the delta through the same checksum ledger used by the other
+deployment paths; and</li>
+<li>the provisioner remains absent: registration projection and publication are
+synchronous control-plane work, not a background job.</li>
+</ul>
+<h2 id="p5-publish-and-consume-host-specific-runtime-configuration"><a class="header" href="#p5-publish-and-consume-host-specific-runtime-configuration">P5: Publish And Consume Host-Specific Runtime Configuration</a></h2>
+<p>Status: complete on 2026-09-02.</p>
+<p>Owners: <code>light-portal</code>, Config Server consumers, <code>light-fabric</code>, and deployment
+configuration repositories.</p>
+<ul>
+<li>Compile version-2 operational-store properties into each exact
+Host/service/instance audience.</li>
+<li>Point each local runtime deployment at its Host-specific URL file while keeping
+<code>/run/secrets/operational-database-url</code> as the in-container path.</li>
+<li>Make Light Gateway, Light Workflow, Light Deployer, Light Agent, and Light A2A
+reject Host, binding digest, database identity, or schema-generation mismatch
+before readiness.</li>
+<li>Preserve last-known-good snapshot behavior across Portal/Config Server outages.</li>
+<li>Remove transitional direct operational access to <code>configserver</code> only after the
+owning schema and runtime have passed cutover gates.</li>
+</ul>
+<p>Exit gate: three Host audiences resolve three database identities and negative
+tests prove that swapping any two URL files fails closed.</p>
+<p>Delivered implementation:</p>
+<ul>
+<li>version-2 publication is Host-wide and compiles the registered database into
+each writable instance’s own environment, preserving an exact
+Host/service/instance audience instead of reusing the page environment;</li>
+<li>an importable Config Property delta completes Gateway’s version-2 identity
+fields and adds Deployer’s operational-store audience without publishing any
+credential value;</li>
+<li>the catalog delta assigns the applicable product versions for
+<code>dev.lightapi.net</code> and <code>dev.networknt.com</code>; <code>dev.taiji.io</code> intentionally has
+no assignments because the authoring Config Server currently has no product
+versions or instances for that Host, so future Taiji product onboarding must
+create its property assignments before creating runtime instances;</li>
+<li>a following registration-update delta reconciles all three publications only
+after the catalog assignments exist, preventing preserved databases from
+retaining legacy version-1 instance properties because the registration birth
+was projected first;</li>
+<li>Agent, Workflow, A2A, Gateway, execution, and Deployer startup validation now
+shares one fail-closed verifier for the URL role/database, active binding ID
+and digest, Host identity, database identity, and minimum schema generation;</li>
+<li>Deployer receives a read-only <code>operational_meta</code> audience and cannot start
+against an unregistered or substituted database;</li>
+<li>all four local deployment repositories materialize Host-specific URL files
+from <code>operational-hosts/&lt;fqdn&gt;</code> into per-service volumes, while runtimes see
+only <code>/run/secrets/operational-database-url</code> (or the execution-specific file
+for Controller);</li>
+<li>the database bootstrap records the exact active version-2 binding in each of
+the three operational databases, grants every runtime audience read-only
+access to the database identity row, and creates the least-privilege Deployer
+metadata reader alongside the other service roles;</li>
+<li>the existing atomic Config Server snapshot/cache paths remain the runtime
+authority during an outage: a rejected candidate does not replace the active
+generation, and A2A and Workflow regression tests retain last-known-good
+state; and</li>
+<li>a shared three-Host negative test resolves <code>operations</code>,
+<code>operations_networknt</code>, and <code>operations_taiji</code>, then proves that every
+cross-Host URL substitution is rejected before database readiness.</li>
+</ul>
+<h2 id="p6-repository-specific-work"><a class="header" href="#p6-repository-specific-work">P6: Repository-Specific Work</a></h2>
+<p>Status: complete on 2026-09-02.</p>
+<p>Owners: <code>portal-config-loc</code>, <code>portal-config-dev</code>, <code>portal-config-bootstrap</code>, and
+<code>light-portal-install</code>.</p>
+<h3 id="portal-config-locall-in-lt"><a class="header" href="#portal-config-locall-in-lt"><code>portal-config-loc/all-in-lt</code></a></h3>
+<ul>
+<li>Treat the currently created three Orgs/Hosts as the source for a reviewed
+canonical event export.</li>
+<li>Expand local database initialization and existing-volume upgrade to all five
+databases.</li>
+<li>Register all three Host mappings automatically after baseline import.</li>
+<li>Remove provisioner Compose profile, token instructions, supervisor functions,
+Docker socket mount, and dedicated-child-container tests.</li>
+<li>Add local qualification for catalog, migrations, publications, and Host-to-DB
+isolation.</li>
+</ul>
+<h3 id="portal-config-dev"><a class="header" href="#portal-config-dev"><code>portal-config-dev</code></a></h3>
+<ul>
+<li>Consume the same canonical Host and registration events.</li>
+<li>Mirror the five-database manifest and migration loop.</li>
+<li>Extend restart/startup validation to wait for three registrations and their
+Config Server publications, not for provisioning jobs.</li>
+<li>Add existing-volume upgrade coverage and keep the development gateway default
+on <code>dev.lightapi.net -&gt; operations</code>.</li>
+</ul>
+<h3 id="portal-config-bootstrap"><a class="header" href="#portal-config-bootstrap"><code>portal-config-bootstrap</code></a></h3>
+<ul>
+<li>Place the canonical Org, Host, and registration events in the ordered bootstrap
+artifact after their dependencies.</li>
+<li>Create/migrate the five databases before importing registration events.</li>
+<li>Verify direct bootstrap and replay/bootstrap modes produce identical
+registrations and digests.</li>
+<li>Remove worker endpoint/profile data from the newly generated baseline only
+after compatibility consumers no longer require it.</li>
+</ul>
+<h3 id="light-portal-install"><a class="header" href="#light-portal-install"><code>light-portal-install</code></a></h3>
+<ul>
+<li>Stage the same database manifest, migration bundle, checksums, and registration
+events for offline installation.</li>
+<li>Make install, upgrade, clean-volume, and retained-volume paths converge.</li>
+<li>Materialize local URL files and document production overrides for customer DB
+DNS, TLS, username, and mounted credential-file path.</li>
+<li>Remove staged worker/provider assets, any remaining profile wiring, and related
+token/operator instructions.</li>
+<li>Validate that installer defaults use one PostgreSQL container and no Docker
+socket privilege.</li>
+</ul>
+<p>Exit gate: all four repository paths converge on the same five-database
+topology, canonical registration events and digests, projected publication
+readiness, retained-volume migrations, and fail-closed Host isolation without
+an operational-store provisioner or Docker socket mount.</p>
+<p>Delivered implementation:</p>
+<ul>
+<li>all four repositories consume byte-identical Org/Host/registration events,
+runtime catalog events, operational database manifests, migration order,
+bundle manifest, and bundle checksum files;</li>
+<li>fresh and retained PostgreSQL volumes converge on <code>configserver</code>, <code>knowledge</code>,
+<code>operations</code>, <code>operations_networknt</code>, and <code>operations_taiji</code>, with identical
+migration ledgers in the three operational databases;</li>
+<li>the local, development, bootstrap, and installer lifecycle paths now wait for
+the three exact active version-2 registration/publication pairs after delta
+projection, including matching Host, database, binding ID, and binding digest,
+and reject any legacy provisioning job for those registrations;</li>
+<li>direct event bootstrap and verified archive restore both pass through the same
+release-delta and readiness path, so fresh, upgrade, clean-volume, and
+retained-volume installs converge;</li>
+<li>runtime qualification now swaps two Host-specific URL files and proves the
+database validator fails closed before restoring and revalidating the files;</li>
+<li>the last local provisioner supervisor call is removed, and every Compose stack
+renders with exactly one PostgreSQL service and no operational provisioner or
+Docker socket mount; and</li>
+<li>newly staged registration artifacts contain no worker endpoint, provider
+profile, token, or callback data; version-1 rows remain only as write-guarded
+replay and audit history; and</li>
+<li>installer documentation distinguishes the five local databases from
+customer-owned production databases and specifies DNS, TLS, username, and
+secret-reference overrides without publishing credentials to Config Server.</li>
+</ul>
+<h2 id="p7-removal-and-compatibility-closure"><a class="header" href="#p7-removal-and-compatibility-closure">P7: Removal And Compatibility Closure</a></h2>
+<p>Status: complete on 2026-09-02.</p>
+<p>Owners: all affected repositories.</p>
+<ul>
+<li>Stop generating version-1 provisioning commands and profiles.</li>
+<li>Remove <code>DEV_DEDICATED</code>, <code>DEV_POOLED</code>, job leasing, worker callbacks, and Docker
+provider code after the declared replay window.</li>
+<li>Preserve a read-only representation or migration for historical bindings where
+audit requirements demand it.</li>
+<li>Regenerate API specifications, event bundles, endpoint registrations, access
+rules, release manifests, and checksums from their owning repositories.</li>
+<li>Remove obsolete help text and operator runbooks.</li>
+</ul>
+<p>Exit gate: repository-wide searches find no active provisioning command, worker,
+job poller, Docker socket mount, or page action; replay of the oldest supported
+baseline still succeeds.</p>
+<p>Delivered implementation:</p>
+<ul>
+<li>Host command/query specifications expose only the version-2 registration
+lifecycle, and the API correction delta replaces their endpoint inventory so
+omitted version-1 endpoints and access rows become inactive;</li>
+<li>Portal rejects live version-1 events, retains replay projection without job
+side effects, and exposes historical bindings only through the read path;</li>
+<li>the legacy profile and provisioning-job tables remain for audit but are
+write-guarded, with old provider profiles inactive and outstanding work
+cancelled by the P7 database patch;</li>
+<li>the Docker provider, polling worker, worker callbacks, lease validation,
+profile query, and credential-rotation scripts are removed;</li>
+<li>operational bundle 2.0.0 migrates local metadata to Host-scoped
+<code>CUSTOMER_MANAGED</code> registration and is checksum-identical across the four
+deployment repositories; and</li>
+<li>the P7 closure gates qualify source absence, API/event parity, bundle parity,
+oldest-supported replay, and version-2 registration without provisioning.</li>
+</ul>
+<h2 id="cross-repository-qualification-matrix"><a class="header" href="#cross-repository-qualification-matrix">Cross-Repository Qualification Matrix</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Gate</th><th>loc</th><th>dev</th><th>bootstrap</th><th>install</th></tr>
+</thead>
+<tbody>
+<tr><td>Compose renders with one PostgreSQL container</td><td>Required</td><td>Required</td><td>Required</td><td>Required</td></tr>
+<tr><td>Fresh volume has five databases</td><td>Required</td><td>Required</td><td>Required</td><td>Required</td></tr>
+<tr><td>Existing volume converges</td><td>Required</td><td>Required</td><td>Required</td><td>Required</td></tr>
+<tr><td>Three operational DB migration digests match</td><td>Required</td><td>Required</td><td>Required</td><td>Required</td></tr>
+<tr><td>Three Host registrations publish</td><td>Required</td><td>Required</td><td>Required</td><td>Required</td></tr>
+<tr><td>No provisioning worker starts</td><td>Required</td><td>Required</td><td>Required</td><td>Required</td></tr>
+<tr><td>Swapped Host URL fails readiness</td><td>Required</td><td>Required</td><td>Required</td><td>Required</td></tr>
+<tr><td>Offline bundle checksum parity</td><td>N/A</td><td>Optional</td><td>Required</td><td>Required</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="recommended-delivery-order"><a class="header" href="#recommended-delivery-order">Recommended Delivery Order</a></h2>
+<ol>
+<li>Land contract version 2 and replay compatibility in the Portal backend.</li>
+<li>Land the registration UI behind backend capability detection.</li>
+<li>Export and review canonical Org/Host events from <code>portal-config-loc</code>.</li>
+<li>Land the shared database manifest/bootstrap changes in all four repositories.</li>
+<li>Import default registration events and qualify Config Server publication.</li>
+<li>Cut runtime consumers to the Host-specific bindings.</li>
+<li>Remove the provisioning worker and legacy write endpoints.</li>
+</ol>
+<p>This order prevents a deployment repository from publishing a registration that
+the backend or runtime cannot yet understand and preserves rollback until the
+three Host mappings are qualified.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../../design/light-portal/development-database-topology.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../../design/light-portal/global-tenant-entity-scope.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../../design/light-portal/development-database-topology.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../../design/light-portal/global-tenant-entity-scope.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../../mark-09e88c2c.min.js"></script>
+        <script src="../../searcher-09f2665d.js"></script>
+
+        <script src="../../clipboard-1626706a.min.js"></script>
+        <script src="../../highlight-abc7f01d.js"></script>
+        <script src="../../book-609e4cb8.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../../mermaid-3a6b472a.min.js"></script>
+        <script src="../../mermaid-init-025d9952.js"></script>
+
+
+
+    </div>
+    </body>
+</html>
