@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-f71e017e.js";
+            window.path_to_searchindex_js = "searchindex-ccb1cd34.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-89f2168e.js"></script>
+        <script src="toc-27285314.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -5616,6 +5616,819 @@ an immutable Agent snapshot, explicit activation and reload, and runtime
 acknowledgement. A2A exposure is an explicit downstream publication that reuses
 this Agent foundation rather than creating a parallel publisher.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="portable-signed-portal-view-artifact-and-runtime-configuration"><a class="header" href="#portable-signed-portal-view-artifact-and-runtime-configuration">Portable Signed Portal View Artifact and Runtime Configuration</a></h1>
+<h2 id="status-1"><a class="header" href="#status-1">Status</a></h2>
+<p>Proposed design. The current <code>portal-view</code> build still compiles deployment
+values from <code>VITE_*</code> variables, and the gateway does not yet render a runtime
+base URL into the SPA entry page. The Rust <code>light-gateway</code> already supports
+virtual-host static files and fallback to <code>index.html</code> for extensionless SPA
+routes. The Java <code>VirtualHostHandler</code> serves static resources but does not yet
+provide equivalent deep-route fallback.</p>
+<p>This document defines the target contract. It does not claim that the runtime
+configuration loader, gateway HTML rendering, release archive, or all
+qualification gates have been implemented.</p>
+<h2 id="problem-3"><a class="header" href="#problem-3">Problem</a></h2>
+<p><code>portal-view</code> is deployed in more than one network topology:</p>
+<ul>
+<li>directly on a host through Docker Compose or a native process;</li>
+<li>behind a conventional reverse proxy;</li>
+<li>behind a centralized Kubernetes Ingress that adds an environment and service
+prefix and removes part of that prefix before forwarding the request; and</li>
+<li>with either Light OAuth authorization-code login or enterprise Microsoft
+Entra ID authentication followed by backend-mediated token exchange.</li>
+</ul>
+<p>Today, Vite embeds values such as the asset base, React Router base, API URL,
+sign-in URL, tenant ID, client ID, and redirect URI into the generated
+JavaScript. A path or identity-provider change therefore requires another
+frontend build. That prevents one release artifact from being signed once,
+published to the CDN, verified by every installer, and reused unchanged in all
+environments.</p>
+<p>A Kubernetes request also has two distinct path namespaces. For example:</p>
+<pre><code class="language-text">Browser-visible URL:
+https://dev.ingress/namespace-dev/service/ai/portal/app/dashboard
+
+Ingress removes:
+/namespace-dev/service
+
+Path received by light-gateway:
+/ai/portal/app/dashboard
+</code></pre>
+<p>Using one <code>basePath</code> for both namespaces hides an important routing boundary.</p>
+<h2 id="decision-summary-2"><a class="header" href="#decision-summary-2">Decision Summary</a></h2>
+<ol>
+<li>Build and sign one immutable <code>portal-view</code> release archive.</li>
+<li>Move deployment values from Vite build variables into a versioned runtime
+JSON document supplied by the installer or operator.</li>
+<li>Keep build-tool and development-only options as Vite variables.</li>
+<li>Model the browser-visible application base, browser-visible API base, and
+gateway-visible static mount as separate values.</li>
+<li>Load and validate runtime configuration before importing the application or
+constructing either authentication client.</li>
+<li>Build static asset references relative to a <code>&lt;base&gt;</code> element.</li>
+<li>Let <code>light-gateway</code> render the effective <code>&lt;base href&gt;</code> into the SPA entry
+response without modifying the signed template on disk.</li>
+<li>Select authentication through an explicit <code>oauth2</code> or <code>entra-sso</code> profile;
+never place a client secret in browser configuration.</li>
+<li>Preserve known API routes ahead of the virtual-host fallback so a missing
+API never becomes an HTML response.</li>
+<li>Verify the vendor archive before extraction and validate customer runtime
+configuration independently.</li>
+</ol>
+<h2 id="goals-7"><a class="header" href="#goals-7">Goals</a></h2>
+<ul>
+<li>Publish one versioned and signed Portal View artifact to the CDN.</li>
+<li>Support Kubernetes path rewriting and standalone deployments with that same
+artifact.</li>
+<li>Support Light OAuth and enterprise Entra SSO with that same artifact.</li>
+<li>Allow an operator to install only a runtime JSON file and gateway
+configuration after verifying the release.</li>
+<li>Preserve direct links and browser refresh for React Router routes.</li>
+<li>Keep hashed assets immutable and efficiently cacheable.</li>
+<li>Fail closed on missing, malformed, or unsafe runtime configuration.</li>
+<li>Keep all credentials and token-exchange secrets out of browser-delivered
+files.</li>
+<li>Make the effective release version and configuration revision observable.</li>
+</ul>
+<h2 id="non-goals-10"><a class="header" href="#non-goals-10">Non-Goals</a></h2>
+<ul>
+<li>The runtime JSON is not a secret store.</li>
+<li>The vendor signature does not certify customer-authored configuration.</li>
+<li>This design does not make Kubernetes Ingress and standalone routing
+identical; it gives both topologies one explicit contract.</li>
+<li>This design does not replace Entra application registration, Light OAuth
+client registration, BFF token exchange, session management, CSRF, CORS, or
+authorization policy.</li>
+<li>This design does not require the gateway to download artifacts from the CDN.
+An installer, image build, init container, or other approved release process
+may perform download and verification.</li>
+<li>This design does not put an environment name, namespace, hostname, or
+customer identity into the signed JavaScript bundle.</li>
+</ul>
+<h2 id="terminology-and-path-contract"><a class="header" href="#terminology-and-path-contract">Terminology and Path Contract</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Name</th><th>Owner</th><th>Meaning</th><th>Kubernetes example</th><th>Standalone example</th></tr>
+</thead>
+<tbody>
+<tr><td><code>publicBasePath</code></td><td>Runtime JSON</td><td>Browser-visible root of the SPA</td><td><code>/namespace-dev/service/ai/portal</code></td><td><code>/</code></td></tr>
+<tr><td><code>apiBasePath</code></td><td>Runtime JSON</td><td>Browser-visible prefix placed before BFF API endpoints</td><td><code>/namespace-dev/service</code></td><td>empty string</td></tr>
+<tr><td><code>gatewayBasePath</code></td><td>Gateway virtual host</td><td>Post-proxy path at which static Portal files are mounted</td><td><code>/ai/portal</code></td><td><code>/</code></td></tr>
+<tr><td>route path</td><td>React</td><td>Path below <code>publicBasePath</code></td><td><code>/app/dashboard</code></td><td><code>/app/dashboard</code></td></tr>
+<tr><td>API endpoint</td><td>Portal code</td><td>Stable BFF endpoint below <code>apiBasePath</code></td><td><code>/portal/query</code></td><td><code>/portal/query</code></td></tr>
+</tbody>
+</table>
+</div>
+<p><code>gatewayBasePath</code> must not be inferred from <code>publicBasePath</code>. An external proxy
+can add, remove, or replace path segments. The operator configures the two sides
+of that rewrite explicitly.</p>
+<p>Paths use these canonical forms:</p>
+<ul>
+<li><code>publicBasePath</code> starts with <code>/</code> and has no trailing slash, except <code>/</code>;</li>
+<li><code>apiBasePath</code> is empty for an origin-root API or starts with <code>/</code> and has no
+trailing slash;</li>
+<li><code>gatewayBasePath</code> starts with <code>/</code> and has no trailing slash, except <code>/</code>; and</li>
+<li>the HTML renderer produces exactly one trailing slash for <code>&lt;base href&gt;</code>.</li>
+</ul>
+<h2 id="architecture-1"><a class="header" href="#architecture-1">Architecture</a></h2>
+<pre class="mermaid">flowchart LR
+    CDN[CDN&lt;br/&gt;signed portal-view archive] --&gt; VERIFY[Installer verifies signature&lt;br/&gt;and member digests]
+    VERIFY --&gt; CORE[Read-only signed SPA files]
+    OP[Operator] --&gt; CFG[portal-config.json]
+    CFG --&gt; VALIDATE[Schema and semantic validation]
+    CORE --&gt; GW[light-gateway virtual host]
+    VALIDATE --&gt; GW
+    INGRESS[Ingress or reverse proxy] --&gt; GW
+    GW --&gt; INDEX[Rendered index response&lt;br/&gt;effective base href]
+    GW --&gt; ASSET[Byte-identical hashed assets]
+    INDEX --&gt; BROWSER[Browser bootstrap]
+    BROWSER --&gt; CFGHTTP[Fetch runtime configuration]
+    CFGHTTP --&gt; BROWSER
+    BROWSER --&gt; AUTH{Authentication mode}
+    AUTH --&gt;|oauth2| OAUTH[Light OAuth authorization flow]
+    AUTH --&gt;|entra-sso| ENTRA[MSAL authentication&lt;br/&gt;BFF token exchange]
+</pre>
+
+<p>The release and deployment trust boundaries are deliberately separate:</p>
+<ul>
+<li>the release publisher owns and signs application code, the index template,
+the runtime schema, and the release manifest;</li>
+<li>the operator owns routing, public identifiers, feature flags, and external
+URLs in <code>portal-config.json</code>; and</li>
+<li>the BFF owns secrets, session cookies, token exchange, authorization, and
+protected API routing.</li>
+</ul>
+<h2 id="release-artifact"><a class="header" href="#release-artifact">Release Artifact</a></h2>
+<p>A release archive should contain:</p>
+<pre><code class="language-text">portal-view-&lt;version&gt;.zip
+├── index.html
+├── assets/
+│   ├── bootstrap.&lt;hash&gt;.js
+│   ├── portal.&lt;hash&gt;.js
+│   ├── oauth2.&lt;hash&gt;.js
+│   ├── entra-sso.&lt;hash&gt;.js
+│   └── portal.&lt;hash&gt;.css
+├── portal-config.schema.json
+├── release-manifest.json
+└── VERSION
+</code></pre>
+<p>The detached signature is published beside the archive. The release manifest
+records at least:</p>
+<ul>
+<li>artifact name and version;</li>
+<li>archive SHA-256;</li>
+<li>each member path and SHA-256;</li>
+<li>build commit;</li>
+<li>build timestamp;</li>
+<li>supported runtime configuration schema versions;</li>
+<li>signing algorithm and key ID; and</li>
+<li>minimum compatible gateway capability version.</li>
+</ul>
+<p>Every release supports its current runtime configuration schema version <code>N</code>
+and the immediately preceding version <code>N-1</code>. A release may add a new schema
+version, but it must not tighten the meaning of an already published version.
+Removing <code>N-1</code> support requires a later release after the normal customer
+configuration migration window.</p>
+<p>The public verification key must arrive through a trust channel independent of
+the downloaded artifact, following the platform release-signing-key design.
+Verification completes before extraction or replacement of the active Portal
+files.</p>
+<p>The verified SPA directory should be mounted read-only. Customer configuration
+should be mounted separately, for example:</p>
+<pre><code class="language-text">/lightapi/dist/                 signed, read-only release files
+/config/portal-config.json      customer-owned runtime configuration
+</code></pre>
+<p>The gateway reads the configuration from the second path. It does not require
+the operator to modify the extracted release.</p>
+<h3 id="reserved-runtime-configuration-endpoint"><a class="header" href="#reserved-runtime-configuration-endpoint">Reserved runtime configuration endpoint</a></h3>
+<p>The gateway owns one reserved endpoint within each SPA mount:</p>
+<pre><code class="language-text">&lt;gatewayBasePath&gt;/portal-config.json
+</code></pre>
+<p>For example, the browser requests
+<code>/namespace-dev/service/ai/portal/portal-config.json</code>, and Ingress forwards
+<code>/ai/portal/portal-config.json</code>.</p>
+<p>That exact gateway route does not resolve a file below <code>/lightapi/dist</code>. The
+virtual-host SPA handler serves a canonical JSON representation from the
+validated in-memory model loaded from <code>spa.runtimeConfig</code>, such as
+<code>/config/portal-config.json</code>. This is an intentional exception to static-root
+file resolution; it does not allow an arbitrary filesystem path in a request.</p>
+<p>Only <code>GET</code> and <code>HEAD</code> are supported. The response uses
+<code>Content-Type: application/json</code>, <code>X-Content-Type-Options: nosniff</code>, and
+<code>Cache-Control: no-store</code>, and includes the validated configuration digest in
+an <code>ETag</code> and <code>X-Portal-Config-Digest</code> response header. The reserved endpoint
+is terminal: it is never eligible for static resolution or SPA fallback,
+including when configuration loading has failed.</p>
+<h2 id="runtime-configuration-contract"><a class="header" href="#runtime-configuration-contract">Runtime Configuration Contract</a></h2>
+<p>The initial schema should use an explicit version and grouped fields:</p>
+<pre><code class="language-json">{
+  "schemaVersion": 1,
+  "routing": {
+    "publicBasePath": "/namespace-dev/service/ai/portal",
+    "apiBasePath": "/namespace-dev/service"
+  },
+  "authentication": {
+    "mode": "entra-sso",
+    "tenantId": "11111111-2222-3333-4444-555555555555",
+    "clientId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    "redirectUri": ""
+  },
+  "features": {
+    "preRegistrationEnabled": false,
+    "preRegistrationUrl": "",
+    "preRegistrationApiIdPath": "apiId",
+    "preRegistrationServiceIdPath": "",
+    "preRegistrationErrorPath": "",
+    "preRegistrationPayloadMapping": {},
+    "toolsSyncEnabled": false,
+    "toolsSyncUrl": "",
+    "toolsSyncErrorPath": "",
+    "wizardRequiredApiFields": [
+      "categoryIds",
+      "apiDesc",
+      "region",
+      "businessGroup",
+      "lob",
+      "platform"
+    ]
+  },
+  "externalLinks": {
+    "portalDocumentation": "https://doc.lightapi.net",
+    "apiOnboarding": "https://lightapi.net",
+    "productReleases": "https://lightapi.net/releases"
+  }
+}
+</code></pre>
+<p>Prefer native JSON booleans, arrays, and objects instead of the string and
+JSON-inside-string representations inherited from environment variables.</p>
+<h3 id="validation-1"><a class="header" href="#validation-1">Validation</a></h3>
+<p>The signed JSON Schema validates structure. Semantic validation additionally
+enforces:</p>
+<ul>
+<li>a supported <code>schemaVersion</code>;</li>
+<li>normalized paths without <code>..</code>, backslashes, query strings, fragments,
+control characters, encoded separators, schemes, or authority components;</li>
+<li>HTTPS for absolute production URLs;</li>
+<li>required <code>tenantId</code> and <code>clientId</code> for <code>entra-sso</code>;</li>
+<li>required <code>signInUrl</code> for <code>oauth2</code>;</li>
+<li>an allowlisted authentication mode;</li>
+<li>allowed redirect origins and paths;</li>
+<li>bounded string, array, object, and document sizes;</li>
+<li>no unknown top-level or security-sensitive fields; and</li>
+<li>no field named or shaped like a client secret, private key, password, access
+token, refresh token, or bearer token.</li>
+</ul>
+<p>Both the gateway and browser validate the document. Gateway validation protects
+HTML generation and startup. Browser validation protects against a stale or
+incorrectly served document and gives the operator a specific diagnostic.</p>
+<h2 id="portal-bootstrap"><a class="header" href="#portal-bootstrap">Portal Bootstrap</a></h2>
+<p>The application must not statically import modules that read configuration
+before the runtime document has loaded. The signed bootstrap chunk performs:</p>
+<pre><code class="language-text">load portal-config.json relative to document.baseURI
+  -&gt; verify HTTP status and content type
+  -&gt; validate schema version and semantic constraints
+  -&gt; publish immutable window.__PORTAL_CONFIG__
+  -&gt; dynamically import the selected authentication adapter
+  -&gt; dynamically import the main Portal application
+</code></pre>
+<p>Conceptual bootstrap code:</p>
+<pre><code class="language-typescript">async function startPortal(): Promise&lt;void&gt; {
+  const url = new URL("portal-config.json", document.baseURI);
+  const signal = AbortSignal.timeout(10_000);
+  const response = await fetch(url, {
+    cache: "no-store",
+    credentials: "same-origin",
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Portal configuration failed: HTTP ${response.status}`);
+  }
+
+  const candidate: unknown = await response.json();
+  const runtimeConfig = validatePortalConfig(candidate);
+  window.__PORTAL_CONFIG__ = deepFreeze(runtimeConfig);
+
+  if (runtimeConfig.authentication.mode === "entra-sso") {
+    await import("./auth/entra-sso");
+  } else {
+    await import("./auth/oauth2");
+  }
+
+  await import("./main");
+}
+
+void startPortal();
+</code></pre>
+<p>This ordering is required because the current MSAL configuration is constructed
+during module initialization. The target implementation creates authentication
+clients only after runtime configuration is available.</p>
+<p>Runtime loading failure displays a small configuration-error page from the
+signed bootstrap code. It must not start the Portal with partially populated
+defaults. A timeout, abort, invalid content type, parse failure, validation
+failure, and non-success HTTP status all take this path.</p>
+<p><code>deepFreeze</code> recursively freezes the validated object, including <code>routing</code>,
+<code>authentication</code>, <code>features</code>, <code>externalLinks</code>, nested mappings, and arrays.
+Application code consumes a deeply read-only type or selectors over that
+object; no module receives a mutable configuration reference.</p>
+<h2 id="asset-and-html-base-handling"><a class="header" href="#asset-and-html-base-handling">Asset and HTML Base Handling</a></h2>
+<p>Production assets are built with a relative Vite base:</p>
+<pre><code class="language-javascript">export default defineConfig({
+  base: "./",
+});
+</code></pre>
+<p>Relative assets alone are insufficient for deep links. Given the browser URL
+<code>/namespace-dev/service/ai/portal/app/dashboard</code>, <code>./assets/app.js</code> would
+otherwise resolve below <code>/app/</code>. The entry page therefore contains a signed
+placeholder before all relative resource references:</p>
+<pre><code class="language-html">&lt;base href="__PORTAL_BASE_HREF__" /&gt;
+</code></pre>
+<p>When the gateway returns <code>index.html</code>, including for SPA fallback, it replaces
+only that exact placeholder with the normalized, HTML-escaped runtime value:</p>
+<pre><code class="language-html">&lt;base href="/namespace-dev/service/ai/portal/" /&gt;
+</code></pre>
+<p>The gateway renders the response in memory. It does not alter the verified
+template or hashed files on disk. The renderer rejects a missing placeholder,
+multiple placeholders, invalid configuration, and unsafe base values.</p>
+<p>The <code>&lt;base&gt;</code> element changes resolution for every relative URL in the document,
+not only Vite assets. Portal code must therefore construct React Router
+locations, <code>history.pushState</code> and <code>history.replaceState</code> URLs, fragment links,
+form actions, fetch URLs, WebSocket URLs, and EventSource URLs as absolute paths
+or through the approved path-joining utilities. A relative <code>#fragment</code> is not
+assumed to remain on the current route after <code>&lt;base&gt;</code> is introduced.</p>
+<h2 id="gateway-static-and-spa-contract"><a class="header" href="#gateway-static-and-spa-contract">Gateway Static and SPA Contract</a></h2>
+<p>The gateway has two independent inputs:</p>
+<pre><code class="language-yaml">virtual-host.hosts:
+  - domain: dev.ingress
+    path: /ai/portal
+    base: /lightapi/dist
+    transferMinSize: 10245760
+    directoryListingEnabled: false
+    spa:
+      enabled: true
+      index: index.html
+      runtimeConfig: /config/portal-config.json
+      basePlaceholder: __PORTAL_BASE_HREF__
+</code></pre>
+<ul>
+<li><code>path</code> is the gateway-visible static mount after proxy rewriting.</li>
+<li><code>runtimeConfig.routing.publicBasePath</code> is the browser-visible mount.</li>
+</ul>
+<p>The proposed <code>spa</code> object is additive. Existing static virtual hosts without it
+retain their current behavior.</p>
+<p>For a matching virtual host, the gateway:</p>
+<ol>
+<li>serves the exact reserved runtime-configuration route from the validated
+in-memory model;</li>
+<li>terminates any path below a registered API, OAuth, WebSocket, MCP, health,
+or management prefix in the corresponding handler chain, including an
+unknown path below that prefix;</li>
+<li>serves an existing static file below the configured root;</li>
+<li>serves the rendered directory index for the configured root;</li>
+<li>serves the rendered SPA index for a missing extensionless browser route;</li>
+<li>returns <code>404</code> for a missing asset-looking path; and</li>
+<li>rejects traversal, dotfiles, and files outside the static root.</li>
+</ol>
+<p>The Rust gateway already implements the underlying static resolution, including
+SPA fallback. It needs the reserved configuration endpoint, prefix-terminal
+routing, optional runtime-config load, validation, and index rendering. The
+Java resource handler needs both explicit SPA fallback and index rendering if
+the Java gateway remains a supported Portal BFF.</p>
+<h3 id="handler-precedence"><a class="header" href="#handler-precedence">Handler precedence</a></h3>
+<p>Known BFF namespaces must be selected by segment-aware prefix before the static
+fallback. The registration is intentionally broader than the exact successful
+routes so a misspelled or unavailable endpoint remains terminal. The exact list
+is profile-owned, but commonly includes:</p>
+<pre><code class="language-text">/oauth2
+/auth/ms
+/logout
+/portal
+/r
+/config-server
+/services
+/schedulers
+/chat
+/ctrl/mcp
+/health
+/adm
+</code></pre>
+<p>Returning <code>index.html</code> for a misspelled or unavailable API creates misleading
+JSON parsing and authentication errors. API selection therefore cannot depend
+only on whether the path contains a dot or exactly matches a valid endpoint.
+For example, <code>/portal/quer</code> is below the registered <code>/portal</code> namespace and
+must return the BFF’s <code>404</code> or structured error; it never reaches virtual-host
+static resolution. Prefix matching is segment-aware, so <code>/portalx</code> does not
+match <code>/portal</code>.</p>
+<h2 id="kubernetes-deployment"><a class="header" href="#kubernetes-deployment">Kubernetes Deployment</a></h2>
+<pre class="mermaid">sequenceDiagram
+    participant B as Browser
+    participant I as Central Ingress
+    participant G as light-gateway BFF
+    participant F as Signed SPA files
+
+    B-&gt;&gt;I: GET /namespace-dev/service/ai/portal/app/dashboard
+    I-&gt;&gt;G: GET /ai/portal/app/dashboard
+    G-&gt;&gt;F: Resolve app/dashboard
+    F--&gt;&gt;G: Not found, extensionless route
+    G--&gt;&gt;B: Rendered index.html with external base href
+    B-&gt;&gt;I: GET /namespace-dev/service/ai/portal/assets/portal.hash.js
+    I-&gt;&gt;G: GET /ai/portal/assets/portal.hash.js
+    G--&gt;&gt;B: Immutable signed asset
+    B-&gt;&gt;I: POST /namespace-dev/service/portal/query
+    I-&gt;&gt;G: POST /portal/query
+    G--&gt;&gt;B: BFF API response
+</pre>
+
+<p>Example runtime routing:</p>
+<pre><code class="language-json">{
+  "routing": {
+    "publicBasePath": "/namespace-dev/service/ai/portal",
+    "apiBasePath": "/namespace-dev/service"
+  }
+}
+</code></pre>
+<p>Example gateway static mount:</p>
+<pre><code class="language-yaml">path: /ai/portal
+base: /lightapi/dist
+</code></pre>
+<p>The Ingress must forward the original host expected by virtual-host matching,
+or explicitly set the gateway host. It must route both the Portal static prefix
+and browser-visible API prefix to the same BFF where that is the selected
+topology.</p>
+<p>The first release does not consume <code>X-Forwarded-Prefix</code>. Explicit runtime
+configuration covers the required single-route Kubernetes and standalone
+topologies without adding a forwarded-header trust or cache-poisoning surface.
+A future multi-prefix requirement must define trusted proxies, edge header
+sanitization, normalization, and cache variation before enabling that mode.</p>
+<h2 id="standalone-and-docker-compose-deployment"><a class="header" href="#standalone-and-docker-compose-deployment">Standalone and Docker Compose Deployment</a></h2>
+<p>The same archive uses root paths when the BFF is directly exposed:</p>
+<pre><code class="language-json">{
+  "schemaVersion": 1,
+  "routing": {
+    "publicBasePath": "/",
+    "apiBasePath": ""
+  },
+  "authentication": {
+    "mode": "oauth2",
+    "signInUrl": "https://signin.example.com?client_id=portal-client"
+  }
+}
+</code></pre>
+<pre><code class="language-yaml">virtual-host.hosts:
+  - domain: portal.example.com
+    path: /
+    base: /lightapi/dist
+    spa:
+      enabled: true
+      index: index.html
+      runtimeConfig: /config/portal-config.json
+</code></pre>
+<p>A standalone reverse proxy may still add a prefix. In that case it uses the
+same explicit external/internal path contract as Kubernetes; no frontend build
+changes.</p>
+<h2 id="authentication-profiles"><a class="header" href="#authentication-profiles">Authentication Profiles</a></h2>
+<p>Authentication is a discriminated runtime choice rather than a collection of
+loosely related booleans.</p>
+<h3 id="light-oauth-profile"><a class="header" href="#light-oauth-profile">Light OAuth profile</a></h3>
+<pre><code class="language-json">{
+  "authentication": {
+    "mode": "oauth2",
+    "signInUrl": "/namespace-dev/service/signin?client_id=portal-client"
+  }
+}
+</code></pre>
+<p>The Portal sends the browser through the configured authorization flow. The BFF
+and Light OAuth own authorization requests, callbacks, cookies, refresh, CSRF,
+and logout. The client identifier is public; any confidential-client secret is
+server-side only.</p>
+<h3 id="enterprise-entra-sso-profile"><a class="header" href="#enterprise-entra-sso-profile">Enterprise Entra SSO profile</a></h3>
+<pre><code class="language-json">{
+  "authentication": {
+    "mode": "entra-sso",
+    "tenantId": "11111111-2222-3333-4444-555555555555",
+    "clientId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    "redirectUri": "https://dev.ingress/namespace-dev/service/ai/portal/redirect",
+    "postLogoutRedirectUri": "https://dev.ingress/namespace-dev/service/ai/portal/redirect"
+  }
+}
+</code></pre>
+<p>When an explicit redirect is absent, Portal may derive it only as:</p>
+<pre><code class="language-text">new URL(joinBrowserPath(publicBasePath, "/redirect"), window.location.origin)
+</code></pre>
+<p><code>joinBrowserPath</code> performs normalized segment joining instead of string
+concatenation. It produces <code>/redirect</code> for a root <code>publicBasePath</code> and
+<code>/namespace-dev/service/ai/portal/redirect</code> for the prefixed example; it never
+produces <code>//redirect</code>. The same rule applies to the post-logout redirect. This
+also repairs the current origin-root <code>postLogoutRedirectUri: "/redirect"</code>
+behavior for every prefixed deployment.</p>
+<p>The exact URI must be registered with Entra. The SPA authenticates with MSAL,
+then the BFF validates the Microsoft token and performs the approved Light OAuth
+token exchange. Tenant ID and SPA client ID are public. Exchange credentials,
+internal tokens, and cookie-signing material never enter runtime JSON.</p>
+<p>The universal release contains both authentication adapters. Dynamic imports
+allow the browser to download only the selected adapter while keeping all
+chunks inside the same signed archive.</p>
+<h3 id="bff-profile-remains-deployment-specific"><a class="header" href="#bff-profile-remains-deployment-specific">BFF profile remains deployment-specific</a></h3>
+<p>The universal frontend does not make backend authentication configuration
+universal. The selected BFF instance must activate the matching handlers and
+configuration:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Concern</th><th><code>oauth2</code></th><th><code>entra-sso</code></th></tr>
+</thead>
+<tbody>
+<tr><td>Browser identity provider</td><td>Light OAuth sign-in</td><td>Microsoft Entra ID</td></tr>
+<tr><td>Frontend adapter</td><td>OAuth redirect/session</td><td>MSAL</td></tr>
+<tr><td>BFF exchange handler</td><td>Not required for ordinary flow</td><td>Required</td></tr>
+<tr><td>Microsoft token validation</td><td>Not applicable</td><td>Required in BFF and token exchange</td></tr>
+<tr><td>Redirect registration</td><td>Light OAuth client</td><td>Entra application</td></tr>
+<tr><td>Client secret in runtime JSON</td><td>Forbidden</td><td>Forbidden</td></tr>
+<tr><td>Signed Portal artifact</td><td>Same artifact</td><td>Same artifact</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="api-url-construction"><a class="header" href="#api-url-construction">API URL Construction</a></h2>
+<p>Application endpoints remain stable strings such as <code>/portal/query</code>. A single
+URL utility joins them to <code>apiBasePath</code> by path segment rather than string
+concatenation:</p>
+<pre><code class="language-text">joinApiPath("/namespace-dev/service", "/portal/query")
+  -&gt; /namespace-dev/service/portal/query
+
+joinApiPath("", "/portal/query")
+  -&gt; /portal/query
+</code></pre>
+<p>Absolute endpoint overrides are permitted only for fields whose schema
+explicitly allows them. They trigger the normal CORS and credential rules and
+must not silently inherit cookies across origins.</p>
+<p>HTTP, WebSocket, and EventSource URL builders must consume the same routing
+authority. <code>/ctrl/mcp</code> and <code>/chat</code> cannot bypass <code>apiBasePath</code> merely because
+they change scheme from HTTP to WebSocket.</p>
+<h2 id="cookies-redirects-and-origin-policy"><a class="header" href="#cookies-redirects-and-origin-policy">Cookies, Redirects, and Origin Policy</a></h2>
+<p>Ingress does not generally rewrite <code>Set-Cookie Path</code>. A cookie scoped to the
+gateway-visible <code>/ai/portal</code> does not match the browser-visible
+<code>/namespace-dev/service/ai/portal</code>.</p>
+<p>In the centralized Kubernetes topology, the Ingress host is shared by multiple
+namespaces and services. The default cookie path is therefore the
+browser-visible <code>apiBasePath</code>, not <code>/</code>, <code>gatewayBasePath</code>, or
+<code>publicBasePath</code>. For example:</p>
+<pre><code class="language-text">Path=/namespace-dev/service
+Secure
+HttpOnly for token-bearing cookies
+SameSite=Lax or the explicitly qualified enterprise policy
+</code></pre>
+<p>This path covers <code>/namespace-dev/service/portal/query</code> as well as the Portal
+application. Scoping it to the longer <code>publicBasePath</code> would prevent the browser
+from sending the session cookie to BFF APIs. <code>Path=/</code> is permitted only when a
+dedicated-host standalone deployment intentionally has no sibling applications
+on that origin. Cookie domain, secure mode, same-site mode, callback URLs, CORS
+origins, and WebSocket origin allowlists are server configuration and must align
+with the public URL.</p>
+<h2 id="caching-and-response-headers"><a class="header" href="#caching-and-response-headers">Caching and Response Headers</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Resource</th><th>Cache policy</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td>Rendered <code>index.html</code></td><td><code>no-cache</code></td><td>Revalidate configuration and release activation</td></tr>
+<tr><td>Reserved <code>portal-config.json</code> response</td><td><code>no-store</code></td><td>Served from the validated gateway model, not the static root</td></tr>
+<tr><td>Hashed JS, CSS, fonts, images</td><td><code>public, max-age=31536000, immutable</code></td><td>Byte-identical signed release members</td></tr>
+<tr><td>Unhashed release metadata</td><td><code>no-cache</code></td><td>Used for diagnostics and compatibility checks</td></tr>
+</tbody>
+</table>
+</div>
+<p>The HTML renderer must apply a content security policy compatible with the
+generated <code>&lt;base&gt;</code>, normally including <code>base-uri 'self'</code>.</p>
+<h2 id="failure-behavior-and-observability"><a class="header" href="#failure-behavior-and-observability">Failure Behavior and Observability</a></h2>
+<p>The system fails closed with an operator-readable page or startup error for:</p>
+<ul>
+<li>missing runtime configuration;</li>
+<li>unsupported schema version;</li>
+<li>unsafe path or redirect configuration;</li>
+<li>incompatible artifact and gateway capability versions;</li>
+<li>a missing or duplicate base placeholder;</li>
+<li>a requested authentication mode whose required fields are absent; or</li>
+<li>release verification failure before activation.</li>
+</ul>
+<p>Do not fall back silently to localhost, <code>/</code>, a default tenant, or a default
+authentication mode in production.</p>
+<p>The gateway service-info/configuration surface should expose only safe metadata:</p>
+<ul>
+<li>Portal artifact version and digest;</li>
+<li>runtime schema version;</li>
+<li>runtime configuration digest, not the full document;</li>
+<li>configured internal mount;</li>
+<li>effective public and API paths;</li>
+<li>selected authentication mode;</li>
+<li>SPA fallback and index-rendering capability state; and</li>
+<li>last successful configuration load/reload time.</li>
+</ul>
+<p>Logs must not print tokens, cookies, authorization headers, or the full runtime
+document.</p>
+<h3 id="long-lived-browser-sessions"><a class="header" href="#long-lived-browser-sessions">Long-lived browser sessions</a></h3>
+<p>Runtime configuration is immutable for one page lifetime. A tab does not hot
+apply a new routing or authentication profile because doing so could split one
+session across incompatible authorities. The bootstrap retains the initial
+configuration digest. On document visibility changes and at a bounded interval,
+the Portal checks the reserved configuration endpoint and compares its digest.
+The check uses <code>ETag</code> or <code>X-Portal-Config-Digest</code> and runs when a backgrounded
+document becomes visible plus at a configurable interval no shorter than five
+minutes. When the digest changes, the UI prompts the user to reload; it does
+not mutate the active configuration in place. This makes revision drift
+observable while keeping authentication and routing transitions explicit.</p>
+<h2 id="compatibility-and-migration"><a class="header" href="#compatibility-and-migration">Compatibility and Migration</a></h2>
+<h3 id="phase-0-contract-and-fixtures"><a class="header" href="#phase-0-contract-and-fixtures">Phase 0: Contract and fixtures</a></h3>
+<ul>
+<li>Add the versioned runtime JSON Schema.</li>
+<li>Add Kubernetes, root Compose, prefixed reverse-proxy, OAuth, and Entra
+fixtures.</li>
+<li>Define release manifest and minimum gateway capability fields.</li>
+<li>Treat the existing build-time deployment model as supported during migration.</li>
+</ul>
+<h3 id="phase-1-portal-bootstrap"><a class="header" href="#phase-1-portal-bootstrap">Phase 1: Portal bootstrap</a></h3>
+<ul>
+<li>Add the runtime bootstrap entry and configuration validator.</li>
+<li>Refactor configuration consumers behind one deeply read-only object and
+selector/path-joining APIs.</li>
+<li>Replace the current module-level derived exports, including authentication
+flags, trimmed URLs, parsed pre-registration mappings, and wizard field
+arrays, with selectors evaluated from the loaded runtime object. Migrate all
+importing modules; this is the main body of Phase 1 rather than incidental
+cleanup.</li>
+<li>Ensure authentication modules initialize after bootstrap.</li>
+<li>Replace the hard-coded origin-root MSAL <code>postLogoutRedirectUri</code> with the
+normalized runtime redirect contract.</li>
+<li>Replace deployment <code>VITE_*</code> values with runtime fields.</li>
+<li>Keep <code>import.meta.env.DEV</code>, development TLS/port/proxy values, and explicit
+build qualification inputs as build-time controls.</li>
+</ul>
+<h3 id="phase-2-portable-assets-and-routing"><a class="header" href="#phase-2-portable-assets-and-routing">Phase 2: Portable assets and routing</a></h3>
+<ul>
+<li>Build production assets with a relative Vite base.</li>
+<li>Add the single base placeholder before resource references.</li>
+<li>Route React with runtime <code>publicBasePath</code>.</li>
+<li>Route HTTP and WebSocket BFF calls with runtime <code>apiBasePath</code>.</li>
+<li>Remove implicit localhost production fallbacks.</li>
+</ul>
+<h3 id="phase-3-rust-gateway-rendering"><a class="header" href="#phase-3-rust-gateway-rendering">Phase 3: Rust gateway rendering</a></h3>
+<ul>
+<li>Extend virtual-host configuration with the optional <code>spa</code> object.</li>
+<li>Validate runtime configuration at startup and reload.</li>
+<li>Serve the exact reserved <code>portal-config.json</code> route from the validated
+in-memory configuration with <code>no-store</code>.</li>
+<li>Render only the SPA index; serve hashed assets unchanged.</li>
+<li>Make registered API namespaces prefix-terminal before static resolution.</li>
+<li>Publish capability and safe configuration evidence.</li>
+</ul>
+<h3 id="phase-4-java-compatibility-if-retained"><a class="header" href="#phase-4-java-compatibility-if-retained">Phase 4: Java compatibility if retained</a></h3>
+<ul>
+<li>Add explicit SPA fallback to the Java resource handler.</li>
+<li>Add the same index-template and validation contract.</li>
+<li>Run a shared fixture suite against Java and Rust implementations.</li>
+</ul>
+<h3 id="phase-5-release-and-installers"><a class="header" href="#phase-5-release-and-installers">Phase 5: Release and installers</a></h3>
+<ul>
+<li>Produce deterministic archives and manifests.</li>
+<li>Sign the archive with the approved release key.</li>
+<li>Publish archive, detached signature, and release metadata to the CDN.</li>
+<li>Update each installer to verify before extraction.</li>
+<li>Before activation, validate the existing customer configuration against the
+incoming release’s supported <code>N</code> and <code>N-1</code> schemas and semantic rules, and
+verify the incoming gateway capability requirement. An incompatible release
+is rejected while the current release remains ready.</li>
+<li>Activate the already-qualified release atomically.</li>
+<li>Mount the verified release read-only and customer configuration separately.</li>
+</ul>
+<h3 id="phase-6-retire-environment-builds"><a class="header" href="#phase-6-retire-environment-builds">Phase 6: Retire environment builds</a></h3>
+<ul>
+<li>Qualify every supported topology and authentication profile.</li>
+<li>Remove environment-specific build scripts only after rollback evidence exists.</li>
+<li>Retain one release rollback and the previously valid customer configuration.</li>
+</ul>
+<h2 id="qualification-gates"><a class="header" href="#qualification-gates">Qualification Gates</a></h2>
+<h3 id="portal-unit-and-build-gates"><a class="header" href="#portal-unit-and-build-gates">Portal unit and build gates</a></h3>
+<ul>
+<li>Runtime configuration loads before <code>config.ts</code>, authentication, and React.</li>
+<li>Runtime configuration fetch timeout takes the deterministic error path.</li>
+<li>Missing or invalid configuration produces a deterministic error page.</li>
+<li>The entire runtime object graph is frozen and exposed through read-only
+types/selectors.</li>
+<li>Path joining covers root, prefixed, duplicate-slash, and rejected traversal
+cases.</li>
+<li>BrowserRouter uses <code>publicBasePath</code> while API and WebSocket clients use
+<code>apiBasePath</code>.</li>
+<li>Root and prefixed login/logout redirect construction produces exactly one
+path separator and the registered browser-visible URI.</li>
+<li>Fragment navigation and History API calls remain on the intended Portal
+route and never depend accidentally on <code>&lt;base&gt;</code> resolution.</li>
+<li>OAuth and Entra adapters are selected exclusively.</li>
+<li>Production output contains no deployment hostname, namespace, tenant, client
+ID, redirect URI, or localhost API fallback.</li>
+<li>Two builds from the same source inputs are byte-for-byte reproducible.</li>
+</ul>
+<h3 id="gateway-gates"><a class="header" href="#gateway-gates">Gateway gates</a></h3>
+<ul>
+<li>Root and deep React routes return the rendered entry page.</li>
+<li>The reserved runtime-configuration endpoint is served from the external
+configured source, never the static root or SPA fallback.</li>
+<li>Existing and missing assets return the correct file or <code>404</code>.</li>
+<li>Any request below a registered API namespace, including an unknown endpoint,
+is terminal and never returns the SPA entry page.</li>
+<li>Traversal and dotfile requests are rejected.</li>
+<li>Base placeholder replacement is exact and injection-safe.</li>
+<li>Runtime configuration reload is atomic; a failed candidate retains the last
+valid configuration and reports failure.</li>
+<li>Index, runtime JSON, and hashed assets receive the specified cache headers.</li>
+<li>Runtime configuration digest changes are observable without mutating a
+running tab’s configuration.</li>
+</ul>
+<h3 id="browser-matrix"><a class="header" href="#browser-matrix">Browser matrix</a></h3>
+<p>Run the same signed archive through:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Topology</th><th>Authentication</th><th>Required result</th></tr>
+</thead>
+<tbody>
+<tr><td>Docker Compose at <code>/</code></td><td>Light OAuth</td><td>Login, API, refresh, logout, and deep-link refresh pass</td></tr>
+<tr><td>Docker Compose behind a prefix</td><td>Light OAuth</td><td>Assets, API prefix, cookies, and redirects pass</td></tr>
+<tr><td>Kubernetes rewritten prefix</td><td>Light OAuth</td><td>External/internal path separation passes</td></tr>
+<tr><td>Kubernetes rewritten prefix</td><td>Entra SSO</td><td>MSAL redirect, exchange, session, logout, and refresh pass</td></tr>
+<tr><td>Standalone at <code>/</code></td><td>Entra SSO</td><td>Same artifact starts with only runtime/BFF config changes</td></tr>
+</tbody>
+</table>
+</div>
+<p>Each case verifies direct navigation to a route at least three levels deep,
+page refresh, back/forward navigation, an absent asset, an absent API endpoint,
+WebSocket connection, and logout redirect.</p>
+<h3 id="release-and-operational-gates"><a class="header" href="#release-and-operational-gates">Release and operational gates</a></h3>
+<ul>
+<li>Invalid signature, unknown key, manifest mismatch, or member digest mismatch
+stops installation before extraction or activation.</li>
+<li>The installer validates existing customer configuration and gateway
+compatibility against the incoming release before activation.</li>
+<li>The gateway fails readiness when its active configuration is invalid, but an
+incompatible candidate release never replaces a ready active release.</li>
+<li>Releases accept schema versions <code>N</code> and <code>N-1</code> through the documented
+migration window.</li>
+<li>Activation is atomic and retains the previous verified release for rollback.</li>
+<li>Runtime evidence reports the expected artifact and configuration digests.</li>
+<li>No private key, OAuth secret, token, or cookie value appears in the archive,
+runtime JSON, logs, or service-info output.</li>
+</ul>
+<h2 id="alternatives-considered"><a class="header" href="#alternatives-considered">Alternatives Considered</a></h2>
+<h3 id="continue-per-environment-builds"><a class="header" href="#continue-per-environment-builds">Continue per-environment builds</a></h3>
+<p>This preserves current behavior but prevents one signed artifact from being the
+release authority. It also makes a path or public-client change look like an
+application-code release.</p>
+<h3 id="use-hashrouter"><a class="header" href="#use-hashrouter">Use <code>HashRouter</code></a></h3>
+<p>Hash routing keeps the server request at the SPA root and makes relative assets
+simple, but changes every public Portal URL to <code>#/...</code>, affects redirect and
+bookmark contracts, and abandons the existing BrowserRouter URL model. It is a
+valid fallback for a static server that cannot render the index, not the target.</p>
+<h3 id="generate-modified-files-in-an-init-container"><a class="header" href="#generate-modified-files-in-an-init-container">Generate modified files in an init container</a></h3>
+<p>An init container can replace placeholders on disk without rebuilding. It is
+operationally workable but changes a verified release member and complicates
+evidence about what bytes are active. In-memory gateway rendering preserves the
+signed source files and centralizes validation.</p>
+<h3 id="infer-the-public-prefix-from-the-request-path"><a class="header" href="#infer-the-public-prefix-from-the-request-path">Infer the public prefix from the request path</a></h3>
+<p>After Ingress rewriting, the gateway cannot reconstruct removed segments from
+the request path. A forwarded prefix can supply them, but only within an
+explicit trusted-proxy boundary. Guessing from route names or probing parent
+directories is rejected.</p>
+<p><code>X-Forwarded-Prefix</code> support is deferred from the first release. It adds a
+trusted-header and cache-variation surface without being required by the
+explicit runtime configurations in the qualification matrix.</p>
+<h3 id="put-runtime-values-in-javascript"><a class="header" href="#put-runtime-values-in-javascript">Put runtime values in JavaScript</a></h3>
+<p>An operator-authored <code>config.js</code> is easy to include but is executable code. JSON
+with strict schema validation gives a smaller trust surface and clearer error
+handling.</p>
+<h2 id="open-questions-1"><a class="header" href="#open-questions-1">Open Questions</a></h2>
+<ul>
+<li>Is Java <code>light-gateway</code> still a required Portal BFF target after the Rust
+rollout, or is Java support limited to migration?</li>
+<li>Which release-signing trust domain and key ID namespace owns Portal View
+archives?</li>
+<li>Should an operator optionally sign its runtime configuration with a local key
+for high-assurance installations?</li>
+<li>What is the minimum gateway capability/version handshake exposed to the
+installer and Portal bootstrap?</li>
+<li>Which exact BFF cookie paths are required by the centralized enterprise
+Ingress?</li>
+</ul>
+<p>The existing <code>10245760</code> <code>transferMinSize</code> compatibility default may be a typo
+for 10 MiB (<code>10485760</code>). Changing that framework default is a separate
+compatibility decision and is not part of this Portal runtime-configuration
+design.</p>
+<h2 id="acceptance-criteria-1"><a class="header" href="#acceptance-criteria-1">Acceptance Criteria</a></h2>
+<p>The design is complete when one archived and signed Portal View build is
+qualified without modification in all required Kubernetes and standalone
+topologies, and changing only validated runtime and BFF configuration can
+switch between Light OAuth and enterprise Entra SSO. Direct React routes,
+assets, APIs, WebSockets, redirects, cookies, refresh, logout, caching,
+signature verification, atomic activation, and rollback must all pass with
+recorded evidence.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="oauth-kafka"><a class="header" href="#oauth-kafka">OAuth Kafka</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="token-exchange"><a class="header" href="#token-exchange">Token Exchange</a></h1>
@@ -5666,7 +6479,7 @@ this Agent foundation rather than creating a parallel publisher.</p>
 <h1 id="light-oauth"><a class="header" href="#light-oauth">Light OAuth</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-oauth-ipv6-support"><a class="header" href="#light-oauth-ipv6-support">Light OAuth IPv6 Support</a></h1>
-<h2 id="problem-3"><a class="header" href="#problem-3">Problem</a></h2>
+<h2 id="problem-4"><a class="header" href="#problem-4">Problem</a></h2>
 <p>The Rust <code>light-oauth</code> service binds its HTTPS listener to <code>0.0.0.0</code>.
 That is correct for IPv4, but it does not accept connections sent to an IPv6
 address.</p>
@@ -5675,7 +6488,7 @@ address.</p>
 address can fail even though the service is healthy on IPv4. One observed
 failure is the gateway proxying <code>/oauth2/{providerId}/code</code> to
 <code>https://light-oauth:6881</code> and receiving <code>ECONNREFUSED</code> on the IPv6 address.</p>
-<h2 id="goals-7"><a class="header" href="#goals-7">Goals</a></h2>
+<h2 id="goals-8"><a class="header" href="#goals-8">Goals</a></h2>
 <ul>
 <li>Allow <code>light-oauth</code> to bind IPv4, IPv6, or a specific interface from config.</li>
 <li>Keep the current default behavior as IPv4 wildcard binding.</li>
@@ -5684,7 +6497,7 @@ new property.</li>
 <li>Build the listener address with <code>SocketAddr</code> so IPv6 addresses are parsed
 correctly.</li>
 </ul>
-<h2 id="non-goals-10"><a class="header" href="#non-goals-10">Non-Goals</a></h2>
+<h2 id="non-goals-11"><a class="header" href="#non-goals-11">Non-Goals</a></h2>
 <ul>
 <li>Do not enable IPv6 for every deployment by default.</li>
 <li>Do not change TLS, OIDC, token, or database behavior.</li>
@@ -5744,7 +6557,7 @@ curl -k -v https://light-oauth:6881/oauth2/&lt;providerId&gt;/keys
 <h1 id="light-controller"><a class="header" href="#light-controller">Light Controller</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-controller-ipv6-support"><a class="header" href="#light-controller-ipv6-support">Light Controller IPv6 Support</a></h1>
-<h2 id="problem-4"><a class="header" href="#problem-4">Problem</a></h2>
+<h2 id="problem-5"><a class="header" href="#problem-5">Problem</a></h2>
 <p>The Rust <code>controller-rs</code> service is the control-plane endpoint for runtime
 registration, discovery, MCP admin traffic, and portal event streams. In
 dual-stack deployments, clients can resolve the controller hostname to either
@@ -5773,7 +6586,7 @@ For IPv6, the value must use bracketed socket-address syntax:</p>
 </ul>
 <p>There is no string concatenation of IP and port in the controller listener
 path, so the common IPv6 failure form <code>:::8438</code> is avoided.</p>
-<h2 id="goals-8"><a class="header" href="#goals-8">Goals</a></h2>
+<h2 id="goals-9"><a class="header" href="#goals-9">Goals</a></h2>
 <ul>
 <li>Support IPv4, IPv6, and dual-stack controller listener binding.</li>
 <li>Keep the current default as IPv4 wildcard binding.</li>
@@ -5783,7 +6596,7 @@ or DNS hostnames.</li>
 <li>Reject unspecified runtime registration addresses such as <code>0.0.0.0</code> and
 <code>::</code>, because those are bind addresses, not reachable service addresses.</li>
 </ul>
-<h2 id="non-goals-11"><a class="header" href="#non-goals-11">Non-Goals</a></h2>
+<h2 id="non-goals-12"><a class="header" href="#non-goals-12">Non-Goals</a></h2>
 <ul>
 <li>Do not enable IPv6 by default.</li>
 <li>Do not change controller WebSocket paths or JSON-RPC contracts.</li>
@@ -5878,7 +6691,7 @@ wss://&lt;controller-host&gt;:8438/ctrl/mcp
 check the certificate SANs before changing the controller listener.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="configurable-controller-transport-and-codec-profiles"><a class="header" href="#configurable-controller-transport-and-codec-profiles">Configurable Controller Transport and Codec Profiles</a></h1>
-<h2 id="status-1"><a class="header" href="#status-1">Status</a></h2>
+<h2 id="status-2"><a class="header" href="#status-2">Status</a></h2>
 <p>This document defines a layered controller communication architecture in which
 application semantics, serialization, framing, transport, and gateway routing
 are separate decisions. It covers both the Rust runtime control channel and the
@@ -6044,7 +6857,7 @@ reload alone is not an immediate revocation mechanism for an existing tunnel.</p
 manifest, and baseline gate live under
 <code>implementation/light-controller/stabilization/s0</code>. They are contract inputs,
 not runtime dependencies shared between TypeScript and Rust.</p>
-<h2 id="problem-5"><a class="header" href="#problem-5">Problem</a></h2>
+<h2 id="problem-6"><a class="header" href="#problem-6">Problem</a></h2>
 <p>Rust services currently connect to <code>controller-rs</code> through
 <code>/ws/microservice</code>. The channel carries JSON-RPC messages for:</p>
 <ul>
@@ -6158,7 +6971,7 @@ Cartesian product.</p>
 token on those paths means the existing JSON behavior. New binary behavior
 requires an explicit negotiated token and must never be inferred from the first
 payload bytes.</p>
-<h2 id="goals-9"><a class="header" href="#goals-9">Goals</a></h2>
+<h2 id="goals-10"><a class="header" href="#goals-10">Goals</a></h2>
 <ul>
 <li>Make transport and codec selection independent while preserving allowlisted
 combinations.</li>
@@ -6185,7 +6998,7 @@ accepting untrusted input.</li>
 effects are isolated.</li>
 <li>Require measured improvement before changing any default.</li>
 </ul>
-<h2 id="non-goals-12"><a class="header" href="#non-goals-12">Non-Goals</a></h2>
+<h2 id="non-goals-13"><a class="header" href="#non-goals-13">Non-Goals</a></h2>
 <ul>
 <li>Do not replace <code>/ctrl/mcp</code> or its JSON-RPC payload contract.</li>
 <li>Do not describe a private <code>rkyv</code> encoding as standard MCP.</li>
@@ -8072,7 +8885,7 @@ because the mandatory local tuple failed first.</p>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="rust-product-and-portal-service-inventory"><a class="header" href="#rust-product-and-portal-service-inventory">Rust Product And Portal Service Inventory</a></h1>
-<h2 id="status-2"><a class="header" href="#status-2">Status</a></h2>
+<h2 id="status-3"><a class="header" href="#status-3">Status</a></h2>
 <p>Code- and deployment-grounded inventory as of 2026-08-19.</p>
 <p>This inventory answers three separate questions:</p>
 <ol>
@@ -8519,7 +9332,7 @@ the exact source commit, image digest, configuration/projection digest,
 database migration set, and live qualification run.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="agent-skill-and-api-endpoint-discovery"><a class="header" href="#agent-skill-and-api-endpoint-discovery">Agent Skill And API Endpoint Discovery</a></h1>
-<h2 id="problem-6"><a class="header" href="#problem-6">Problem</a></h2>
+<h2 id="problem-7"><a class="header" href="#problem-7">Problem</a></h2>
 <p>The GenAI chat flow has two separate concepts that are easy to confuse:</p>
 <ul>
 <li>The <code>light-gateway</code> MCP endpoint is the runtime server that lists and executes
@@ -8544,7 +9357,7 @@ exist, which endpoint projections are invokable by agents, which skills they
 belong to, and which agents are allowed or expected to use those skills. Without
 that catalog, the agent can list executable gateway tools, but it has no domain
 guidance beyond each tool description.</p>
-<h2 id="goals-10"><a class="header" href="#goals-10">Goals</a></h2>
+<h2 id="goals-11"><a class="header" href="#goals-11">Goals</a></h2>
 <ul>
 <li>Keep the gateway as the runtime source of truth for MCP tool execution.</li>
 <li>Keep direct gateway <code>tools/list</code> and <code>tools/call</code> working even when no skills
@@ -8568,7 +9381,7 @@ to be wrapped before it can be called.</li>
 portal-query can perform macro-filtering, keyword search, vector ranking,
 context viability checks, and safety filtering.</li>
 </ul>
-<h2 id="non-goals-13"><a class="header" href="#non-goals-13">Non-Goals</a></h2>
+<h2 id="non-goals-14"><a class="header" href="#non-goals-14">Non-Goals</a></h2>
 <ul>
 <li>Do not move MCP request routing or downstream REST calls into the controller.</li>
 <li>Do not implement <code>skill/search</code> in controller-rs. Controller-rs can
@@ -9592,7 +10405,7 @@ portal operators a clean path to organize tools into skills, assign those
 skills to agents, and improve retrieval over time.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="agent-api-compose-and-multi-agent-workflow"><a class="header" href="#agent-api-compose-and-multi-agent-workflow">Agent API Compose And Multi-Agent Workflow</a></h1>
-<h2 id="problem-7"><a class="header" href="#problem-7">Problem</a></h2>
+<h2 id="problem-8"><a class="header" href="#problem-8">Problem</a></h2>
 <p><code>portal-config-loc</code> and <code>portal-config-dev</code> are being updated so local Docker
 Compose stacks can run <code>light-agent</code> beside the portal services, demo APIs, and
 gateway. The first implementation adds one <code>light-agent</code> directly to the main
@@ -9609,7 +10422,7 @@ next phase:</p>
 </ul>
 <p>The design goal is to split deployment concerns without splitting the runtime
 network or the control-plane model.</p>
-<h2 id="goals-11"><a class="header" href="#goals-11">Goals</a></h2>
+<h2 id="goals-12"><a class="header" href="#goals-12">Goals</a></h2>
 <ul>
 <li>Move the two demo APIs and local <code>light-agent</code> services into a separate
 Docker Compose overlay file.</li>
@@ -9626,7 +10439,7 @@ workflows.</li>
 <li>Use <code>light-workflow</code> for deterministic orchestration, retries, human tasks,
 assertions, audit, and multi-agent coordination.</li>
 </ul>
-<h2 id="non-goals-14"><a class="header" href="#non-goals-14">Non-Goals</a></h2>
+<h2 id="non-goals-15"><a class="header" href="#non-goals-15">Non-Goals</a></h2>
 <ul>
 <li>Do not move the demo APIs or agent services into a different Compose project
 by default.</li>
@@ -10059,7 +10872,7 @@ Portal-command memory store.</li>
 <li>derived and vector state is never presented as Portal-authored authoritative
 content.</li>
 </ul>
-<h2 id="non-goals-15"><a class="header" href="#non-goals-15">Non-Goals</a></h2>
+<h2 id="non-goals-16"><a class="header" href="#non-goals-16">Non-Goals</a></h2>
 <ul>
 <li>Do not add legacy table migration, dual reads, or compatibility writers.</li>
 <li>Do not convert derived caches into authoritative state unless a product
@@ -10417,7 +11230,7 @@ platform can re-embed after model upgrades.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="tool-description-embedding-population"><a class="header" href="#tool-description-embedding-population">Tool Description Embedding Population</a></h1>
-<h2 id="problem-8"><a class="header" href="#problem-8">Problem</a></h2>
+<h2 id="problem-9"><a class="header" href="#problem-9">Problem</a></h2>
 <p>The GenAI Tool page lets users update <code>tool_t.description</code> through the
 <code>updateTool</code> form. Endpoint-backed tools are also projected into <code>tool_t</code> when
 <code>api_endpoint_t</code> is populated from OpenAPI, MCP <code>tools/list</code>, or LightAPI
@@ -10435,7 +11248,7 @@ field, and the Portal UI should not expose raw vectors to users.</li>
 <p>As a result, new endpoint-backed tool rows start with a null
 <code>description_embedding</code>, and user edits can leave any future vector stale unless
 the write path marks it for regeneration.</p>
-<h2 id="goals-12"><a class="header" href="#goals-12">Goals</a></h2>
+<h2 id="goals-13"><a class="header" href="#goals-13">Goals</a></h2>
 <ul>
 <li>Populate <code>tool_t.description_embedding</code> for endpoint-backed and manually
 authored tools.</li>
@@ -10447,7 +11260,7 @@ latency.</li>
 disabled or temporarily failing.</li>
 <li>Keep the first implementation aligned with the existing <code>VECTOR(384)</code> schema.</li>
 </ul>
-<h2 id="non-goals-16"><a class="header" href="#non-goals-16">Non-Goals</a></h2>
+<h2 id="non-goals-17"><a class="header" href="#non-goals-17">Non-Goals</a></h2>
 <ul>
 <li>Do not require every tool to have an embedding before it can be listed,
 edited, linked to a skill, or executed through the gateway.</li>
@@ -10824,7 +11637,7 @@ forms whose <code>definition</code> field is a YAML textarea.</li>
 </ul>
 <p>The first Workflow Editor can therefore be an incremental UI improvement over
 the existing definition CRUD and start workflow command.</p>
-<h2 id="goals-13"><a class="header" href="#goals-13">Goals</a></h2>
+<h2 id="goals-14"><a class="header" href="#goals-14">Goals</a></h2>
 <ul>
 <li>Keep workflow YAML as the canonical persisted artifact.</li>
 <li>Provide a readable step outline or graph next to the YAML editor.</li>
@@ -10837,7 +11650,7 @@ flows.</li>
 authoring component with skill-specific constraints.</li>
 <li>Preserve owner scoping and existing Portal command/query conventions.</li>
 </ul>
-<h2 id="non-goals-17"><a class="header" href="#non-goals-17">Non-Goals</a></h2>
+<h2 id="non-goals-18"><a class="header" href="#non-goals-18">Non-Goals</a></h2>
 <ul>
 <li>Do not execute workflow logic in Portal View.</li>
 <li>Do not make skills the workflow runtime.</li>
@@ -11024,7 +11837,7 @@ Workspace.</li>
 <p>For generic workflow authoring, the reference panel can show all objects the
 current user is allowed to read. For skill authoring, it should filter tools to
 the skill’s linked tools and flag references outside that set.</p>
-<h2 id="validation-1"><a class="header" href="#validation-1">Validation</a></h2>
+<h2 id="validation-2"><a class="header" href="#validation-2">Validation</a></h2>
 <p>Validation should run in layers:</p>
 <div class="table-wrapper">
 <table>
@@ -11355,7 +12168,7 @@ workflow editor provides YAML editing, step preview, validation, and test runs
 for every workflow authoring use case in Portal.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="portal-catalog-scope"><a class="header" href="#portal-catalog-scope">Portal Catalog Scope</a></h1>
-<h2 id="problem-9"><a class="header" href="#problem-9">Problem</a></h2>
+<h2 id="problem-10"><a class="header" href="#problem-10">Problem</a></h2>
 <p>Light Portal supports multiple tenants through <code>host_id</code> and can also host
 multiple runtime environments in one portal instance. A common deployment shape
 is:</p>
@@ -11386,7 +12199,7 @@ should model catalog scope explicitly:</p>
 <li>a separate SPA may expose the same backend catalog, but it should not become
 the catalog authority.</li>
 </ul>
-<h2 id="goals-14"><a class="header" href="#goals-14">Goals</a></h2>
+<h2 id="goals-15"><a class="header" href="#goals-15">Goals</a></h2>
 <ul>
 <li>Avoid duplicating the full catalog for every tenant.</li>
 <li>Prevent catalog drift between tenants and between portal instances.</li>
@@ -11405,7 +12218,7 @@ agent-facing skills and tools.</li>
 <li>Support promotion or import/export between portal instances instead of
 relying on ad hoc row copies.</li>
 </ul>
-<h2 id="non-goals-18"><a class="header" href="#non-goals-18">Non-Goals</a></h2>
+<h2 id="non-goals-19"><a class="header" href="#non-goals-19">Non-Goals</a></h2>
 <ul>
 <li>Do not clone every global catalog row into every tenant by default.</li>
 <li>Do not make a separate SPA the source of truth for catalog data.</li>
@@ -11648,7 +12461,7 @@ instances.</li>
 <li>Update portal-view to expose scope and provenance.</li>
 <li>Keep existing host-scoped APIs working during the migration.</li>
 </ol>
-<h2 id="open-questions-1"><a class="header" href="#open-questions-1">Open Questions</a></h2>
+<h2 id="open-questions-2"><a class="header" href="#open-questions-2">Open Questions</a></h2>
 <ul>
 <li>Should global reusable skills and tools use nullable <code>host_id</code> in the
 existing tables, or separate template tables with host bindings?</li>
@@ -11665,7 +12478,7 @@ entity-specific effective endpoints?</li>
 <h1 id="oauth-audit"><a class="header" href="#oauth-audit">OAuth Audit</a></h1>
 <p>The OAuth services keep authorization codes and refresh tokens as operational state. These rows are short lived and are now written directly to <code>auth_code_t</code> and <code>auth_refresh_token_t</code> instead of being created through the general event store. This avoids high-volume login and refresh-token churn in <code>event_store_t</code> and <code>outbox_message_t</code>.</p>
 <p>Audit and login history are recorded separately in append-oriented OAuth audit tables.</p>
-<h2 id="goals-15"><a class="header" href="#goals-15">Goals</a></h2>
+<h2 id="goals-16"><a class="header" href="#goals-16">Goals</a></h2>
 <ul>
 <li>Show administrators who is currently online.</li>
 <li>Show a user the last login time and session history.</li>
@@ -12696,7 +13509,7 @@ tenant data</li>
 <p>The browser must improve usability by hiding irrelevant admin menus, but it must
 not be the security boundary. The security boundary must be enforced by the
 gateway and by the portal query and command handlers.</p>
-<h2 id="goals-16"><a class="header" href="#goals-16">Goals</a></h2>
+<h2 id="goals-17"><a class="header" href="#goals-17">Goals</a></h2>
 <ul>
 <li>Limit admin menus based on the user’s roles, positions, groups, and
 attributes.</li>
@@ -12711,7 +13524,7 @@ model for self-service admin pages.</li>
 <li>Keep authorization rules declarative enough that they can be managed from the
 existing rule and access-control pages.</li>
 </ul>
-<h2 id="non-goals-19"><a class="header" href="#non-goals-19">Non-Goals</a></h2>
+<h2 id="non-goals-20"><a class="header" href="#non-goals-20">Non-Goals</a></h2>
 <ul>
 <li>Do not rely on menu hiding as authorization.</li>
 <li>Do not make <code>host-admin</code> a global portal super admin.</li>
@@ -13364,8 +14177,670 @@ revisions and snapshots are never mutated.</p>
 standard snapshot workflow.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="enterprise-llm-inference-options-and-mac-studio-business-case"><a class="header" href="#enterprise-llm-inference-options-and-mac-studio-business-case">Enterprise LLM Inference Options and Mac Studio Business Case</a></h1>
+<h2 id="status-4"><a class="header" href="#status-4">Status</a></h2>
+<p>Decision proposal and pilot plan. Pricing and product availability were checked
+on September 3, 2026 and must be refreshed before purchase.</p>
+<h2 id="executive-recommendation"><a class="header" href="#executive-recommendation">Executive Recommendation</a></h2>
+<p>Approve one Mac Studio with M5 Ultra, 256 GB unified memory, and at least 2 TB
+of storage as a capacity-measurement and model-qualification node. Use its
+measured throughput to size an N+1 production fleet during a bounded 90-day
+pilot. Do not approve one Mac as the production capacity plan.</p>
+<p>Use a hybrid routing policy:</p>
+<ul>
+<li>route approved, repetitive, data-sensitive diagnosis and agent workflow calls
+to the local Mac;</li>
+<li>retain Amazon Bedrock as the managed fallback and as the escalation route for
+tasks that require Claude Opus 5 or Claude Fable 5 quality; and</li>
+<li>keep the LLM Gateway Public Alias stable so applications do not depend on the
+physical provider.</li>
+</ul>
+<p>This is the most defensible case for the Mac. The anticipated workload runs
+continuously and may present about 100 million or more logical input tokens per
+day. At that volume, premium per-token inference can dominate operating cost.
+A right-sized Mac fleet buys a private, fixed-cost capacity pool for workloads
+that pass on an open-weight model, while Bedrock continues to cover
+policy-eligible bursts, disaster recovery, and the quality ceiling.</p>
+<p>The purchase case is strong against always-on Opus 5 or Fable 5 traffic, but it
+is not automatically strong against inexpensive open-weight models already
+hosted by Bedrock. The final decision depends on measured local throughput,
+cache hit rate, required fleet size, workflow quality, and availability—not
+only the daily token counter.</p>
+<h2 id="scope-and-requirements"><a class="header" href="#scope-and-requirements">Scope and Requirements</a></h2>
+<p>The target workloads are Light Portal diagnosis and agentic workflows, not
+foundation-model training. The selected service must support:</p>
+<ul>
+<li>reliable tool calling and structured output across multi-step workflows;</li>
+<li>streaming responses and cancellation;</li>
+<li>adequate context for logs, configurations, retrieved knowledge, and tool
+results;</li>
+<li>predictable latency at the expected concurrent-session count;</li>
+<li>private handling of prompts, retrieved knowledge, tool results, and output;</li>
+<li>auditable model, quantization, prompt, runtime, and configuration revisions;</li>
+<li>an OpenAI-compatible or other LLM Gateway-supported provider protocol; and</li>
+<li>a tested fallback when the local model is unavailable or fails a capability
+policy.</li>
+</ul>
+<p>Model fit is an acceptance test, not an assumption. A model that fits in memory
+but cannot reliably select tools, preserve arguments, or finish the workflow is
+not a viable deployment.</p>
+<h2 id="workload-profile"><a class="header" href="#workload-profile">Workload Profile</a></h2>
+<p>The expected workload is materially larger and more continuous than an
+interactive assistant:</p>
+<ul>
+<li>workflows operate 24 hours per day to monitor services;</li>
+<li>incidents trigger diagnosis and potentially corrective actions;</li>
+<li><code>light-portal-test</code> and corporate regression suites run continuously or on a
+schedule;</li>
+<li>agents inspect test results, correlate failures, report findings, and address
+approved issues; and</li>
+<li>aggregate logical input volume can reach about 100 million tokens per day and
+may grow beyond that as workflows are added.</li>
+</ul>
+<p>This profile favours owned capacity, but it also makes capacity engineering a
+first-order requirement. At a perfectly even arrival rate:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: right">Gross input tokens/day</th><th style="text-align: right">Average input rate before cache effects</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: right">100 million</td><td style="text-align: right">1,157 tokens/second</td></tr>
+<tr><td style="text-align: right">500 million</td><td style="text-align: right">5,787 tokens/second</td></tr>
+</tbody>
+</table>
+</div>
+<p>These are aggregate input rates, not the decode speed of one request. Traffic
+will be burstier than the average, and generated reasoning/output consumes a
+separate, usually scarcer decode budget. A single Mac must not be assumed to
+serve even the 100-million-token tier until an end-to-end replay measures
+prefill throughput, prompt-cache reuse, decoding, concurrency, and queueing.
+The 500-million row is a growth sensitivity, not a claim that a practical Mac
+fleet can serve it. Do not extrapolate beyond the measured pilot range.</p>
+<p>Track at least four different quantities:</p>
+<ol>
+<li>gross logical input tokens presented by workflows;</li>
+<li>uncached input tokens actually prefetched by the model;</li>
+<li>cache-read tokens and cache eviction/rebuild frequency; and</li>
+<li>reasoning plus visible output tokens actually decoded.</li>
+</ol>
+<p>Agent workflows often repeat system prompts, tool schemas, policy, repository
+context, and test metadata. Prefix caching and context compaction may therefore
+reduce physical compute and cloud billing substantially. Conversely, merely
+counting gross tokens can overstate both the Bedrock bill and the local fleet
+required. Capacity and TCO must use the same trace and cache semantics.</p>
+<h3 id="interpreting-codex-like-token-counters"><a class="header" href="#interpreting-codex-like-token-counters">Interpreting Codex-Like Token Counters</a></h3>
+<p>A large cumulative input/output ratio is normal for an agent. Each model call
+includes a substantial prefix: system and developer instructions, tool
+definitions, relevant conversation history, previous model output, and tool
+results. The cumulative input counter adds the input tokens for every call, so
+the same logical prefix may be counted many times. Output is only the newly
+generated tokens for each call.</p>
+<p>The input tokens are real logical model inputs, but they are not necessarily
+unique tokens or full prefill work. Official OpenAI usage objects report total
+input and cached input separately; total input includes the cached portion. A
+local Codex session inspected on September 3, 2026 reported approximately
+3.54M cumulative input tokens, 3.36M cached input tokens, and 19.7K output
+tokens. About 95 percent of its reported input was cache hits, leaving about
+178K uncached input tokens at that observation point.</p>
+<p>That example must not be assumed for Light Portal. Measure the actual workflow
+traffic because cache reuse depends on stable prefixes, cache retention,
+eviction, model revisions, process restarts, and routing. For financial and
+capacity analysis, always graph:</p>
+<pre><code class="language-text">logical_input = cached_read + cache_write + uncached_input
+cache_hit_rate = cached_read / logical_input
+physical_prefill_work ~= cache_write + uncached_input
+</code></pre>
+<p>The final approximation is runtime-specific. Cache hits still use KV-cache
+memory and some lookup/attention work, but they avoid recomputing the entire
+cached prefix. They can also be billed at a discounted cached-input rate by a
+managed provider; they are not automatically free.</p>
+<h2 id="current-product-facts"><a class="header" href="#current-product-facts">Current Product Facts</a></h2>
+<p>The proposed Mac is real but very new. Apple announced the M5 Ultra Mac Studio
+on August 25, 2026, with customer availability starting September 22. The
+36-core CPU, 80-core GPU, 256 GB unified-memory, 1 TB configuration is currently
+listed at CAD 15,749; moving to 2 TB adds CAD 750. Apple specifies 1.2 TB/s
+memory bandwidth, 10 Gb Ethernet, and configurations up to 512 GB unified
+memory. The 256 GB configuration is therefore a purchasable candidate, but no
+internal production evidence should be inferred from Apple’s performance
+claims.</p>
+<p>The model names in this proposal are also current:</p>
+<ul>
+<li>Claude Opus 5 is active in Bedrock with a 1 million-token context window and
+a 128,000-token maximum output. Its published base price is USD 5 per million
+input tokens and USD 25 per million output tokens.</li>
+<li>Claude Fable 5 is active in Bedrock with the same stated context and maximum
+output sizes. Its published price is USD 10 per million input tokens and USD
+50 per million output tokens.</li>
+<li>Qwen3.8-27B is a 27-billion-parameter dense vision-language model under
+Apache-2.0. Its official artifact is about 55.6 GB in BF16 and has a native
+262,144-token context window.</li>
+<li>Qwen3.8-Flash-Next is not a 27B model. It is an experimental MoE preview whose
+repository is about 180B parameters overall; the model card reports a 125B
+model core, 51B n-gram embedding parameters, and 6B activated parameters.
+It uses the Qwen Community License rather than Apache-2.0. Qwen recommends
+dedicated serving engines for production/high-throughput use, so Mac runtime
+support and commercial licence applicability must be proved before selection.</li>
+</ul>
+<p>Do not use a family name as the production pin. Procurement and qualification
+must record the exact model repository, immutable revision, weight digest,
+quantization, chat template, inference runtime, and licence review.</p>
+<h2 id="options-at-a-glance"><a class="header" href="#options-at-a-glance">Options at a Glance</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Criterion</th><th>Bedrock managed models</th><th>AWS GPU self-hosting</th><th>Mac Studio self-hosting</th></tr>
+</thead>
+<tbody>
+<tr><td>Up-front cost</td><td>Lowest</td><td>Low</td><td>Highest for one pilot node</td></tr>
+<tr><td>Cost shape</td><td>Per token/request</td><td>Per instance-hour plus storage/network</td><td>Capital cost plus power, support, and labour</td></tr>
+<tr><td>Scale</td><td>Immediate within quotas</td><td>Elastic but capacity/startup constrained</td><td>Fixed; another node requires another purchase</td></tr>
+<tr><td>Frontier quality</td><td>Best option</td><td>Open-weight models only unless separately licensed</td><td>Open-weight models only unless separately licensed</td></tr>
+<tr><td>Data locality</td><td>AWS boundary and selected routing region</td><td>Customer AWS account/VPC</td><td>Corporate premises; can operate without inference egress</td></tr>
+<tr><td>Operational burden</td><td>Lowest</td><td>High: Linux, CUDA, drivers, scheduler, images</td><td>Medium/high: new macOS, Metal/MLX, native service operations</td></tr>
+<tr><td>Software ecosystem</td><td>Provider managed</td><td>Broadest production ecosystem through CUDA</td><td>Improving, but narrower and newer than CUDA</td></tr>
+<tr><td>Availability</td><td>Managed multi-tenant service</td><td>Can be multi-AZ and autoscaled</td><td>One box is one failure domain</td></tr>
+<tr><td>Burst handling</td><td>Strong</td><td>Strong after capacity is available</td><td>Weak without queueing or cloud fallback</td></tr>
+<tr><td>Hardware flexibility</td><td>None required</td><td>Many GPU sizes and generations</td><td>GPU and unified memory fixed for life of unit</td></tr>
+<tr><td>Best fit</td><td>Low/variable demand and frontier escalation</td><td>High concurrency, CUDA-first serving, elastic demand</td><td>Private, steady demand when a measured fleet can carry the load</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="option-1-amazon-bedrock"><a class="header" href="#option-1-amazon-bedrock">Option 1: Amazon Bedrock</a></h2>
+<h3 id="advantages"><a class="header" href="#advantages">Advantages</a></h3>
+<ul>
+<li>Fastest and lowest-risk path to supported frontier models.</li>
+<li>No GPU acquisition, drivers, model downloads, serving framework, host
+patching, or capacity scheduler for the Portal team.</li>
+<li>Per-token charging is attractive for pilots, sporadic use, and unpredictable
+demand; batch, cache, and service-tier discounts may reduce cost further.</li>
+<li>IAM, CloudTrail, KMS, VPC endpoints, quotas, regional controls, and existing
+AWS procurement integrate with normal enterprise operations.</li>
+<li>Current Bedrock documentation supports <code>Invoke</code> and <code>Converse</code> for Opus 5 and
+Fable 5. The Light Portal runtime already defines <code>bedrock_converse</code> and
+requires it to be paired with <code>providerType: aws_bedrock</code>.</li>
+<li>Bedrock offers much cheaper open-model routes as well as frontier models. For
+example, the current US price for Gemma 4 31B is USD 0.14/M input and
+USD 0.40/M output; Sydney pricing for Qwen3 32B is USD 0.1545/M input and
+USD 0.618/M output. Exact regional availability must be checked.</li>
+</ul>
+<h3 id="disadvantages-and-risks"><a class="header" href="#disadvantages-and-risks">Disadvantages and Risks</a></h3>
+<ul>
+<li>Frontier agent loops can create large and difficult-to-predict token bills,
+particularly when tool results and history are repeatedly sent as input.</li>
+<li>Service quotas, throttling, provider incidents, model retirement, price
+changes, and region availability are outside the customer’s control.</li>
+<li>Inference requires connectivity to AWS and cannot continue during an isolated
+corporate-network event.</li>
+<li>Prompts and results leave the premises even when AWS contractual and technical
+controls are acceptable.</li>
+<li>Data handling is model-specific. Bedrock documents provider access controls
+and configurable retention, but Fable 5 currently requires
+<code>provider_data_share</code> unless the account receives a zero-data-retention
+exception. In that mode prompts and completions are shared with Anthropic and
+may be retained for up to 30 days. This can disqualify Fable for sensitive
+diagnosis even though other Bedrock models meet the policy.</li>
+<li>Frontier quality cannot be compared fairly to a medium local model. A lower
+local token cost has no value if workflow failure causes human rework or an
+unsafe action.</li>
+</ul>
+<h3 id="best-use"><a class="header" href="#best-use">Best Use</a></h3>
+<p>Use Bedrock as the initial benchmark, fallback, burst route, and frontier
+escalation. It may also remain the cheapest primary route when demand is low or
+when a low-cost hosted open model meets the quality gate.</p>
+<h2 id="option-2-self-hosted-model-on-aws-gpu-compute"><a class="header" href="#option-2-self-hosted-model-on-aws-gpu-compute">Option 2: Self-Hosted Model on AWS GPU Compute</a></h2>
+<p>This option includes EC2 or a managed SageMaker real-time endpoint using a GPU
+instance. It is distinct from Bedrock because the team owns the model server,
+runtime, scaling, and most availability work.</p>
+<h3 id="advantages-1"><a class="header" href="#advantages-1">Advantages</a></h3>
+<ul>
+<li>Broad Linux/CUDA ecosystem: vLLM, SGLang, NVIDIA tooling, containers,
+telemetry, and established automation skills.</li>
+<li>Elastic choice of GPU size, count, Region, tenancy, and deployment topology.</li>
+<li>Easier than a Mac to reproduce with infrastructure as code, replace after
+failure, place behind a load balancer, and scale horizontally.</li>
+<li>Suitable for high concurrency and continuous batching. AWS G7e supplies
+96 GB per GPU, while larger sizes aggregate multiple GPUs.</li>
+<li>On-Demand avoids capital commitment; Savings Plans suit predictable demand;
+Spot can reduce eligible fault-tolerant capacity by up to 90%.</li>
+<li>Workloads stay in the corporate AWS security perimeter and can use private
+networking and existing cloud operations.</li>
+</ul>
+<h3 id="disadvantages-and-risks-1"><a class="header" href="#disadvantages-and-risks-1">Disadvantages and Risks</a></h3>
+<ul>
+<li>An always-on endpoint accumulates cost while idle. As one published reference
+point, AWS lists <code>ml.g7e.2xlarge</code> with one 96 GB GPU at USD 4.20/hour in a
+SageMaker inference comparison: about USD 3,066 per 730-hour month before
+storage, network, support, or engineering labour.</li>
+<li>GPU capacity and quotas may not be immediately available in the desired
+Region or Availability Zone.</li>
+<li>The team owns image and driver updates, runtime regressions, model loading,
+autoscaling, security patches, monitoring, and incident response.</li>
+<li>Spot is interruptible with a two-minute notice, so it is not the only
+capacity for interactive agent sessions.</li>
+<li>Multi-GPU instances can be costly and may add tensor-parallel complexity.</li>
+<li>Prompts still leave the premises, and the instance needs carefully controlled
+model-download and software-supply-chain paths.</li>
+</ul>
+<h3 id="best-use-1"><a class="header" href="#best-use-1">Best Use</a></h3>
+<p>Use AWS GPU hosting when CUDA compatibility, high concurrency, elasticity,
+multi-node scaling, or normal cloud HA is more important than the lowest
+steady-state single-node cost. It is also the safest technical validation
+environment for a model whose authors recommend vLLM or SGLang but whose Apple
+Silicon support is not yet qualified.</p>
+<h2 id="option-3-mac-studio-m5-ultra-with-256-gb"><a class="header" href="#option-3-mac-studio-m5-ultra-with-256-gb">Option 3: Mac Studio M5 Ultra with 256 GB</a></h2>
+<h3 id="advantages-2"><a class="header" href="#advantages-2">Advantages</a></h3>
+<ul>
+<li>Prompts, retrieved documents, tool results, and model output can remain on the
+corporate network. Inference can continue without cloud egress.</li>
+<li>Fixed capital cost eliminates per-token charges for accepted local traffic
+and makes a fully utilized node easier to budget.</li>
+<li>The 256 GB unified-memory pool is much larger than a single mainstream cloud
+GPU’s memory and avoids CPU-to-discrete-GPU weight copies. It gives the team
+room to test multiple quantizations and models substantially larger than 27B.</li>
+<li>Apple specifies 1.2 TB/s unified-memory bandwidth. <code>llama.cpp</code> treats Apple
+Silicon as a first-class Metal target and provides an OpenAI-compatible HTTP
+server. Apple’s MLX and MLX-LM support Apple-Silicon generation,
+quantization, fine-tuning, and distributed inference.</li>
+<li>The unit is compact, quiet, and includes 10 Gb Ethernet; no data-centre GPU
+rack, high-amperage circuit, or cloud GPU reservation is required for a
+single-node pilot.</li>
+<li>It provides a reusable private-model lab for evaluation, quantization,
+embedding experiments, regression testing, and incident diagnosis even when
+local inference is not the final production route.</li>
+<li>AppleCare for Enterprise can add 24/7 telephone support and eligible onsite
+repair, reducing—but not eliminating—the new-platform support risk.</li>
+</ul>
+<h3 id="disadvantages-and-risks-2"><a class="header" href="#disadvantages-and-risks-2">Disadvantages and Risks</a></h3>
+<ul>
+<li>The M5 Ultra system is pre-release as of this decision date. Framework and
+model-kernel compatibility, stability under sustained load, thermals, and
+real throughput are unproved for the Portal workload.</li>
+<li>A Mac Studio is a workstation, not an automatically replaceable cloud
+instance. One unit is a single failure and maintenance domain; production HA
+requires at least a second qualified route, normally Bedrock at first.</li>
+<li>The CUDA production ecosystem remains broader. The best-performing upstream
+recipe for a newly released architecture may arrive first for vLLM/SGLang on
+NVIDIA, while the Mac waits for MLX or GGUF conversion and kernel support.</li>
+<li>The inference server must normally run natively to use Metal. The team cannot
+assume that its Linux/CUDA container image will receive Mac GPU acceleration.</li>
+<li>Unified memory is shared by weights, KV cache, runtime, and the operating
+system. A model fitting by weight size alone does not prove the desired
+context length or concurrency.</li>
+<li>Long contexts can consume large KV caches and reduce concurrent sessions.
+Quantization can reduce quality, and model-specific tool parsing may be less
+robust than frontier APIs.</li>
+<li>GPU, memory, and internal storage cannot be upgraded later. A wrong sizing or
+immature runtime choice becomes sunk cost.</li>
+<li>macOS lifecycle, MDM, service accounts, FileVault recovery, certificates,
+unattended reboot, monitoring, log collection, backup, and physical security
+must be added to the support team’s runbooks.</li>
+<li>Open-weight does not mean unrestricted. Each exact model licence, acceptable
+use policy, attribution requirement, and third-party conversion must pass
+legal and supply-chain review.</li>
+</ul>
+<h3 id="best-use-2"><a class="header" href="#best-use-2">Best Use</a></h3>
+<p>Use a Mac fleet as the primary route only for qualified private workloads with
+steady demand and a model that meets the business outcome gate. Fleet size must
+come from measured throughput at the required context and concurrency. Retain a
+paid fallback for policy-eligible overflow, failure, and tasks requiring
+frontier quality.</p>
+<h2 id="cost-model-and-break-even"><a class="header" href="#cost-model-and-break-even">Cost Model and Break-Even</a></h2>
+<p>Do not compare the Mac purchase price only with one month’s peak Bedrock bill.
+Use the same workload trace, successful-workflow denominator, support labour,
+availability target, and three-year period for every option.</p>
+<h3 id="required-inputs"><a class="header" href="#required-inputs">Required Inputs</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Input</th><th>Symbol</th></tr>
+</thead>
+<tbody>
+<tr><td>Monthly non-cached input tokens</td><td><code>I</code></td></tr>
+<tr><td>Monthly output/reasoning tokens</td><td><code>O</code></td></tr>
+<tr><td>Cached input by cache class</td><td><code>C</code></td></tr>
+<tr><td>Required concurrency and p95 time to first/output token</td><td>workload SLO</td></tr>
+<tr><td>Successful workflow rate and human-rework cost</td><td>quality cost</td></tr>
+<tr><td>Mac purchase, tax, support, spare/HA node, power, and labour</td><td>local TCO</td></tr>
+<tr><td>GPU instance hours, storage, snapshots, network, support, and labour</td><td>AWS GPU TCO</td></tr>
+<tr><td>Fallback percentage and its token price</td><td>fallback TCO</td></tr>
+</tbody>
+</table>
+</div>
+<p>The basic monthly formulas are:</p>
+<pre><code class="language-text">Bedrock = I * input_rate + O * output_rate + cache and feature charges
+
+AWS GPU = instance_hours * hourly_rate + storage + network + operations
+
+Mac = (purchase + support + power + operations + replacement reserve) / life_months
+      + paid_fallback
+
+Cost per successful workflow = total cost / workflows passing the outcome gate
+</code></pre>
+<p>For a local fleet, calculate required nodes from both compute dimensions and
+availability:</p>
+<pre><code class="language-text">prefill_nodes = peak_uncached_input_tokens_per_second
+                / (measured_prefill_tokens_per_second_per_node * target_utilization)
+
+decode_nodes = peak_output_tokens_per_second
+               / (measured_decode_tokens_per_second_per_node * target_utilization)
+
+capacity_nodes = ceiling(max(prefill_nodes, decode_nodes, concurrency_nodes))
+
+production_nodes = capacity_nodes + failure/maintenance reserve
+</code></pre>
+<p>Use no more than 70 percent sustained target utilization until soak testing
+supports a different value. The reserve must permit one node to be patched or
+failed without violating the service objective. For a small fleet this normally
+means N+1, not one production node plus an untested purchase plan.</p>
+<h3 id="illustrative-hardware-only-threshold"><a class="header" href="#illustrative-hardware-only-threshold">Illustrative Hardware-Only Threshold</a></h3>
+<p>The following is a sensitivity example, not a budget quote. It uses the US
+USD 11,299 price for the 256 GB/2 TB configuration, adds a 15% support and
+replacement reserve, assumes 350 W average wall power at USD 0.15/kWh, and
+amortizes over 36 months. That is about USD 14,374 total or USD 399/month. It
+excludes tax, facilities, engineering labour, downtime, and a second HA node.</p>
+<p>For a workload mix of four input tokens per output token, USD 399/month is
+approximately equivalent to:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Comparator</th><th>Published rates (USD/M input, output)</th><th>Approximate monthly tokens at USD 399</th></tr>
+</thead>
+<tbody>
+<tr><td>Claude Fable 5</td><td>10, 50</td><td>17.7M input + 4.4M output</td></tr>
+<tr><td>Claude Opus 5</td><td>5, 25</td><td>35.5M input + 8.9M output</td></tr>
+<tr><td>Bedrock Gemma 4 31B, US</td><td>0.14, 0.40</td><td>1.66B input + 416M output</td></tr>
+</tbody>
+</table>
+</div>
+<p>This reveals both sides of the case:</p>
+<ul>
+<li>compared with premium frontier traffic, a busy local node can recover its
+hardware cost at a moderate token volume;</li>
+<li>compared with a cheap hosted open model, token spend alone may never justify
+the Mac at the expected demand; and</li>
+<li>privacy, offline operation, local experimentation, stable capacity, and
+avoided data-governance work may therefore be the decisive benefits.</li>
+</ul>
+<p>Replace every assumption with a procurement quote and 30 days of LLM Gateway
+usage telemetry. Convert all candidates to one currency on the approval date.</p>
+<h3 id="cost-at-the-expected-traffic-scale"><a class="header" href="#cost-at-the-expected-traffic-scale">Cost at the Expected Traffic Scale</a></h3>
+<p>The following sensitivity shows input charges only, uses 30 days per month,
+published standard uncached-input rates, and assumes every input token is an
+uncached token. It intentionally excludes output charges because the observed
+agent ratio is much more input-heavy than the earlier four-to-one assumption.
+It also excludes prompt-cache, batch, volume, regional, and negotiated
+discounts. It is a maximum uncached-input exposure, not an invoice forecast.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Daily logical input volume</th><th style="text-align: right">Claude Opus 5 input/month</th><th style="text-align: right">Claude Fable 5 input/month</th><th style="text-align: right">Bedrock Gemma 4 31B US input/month</th></tr>
+</thead>
+<tbody>
+<tr><td>100M input</td><td style="text-align: right">USD 15,000</td><td style="text-align: right">USD 30,000</td><td style="text-align: right">USD 420</td></tr>
+<tr><td>500M input growth case</td><td style="text-align: right">USD 75,000</td><td style="text-align: right">USD 150,000</td><td style="text-align: right">USD 2,100</td></tr>
+</tbody>
+</table>
+</div>
+<p>Add measured output and reasoning-token charges separately. Then replace the
+uncached assumption with the actual provider-specific cache-read and cache-write
+rates. For local capacity, use measured uncached/cache-write prefill work rather
+than pricing every logical cache read as a fresh prefill.</p>
+<p>At this scale, replacing routine premium-model traffic has very large potential
+savings. Even a multi-node local fleet can have a short capital payback relative
+to Opus or Fable. However, the cheap hosted-open-model column remains the
+critical control: the local fleet must beat its cost, privacy, or operational
+properties, and it must do so per successful workflow.</p>
+<p>For example, eight illustrative USD 399/month Mac nodes are about USD 3,192 per
+month on the same hardware-only assumptions, before labour, network, support,
+spares beyond those eight nodes, and fallback. That can be far below uncached
+premium-model input, but it exceeds the raw Gemma input charge at 100M logical
+input tokens per day. Eight is an illustration, not a sizing recommendation;
+only a cache-aware replay benchmark can determine whether the workload needs
+two nodes, eight nodes, or a higher-throughput architecture.</p>
+<h3 id="cost-reduction-before-buying-capacity"><a class="header" href="#cost-reduction-before-buying-capacity">Cost Reduction Before Buying Capacity</a></h3>
+<p>Apply these controls to all three hosting options:</p>
+<ul>
+<li>cache stable system prompts, tool schemas, policies, repository summaries,
+and test-suite metadata with model-specific cache keys;</li>
+<li>send deltas and bounded log windows instead of entire histories;</li>
+<li>summarize or index historical test output once, then retrieve only evidence
+needed for the current decision;</li>
+<li>use deterministic code for polling, parsing, deduplication, thresholding, and
+known remediations; invoke an LLM only for semantic work;</li>
+<li>route classification and summarization to the smallest model that passes its
+task-specific gate;</li>
+<li>stop agent loops with explicit budgets, repeated-state detection, and
+idempotent action checks; and</li>
+<li>deduplicate identical incidents and fan out one diagnosis to affected
+workflows instead of recomputing it.</li>
+</ul>
+<p>The lowest-cost token is the one the architecture does not need to infer.</p>
+<h2 id="why-256-gb-instead-of-a-smaller-mac"><a class="header" href="#why-256-gb-instead-of-a-smaller-mac">Why 256 GB Instead of a Smaller Mac</a></h2>
+<p>The 27B dense model is not the economic reason to buy 256 GB: a quantized 27B
+model fits much smaller accelerators. The memory headroom is justified only if
+the roadmap includes one or more of the following:</p>
+<ul>
+<li>testing 70B-to-120B-class quantized models;</li>
+<li>evaluating Qwen3.8-Flash-Next-class large MoE artifacts after runtime and
+licence qualification;</li>
+<li>retaining longer KV caches or serving multiple controlled contexts;</li>
+<li>running an embedding/reranking model beside generation; or</li>
+<li>keeping two model revisions resident to reduce changeover time.</li>
+</ul>
+<p>If the pilot corpus and concurrency need only a 27B model, benchmark a smaller
+M5 Max or lower-memory Ultra configuration before procurement. Unused unified
+memory does not improve output quality.</p>
+<h2 id="other-viable-options"><a class="header" href="#other-viable-options">Other Viable Options</a></h2>
+<h3 id="bedrock-hosted-open-models"><a class="header" href="#bedrock-hosted-open-models">Bedrock-Hosted Open Models</a></h3>
+<p>This is the most important fourth option. Test Gemma, Qwen, GPT-OSS, Nemotron,
+Mistral, or another approved low-cost Bedrock model against the same workflow
+suite. It preserves managed operations and may cost less than local ownership
+at low utilization. Availability, licence, region, protocol behavior, and model
+quality still require qualification.</p>
+<h3 id="managed-dedicated-endpoint"><a class="header" href="#managed-dedicated-endpoint">Managed Dedicated Endpoint</a></h3>
+<p>Use SageMaker or another approved managed endpoint instead of raw EC2. It costs
+more than carefully operated EC2 but reduces serving, deployment, monitoring,
+and autoscaling work. Scale-to-zero or scheduled endpoints can be useful for
+development if cold-start time is acceptable.</p>
+<h3 id="on-premises-nvidia-server-or-appliance"><a class="header" href="#on-premises-nvidia-server-or-appliance">On-Premises NVIDIA Server or Appliance</a></h3>
+<p>A rack or tower server with one or more NVIDIA enterprise GPUs gives the support
+team Linux/CUDA, container, telemetry, and vendor-support familiarity. It may
+offer ECC memory, replaceable parts, and conventional redundancy depending on
+the chosen server. It normally costs more, uses more power, and provides less
+accelerator memory per purchase dollar than the Mac, but may be the better
+production platform when CUDA compatibility and enterprise hardware service
+are mandatory.</p>
+<h3 id="scheduled-or-spot-gpu-pool"><a class="header" href="#scheduled-or-spot-gpu-pool">Scheduled or Spot GPU Pool</a></h3>
+<p>Use On-Demand only for interactive baseline capacity and add Spot for
+interruptible evaluation, batch diagnosis, quantization, or test execution.
+This lowers idle cost without claiming Spot is safe for a live agent session.</p>
+<h3 id="hybrid-model-cascade"><a class="header" href="#hybrid-model-cascade">Hybrid Model Cascade</a></h3>
+<p>Use a small local or inexpensive hosted model for classification, retrieval
+planning, summarization, and simple diagnosis; escalate only difficult or
+low-confidence steps to Opus or Fable. Prompt caching, context compaction,
+bounded tool output, and request deduplication can reduce cost regardless of
+hardware.</p>
+<h2 id="proposed-light-portal-architecture"><a class="header" href="#proposed-light-portal-architecture">Proposed Light Portal Architecture</a></h2>
+<p>The deployment does not change application-facing contracts:</p>
+<pre><code class="language-text">Light Portal diagnosis / light-agent / light-workflow
+                         |
+                         | Public Alias
+                         v
+                    llm-gateway
+                    /         \
+       local replica group     Bedrock fallback / frontier escalation
+        /      |      \                       |
+       v       v       v                      v
+    Mac 01   Mac 02   Mac N          bedrock_converse provider
+    same immutable model, quantization, template, and runtime contract
+</code></pre>
+<p>For the Mac route, use <code>providerType: compatible</code> and the protocol actually
+proved by conformance, normally <code>providerProtocol: openai_chat</code>. <code>llama-server</code>
+already exposes an OpenAI-compatible chat endpoint and supports parallel
+decoding. MLX-LM is a promising alternative, but the exact released server API
+and tool-call behavior must be pinned and tested.</p>
+<p>Follow <a href="#local-model-provider-transport-for-llm-gateway">Local Model Provider Transport For LLM Gateway</a>:
+terminate private TLS on the model host, bind the raw inference listener to
+loopback, expose only required inference and identity paths, and publish the
+provider through the normal immutable
+<a href="#llm-gateway-configuration-topology">LLM Gateway topology</a>. That transport design is still
+marked proposed, so its implementation and production qualification are a
+dependency—not an already available guarantee.</p>
+<p>The alias should express capability and policy, such as
+<code>diagnosis-private-medium</code>, rather than hardware or a mutable model name. Route
+order, timeout, retry, paid fallback, and data-classification policy must be
+explicit. Never send data that is restricted to premises through a cloud
+fallback.</p>
+<h3 id="replica-routing-gap"><a class="header" href="#replica-routing-gap">Replica Routing Gap</a></h3>
+<p>The current LLM Gateway alias contains an ordered list of deployments. Dispatch
+tries the first healthy deployment with an available concurrency permit and
+spills to later candidates when an earlier deployment is unavailable or full.
+This supports bounded fallback and some capacity spillover, but it is not an
+explicit round-robin, least-loaded, or cache-affine replica scheduler.</p>
+<p>For a multi-Mac fleet serving the same model, add a replica-group routing
+contract to LLM Gateway rather than treating independent machines as
+semantically different fallback models. A replica group must require the same
+model revision, weight digest, quantization, tokenizer, chat template,
+capability evidence, and pricing basis across members. It must provide:</p>
+<ul>
+<li>per-node health, readiness, concurrency, queue depth, and circuit state;</li>
+<li>least-loaded or power-of-two-choices selection for new stateless work;</li>
+<li>stable session-affinity or consistent-hash routing for multi-turn agents so
+reusable prompt/KV-cache prefixes return to the same Mac;</li>
+<li>bounded rebalance when a node is saturated, draining, failed, or patched;</li>
+<li>immutable audit evidence recording the physical node that served each call;</li>
+<li>no retry on a different node after response bytes or an action-bearing tool
+call have been accepted; and</li>
+<li>an N+1 failure reserve with a distinct Bedrock escalation tier.</li>
+</ul>
+<p>An internal load balancer in front of the Macs is an interim alternative, but
+it hides per-node capacity and physical-runtime identity from LLM Gateway. If
+used, it must implement health-aware consistent hashing and expose trustworthy
+node identity in signed response/audit metadata. Native replica-group routing
+in LLM Gateway is the preferred production design.</p>
+<p>Cache affinity is an optimization, not correctness state. A request must remain
+correct after a cache miss or failover, although it may be slower. Report cache
+hit rate by replica and session; an aggregate fleet hit rate can hide one hot
+node and several ineffective replicas.</p>
+<h2 id="90-day-pilot"><a class="header" href="#90-day-pilot">90-Day Pilot</a></h2>
+<h3 id="phase-0-before-purchase"><a class="header" href="#phase-0-before-purchase">Phase 0: Before Purchase</a></h3>
+<ol>
+<li>Export 100-300 representative, sanitized diagnosis and agent workflows,
+including tool errors, long logs, retries, and adverse inputs. Also capture
+at least seven days of arrival rate, token, cacheability, concurrency, and
+output-length distributions for capacity replay.</li>
+<li>Record Bedrock Opus 5, Fable 5, and at least two cheaper hosted models as
+quality/cost baselines.</li>
+<li>Define numeric gates: workflow success, unsafe action rate, tool-call schema
+accuracy, p50/p95 latency, concurrent sessions, aggregate prefill and decode
+tokens per second, prompt-cache hit rate, queue depth, maximum context,
+uptime, and operator hours.</li>
+<li>Obtain CAD quotes for the Mac, 2 TB storage, AppleCare, tax, power, and an HA
+strategy. Obtain matched AWS quotes in the same currency and Region.</li>
+<li>Complete security, privacy, model-licence, model-card, and third-party weight
+conversion review.</li>
+</ol>
+<h3 id="phase-1-lab-bring-up"><a class="header" href="#phase-1-lab-bring-up">Phase 1: Lab Bring-Up</a></h3>
+<ol>
+<li>Enrol the Mac through the corporate Apple/MDM process; enable FileVault,
+escrow recovery, host firewall, EDR, certificate management, patch policy,
+non-interactive service identity, and physical access controls.</li>
+<li>Pin macOS, Xcode/Metal dependencies, inference runtime, model revision,
+quantization, tokenizer, chat template, and hashes in a reproducible build
+record.</li>
+<li>Run the inference service natively under a supervised service. Do not expose
+a model-management UI or raw runtime port.</li>
+<li>Add private TLS, workload authentication, health/readiness, bounded queues,
+request/body/time limits, metrics, log redaction, and controlled model
+downloads.</li>
+<li>Integrate through LLM Gateway; do not let applications call the Mac directly.</li>
+</ol>
+<h3 id="phase-2-qualification"><a class="header" href="#phase-2-qualification">Phase 2: Qualification</a></h3>
+<p>Run every candidate at the intended quantization and context:</p>
+<ul>
+<li>cold/warm start, streaming, cancellation, malformed responses, and tool-call
+conformance;</li>
+<li>1, expected, peak, and overload concurrency with queue-saturation behavior;</li>
+<li>trace replay at the expected 100M logical-input-token daily load and a 500M
+growth sensitivity, with measured cached and uncached variants;</li>
+<li>session-affinity, cache-hit, rebalance, hot-node, and node-drain behaviour
+across at least two serving replicas;</li>
+<li>24-hour soak and repeated restart/update/rollback exercises;</li>
+<li>p50/p95 time to first token, output rate, memory pressure, power, temperature,
+and operator intervention;</li>
+<li>prompt, retrieved-data, secret, vector, and reasoning-text leak checks;</li>
+<li>model quality and human-rework comparison against Bedrock baselines; and</li>
+<li>local failure, Mac reboot, network partition, certificate rotation, and
+policy-safe fallback.</li>
+</ul>
+<h3 id="phase-3-controlled-production"><a class="header" href="#phase-3-controlled-production">Phase 3: Controlled Production</a></h3>
+<p>Start with an internal cohort and a low traffic percentage. Increase traffic
+only while fleet headroom remains above the failure reserve. Promote only an
+immutable qualified artifact. Maintain a one-action rollback to the previous
+local model or approved Bedrock route. Review quality, cache hit rate, queue
+depth, per-node saturation, fallback rate, uptime, cost, and support labour
+weekly.</p>
+<h2 id="approval-and-exit-gates"><a class="header" href="#approval-and-exit-gates">Approval and Exit Gates</a></h2>
+<p>Management should approve production use only if all of these hold:</p>
+<ol>
+<li>The local model meets the agreed successful-workflow rate and safety bar;
+aggregate public benchmark scores are insufficient.</li>
+<li>The fleet sustains the peak replay, expected concurrency, and p95 latency SLO
+at or below the approved utilization target without memory pressure or
+unbounded queues.</li>
+<li>Three-year risk-adjusted TCO is favourable for the measured local-eligible
+traffic, or privacy/offline requirements independently justify the spend.</li>
+<li>Security approves the on-premises data path, host hardening, model supply
+chain, licence, logging, and update process.</li>
+<li>Technical support accepts a named owner, spare/fallback plan, monitoring,
+restore procedure, and patch/rollback SLO.</li>
+<li>The production plan is N+1 or better for local-eligible traffic and retains
+a policy-safe fallback. One Mac is not represented as highly available.</li>
+<li>LLM Gateway local-provider transport and live conformance evidence have
+completed their production gates.</li>
+</ol>
+<p>Exit or resize the Mac route if the local model misses the quality gate, demand
+is too low to justify ownership, support effort exceeds the budget, required
+models remain unsupported on Metal/MLX, or traffic requires horizontal scale
+that is cheaper and safer in AWS.</p>
+<h2 id="decision-requested"><a class="header" href="#decision-requested">Decision Requested</a></h2>
+<p>Authorize the 90-day pilot budget for one M5 Ultra/256 GB/2 TB Mac Studio as a
+benchmark and qualification node, enterprise support coverage, security
+onboarding, and named engineering/support capacity. Retain the existing Bedrock
+path during the pilot. At day 60, present measured quality, cache effectiveness,
+per-node prefill/decode throughput, concurrency, support effort, required N+1
+fleet size, and projected three-year TCO. At day 90, decide among purchasing the
+measured production fleet, using the Mac only for selected lanes, choosing AWS
+GPU capacity, or retiring the local route.</p>
+<p>This staged decision limits downside while preserving the Mac’s central
+business value: private, predictable, reusable inference capacity with no
+per-token marginal charge for qualified local traffic.</p>
+<h2 id="references-1"><a class="header" href="#references-1">References</a></h2>
+<ul>
+<li><a href="https://www.apple.com/ca/newsroom/2026/08/apple-introduces-new-mac-studio-with-m5-max-and-m5-ultra/">Apple Canada: M5 Ultra Mac Studio announcement and availability</a></li>
+<li><a href="https://www.apple.com/ca/shop/buy-mac/mac-studio/m5-ultra-chip-36-core-cpu-80-core-gpu-256gb-memory-1tb-storage">Apple Canada: 256 GB M5 Ultra configuration and price</a></li>
+<li><a href="https://www.apple.com/ca/mac-studio/specs/">Apple Canada: Mac Studio technical specifications</a></li>
+<li><a href="https://www.apple.com/support/professional/enterprise/">AppleCare for Enterprise</a></li>
+<li><a href="https://aws.amazon.com/bedrock/pricing/">Amazon Bedrock pricing</a></li>
+<li><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-opus-5.html">Amazon Bedrock: Claude Opus 5</a></li>
+<li><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-fable-5.html">Amazon Bedrock: Claude Fable 5</a></li>
+<li><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/data-protection.html">Amazon Bedrock data protection</a></li>
+<li><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/data-retention.html">Amazon Bedrock data retention</a></li>
+<li><a href="https://aws.amazon.com/blogs/machine-learning/accelerate-generative-ai-inference-on-amazon-sagemaker-ai-with-g7e-instances/">AWS G7e inference performance and cost example</a></li>
+<li><a href="https://docs.aws.amazon.com/ec2/latest/instancetypes/ac.html">Amazon EC2 accelerated instance specifications</a></li>
+<li><a href="https://aws.amazon.com/ec2/spot/">Amazon EC2 Spot pricing and interruption model</a></li>
+<li><a href="https://huggingface.co/Qwen/Qwen3.8-27B">Qwen3.8-27B model card</a></li>
+<li><a href="https://huggingface.co/Qwen/Qwen3.8-Flash-Next">Qwen3.8-Flash-Next model card</a></li>
+<li><a href="https://huggingface.co/Qwen/Qwen3.8-Flash-Next/blob/main/LICENSE">Qwen3.8-Flash-Next licence</a></li>
+<li><a href="https://github.com/ggml-org/llama.cpp">llama.cpp Metal and OpenAI-compatible server</a></li>
+<li><a href="https://github.com/ml-explore/mlx-lm">MLX-LM</a></li>
+<li><a href="https://github.com/ml-explore/mlx/blob/main/docs/src/usage/distributed.rst">MLX distributed inference</a></li>
+<li><a href="https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage">OpenAI API usage fields for cached and uncached input</a></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="control-plane-policy-publication-through-config-server"><a class="header" href="#control-plane-policy-publication-through-config-server">Control-Plane Policy Publication Through Config Server</a></h1>
-<h2 id="status-3"><a class="header" href="#status-3">Status</a></h2>
+<h2 id="status-5"><a class="header" href="#status-5">Status</a></h2>
 <p>Proposed target architecture.</p>
 <p>This document defines how Light Portal publishes immutable policy and runtime
 configuration to independently operated workloads such as Agent, Gateway, and
@@ -13374,7 +14849,7 @@ Workflow service.</p>
 <p>The development placement and migration contract for the Config Server,
 Knowledge, and Host operational databases is defined in
 <a href="#operational-storage-registration-and-development-postgresql-topology">Operational Storage Registration And Development PostgreSQL Topology</a>.</p>
-<h2 id="decision-summary-2"><a class="header" href="#decision-summary-2">Decision Summary</a></h2>
+<h2 id="decision-summary-3"><a class="header" href="#decision-summary-3">Decision Summary</a></h2>
 <p>Light Portal is the policy authoring and publication control plane. Agent,
 Gateway, Knowledge, and other independently operated application runtimes are
 Config Server policy consumers. They receive control-plane configuration only
@@ -13516,7 +14991,7 @@ path for Config Server runtime services.</p>
 </tbody>
 </table>
 </div>
-<h2 id="goals-17"><a class="header" href="#goals-17">Goals</a></h2>
+<h2 id="goals-18"><a class="header" href="#goals-18">Goals</a></h2>
 <ul>
 <li>Prevent Config Server runtimes from using Light Portal database tables as a
 control-plane policy source.</li>
@@ -13536,7 +15011,7 @@ snapshot is invalid or temporarily unavailable.</li>
 <li>Provide sufficient identifiers and digests for audit, diagnosis, and
 cross-service consistency checks.</li>
 </ul>
-<h2 id="non-goals-20"><a class="header" href="#non-goals-20">Non-Goals</a></h2>
+<h2 id="non-goals-21"><a class="header" href="#non-goals-21">Non-Goals</a></h2>
 <ul>
 <li>Config Server does not make policy decisions for a runtime request.</li>
 <li>Light Portal does not become the runtime session, retrieval, or Gateway data
@@ -13661,7 +15136,7 @@ shortcuts.</li>
 version is immutable and remains addressable by its stable <code>wfDefId</code> and
 version string.</li>
 </ol>
-<h2 id="architecture-1"><a class="header" href="#architecture-1">Architecture</a></h2>
+<h2 id="architecture-2"><a class="header" href="#architecture-2">Architecture</a></h2>
 <pre><code class="language-text">Light Portal policy authoring
             |
             v
@@ -14434,7 +15909,7 @@ identifiers, database URLs, and local demo policy are non-secret configuration.<
 </ul>
 <p>Exit gate: both repositories recreate from the same signed release bundle and
 all required Agents remain healthy with matching publication evidence.</p>
-<h2 id="acceptance-criteria-1"><a class="header" href="#acceptance-criteria-1">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-2"><a class="header" href="#acceptance-criteria-2">Acceptance Criteria</a></h2>
 <p>The design is complete when:</p>
 <ol>
 <li>Agent, Gateway, and Knowledge start and serve authorized traffic without
@@ -14481,7 +15956,7 @@ remains an explicit internal contract that can later be replaced by Config
 Server delivery without changing pinned policy identities.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="operational-storage-registration-and-development-postgresql-topology"><a class="header" href="#operational-storage-registration-and-development-postgresql-topology">Operational Storage Registration And Development PostgreSQL Topology</a></h1>
-<h2 id="status-4"><a class="header" href="#status-4">Status</a></h2>
+<h2 id="status-6"><a class="header" href="#status-6">Status</a></h2>
 <p>Accepted and implemented target architecture. Phases P0 through P7 are
 complete, including runtime cutover and compatibility closure.</p>
 <p>This document defines the operational-storage boundary for Light Portal and the
@@ -14494,7 +15969,7 @@ default PostgreSQL topology for:</p>
 </ul>
 <p>The detailed delivery sequence is in
 <a href="#operational-storage-registration-implementation-plan">Operational Storage Registration Implementation Plan</a>.</p>
-<h2 id="decision-summary-3"><a class="header" href="#decision-summary-3">Decision Summary</a></h2>
+<h2 id="decision-summary-4"><a class="header" href="#decision-summary-4">Decision Summary</a></h2>
 <p>The <strong>Operational Storage</strong> page is a registration page. It does not provision,
 create, migrate, rotate, stop, or delete a customer’s database.</p>
 <p>An administrator opens the page from a selected Host and registers the database
@@ -15260,9 +16735,9 @@ the backend or runtime cannot yet understand and preserves rollback until the
 three Host mappings are qualified.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="global-and-tenant-entity-scope"><a class="header" href="#global-and-tenant-entity-scope">Global And Tenant Entity Scope</a></h1>
-<h2 id="status-5"><a class="header" href="#status-5">Status</a></h2>
+<h2 id="status-7"><a class="header" href="#status-7">Status</a></h2>
 <p>Proposed design for discussion.</p>
-<h2 id="decision-summary-4"><a class="header" href="#decision-summary-4">Decision Summary</a></h2>
+<h2 id="decision-summary-5"><a class="header" href="#decision-summary-5">Decision Summary</a></h2>
 <p>Use <code>host_id IS NULL</code> as the storage representation for a global row when one
 table intentionally contains both global and host-scoped definitions. Use a
 non-null <code>host_id</code> for a host-owned row. Do not add a second <code>common</code> flag to
@@ -15427,7 +16902,7 @@ executions without an explicit adoption decision.</p>
 <h3 id="option-a-host-owned-row-with-common--yn"><a class="header" href="#option-a-host-owned-row-with-common--yn">Option A: Host-owned Row With <code>common = Y/N</code></a></h3>
 <p>The row always has an owner host. <code>common = 'Y'</code> makes it visible to other
 hosts.</p>
-<h4 id="advantages"><a class="header" href="#advantages">Advantages</a></h4>
+<h4 id="advantages-3"><a class="header" href="#advantages-3">Advantages</a></h4>
 <ul>
 <li>Preserves the original author or owning tenant.</li>
 <li>Allows tenant-authored content to be published without copying its body.</li>
@@ -15461,7 +16936,7 @@ Do not call the published row global and do not reuse <code>common</code> as its
 authorization policy.</p>
 <h3 id="option-b-nullable-host_id"><a class="header" href="#option-b-nullable-host_id">Option B: Nullable <code>host_id</code></a></h3>
 <p>Null means a platform-global definition; a value means a host definition.</p>
-<h4 id="advantages-1"><a class="header" href="#advantages-1">Advantages</a></h4>
+<h4 id="advantages-1-1"><a class="header" href="#advantages-1-1">Advantages</a></h4>
 <ul>
 <li>One authoritative column defines scope.</li>
 <li>Aligns naturally with partial unique indexes and scoped semantic identity.</li>
@@ -15496,7 +16971,7 @@ surrogate IDs. It is especially suitable for taxonomy and reference data.</p>
 <h3 id="option-c-separate-global-definition-and-host-adoption-tables"><a class="header" href="#option-c-separate-global-definition-and-host-adoption-tables">Option C: Separate Global Definition And Host Adoption Tables</a></h3>
 <p>The definition is global. A registration, installation, or binding records the
 host’s decision to use it.</p>
-<h4 id="advantages-2"><a class="header" href="#advantages-2">Advantages</a></h4>
+<h4 id="advantages-2-1"><a class="header" href="#advantages-2-1">Advantages</a></h4>
 <ul>
 <li>Separates shared knowledge from tenant authorization and lifecycle.</li>
 <li>Supports host- and environment-specific restrictions without duplicating the
@@ -15850,9 +17325,9 @@ structure is intentional: it makes cross-tenant impact explicit and auditable.</
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="global-and-tenant-knowledge-bases-for-shared-agent-retrieval"><a class="header" href="#global-and-tenant-knowledge-bases-for-shared-agent-retrieval">Global And Tenant Knowledge Bases For Shared Agent Retrieval</a></h1>
-<h2 id="status-6"><a class="header" href="#status-6">Status</a></h2>
+<h2 id="status-8"><a class="header" href="#status-8">Status</a></h2>
 <p>Proposed design for discussion.</p>
-<h2 id="decision-summary-5"><a class="header" href="#decision-summary-5">Decision Summary</a></h2>
+<h2 id="decision-summary-6"><a class="header" href="#decision-summary-6">Decision Summary</a></h2>
 <p>Add Knowledge Bases as a Light Portal resource with two ownership scopes:</p>
 <ul>
 <li>knowledge_base_t.host_id IS NULL represents a platform-owned global
@@ -15985,7 +17460,7 @@ Agent’s perspective.</li>
 <p>The workflow schema already has a data-store concept for RAG. Knowledge Bases
 should become the concrete Light Portal resource referenced by that concept
 rather than creating workflow-local copies of documents.</p>
-<h2 id="goals-18"><a class="header" href="#goals-18">Goals</a></h2>
+<h2 id="goals-19"><a class="header" href="#goals-19">Goals</a></h2>
 <ul>
 <li>Let each tenant create and administer multiple Knowledge Bases.</li>
 <li>Let platform administrators create global Knowledge Bases that every tenant
@@ -16014,7 +17489,7 @@ API.</li>
 inputs or contracts changed, while keeping deletion, permission, metadata,
 citation, and retrieval behavior transactionally consistent.</li>
 </ul>
-<h2 id="non-goals-21"><a class="header" href="#non-goals-21">Non-Goals</a></h2>
+<h2 id="non-goals-22"><a class="header" href="#non-goals-22">Non-Goals</a></h2>
 <ul>
 <li>A Knowledge Base is not conversational memory or session history.</li>
 <li>It is not a general file-authoring or content-management system.</li>
@@ -19120,7 +20595,7 @@ disconnected seeds, graph-budget exhaustion, and planner timeout.</li>
 <li>Promote GraphRAG only for tenants and Knowledge Bases where the evidence
 supports it.</li>
 </ul>
-<h2 id="acceptance-criteria-2"><a class="header" href="#acceptance-criteria-2">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-3"><a class="header" href="#acceptance-criteria-3">Acceptance Criteria</a></h2>
 <p>Each criterion is tagged with the earliest delivery gate that must enforce it.
 Phase 1a is complete when every P1a criterion passes; later phases add their own
 criteria without postponing the core trust boundary:</p>
@@ -19621,7 +21096,7 @@ retrieval without partitioning the graph by visibility boundary;</li>
 <li>query-audit retention and whether raw query text is stored, hashed, or
 omitted by policy.</li>
 </ul>
-<h2 id="references-1"><a class="header" href="#references-1">References</a></h2>
+<h2 id="references-2"><a class="header" href="#references-2">References</a></h2>
 <p>Current Light Portal design and implementation references:</p>
 <ul>
 <li><a href="#agent-memory-event-refactor">Agent Memory Event Refactor</a></li>
@@ -19659,7 +21134,7 @@ Platform defaults or SLOs</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="portal-operational-access-boundary-for-light-knowledge"><a class="header" href="#portal-operational-access-boundary-for-light-knowledge">Portal Operational Access Boundary For Light Knowledge</a></h1>
-<h2 id="status-7"><a class="header" href="#status-7">Status</a></h2>
+<h2 id="status-9"><a class="header" href="#status-9">Status</a></h2>
 <p>Proposed implementation design.</p>
 <p>This page narrows the read, command, and database-boundary decision in
 <a href="#global-and-tenant-knowledge-bases-for-shared-agent-retrieval">Global And Tenant Knowledge Bases For Shared Agent Retrieval</a>
@@ -20939,7 +22414,7 @@ transcript with the qualification evidence.</li>
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="workflow-version-and-publication"><a class="header" href="#workflow-version-and-publication">Workflow Version and Publication</a></h1>
-<h2 id="status-8"><a class="header" href="#status-8">Status</a></h2>
+<h2 id="status-10"><a class="header" href="#status-10">Status</a></h2>
 <p>Accepted design.</p>
 <p>The workflow draft, publish, immutable-version, published-version selection,
 and comparison flows are implemented. Publishing one or more tools to a
@@ -20960,7 +22435,7 @@ entry;</li>
 <li>how the selected tool and workflow revisions eventually become Gateway
 configuration through Config Server snapshots.</li>
 </ul>
-<h2 id="decision-summary-6"><a class="header" href="#decision-summary-6">Decision Summary</a></h2>
+<h2 id="decision-summary-7"><a class="header" href="#decision-summary-7">Decision Summary</a></h2>
 <ol>
 <li>A workflow has one stable <code>wfDefId</code> for its complete version history.</li>
 <li><code>(hostId, wfDefId, version)</code> identifies one workflow version.</li>
@@ -20977,7 +22452,7 @@ them on the Tool form.</li>
 <li>A Gateway change becomes live only after Instance Admin creates a new
 configuration snapshot and selects it as current.</li>
 </ol>
-<h2 id="goals-19"><a class="header" href="#goals-19">Goals</a></h2>
+<h2 id="goals-20"><a class="header" href="#goals-20">Goals</a></h2>
 <ul>
 <li>Let an author iterate frequently without creating duplicate workflow
 identities.</li>
@@ -20993,7 +22468,7 @@ workflow.</li>
 <li>Reuse Config Server snapshots for deployment activation and configuration
 drift prevention.</li>
 </ul>
-<h2 id="non-goals-22"><a class="header" href="#non-goals-22">Non-Goals</a></h2>
+<h2 id="non-goals-23"><a class="header" href="#non-goals-23">Non-Goals</a></h2>
 <ul>
 <li>Publishing a workflow does not deploy it to a Gateway.</li>
 <li>Saving a tool does not change a live Gateway.</li>
@@ -21391,7 +22866,7 @@ latency, activation failures, and last-known-good fallback events.</p>
 <li>Require explicit current-pointer activation.</li>
 <li>Add removal, retry, failure recovery, and rollback tests.</li>
 </ul>
-<h2 id="acceptance-criteria-3"><a class="header" href="#acceptance-criteria-3">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-4"><a class="header" href="#acceptance-criteria-4">Acceptance Criteria</a></h2>
 <ul>
 <li>Multiple versions share one <code>wfDefId</code> and appear as one workflow history.</li>
 <li>A draft can be saved repeatedly without changing its version.</li>
@@ -21414,7 +22889,7 @@ configuration snapshot.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="endpoint-tools-and-workflow-access"><a class="header" href="#endpoint-tools-and-workflow-access">Endpoint Tools and Workflow Access</a></h1>
-<h2 id="status-9"><a class="header" href="#status-9">Status</a></h2>
+<h2 id="status-11"><a class="header" href="#status-11">Status</a></h2>
 <p>Implemented for the REST/HTTP first slice, with qualification still pending.
 MCP and JSON-RPC palette builders remain later protocol extensions of the same
 identity and grant model. Authentication metadata must explicitly resolve to
@@ -21436,7 +22911,7 @@ metadata, and testing information needed by agents and workflow authors.</p>
 <p>The related designs are <a href="#agent-skill-and-api-endpoint-discovery">Agent Skill And API Endpoint Discovery</a>,
 <a href="#workflow-editor">Workflow Editor</a>, and
 <a href="#workflow-version-and-publication">Workflow Version and Publication</a>.</p>
-<h2 id="decision-summary-7"><a class="header" href="#decision-summary-7">Decision Summary</a></h2>
+<h2 id="decision-summary-8"><a class="header" href="#decision-summary-8">Decision Summary</a></h2>
 <ol>
 <li><code>api_endpoint_t.endpoint_id</code> remains the internal UUID identity used by
 database relationships.</li>
@@ -21775,7 +23250,7 @@ same workflow Tool grant.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="api-version-publication-to-gateway"><a class="header" href="#api-version-publication-to-gateway">API Version Publication To Gateway</a></h1>
-<h2 id="status-10"><a class="header" href="#status-10">Status</a></h2>
+<h2 id="status-12"><a class="header" href="#status-12">Status</a></h2>
 <p>Source implementation complete; integration and runtime qualification remain.</p>
 <p>The query, compiler, append-only command, locked graph-revision guard,
 replacement event ordering, snapshot-readiness guard, API Detail dialog, and
@@ -21818,7 +23293,7 @@ The action lets an authorized operator:</p>
 This command records a requested desired instance configuration change. The
 immutable configuration snapshot and current-pointer workflow described there
 remains the runtime publication boundary.</p>
-<h2 id="decision-summary-8"><a class="header" href="#decision-summary-8">Decision Summary</a></h2>
+<h2 id="decision-summary-9"><a class="header" href="#decision-summary-9">Decision Summary</a></h2>
 <ol>
 <li><strong>Publish to Gateway</strong> is a row action for a specific API version on
 <code>/app/apiDetail</code>.</li>
@@ -21856,7 +23331,7 @@ activation, and rollback.</li>
 <li>The existing <strong>Sync Config From API</strong> action may remain temporarily as an
 administrator repair path, but it is not the normal publication workflow.</li>
 </ol>
-<h2 id="goals-20"><a class="header" href="#goals-20">Goals</a></h2>
+<h2 id="goals-21"><a class="header" href="#goals-21">Goals</a></h2>
 <ul>
 <li>Reduce a multi-page operation to one API-version-centered publication flow.</li>
 <li>Support intentional parallel API versions and explicit replacement.</li>
@@ -21871,7 +23346,7 @@ snapshots.</li>
 <li>Leave room for future API-level publication sections without moving the
 action to another page.</li>
 </ul>
-<h2 id="non-goals-23"><a class="header" href="#non-goals-23">Non-Goals</a></h2>
+<h2 id="non-goals-24"><a class="header" href="#non-goals-24">Non-Goals</a></h2>
 <ul>
 <li>Access Overview does not become a deployment or publication page.</li>
 <li>Creating or editing an API version does not automatically change a Gateway.</li>
@@ -22455,7 +23930,7 @@ loaded the expected configuration.</li>
 graph, block publication/snapshot creation, and recover the accepted batch
 through replay.</li>
 </ul>
-<h2 id="acceptance-criteria-4"><a class="header" href="#acceptance-criteria-4">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-5"><a class="header" href="#acceptance-criteria-5">Acceptance Criteria</a></h2>
 <p>The first complete release is accepted when:</p>
 <ul>
 <li>an authorized <code>admin</code>, <code>host-admin</code>, or <code>api-admin</code> can publish from the
@@ -22482,7 +23957,7 @@ remain separate from the publication command.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="direct-event-replay-execution"><a class="header" href="#direct-event-replay-execution">Direct Event Replay Execution</a></h1>
-<h2 id="status-11"><a class="header" href="#status-11">Status</a></h2>
+<h2 id="status-13"><a class="header" href="#status-13">Status</a></h2>
 <p>Implemented on 2026-08-19 as the replacement for the asynchronous
 replay-worker execution path in <a href="#event-replay">Event Replay</a>.</p>
 <p>This design changes only the trigger and invocation path for an approved replay.
@@ -22525,7 +24000,7 @@ that caused the notification.</p>
 <p>Direct execution is both smaller and more precise: the command names one
 approved request and query processes that request only. Removing the idle
 dispatcher machinery also removes its shutdown delay from <code>hybrid-query</code>.</p>
-<h2 id="goals-21"><a class="header" href="#goals-21">Goals</a></h2>
+<h2 id="goals-22"><a class="header" href="#goals-22">Goals</a></h2>
 <ul>
 <li>Execute only the <code>(hostId, replayRequestId)</code> submitted by the user.</li>
 <li>Pass the user’s existing bearer token from command to query.</li>
@@ -22536,7 +24011,7 @@ gateway route.</li>
 <li>Remove permanent threads and database sessions that exist only to wait for
 replay work.</li>
 </ul>
-<h2 id="non-goals-24"><a class="header" href="#non-goals-24">Non-Goals</a></h2>
+<h2 id="non-goals-25"><a class="header" href="#non-goals-25">Non-Goals</a></h2>
 <ul>
 <li>No queue, scheduler, workflow, Kafka topic, or outbox consumer is added.</li>
 <li>No machine or bootstrap token is introduced for this call.</li>
@@ -22850,7 +24325,7 @@ runbook, and rollout tests. The durable database state remains authoritative;
 only the trigger changes from background discovery to the explicit user request.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="fast-snapshot-derived-database-bootstrap"><a class="header" href="#fast-snapshot-derived-database-bootstrap">Fast Snapshot-Derived Database Bootstrap</a></h1>
-<h2 id="status-12"><a class="header" href="#status-12">Status</a></h2>
+<h2 id="status-14"><a class="header" href="#status-14">Status</a></h2>
 <p>Implemented with a narrower ingestion-only boundary. The projection-aware
 bootstrap proposal retained below records the review history, but its barrier,
 materialization, convergence, DLQ, and database-ready requirements are
@@ -22883,7 +24358,7 @@ passes the parity gates in this document.</p>
 <p>Related designs are <a href="#rust-event-importer-design">Rust Event Importer</a>,
 <a href="#event-replay">Event Replay</a>, and
 <a href="#light-portal-install-1">Light Portal Install</a>.</p>
-<h2 id="problem-10"><a class="header" href="#problem-10">Problem</a></h2>
+<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
 <p>Database recreation currently imports <code>events.json</code> one event at a time. Each
 event opens and commits a PostgreSQL transaction. Guarded graph appends also
 commit and then poll projection convergence at 250 ms intervals before the next
@@ -22932,7 +24407,7 @@ that relationship for synthetic snapshot events.</p>
 <p>The importer must not attempt to enrich snapshot-derived <code>events.json</code> with
 original transaction metadata. Original-history export is a separate problem
 and is outside this design.</p>
-<h2 id="decision-summary-9"><a class="header" href="#decision-summary-9">Decision Summary</a></h2>
+<h2 id="decision-summary-10"><a class="header" href="#decision-summary-10">Decision Summary</a></h2>
 <ol>
 <li>The existing top-level JSON array remains the canonical snapshot-derived
 <code>events.json</code> format.</li>
@@ -22968,7 +24443,7 @@ advisory lock, and uses <code>READ COMMITTED</code> transactions.</li>
 adaptive low-latency poll and evaluates <code>LISTEN</code>/<code>NOTIFY</code> if polling remains
 material.</li>
 </ol>
-<h2 id="goals-22"><a class="header" href="#goals-22">Goals</a></h2>
+<h2 id="goals-23"><a class="header" href="#goals-23">Goals</a></h2>
 <ul>
 <li>Reduce empty-database recreation time as snapshot event volume grows.</li>
 <li>Preserve the current one-event logical transaction and DLQ isolation
@@ -22984,7 +24459,7 @@ and event baseline.</li>
 <li>Compare Java and Rust importers against the same fixtures and database
 postconditions.</li>
 </ul>
-<h2 id="non-goals-25"><a class="header" href="#non-goals-25">Non-Goals</a></h2>
+<h2 id="non-goals-26"><a class="header" href="#non-goals-26">Non-Goals</a></h2>
 <ul>
 <li>Recovering original history or adding original <code>transaction_id</code> metadata to
 the snapshot/event format.</li>
@@ -23786,7 +25261,7 @@ projection indexes, and temporary unlogged projections may be useful on an
 empty disposable destination, but each changes a different cost and some add a
 rewrite or recovery penalty. P0 measures them independently. None may bypass
 the canonical append path or remain active after the readiness gate.</p>
-<h2 id="open-questions-2"><a class="header" href="#open-questions-2">Open Questions</a></h2>
+<h2 id="open-questions-3"><a class="header" href="#open-questions-3">Open Questions</a></h2>
 <ol>
 <li>Which validator read-model dependencies, beyond graph-root resolution, need
 an initial barrier-registry entry?</li>
@@ -23800,7 +25275,7 @@ release-built archive sufficient for installation performance?</li>
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="composable-multi-host-snapshot-export-and-bootstrap"><a class="header" href="#composable-multi-host-snapshot-export-and-bootstrap">Composable Multi-Host Snapshot Export And Bootstrap</a></h1>
-<h2 id="status-13"><a class="header" href="#status-13">Status</a></h2>
+<h2 id="status-15"><a class="header" href="#status-15">Status</a></h2>
 <p>Accepted design. Phases 0 through 4 are implemented in the working
 repositories. The Phase 4 release cut-over requires signed v2 archives and
 trusted public-key publication; final release qualification still requires a
@@ -23811,7 +25286,7 @@ composition exercise.</p>
 That design defines how one generated <code>events.json</code> is imported efficiently;
 this design defines which user, membership, profile, and access events may be
 generated when the source environment contains more than one host.</p>
-<h2 id="decision-summary-10"><a class="header" href="#decision-summary-10">Decision Summary</a></h2>
+<h2 id="decision-summary-11"><a class="header" href="#decision-summary-11">Decision Summary</a></h2>
 <ol>
 <li>Treat <code>user_t</code> identity as environment-wide and emit at most one user birth
 event for each <code>user_id</code> in a complete environment bundle.</li>
@@ -23846,7 +25321,7 @@ exported row with no declared conversion disposition blocks publication.</li>
 mark a self-contained <code>standalone-host</code> bundle as non-composable and
 normalize exactly one membership as current.</li>
 </ol>
-<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
+<h2 id="problem-12"><a class="header" href="#problem-12">Problem</a></h2>
 <p>The current snapshot exporter selects active users through active
 <code>user_host_t</code> membership for one source host. It intentionally includes an
 active membership even when <code>current = FALSE</code>. This is correct for a user who
@@ -23891,7 +25366,7 @@ membership parent.</p>
 <p>The observed failure is not an isolated bad-row case. It is evidence that a
 host-filtered projection snapshot does not yet define a closed, composable
 user-identity boundary.</p>
-<h2 id="goals-23"><a class="header" href="#goals-23">Goals</a></h2>
+<h2 id="goals-24"><a class="header" href="#goals-24">Goals</a></h2>
 <ul>
 <li>Recreate a selected multi-host environment without duplicate user births.</li>
 <li>Preserve every included active membership and its host-scoped access state.</li>
@@ -23908,7 +25383,7 @@ migration workflows one documented contract.</li>
 <li>Provide an incremental migration path from the existing
 <code>UserCreatedEvent</code> projection behavior.</li>
 </ul>
-<h2 id="non-goals-26"><a class="header" href="#non-goals-26">Non-Goals</a></h2>
+<h2 id="non-goals-27"><a class="header" href="#non-goals-27">Non-Goals</a></h2>
 <ul>
 <li>Reconstruct original business history from projection snapshots.</li>
 <li>Make two legacy self-contained host exports composable by ignoring duplicate
@@ -24692,11 +26167,11 @@ without a satisfiable declared dependency and conversion disposition.</p>
 <h1 id="light-gateway-1"><a class="header" href="#light-gateway-1">Light Gateway</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="local-model-provider-transport-for-llm-gateway"><a class="header" href="#local-model-provider-transport-for-llm-gateway">Local Model Provider Transport For LLM Gateway</a></h1>
-<h2 id="status-14"><a class="header" href="#status-14">Status</a></h2>
+<h2 id="status-16"><a class="header" href="#status-16">Status</a></h2>
 <p>Proposed design for implementation and qualification.</p>
 <p>This design extends the completed OpenAI-compatible LLM gateway and the
 Embedding Space Contract. It does not change the public <code>/v1</code> client contract.</p>
-<h2 id="decision-summary-11"><a class="header" href="#decision-summary-11">Decision Summary</a></h2>
+<h2 id="decision-summary-12"><a class="header" href="#decision-summary-12">Decision Summary</a></h2>
 <p>The LLM gateway must support self-hosted model servers running on the same
 machine, in the same Kubernetes cluster, or elsewhere on an organization’s
 private network. Self-hosted models are a first-class production deployment,
@@ -24768,7 +26243,7 @@ using <code>developmentFixtures</code> or adding an unrestricted <code>allowHttp
 </tbody>
 </table>
 </div>
-<h2 id="goals-24"><a class="header" href="#goals-24">Goals</a></h2>
+<h2 id="goals-25"><a class="header" href="#goals-25">Goals</a></h2>
 <ul>
 <li>Make Ollama, llama.cpp, vLLM, and other OpenAI-compatible self-hosted servers
 production-capable Provider Deployments.</li>
@@ -24788,7 +26263,7 @@ verification. Leave mTLS as an optional later enhancement.</li>
 keep protected query, indexing, and standard traffic out of shared capacity
 domains when isolation is required.</li>
 </ul>
-<h2 id="non-goals-27"><a class="header" href="#non-goals-27">Non-Goals</a></h2>
+<h2 id="non-goals-28"><a class="header" href="#non-goals-28">Non-Goals</a></h2>
 <ul>
 <li>This design does not let callers submit provider URLs.</li>
 <li>It does not make <code>light-gateway</code> an Alias router or LLM protocol translator.</li>
@@ -25697,7 +27172,7 @@ query, indexing, and standard traffic use qualified capacity isolation.</li>
 </ul>
 <p>These risks require host hardening, workload identity, least-privilege network
 policy, model-artifact provenance, and the existing KB embedding-stability gate.</p>
-<h2 id="alternatives-considered"><a class="header" href="#alternatives-considered">Alternatives Considered</a></h2>
+<h2 id="alternatives-considered-1"><a class="header" href="#alternatives-considered-1">Alternatives Considered</a></h2>
 <h3 id="allow-all-http-provider-urls"><a class="header" href="#allow-all-http-provider-urls">Allow All HTTP Provider URLs</a></h3>
 <p>Rejected. It exposes credentials and data and turns a provider configuration
 surface into unrestricted internal-network access.</p>
@@ -25796,7 +27271,7 @@ embedding.</li>
 <li>Promote a KB index only after the Embedding Space Contract is verified through
 every eligible local deployment.</li>
 </ul>
-<h2 id="acceptance-criteria-5"><a class="header" href="#acceptance-criteria-5">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-6"><a class="header" href="#acceptance-criteria-6">Acceptance Criteria</a></h2>
 <ol>
 <li>An Ollama deployment may use an HTTPS Light Gateway sidecar or an explicitly
 approved, credential-free <code>private_plaintext</code> connection.</li>
@@ -25874,7 +27349,7 @@ protocol and capability behavior determines qualification.</li>
 does not allow administrators to edit results; the runner signs live evidence
 and the gateway verifies producer authenticity and endpoint binding.</li>
 </ul>
-<h2 id="references-2"><a class="header" href="#references-2">References</a></h2>
+<h2 id="references-3"><a class="header" href="#references-3">References</a></h2>
 <ul>
 <li><a href="https://docs.ollama.com/api/openai-compatibility">Ollama OpenAI compatibility</a></li>
 <li><a href="https://docs.ollama.com/faq">Ollama network and proxy guidance</a></li>
@@ -25885,7 +27360,7 @@ and the gateway verifies producer authenticity and endpoint binding.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-workflow-tool-access-approval"><a class="header" href="#light-workflow-tool-access-approval">Light Workflow Tool Access Approval</a></h1>
-<h2 id="status-15"><a class="header" href="#status-15">Status</a></h2>
+<h2 id="status-17"><a class="header" href="#status-17">Status</a></h2>
 <p>Proposed.</p>
 <p>The design reuses the Portal Workflow application, <code>ask</code> tasks, role-based
 worklists, and the existing workflow Tool grant events. It changes the
@@ -25916,7 +27391,7 @@ acknowledgement task to the original author.</p>
 <li><a href="#endpoint-tools-and-workflow-access">Endpoint Tools and Workflow Access</a></li>
 <li><a href="#workflow-version-and-publication">Workflow Version and Publication</a></li>
 </ul>
-<h2 id="decision-summary-12"><a class="header" href="#decision-summary-12">Decision Summary</a></h2>
+<h2 id="decision-summary-13"><a class="header" href="#decision-summary-13">Decision Summary</a></h2>
 <ol>
 <li>Runtime authorization remains an explicit Tool grant scoped to one workflow
 definition. Version-scoped grants are deferred because the current active
@@ -25939,7 +27414,7 @@ grants in the same transaction as task completion.</li>
 <li>The editor enables testing when it observes committed grants. The author’s
 acknowledgement task is informational and is not an authorization gate.</li>
 </ol>
-<h2 id="goals-25"><a class="header" href="#goals-25">Goals</a></h2>
+<h2 id="goals-26"><a class="header" href="#goals-26">Goals</a></h2>
 <ul>
 <li>Keep the workflow author inside the Workflow Editor.</li>
 <li>Allow an author to compose a complete draft while access is pending.</li>
@@ -25952,7 +27427,7 @@ locations, and justification instead of requiring raw ID exchange.</li>
 authorization authority.</li>
 <li>Fail closed when a Tool changes between request and approval.</li>
 </ul>
-<h2 id="non-goals-28"><a class="header" href="#non-goals-28">Non-Goals</a></h2>
+<h2 id="non-goals-29"><a class="header" href="#non-goals-29">Non-Goals</a></h2>
 <ul>
 <li>Do not grant a Tool to every workflow on the host by default.</li>
 <li>Do not let a pending request satisfy runtime authorization.</li>
@@ -26401,7 +27876,7 @@ request aggregate is keyed by <code>request_id</code> and must not reuse that ta
 <li>Consider preapproved Tool bundles for low-risk workflow namespaces while
 still materializing explicit per-workflow grants.</li>
 </ul>
-<h2 id="acceptance-criteria-6"><a class="header" href="#acceptance-criteria-6">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-7"><a class="header" href="#acceptance-criteria-7">Acceptance Criteria</a></h2>
 <p>The design is complete when:</p>
 <ol>
 <li>A new workflow receives a stable <code>wfDefId</code> before the author selects Tools.</li>
@@ -26424,7 +27899,7 @@ the workflow.</li>
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="claim-org-role-bootstrap"><a class="header" href="#claim-org-role-bootstrap">Claim Org Role Bootstrap</a></h1>
-<h2 id="problem-12"><a class="header" href="#problem-12">Problem</a></h2>
+<h2 id="problem-13"><a class="header" href="#problem-13">Problem</a></h2>
 <p>The Claim Org action lets a signed-in user create an organization and its default host from the profile menu. The <code>createOrg</code> form captures the organization owner, default subdomain, host description, and host owner. The backend create-org flow then creates the organization, the default host, and user-host membership rows in one transaction.</p>
 <p>That transaction is not sufficient for a usable tenant. A new host membership without role assignments can leave the owner unable to authorize after switching to the newly claimed host. The user profile/login query joins roles through <code>role_user_t</code> by the current <code>user_host_t.host_id</code>; if the current host has no active role rows for that user, role-dependent reads can return no user context.</p>
 <p>The Claim Org bootstrap must create the minimum administration roles and assignments for the default host at the same time as the organization and host.</p>
@@ -26454,7 +27929,7 @@ the workflow.</li>
 <li><code>role_permission_t</code></li>
 </ul>
 <p>The <code>role_user_t</code> table has a foreign key to <code>(host_id, role_id)</code> in <code>role_t</code>, so role rows must exist before the user-role assignments are inserted.</p>
-<h2 id="goals-26"><a class="header" href="#goals-26">Goals</a></h2>
+<h2 id="goals-27"><a class="header" href="#goals-27">Goals</a></h2>
 <ol>
 <li>A claimed organization must be immediately usable by the selected organization owner and host owner.</li>
 <li>The default host must receive deterministic administrative roles.</li>
@@ -26462,7 +27937,7 @@ the workflow.</li>
 <li>The event stream and projections must remain replayable and idempotent.</li>
 <li>The implementation must use the canonical role IDs already used by the portal data: <code>org-admin</code> and <code>host-admin</code>.</li>
 </ol>
-<h2 id="non-goals-29"><a class="header" href="#non-goals-29">Non-Goals</a></h2>
+<h2 id="non-goals-30"><a class="header" href="#non-goals-30">Non-Goals</a></h2>
 <p>This design does not introduce a new global organization-role table. Existing roles are host-scoped through <code>role_t.host_id</code>, so the organization administrator role for a claimed organization is represented as a role on the default host.</p>
 <p>This design also does not merge organization and host administration into one broad role. Organization ownership and host ownership are separate responsibilities, and the system should grant both roles only when the same user is selected for both owner fields.</p>
 <h2 id="role-model-1"><a class="header" href="#role-model-1">Role Model</a></h2>
@@ -26550,7 +28025,7 @@ the workflow.</li>
 <li>Seed required role permissions if the endpoint catalog is present.</li>
 </ol>
 <p>The repair must be idempotent and should only activate missing or soft-deleted bootstrap rows. It should not remove custom roles or overwrite existing role assignments.</p>
-<h2 id="validation-2"><a class="header" href="#validation-2">Validation</a></h2>
+<h2 id="validation-3"><a class="header" href="#validation-3">Validation</a></h2>
 <p>A focused validation set should cover:</p>
 <ul>
 <li>Claim Org creates <code>org_t</code>, <code>host_t</code>, and <code>user_host_t</code> rows.</li>
@@ -26575,7 +28050,7 @@ the workflow.</li>
 <p>The owner-transfer role policy also remains open. The system should decide whether owner changes imply role grants, role revokes, both, or neither before adding role side effects to <code>UpdateOrg</code> or <code>UpdateHost</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="master-oauth-host-tenant-login"><a class="header" href="#master-oauth-host-tenant-login">Master OAuth Host Tenant Login</a></h1>
-<h2 id="problem-13"><a class="header" href="#problem-13">Problem</a></h2>
+<h2 id="problem-14"><a class="header" href="#problem-14">Problem</a></h2>
 <p>In a deployed portal instance, <code>dev.lightapi.net</code> is the master host for the instance. Its host ID is:</p>
 <pre><code class="language-text">01964b05-552a-7c4b-9184-6857e7f3dc5f
 </code></pre>
@@ -26599,7 +28074,7 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 <p>The new tenant host does not and should not have duplicate OAuth provider/client rows. The FK therefore rejects login with:</p>
 <pre><code class="language-text">auth_session_t_host_id_client_id_provider_id_fkey
 </code></pre>
-<h2 id="goals-27"><a class="header" href="#goals-27">Goals</a></h2>
+<h2 id="goals-28"><a class="header" href="#goals-28">Goals</a></h2>
 <ol>
 <li>Keep <code>dev.lightapi.net</code> as the single master OAuth host for the instance.</li>
 <li>Allow users whose current host is a tenant host to log in through the master host’s provider/client.</li>
@@ -26608,7 +28083,7 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 <li>Allow Claim Org to switch the host owner to the new host and require logout/login for fresh claims.</li>
 <li>Keep session, auth-code, refresh-token, and audit lifecycle behavior deterministic and queryable.</li>
 </ol>
-<h2 id="non-goals-30"><a class="header" href="#non-goals-30">Non-Goals</a></h2>
+<h2 id="non-goals-31"><a class="header" href="#non-goals-31">Non-Goals</a></h2>
 <p>This design does not introduce tenant-specific OAuth provider IDs, client IDs, redirect URIs, or BFF configuration.</p>
 <p>This design does not change the portal UI or BFF to select a different OAuth provider per tenant host.</p>
 <p>This design does not remove database referential integrity. The provider-client relationship should remain enforced, but it should be enforced against the master OAuth host instead of the tenant host.</p>
@@ -26929,7 +28404,7 @@ query_long_live_provider_key(state.host_id, provider_id)
 auth_host_id = master OAuth host
 </code></pre>
 <p>If an earlier failed login left partial session artifacts, they should be removed through existing session cleanup paths or targeted SQL cleanup before retesting.</p>
-<h2 id="validation-3"><a class="header" href="#validation-3">Validation</a></h2>
+<h2 id="validation-4"><a class="header" href="#validation-4">Validation</a></h2>
 <p>A focused validation set should cover:</p>
 <ul>
 <li>Existing master-host login still succeeds after migration.</li>
@@ -26995,7 +28470,7 @@ service yet. The main gaps are:</p>
 <li>tests for schema CRUD, tenant/global lookup, versioning, and config
 validation are incomplete</li>
 </ul>
-<h2 id="goals-28"><a class="header" href="#goals-28">Goals</a></h2>
+<h2 id="goals-29"><a class="header" href="#goals-29">Goals</a></h2>
 <ul>
 <li>Store JSON Schema documents with clear tenant/global ownership.</li>
 <li>Support immutable published schema versions.</li>
@@ -27012,7 +28487,7 @@ and loading schema bodies lazily.</li>
 JSON path.</li>
 <li>Categorize and tag schemas for easier discovery and filtering.</li>
 </ul>
-<h2 id="non-goals-31"><a class="header" href="#non-goals-31">Non-Goals</a></h2>
+<h2 id="non-goals-32"><a class="header" href="#non-goals-32">Non-Goals</a></h2>
 <ul>
 <li>Do not build a full schema compatibility engine in the first release.</li>
 <li>Do not require every config property to have a schema.</li>
@@ -28617,7 +30092,7 @@ GROUP BY
 <p>This approach provides a seamless experience while maintaining compatibility with applications requiring roles for authorization or UI customization.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="private-messages"><a class="header" href="#private-messages">Private Messages</a></h1>
-<h2 id="problem-14"><a class="header" href="#problem-14">Problem</a></h2>
+<h2 id="problem-15"><a class="header" href="#problem-15">Problem</a></h2>
 <p>Portal users need a way to exchange private messages from the user profile
 without exposing email addresses to each other. The sender should only need a
 recipient user id or a display-safe user label. The backend can resolve email
@@ -28652,7 +30127,7 @@ model conversations, read state, participant visibility, or per-user delete.</li
 messages page should load its own data from the query API.</li>
 <li>The existing private-message tests are disabled stubs.</li>
 </ul>
-<h2 id="goals-29"><a class="header" href="#goals-29">Goals</a></h2>
+<h2 id="goals-30"><a class="header" href="#goals-30">Goals</a></h2>
 <ul>
 <li>Let one logged-in user send a message to another portal user without knowing
 or seeing the recipient email.</li>
@@ -28667,7 +30142,7 @@ recipient email internally.</li>
 <li>Provide a path from the existing <code>message_t</code> skeleton to a conversation-based
 model without breaking existing UI routes immediately.</li>
 </ul>
-<h2 id="non-goals-32"><a class="header" href="#non-goals-32">Non-Goals</a></h2>
+<h2 id="non-goals-33"><a class="header" href="#non-goals-33">Non-Goals</a></h2>
 <ul>
 <li>Do not build group chat in the first phase.</li>
 <li>Do not expose email addresses in message APIs, events, UI state, or task
@@ -28974,7 +30449,7 @@ retention and keeps visible, partially deleted, and recently deleted messages.</
 <li>Reply pre-populates recipient context without email.</li>
 <li>Empty and error states do not produce JSON parse failures.</li>
 </ul>
-<h2 id="open-questions-3"><a class="header" href="#open-questions-3">Open Questions</a></h2>
+<h2 id="open-questions-4"><a class="header" href="#open-questions-4">Open Questions</a></h2>
 <ul>
 <li>Should users be able to send messages to themselves as private notes?</li>
 <li>Should profile pages expose a “Message” action only for users in the same
@@ -30807,7 +32282,7 @@ public class ConfigRollbackService {
 <p>This approach provides a clean and relatively robust way to restore the specific override state from your snapshots using the DELETE/INSERT strategy. Remember to test thoroughly!</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="sid-and-host-verification"><a class="header" href="#sid-and-host-verification">SID and Host Verification</a></h1>
-<h2 id="problem-15"><a class="header" href="#problem-15">Problem</a></h2>
+<h2 id="problem-16"><a class="header" href="#problem-16">Problem</a></h2>
 <p>GitHub issue https://github.com/lightapi/portal-service/issues/39 reports that
 <code>config-server</code> accepted a valid JWT whose service identity did not match the
 requested service configuration.</p>
@@ -30924,7 +32399,7 @@ should not be forced to match <code>sid</code> until the product-level authoriza
 is explicitly designed.</p>
 <p>The same exception does not apply to controller registry registration because
 <code>service/register</code> always carries a requested <code>serviceId</code>.</p>
-<h2 id="goals-30"><a class="header" href="#goals-30">Goals</a></h2>
+<h2 id="goals-31"><a class="header" href="#goals-31">Goals</a></h2>
 <ul>
 <li>Prevent one service token from downloading another service’s config, certs,
 or files.</li>
@@ -30970,7 +32445,7 @@ helper.</p>
 <p>The focused implementation tests cover missing and mismatched <code>host</code>, missing
 and mismatched <code>sid</code>, missing and mismatched <code>env</code> when <code>envTag</code> is requested,
 blank values, whitespace trimming, and case-sensitive identifier comparison.</p>
-<h2 id="non-goals-33"><a class="header" href="#non-goals-33">Non-Goals</a></h2>
+<h2 id="non-goals-34"><a class="header" href="#non-goals-34">Non-Goals</a></h2>
 <ul>
 <li>Do not replace JWT verification middleware.</li>
 <li>Do not redesign OAuth token issuance.</li>
@@ -31361,7 +32836,7 @@ cargo test microservice_registration_uses_jwt_env_when_request_omits_env_tag
 mvn -q -Dtest=ControllerWebSocketIntegrationTest#rejectsMicroserviceJwtWhenHostClaimIsMissing+rejectsMicroserviceJwtWhenHostClaimDiffersFromControllerHostId+rejectsMicroserviceJwtWhenSidIsMissing+rejectsMicroserviceJwtWhenSidDiffersFromServiceId+rejectsMicroserviceJwtWhenEnvClaimIsMissingAndEnvTagIsRequested+rejectsMicroserviceJwtWhenEnvClaimDiffersFromEnvTag+registersMicroserviceWhenEnvTagAndEnvClaimAreOmitted test
 mvn -q -Dtest=ServiceIdAuthorizationUtilTest test
 </code></pre>
-<h2 id="open-questions-4"><a class="header" href="#open-questions-4">Open Questions</a></h2>
+<h2 id="open-questions-5"><a class="header" href="#open-questions-5">Open Questions</a></h2>
 <p>No open questions for SID, host, and environment binding in this phase.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="instance-clone"><a class="header" href="#instance-clone">Instance Clone</a></h1>
@@ -31387,7 +32862,7 @@ copies the current active state of this graph and lets the administrator change
 the target identity and environment-specific configuration.</p>
 <p>This is a same-host operation. Cross-host or cross-database copying remains an
 event-promotion/import concern.</p>
-<h2 id="goals-31"><a class="header" href="#goals-31">Goals</a></h2>
+<h2 id="goals-32"><a class="header" href="#goals-32">Goals</a></h2>
 <ul>
 <li>Clone an active instance and its selected active children with one command.</li>
 <li>Require a target instance name and environment tag while allowing other
@@ -31404,7 +32879,7 @@ omit it without exposing values unnecessarily.</li>
 transaction when requested.</li>
 <li>Report durable projection and snapshot status after command acceptance.</li>
 </ul>
-<h2 id="non-goals-34"><a class="header" href="#non-goals-34">Non-goals</a></h2>
+<h2 id="non-goals-35"><a class="header" href="#non-goals-35">Non-goals</a></h2>
 <ul>
 <li>Copy raw historical events or preserve source aggregate versions.</li>
 <li>Copy an existing configuration snapshot, runtime registration, deployment
@@ -31803,7 +33278,7 @@ plan contains only properties whose parents remain selected.</p>
 <p>The immediate response is <code>ACCEPTED</code>, not completed. It contains the clone
 request ID, target instance ID, transaction ID, terminal event ID, event counts,
 and status URL/action.</p>
-<h3 id="status-16"><a class="header" href="#status-16">Status</a></h3>
+<h3 id="status-18"><a class="header" href="#status-18">Status</a></h3>
 <p><code>getInstanceCloneStatus</code> accepts <code>hostId</code> and <code>cloneRequestId</code> in a POST query
 and returns one of:</p>
 <ul>
@@ -32021,7 +33496,7 @@ release.</p>
 moves the complete batch to the DLQ, and sets the ledger to <code>FAILED_DLQ</code> using
 the transaction ID. Replaying a repaired DLQ transaction can advance the same
 ledger to success without appending another clone batch.</p>
-<h2 id="validation-4"><a class="header" href="#validation-4">Validation</a></h2>
+<h2 id="validation-5"><a class="header" href="#validation-5">Validation</a></h2>
 <p>Before append, validate:</p>
 <ul>
 <li>source exists, is active, is caught up, and is visible to the caller;</li>
@@ -32282,7 +33757,7 @@ retries return a retryable conflict with no committed clone state.</li>
 <li>Non-standard instance files are copied into <code>snapshot_instance_file_t</code>.</li>
 </ul>
 <p>The <code>/config-server/files</code> endpoint must return both sets. It already filters standard files by <code>config_phase</code> through <code>config_snapshot_property_t.config_phase</code>, but <code>instance_file_t</code> and <code>snapshot_instance_file_t</code> do not currently carry <code>config_phase</code>. That makes it impossible to union the two sources while preserving runtime, deployment, and generator phase semantics.</p>
-<h2 id="problem-16"><a class="header" href="#problem-16">Problem</a></h2>
+<h2 id="problem-17"><a class="header" href="#problem-17">Problem</a></h2>
 <p>When a service starts through <code>DefaultConfigLoader</code>, it calls <code>/config-server/files</code> with <code>host</code>, <code>serviceId</code>, and <code>envTag</code>. The endpoint resolves the current snapshot and returns the files that should be written into <code>/config</code>.</p>
 <p>For the sidecar case, <code>openapi.yaml</code> exists in both <code>instance_file_t</code> and <code>snapshot_instance_file_t</code>, but it does not exist in <code>config_snapshot_property_t</code>. Since the current <code>/files</code> query reads only <code>config_snapshot_property_t</code>, the response does not include <code>openapi.yaml</code>, and the sidecar cannot write it to <code>/config</code>.</p>
 <p>The correct endpoint behavior is:</p>
@@ -32443,7 +33918,7 @@ WHERE h.sub_domain || '.' || h.domain = ?
 <li><code>portal-service/apps/config-server</code> response assembly if duplicate precedence is handled outside SQL</li>
 <li><code>portal-view</code> schemas/forms/pages for instance files</li>
 </ul>
-<h2 id="validation-5"><a class="header" href="#validation-5">Validation</a></h2>
+<h2 id="validation-6"><a class="header" href="#validation-6">Validation</a></h2>
 <p>Minimum checks:</p>
 <ol>
 <li>Create or migrate an instance file named <code>openapi.yaml</code> with <code>config_phase = 'R'</code>.</li>
@@ -32981,7 +34456,7 @@ public class UuidUtil {
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="entity-creation-uniqueness"><a class="header" href="#entity-creation-uniqueness">Entity Creation Uniqueness</a></h1>
-<h2 id="status-17"><a class="header" href="#status-17">Status</a></h2>
+<h2 id="status-19"><a class="header" href="#status-19">Status</a></h2>
 <p>Implemented through Phase 5 for Role/Rule stream births and Category/Tag semantic
 identity, client retries, lifecycle alignment, verified historical materialization,
 snapshot/import guards, and policy-aware retry-ledger cleanup. Later aggregate
@@ -33011,7 +34486,7 @@ name are equal.</p>
 <code>entity_identity_t</code> reservation table. The identity reservation, event-store
 append, outbox write, nonce allocation, and idempotency record must commit in one
 PostgreSQL transaction.</p>
-<h2 id="problem-17"><a class="header" href="#problem-17">Problem</a></h2>
+<h2 id="problem-18"><a class="header" href="#problem-18">Problem</a></h2>
 <p>Issue 691 demonstrates the same-aggregate form of the defect:</p>
 <ol>
 <li>A role such as <code>abc-123</code> already exists at aggregate version 1.</li>
@@ -33045,7 +34520,7 @@ the second event reaches a projection unique constraint.</li>
 </ul>
 <p>The failure is not specific to role or rule. It is a missing write-side creation
 contract shared by many command services.</p>
-<h2 id="goals-32"><a class="header" href="#goals-32">Goals</a></h2>
+<h2 id="goals-33"><a class="header" href="#goals-33">Goals</a></h2>
 <ul>
 <li>Reject a second create for an existing aggregate without changing its event
 stream.</li>
@@ -33057,7 +34532,7 @@ stream.</li>
 <li>Provide one reusable implementation rather than handler-specific query checks.</li>
 <li>Return an actionable conflict to the UI without exposing another tenant’s data.</li>
 </ul>
-<h2 id="non-goals-35"><a class="header" href="#non-goals-35">Non-goals</a></h2>
+<h2 id="non-goals-36"><a class="header" href="#non-goals-36">Non-goals</a></h2>
 <ul>
 <li>Treating all equal request payloads as the same entity.</li>
 <li>Preventing valid multiplicity for events such as audit records, workflow runs,
@@ -34309,7 +35784,7 @@ unprotected append path, importer problem, or policy drift.</p>
 create commands.</li>
 <li>Require elevated, audited authorization for identity release and legacy repair.</li>
 </ul>
-<h2 id="acceptance-criteria-7"><a class="header" href="#acceptance-criteria-7">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-8"><a class="header" href="#acceptance-criteria-8">Acceptance Criteria</a></h2>
 <p>These are program-wide criteria for issue 691. Phase 5 satisfies them only for
 the scoped Role/Rule stream and Category/Tag semantic-identity rollout described
 in Status; criteria involving the remaining 114 <code>REVIEW_PENDING</code> birth events
@@ -38217,7 +39692,7 @@ scale well if every Java or Rust release requires a hand-maintained set of
 mapping events across all portal instances. This design proposes a release
 mapping automation model that keeps the existing event-sourced write path and
 removes the need to manually recreate mapping files for every product release.</p>
-<h2 id="problem-18"><a class="header" href="#problem-18">Problem</a></h2>
+<h2 id="problem-19"><a class="header" href="#problem-19">Problem</a></h2>
 <p>Product versions are released often. Each new release can introduce a new
 <code>productVersionId</code>, and the config update page only knows which configs and
 properties are applicable when mappings exist for that exact product version.</p>
@@ -38318,7 +39793,7 @@ unchanged products and to the new <code>productVersionId</code> for rebuilt prod
 </tbody>
 </table>
 </div>
-<h2 id="goals-33"><a class="header" href="#goals-33">Goals</a></h2>
+<h2 id="goals-34"><a class="header" href="#goals-34">Goals</a></h2>
 <ul>
 <li>Auto-populate config mappings for every new Java or Rust product release.</li>
 <li>Preserve event replay, auditability, and projection rebuild behavior.</li>
@@ -38331,7 +39806,7 @@ event amplification.</li>
 <li>Detect missing config and property definitions before a release appears
 complete.</li>
 </ul>
-<h2 id="non-goals-36"><a class="header" href="#non-goals-36">Non-Goals</a></h2>
+<h2 id="non-goals-37"><a class="header" href="#non-goals-37">Non-Goals</a></h2>
 <ul>
 <li>Do not change the config override hierarchy.</li>
 <li>Do not write directly to config mapping projection tables.</li>
@@ -38933,7 +40408,7 @@ mappings.</li>
 <code>config_property_t</code>.</li>
 <li>Add a portal-view diagnostics link from the config update page.</li>
 </ul>
-<h2 id="open-questions-5"><a class="header" href="#open-questions-5">Open Questions</a></h2>
+<h2 id="open-questions-6"><a class="header" href="#open-questions-6">Open Questions</a></h2>
 <ul>
 <li>Should <code>ProductVersionCreatedEvent</code> optionally carry a <code>configProfileRef</code>,
 or should profile linking remain a separate release step?</li>
@@ -38967,7 +40442,7 @@ event-sourced product release model without duplicating standard mappings for
 every tenant.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="release-workflow"><a class="header" href="#release-workflow">Release Workflow</a></h1>
-<h2 id="status-18"><a class="header" href="#status-18">Status</a></h2>
+<h2 id="status-20"><a class="header" href="#status-20">Status</a></h2>
 <p>Proposed design.</p>
 <p>Light Portal should use <code>light-workflow</code> as the durable release orchestrator
 for Java and Rust releases. The workflow should coordinate repository checkout,
@@ -38977,7 +40452,7 @@ artifact publishing, AI-assisted failure diagnosis, and human approval.</p>
 portal service process. Command execution belongs in a sandboxed release
 runner, with <code>light-workflow</code> owning state, task routing, retries, approvals,
 and audit history.</p>
-<h2 id="problem-19"><a class="header" href="#problem-19">Problem</a></h2>
+<h2 id="problem-20"><a class="header" href="#problem-20">Problem</a></h2>
 <p>Java releases currently depend on <code>light-bot</code>, while Rust releases are handled
 through separate command-line and repository-specific steps. This works, but it
 keeps release knowledge outside the same workflow model used by Light Portal
@@ -38996,7 +40471,7 @@ and who approved publication.</li>
 <p>The release workflow should be flexible enough to call existing command-line
 tools, but controlled enough that it does not become an unrestricted shell
 inside Light Portal.</p>
-<h2 id="goals-34"><a class="header" href="#goals-34">Goals</a></h2>
+<h2 id="goals-35"><a class="header" href="#goals-35">Goals</a></h2>
 <ul>
 <li>Replace the current Java <code>light-bot</code> release path with <code>light-workflow</code> once
 parity is proven.</li>
@@ -39014,7 +40489,7 @@ reporting into the release gate.</li>
 behind explicit approval.</li>
 <li>Preserve release auditability and reproducibility.</li>
 </ul>
-<h2 id="non-goals-37"><a class="header" href="#non-goals-37">Non-Goals</a></h2>
+<h2 id="non-goals-38"><a class="header" href="#non-goals-38">Non-Goals</a></h2>
 <ul>
 <li>Do not run arbitrary release commands in the Light Portal service process.</li>
 <li>Do not replace Maven, Cargo, Docker, GitHub CLI, or existing release scripts
@@ -40007,7 +41482,7 @@ It also allows restoration of credentials that should be permanently revoked.</p
 lists drift across processors. The database already owns the foreign-key graph
 and executes projection transactions, so a validated database policy is the
 smaller consistency boundary.</p>
-<h2 id="acceptance-criteria-8"><a class="header" href="#acceptance-criteria-8">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-9"><a class="header" href="#acceptance-criteria-9">Acceptance Criteria</a></h2>
 <ul>
 <li>No trigger contains hard-coded domain table names.</li>
 <li>Every public foreign key from a parent with <code>active</code> and <code>delete_ts</code> has an
@@ -40126,7 +41601,7 @@ mutation.</li>
 <h1 id="distributed-scheduler-design"><a class="header" href="#distributed-scheduler-design">Distributed Scheduler Design</a></h1>
 <h2 id="introduction-1"><a class="header" href="#introduction-1">Introduction</a></h2>
 <p>The Distributed Scheduler is a robust, highly available component of the light-portal architecture that manages the periodic execution of tasks across a cluster of application instances. It ensures that scheduled tasks are executed exactly as defined, even in a distributed environment, by using a database-backed leader election and locking mechanism.</p>
-<h2 id="architecture-2"><a class="header" href="#architecture-2">Architecture</a></h2>
+<h2 id="architecture-3"><a class="header" href="#architecture-3">Architecture</a></h2>
 <p>The scheduler follows a <strong>Leader-Follower</strong> pattern to prevent redundant executions and ensure consistency.</p>
 <ol>
 <li><strong>Leader Election</strong>: All scheduler instances compete for a global lock in the <code>scheduler_lock_t</code> table.</li>
@@ -40201,7 +41676,7 @@ LIMIT ?;
 <h1 id="postgresql-pubsub-design"><a class="header" href="#postgresql-pubsub-design">PostgreSQL Pub/Sub Design</a></h1>
 <h2 id="introduction-2"><a class="header" href="#introduction-2">Introduction</a></h2>
 <p>The PostgreSQL Pub/Sub mechanism provides an alternative to Kafka for event distribution within the light-portal architecture. It is designed for smaller deployments or environments where Kafka is not available, offering a reliable, low-latency, and strictly ordered event delivery system using native PostgreSQL features.</p>
-<h2 id="architecture-3"><a class="header" href="#architecture-3">Architecture</a></h2>
+<h2 id="architecture-4"><a class="header" href="#architecture-4">Architecture</a></h2>
 <p>The system utilizes a hybrid <strong>Polling + LISTEN/NOTIFY</strong> approach to achieve both high reliability and low latency.</p>
 <h3 id="1-logical-partitioning"><a class="header" href="#1-logical-partitioning">1. Logical Partitioning</a></h3>
 <p>To support horizontal scalability and ensure ordered processing for multi-tenant environments, the system uses logical partitioning based on the <code>host_id</code>.</p>
@@ -40443,7 +41918,7 @@ waitPeriodMs: ${db-event-consumer.waitPeriodMs:1000}
 <h1 id="kafka-event-processor"><a class="header" href="#kafka-event-processor">Kafka Event Processor</a></h1>
 <h2 id="overview-2"><a class="header" href="#overview-2">Overview</a></h2>
 <p>The Kafka Event Processor (<code>PortalEventConsumerStartupHook</code>) consumes events from Kafka topics that are populated by Debezium CDC from the <code>outbox_message_t</code> table. It provides robust event processing with transaction-level granularity and Dead Letter Queue (DLQ) support.</p>
-<h2 id="architecture-4"><a class="header" href="#architecture-4">Architecture</a></h2>
+<h2 id="architecture-5"><a class="header" href="#architecture-5">Architecture</a></h2>
 <p>The processor uses a <strong>two-phase processing strategy</strong> with automatic fallback to ensure both performance and reliability:</p>
 <ol>
 <li><strong>Optimistic Batch Processing</strong>: Attempts to process all transactions in a single database transaction for maximum throughput</li>
@@ -40712,7 +42187,7 @@ aggregate version for that subject.</li>
 </li>
 </ol>
 <p>The generated JSON is then imported through import mode.</p>
-<h2 id="goals-35"><a class="header" href="#goals-35">Goals</a></h2>
+<h2 id="goals-36"><a class="header" href="#goals-36">Goals</a></h2>
 <ul>
 <li>Preserve Java CLI compatibility for existing scripts and runbooks.</li>
 <li>Preserve event-store, outbox, notification, nonce, offset, and transaction
@@ -40724,7 +42199,7 @@ into testable modules.</li>
 <li>Support large migration workflows with stdin/stdout piping, bounded-memory
 conversion options, aggregate-version caching, and configurable batch imports.</li>
 </ul>
-<h2 id="non-goals-38"><a class="header" href="#non-goals-38">Non-Goals</a></h2>
+<h2 id="non-goals-39"><a class="header" href="#non-goals-39">Non-Goals</a></h2>
 <ul>
 <li>No online REST service in the first version.</li>
 <li>No schema migration management.</li>
@@ -41285,7 +42760,7 @@ Java-compatible unversioned arrays for migration compatibility.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="event-replay"><a class="header" href="#event-replay">Event Replay</a></h1>
-<h2 id="status-19"><a class="header" href="#status-19">Status</a></h2>
+<h2 id="status-21"><a class="header" href="#status-21">Status</a></h2>
 <p>This document defines the revised target design for event replay during the
 early development stage of light-portal. The implementation still contains
 legacy-backfill, staged-rollout, feature-gate, mandatory-encryption, and
@@ -41325,7 +42800,7 @@ transactions first;</li>
 <p>Event replay therefore operates on complete canonical failure transactions,
 not individual notification or DLQ rows. It invokes the same projection
 executor as live processing without rewinding PostgreSQL or Kafka offsets.</p>
-<h2 id="goals-36"><a class="header" href="#goals-36">Goals</a></h2>
+<h2 id="goals-37"><a class="header" href="#goals-37">Goals</a></h2>
 <ul>
 <li>Capture every new failed projection transaction in a replayable canonical
 form.</li>
@@ -41350,7 +42825,7 @@ only from an explicit operator request.</li>
 <li>Keep configuration small enough that a developer can understand the entire
 replay setup from one screen.</li>
 </ul>
-<h2 id="non-goals-39"><a class="header" href="#non-goals-39">Non-Goals</a></h2>
+<h2 id="non-goals-40"><a class="header" href="#non-goals-40">Non-Goals</a></h2>
 <ul>
 <li>Historical or legacy <code>dead_letter_queue</code> rows are not imported. They remain
 diagnostic history only.</li>
@@ -42980,13 +44455,13 @@ Location: https://portal.lightapi.net/authorization?code=auth_code_abc&amp;state
 </tbody>
 </table>
 </div>
-<h2 id="references-3"><a class="header" href="#references-3">References</a></h2>
+<h2 id="references-4"><a class="header" href="#references-4">References</a></h2>
 <ul>
 <li><a href="https://datatracker.ietf.org/doc/html/rfc6749#section-10.12">RFC 6749 Section 10.12 (Cross-Site Request Forgery)</a></li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="auth-client-secret-regeneration"><a class="header" href="#auth-client-secret-regeneration">Auth Client Secret Regeneration</a></h1>
-<h2 id="problem-20"><a class="header" href="#problem-20">Problem</a></h2>
+<h2 id="problem-21"><a class="header" href="#problem-21">Problem</a></h2>
 <p>An OAuth auth client receives a <code>client_id</code> and <code>client_secret</code> when it is
 created. The clear text <code>client_secret</code> is intentionally a one-time value. The
 database projection stores only a verifier value in <code>auth_client_t.client_secret</code>
@@ -43306,7 +44781,7 @@ unchanged.</li>
 </ul>
 </li>
 </ol>
-<h3 id="advantages-3"><a class="header" href="#advantages-3">Advantages</a></h3>
+<h3 id="advantages-4"><a class="header" href="#advantages-4">Advantages</a></h3>
 <ul>
 <li><strong>Conflict Immunity:</strong> No <code>aggregateVersion</code> conflicts; we always append <em>new</em> events.</li>
 <li><strong>Self-Healing:</strong> Automatically synchronizes diverged states.</li>
@@ -43827,7 +45302,7 @@ Kubernetes cluster from the Instance Admin page.</p>
 <p>The goal is to provide a production-like deployment path for small businesses
 and enterprise tenants without requiring Light Portal to have direct network
 access to every customer cluster.</p>
-<h2 id="problem-21"><a class="header" href="#problem-21">Problem</a></h2>
+<h2 id="problem-22"><a class="header" href="#problem-22">Problem</a></h2>
 <p>Each API or application repository can contain a <code>k8s/</code> folder with Kubernetes
 deployment templates. The templates contain variables in the following format:</p>
 <pre><code class="language-text">${key:defaultValue}
@@ -44348,7 +45823,7 @@ later.</li>
 <li>Rollback is a redeploy of a previous Light Portal deployment snapshot, not a
 native Kubernetes rollout undo.</li>
 </ul>
-<h2 id="open-questions-6"><a class="header" href="#open-questions-6">Open Questions</a></h2>
+<h2 id="open-questions-7"><a class="header" href="#open-questions-7">Open Questions</a></h2>
 <ul>
 <li>Which object storage providers should enterprise artifact mode support first?</li>
 <li>What retention policies should be available for encrypted rendered manifest
@@ -44369,7 +45844,7 @@ deployment intent and history, while the deployer owns safe cluster-local
 execution.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="release-signing-key-management-and-rotation"><a class="header" href="#release-signing-key-management-and-rotation">Release Signing Key Management and Rotation</a></h1>
-<h2 id="status-20"><a class="header" href="#status-20">Status</a></h2>
+<h2 id="status-22"><a class="header" href="#status-22">Status</a></h2>
 <p>Normative design. Implementation is partial.</p>
 <p><code>portal-config-dev</code> currently verifies the signed environment bundle before
 extracting its editable <code>events.json</code>. The other deployment repositories do
@@ -44379,7 +45854,7 @@ status table identifies those gaps explicitly.</p>
 <a href="#enterprise-ai-assisted-bootstrap-and-eks-deployment">Enterprise AI-Assisted Bootstrap and EKS Deployment</a>
 and the bundle signature contract in
 <a href="#composable-multi-host-snapshot-export-and-bootstrap">Composable Multi-Host Snapshot Export and Bootstrap</a>.</p>
-<h2 id="problem-22"><a class="header" href="#problem-22">Problem</a></h2>
+<h2 id="problem-23"><a class="header" href="#problem-23">Problem</a></h2>
 <p>Light Portal release artifacts are consumed through several paths:</p>
 <ul>
 <li><code>portal-config-loc</code> recreates disposable development databases;</li>
@@ -44397,7 +45872,7 @@ Ed25519 key used for <code>events.zip</code> is not automatically the same ident
 key used for the optional PostgreSQL bootstrap archive manifest. Treating
 unrelated keys as one unnamed “release key” makes rotation and revocation
 ambiguous.</p>
-<h2 id="goals-37"><a class="header" href="#goals-37">Goals</a></h2>
+<h2 id="goals-38"><a class="header" href="#goals-38">Goals</a></h2>
 <ul>
 <li>Establish explicit signing-key trust domains and ownership.</li>
 <li>Deliver public trust anchors independently of the artifacts they verify.</li>
@@ -44408,7 +45883,7 @@ ambiguous.</p>
 <li>Preserve an auditable release and key-rotation history.</li>
 <li>Keep local installation simple: public keys are configuration, not secrets.</li>
 </ul>
-<h2 id="non-goals-40"><a class="header" href="#non-goals-40">Non-Goals</a></h2>
+<h2 id="non-goals-41"><a class="header" href="#non-goals-41">Non-Goals</a></h2>
 <ul>
 <li>This design does not make an edited environment-specific <code>events.json</code>
 immutable or signed. The downloaded global bundle is verified before
@@ -44659,7 +46134,7 @@ manifest’s <code>keyId</code> selection rule. A representative record is:</p>
 <p>Until the importer enforces this metadata directly, repository review and
 release automation must enforce lifecycle state. A PEM file must never silently
 override an explicit revocation record.</p>
-<h2 id="qualification-gates"><a class="header" href="#qualification-gates">Qualification Gates</a></h2>
+<h2 id="qualification-gates-1"><a class="header" href="#qualification-gates-1">Qualification Gates</a></h2>
 <p>Every key-management change must pass:</p>
 <ol>
 <li><strong>Key material checks</strong>: Every PEM parses as a public key; no private-key
@@ -44723,7 +46198,7 @@ top-level release manifest.</li>
 <p>This evidence contains no private-key material.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="enterprise-ai-assisted-bootstrap-and-eks-deployment"><a class="header" href="#enterprise-ai-assisted-bootstrap-and-eks-deployment">Enterprise AI-Assisted Bootstrap and EKS Deployment</a></h1>
-<h2 id="status-21"><a class="header" href="#status-21">Status</a></h2>
+<h2 id="status-23"><a class="header" href="#status-23">Status</a></h2>
 <p>Proposed customer deployment and qualification design.</p>
 <h2 id="executive-decision-1"><a class="header" href="#executive-decision-1">Executive Decision</a></h2>
 <p>Create a dedicated Linux VM that continuously proves a complete Light Portal
@@ -44787,7 +46262,7 @@ mutating action behind policy and approval.</li>
 </ul>
 <p>This does not make the platform intrinsically simple. It makes the complexity
 visible, repeatable, testable, and supportable.</p>
-<h2 id="goals-38"><a class="header" href="#goals-38">Goals</a></h2>
+<h2 id="goals-39"><a class="header" href="#goals-39">Goals</a></h2>
 <ul>
 <li>Maintain a complete, customer-shaped Light Portal and Light Fabric reference
 environment on a Linux VM.</li>
@@ -44806,7 +46281,7 @@ status, and rollback operations.</li>
 <li>Preserve a conventional, fully documented operator path when AI is disabled
 or unavailable.</li>
 </ul>
-<h2 id="non-goals-41"><a class="header" href="#non-goals-41">Non-Goals</a></h2>
+<h2 id="non-goals-42"><a class="header" href="#non-goals-42">Non-Goals</a></h2>
 <ul>
 <li>Do not make the Linux VM a production runtime or production database.</li>
 <li>Do not deploy unverified output directly from the daily development branch.</li>
@@ -45429,7 +46904,7 @@ prune thresholds in deployer policy.</li>
 <li>Redact Secret and sealed-secret data from diffs and logs.</li>
 <li>Record Kubernetes audit events and the Light Workflow request ID together.</li>
 </ul>
-<h2 id="qualification-gates-1"><a class="header" href="#qualification-gates-1">Qualification Gates</a></h2>
+<h2 id="qualification-gates-2"><a class="header" href="#qualification-gates-2">Qualification Gates</a></h2>
 <p>A customer release is qualified only when all mandatory gates are green.</p>
 <div class="table-wrapper">
 <table>
@@ -45645,7 +47120,7 @@ security and operations teams require.</p>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-oauth-and-oauth-kafka-agentcore-oidc-discovery"><a class="header" href="#light-oauth-and-oauth-kafka-agentcore-oidc-discovery">Light OAuth and OAuth Kafka AgentCore OIDC Discovery</a></h1>
-<h2 id="problem-23"><a class="header" href="#problem-23">Problem</a></h2>
+<h2 id="problem-24"><a class="header" href="#problem-24">Problem</a></h2>
 <p>Issue https://github.com/lightapi/portal-service/issues/44 asks whether
 <code>portal-service/apps/light-oauth</code> can support AWS AgentCore JWT inbound
 authorization.</p>
@@ -45775,7 +47250,7 @@ the provider <code>jwk</code> from <code>auth_provider_t</code>. The implementat
 that the JWT header <code>kid</code> is present in the returned JWKS for the same provider.
 That guarantee matters more once external AWS services cache the discovery and
 JWKS responses.</p>
-<h2 id="goals-39"><a class="header" href="#goals-39">Goals</a></h2>
+<h2 id="goals-40"><a class="header" href="#goals-40">Goals</a></h2>
 <ul>
 <li>Let AWS AgentCore use Rust <code>light-oauth</code> or Java <code>oauth-kafka</code> as a JWT
 bearer token issuer.</li>
@@ -45787,7 +47262,7 @@ claims working.</li>
 <li>Keep issuer, audience, and discovery URLs deterministic across environments.</li>
 <li>Add tests that prove discovery, JWKS, and signed token claims line up.</li>
 </ul>
-<h2 id="non-goals-42"><a class="header" href="#non-goals-42">Non-Goals</a></h2>
+<h2 id="non-goals-43"><a class="header" href="#non-goals-43">Non-Goals</a></h2>
 <ul>
 <li>Do not implement full OIDC identity-provider behavior in the first phase.</li>
 <li>Do not add dynamic client registration.</li>
@@ -46632,7 +48107,7 @@ highlight the relevant record when supported.</p>
 <p>The Rule Admin page allows administrators to create and manage YAML rules with CEL condition expressions and actions.</p>
 <p>For most users, they just need to pick up rules pre-defined in this page. We have defined some global rules to share with all tenants. Each tenant can create host-specific rules that can be used with the tenant.</p>
 <p>When creating a new rule, the default condition security profile is strict. If standard profile is selected, a workflow task will be assigned to the <code>rule-admin</code> role for approval.</p>
-<h2 id="references-4"><a class="header" href="#references-4">References</a></h2>
+<h2 id="references-5"><a class="header" href="#references-5">References</a></h2>
 <ul>
 <li><a href="https://www.networknt.com/light-fabric/crate/light-rule.html">Light Rule</a></li>
 <li><a href="https://www.networknt.com/light-fabric/design/cel-rule.html">CEL Rule Conditions</a></li>
