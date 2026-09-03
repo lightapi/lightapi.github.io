@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-ccb1cd34.js";
+            window.path_to_searchindex_js = "searchindex-ad5d6538.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-27285314.js"></script>
+        <script src="toc-70596051.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -23956,8 +23956,649 @@ projection is behind or has an unresolved failure;</li>
 remain separate from the publication command.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="direct-event-replay-execution"><a class="header" href="#direct-event-replay-execution">Direct Event Replay Execution</a></h1>
+<h1 id="portal-managed-light-gateway-regression"><a class="header" href="#portal-managed-light-gateway-regression">Portal-Managed Light Gateway Regression</a></h1>
 <h2 id="status-13"><a class="header" href="#status-13">Status</a></h2>
+<p>Proposed design. The generic SSE passthrough implementation and its repository-
+local qualification gate are complete in <code>light-fabric</code>. The Portal-managed
+daily regression harness described here is not yet implemented.</p>
+<h2 id="purpose-4"><a class="header" href="#purpose-4">Purpose</a></h2>
+<p>Light Gateway supports behavior that depends on both the released runtime and
+configuration published by Light Portal. Repository-local unit and integration
+tests can qualify the implementation, but they do not prove that a released
+Gateway can:</p>
+<ul>
+<li>authenticate to Config Server;</li>
+<li>resolve the intended configuration identity;</li>
+<li>download and apply the current immutable snapshot;</li>
+<li>start from that configuration; and</li>
+<li>provide the expected behavior through its real network listener.</li>
+</ul>
+<p>This design introduces a reusable regression harness in <code>light-portal-test</code>.
+For each scheduled run, the harness starts a deterministic fixture service and
+a fresh standalone Light Gateway runtime. The Gateway retrieves its
+configuration from a Portal-managed Config Instance and the test client probes
+the resulting black-box behavior.</p>
+<p>The first runtime profile is <code>regression-core</code>. It uses multiple reserved path
+prefixes so one Gateway instance and snapshot can exercise several compatible
+features. Generic Server-Sent Events (SSE) passthrough is the first feature in
+that profile. Once the harness is qualified, other Gateway features can reuse
+the same runtime, lifecycle, and evidence model. Additional runtime profiles
+are created only when two tests require incompatible handler chains, global
+settings, startup outcomes, or dependencies.</p>
+<h2 id="decision-summary-10"><a class="header" href="#decision-summary-10">Decision Summary</a></h2>
+<ol>
+<li>Light Portal owns the mutable desired configuration, immutable snapshots,
+current-snapshot selection, and operator audit trail.</li>
+<li><code>light-fabric</code> retains exhaustive implementation qualification, including
+protocol matrices, concurrency, retry boundaries, soak, resource, and
+shutdown tests.</li>
+<li><code>light-portal-test</code> owns the scheduled black-box harness, deterministic
+upstream fixtures, runtime lifecycle, behavioral assertions, reports, and
+cleanup.</li>
+<li>Each daily run starts a fresh released Light Gateway image. It does not
+reuse a long-running regression Gateway.</li>
+<li>The Gateway loads configuration through the normal Config Server bootstrap
+tuple <code>(host, serviceId, envTag)</code>. Tests do not copy a complete runtime
+configuration into the test repository.</li>
+<li>The shared development control plane uses the <code>dev.networknt.com</code> Host and
+a primary <code>regression-core</code> Env Tag. The Host is a configuration and
+ownership namespace; it does not require the temporary Gateway listener to
+be public.</li>
+<li>The core profile selects feature-specific behavior with reserved request
+path prefixes. SSE is the first feature and uses a deterministic
+direct-proxy upstream. Router, rewrite, header, limit, and security tests
+should join the core profile when their effective configurations can safely
+coexist.</li>
+<li>Timing-sensitive SSE assertions use a streaming client rather than treating
+an eventual HTTP 200 response as proof of incremental delivery.</li>
+<li>The daily suite records enough runtime, image, snapshot, configuration, and
+request evidence to distinguish product regressions from configuration,
+credential, fixture, or infrastructure failures.</li>
+<li>A separate regression profile and Config Instance are introduced only
+when the required configuration cannot safely coexist with the core
+profile or the test intentionally expects a different startup lifecycle.</li>
+<li>Config Instances are created and updated through Portal commands or UI
+workflows. Regression setup must not seed Portal projection tables
+directly.</li>
+</ol>
+<h2 id="relationship-to-existing-qualification"><a class="header" href="#relationship-to-existing-qualification">Relationship To Existing Qualification</a></h2>
+<p>The SSE passthrough implementation already has a repeatable Phase 3 gate in
+<code>light-fabric</code>:</p>
+<pre><code class="language-bash">./scripts/run-sse-passthrough-phase3-gates.sh
+</code></pre>
+<p>That gate is the authoritative implementation-level qualification for:</p>
+<ul>
+<li>downstream and upstream HTTP/1.1 and HTTP/2 combinations;</li>
+<li>direct proxy and service-router selection;</li>
+<li>timeout isolation;</li>
+<li>fail-closed response-handler conflicts;</li>
+<li>post-commit retry prevention;</li>
+<li>bounded file-descriptor and memory growth; and</li>
+<li>graceful and forced shutdown behavior.</li>
+</ul>
+<p>The Portal-managed suite does not reproduce this full matrix every day. Its
+purpose is to prove the released artifact and the real control-plane delivery
+path together. A daily success therefore means more than a unit-test success,
+but less than complete protocol requalification.</p>
+<h2 id="architecture-3"><a class="header" href="#architecture-3">Architecture</a></h2>
+<pre class="mermaid">flowchart LR
+    subgraph CP[Light Portal control plane]
+        H[Host: dev.networknt.com]
+        I[Gateway Config Instance]
+        S[Current immutable snapshot]
+        CS[Config Server]
+        H --&gt; I --&gt; S --&gt; CS
+    end
+
+    subgraph RH[Daily regression host]
+        O[light-portal-test orchestrator]
+        F[Deterministic regression fixture]
+        G[Fresh Light Gateway container]
+        T[Streaming test client]
+        R[Reports and evidence]
+        O --&gt; F
+        O --&gt; G
+        O --&gt; T
+        CS --&gt;|startup bootstrap| G
+        T --&gt;|HTTP requests| G
+        G --&gt;|proxy requests| F
+        O --&gt; R
+        G --&gt; R
+        T --&gt; R
+    end
+</pre>
+
+<p>The Gateway can bind only to loopback on the regression host. The Portal Host
+value is used for configuration lookup and ownership; it is not the listener’s
+DNS name. A public Gateway hostname is unnecessary for the core profile.</p>
+<h2 id="component-responsibilities"><a class="header" href="#component-responsibilities">Component Responsibilities</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Component</th><th>Responsibility</th></tr>
+</thead>
+<tbody>
+<tr><td>Light Portal</td><td>Author Config Instance properties, preserve event history, create immutable snapshots, select the current snapshot, and provide operator visibility.</td></tr>
+<tr><td>Config Server</td><td>Authenticate the Gateway and return only the current runtime configuration for its bootstrap identity.</td></tr>
+<tr><td>Light Gateway image</td><td>Load the snapshot and provide the released proxy behavior under test.</td></tr>
+<tr><td>Regression fixture</td><td>Emit deterministic responses for SSE and other compatible core features, including headers, events, delays, heartbeats, silence, and upstream failures.</td></tr>
+<tr><td><code>light-portal-test</code></td><td>Start dependencies, wait for readiness, execute probes, classify failures, publish reports, and clean up.</td></tr>
+<tr><td><code>light-fabric</code> gates</td><td>Qualify implementation details and the larger protocol/resource matrix before release.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="portal-configuration-model"><a class="header" href="#portal-configuration-model">Portal Configuration Model</a></h2>
+<h3 id="config-instance-identity"><a class="header" href="#config-instance-identity">Config Instance identity</a></h3>
+<p>The first shared-development Config Instance is the core regression runtime:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>Host</td><td><code>dev.networknt.com</code></td></tr>
+<tr><td>Product</td><td>Light Gateway (<code>gtw</code>)</td></tr>
+<tr><td>Service ID</td><td><code>com.networknt.light-gateway-1.0.0</code></td></tr>
+<tr><td>Environment</td><td><code>dev</code></td></tr>
+<tr><td>Env Tag</td><td><code>regression-core</code></td></tr>
+<tr><td>Suggested instance name</td><td><code>Light Gateway Core Regression</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>The authoritative runtime lookup identity is:</p>
+<pre><code class="language-text">(dev.networknt.com, com.networknt.light-gateway-1.0.0, regression-core)
+</code></pre>
+<p>The internal <code>instanceId</code> remains useful for Portal relationships, snapshot
+ownership, and audit. It is not added to the runtime lookup contract.</p>
+<p>If <code>regression-core</code> is not already an allowed Env Tag, a Host-specific
+<code>environment</code> reference-table value should be created for
+<code>dev.networknt.com</code>.</p>
+<h3 id="instance-strategy"><a class="header" href="#instance-strategy">Instance strategy</a></h3>
+<p>Use one core Config Instance for all compatible Gateway feature tests. The
+instance owns one current snapshot containing multiple path-scoped handler and
+feature configurations. Adding a feature normally means adding another
+reserved path prefix and test case, not another Portal instance.</p>
+<p>The core path namespace is:</p>
+<pre><code class="language-text">/__regression/&lt;feature&gt;/&lt;case&gt;
+</code></pre>
+<p>Initial and candidate allocations are:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Prefix</th><th>Intended behavior</th></tr>
+</thead>
+<tbody>
+<tr><td><code>/__regression/sse/declared/</code></td><td>Path-declared SSE classification and streaming.</td></tr>
+<tr><td><code>/__regression/sse/accept/</code></td><td>Request <code>Accept</code> classification.</td></tr>
+<tr><td><code>/__regression/sse/promoted/</code></td><td>Response <code>Content-Type</code> promotion.</td></tr>
+<tr><td><code>/__regression/sse/idle/</code></td><td>Heartbeat and idle-timeout cases.</td></tr>
+<tr><td><code>/__regression/ordinary/</code></td><td>Non-streaming timeout controls.</td></tr>
+<tr><td><code>/__regression/headers/</code></td><td>Request and response header behavior.</td></tr>
+<tr><td><code>/__regression/rewrite/</code></td><td>Path, method, and query rewrite behavior.</td></tr>
+<tr><td><code>/__regression/limits/</code></td><td>Rate, concurrency, and bounded-size behavior.</td></tr>
+<tr><td><code>/__regression/security/</code></td><td>Authentication and authorization behavior compatible with the core startup contract.</td></tr>
+<tr><td><code>/__regression/router/</code></td><td>Service-router behavior once its fixture registration is part of the core lifecycle.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The prefix is the stable test contract. Individual cases may be added below a
+prefix without changing the instance identity. Paths must remain synthetic and
+must not overlap real Portal, MCP, LLM, A2A, or application routes.</p>
+<p><code>handler.paths</code> uses trailing-wildcard templates such as
+<code>/__regression/sse/declared/*</code> to select a chain for a feature family. The
+Gateway resolves the first matching path entry, so specific templates must be
+ordered before broader entries such as <code>/__regression/sse/*</code> or
+<code>/__regression/*</code>. The SSE <code>streamPathPrefixes</code> property uses the corresponding
+literal prefix without <code>*</code> because its matching contract is <code>startsWith</code>.</p>
+<p>An additional regression runtime profile is justified only when the feature:</p>
+<ul>
+<li>requires a mutually exclusive default or complete handler chain;</li>
+<li>changes a global module setting in a way that invalidates another core case;</li>
+<li>intentionally exercises invalid configuration or startup rejection;</li>
+<li>requires a different listener or transport security posture; or</li>
+<li>needs an isolated external dependency whose lifecycle would make the core
+lane unreliable.</li>
+</ul>
+<p>Because Config Server selects one current snapshot for a runtime bootstrap
+tuple, an incompatible runtime profile normally receives another Env Tag and
+Config Instance. It is still a profile-level separation, not a feature-level
+instance policy. Candidate alternate identities should be named for the
+incompatibility, such as <code>regression-invalid-config</code> or
+<code>regression-strict-security</code>, rather than for every individual feature.</p>
+<p>This document uses <strong>runtime profile</strong> for those test/runtime variants. Portal
+<strong>Config Profiles</strong> are reusable product configuration-contract mappings; they
+do not select among several current snapshots for one running instance and
+must not be confused with regression runtime profiles.</p>
+<h3 id="snapshot-lifecycle"><a class="header" href="#snapshot-lifecycle">Snapshot lifecycle</a></h3>
+<p>Portal desired-state updates and runtime activation remain separate:</p>
+<pre class="mermaid">sequenceDiagram
+    actor Admin
+    participant Portal as Light Portal
+    participant Projection as Portal projection
+    participant Snapshot as Snapshot workflow
+    participant Config as Config Server
+    participant Gateway as Daily Gateway
+
+    Admin-&gt;&gt;Portal: Create or update core regression Config Instance
+    Portal--&gt;&gt;Admin: Configuration events accepted
+    Portal-&gt;&gt;Projection: Asynchronous event projection
+    Projection--&gt;&gt;Portal: Desired state current
+    Admin-&gt;&gt;Snapshot: Create and review immutable snapshot
+    Admin-&gt;&gt;Snapshot: Select snapshot as current
+    Gateway-&gt;&gt;Config: Fetch host + serviceId + envTag
+    Config--&gt;&gt;Gateway: Current runtime snapshot
+    Gateway--&gt;&gt;Gateway: Validate and start listener
+</pre>
+
+<p>A daily test run is read-only with respect to Portal configuration. It must not
+create a new snapshot, move the current pointer, or repair the instance. An
+unexpected current snapshot is reported as configuration evidence instead of
+being silently overwritten by the test.</p>
+<p>For local authoring, changes are validated in <code>portal-config-loc/all-in-lt</code>.
+Shared development receives the canonical events or supported promotion
+artifact. Local and shared-development databases must not become independent
+sources of truth for the same core regression profile.</p>
+<h2 id="gateway-bootstrap"><a class="header" href="#gateway-bootstrap">Gateway Bootstrap</a></h2>
+<p>The committed test asset is a minimal <code>startup.yml</code> template. It identifies the
+runtime and Config Server, but it does not contain the complete Gateway
+configuration:</p>
+<pre><code class="language-yaml">host: ${LIGHT_GATEWAY_STARTUP_HOST:dev.networknt.com}
+serviceId: ${LIGHT_GATEWAY_SERVICE_ID:com.networknt.light-gateway-1.0.0}
+envTag: ${LIGHT_GATEWAY_ENVIRONMENT:regression-core}
+acceptHeader: application/yaml
+timeout: ${LIGHT_GATEWAY_STARTUP_TIMEOUT:5000}
+connectTimeout: ${LIGHT_GATEWAY_STARTUP_CONNECT_TIMEOUT:5000}
+configServerUri: ${LIGHT_CONFIG_SERVER_URI}
+authorization: ${LIGHT_PORTAL_AUTHORIZATION}
+bootstrapCaCertPath: ${LIGHT_GATEWAY_BOOTSTRAP_CA_CERT_PATH:/config/ca.pem}
+externalConfigDir: ${LIGHT_GATEWAY_EXTERNAL_CONFIG_DIR:/app/config-cache}
+</code></pre>
+<p>The harness supplies the Config Server URI, service authorization, and CA at
+runtime. Tokens, private keys, and private CA material are never committed to
+<code>light-portal-test</code> or stored in Portal as ordinary configuration properties.</p>
+<p>The first implementation should run the Gateway container with host networking
+on the Linux regression host. That allows the fixture and Gateway to use
+stable loopback ports without publishing either service externally. A later
+portable container-network mode may replace host networking if both Docker and
+Podman behavior are qualified.</p>
+<h2 id="core-profile-configuration-contract"><a class="header" href="#core-profile-configuration-contract">Core Profile Configuration Contract</a></h2>
+<p>The core snapshot defines the common server, handler, proxy, routing, and
+observability baseline once. Feature-specific rules are scoped to the reserved
+path prefixes wherever the Gateway configuration model supports path-level
+selection. A new core feature must demonstrate that it does not alter the
+expected behavior of existing prefixes before its properties are added to the
+current snapshot.</p>
+<h3 id="initial-sse-properties"><a class="header" href="#initial-sse-properties">Initial SSE properties</a></h3>
+<p>The Portal snapshot should establish the following behavior without using
+aggressive test timings:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Property</th><th>Initial intent</th></tr>
+</thead>
+<tbody>
+<tr><td><code>proxy.hosts</code></td><td>Stable loopback address of the deterministic fixture.</td></tr>
+<tr><td><code>proxy.streamResponseContentTypes</code></td><td>Include <code>text/event-stream</code>.</td></tr>
+<tr><td><code>proxy.streamRequestAcceptTypes</code></td><td>Include <code>text/event-stream</code>.</td></tr>
+<tr><td><code>proxy.streamPathPrefixes</code></td><td>Include <code>/__regression/sse/declared/</code>.</td></tr>
+<tr><td><code>proxy.streamMaxRequestTime</code></td><td>Allow the bounded fixture stream to complete.</td></tr>
+<tr><td><code>proxy.streamIdleTimeout</code></td><td>Approximately two seconds.</td></tr>
+<tr><td><code>proxy.streamResponseHeaderOverwrite</code></td><td>Retain the documented standard streaming headers.</td></tr>
+<tr><td><code>proxy.maxRequestTime</code></td><td>Nonzero and shorter than the streaming maximum so ordinary behavior can be distinguished.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The effective handler configuration for the initial SSE prefixes ends in the
+ordinary proxy handler and does not enable a complete-body response
+transformation. A fail-closed filter case may join the core instance only when
+its path-specific handler chain does not make the core snapshot invalid at
+startup. Otherwise it belongs in an alternate runtime profile dedicated to
+that incompatibility.</p>
+<p>The exact port numbers and timeout values are implementation settings, but
+they must be stable for a given published snapshot and documented in the
+core profile’s operational metadata. Daily timeout values should be measured in
+seconds and have generous margins. Tight 75 or 100 millisecond deadlines
+belong in deterministic repository-local gates, not on a potentially loaded
+scheduled runner.</p>
+<h2 id="deterministic-fixture-contract"><a class="header" href="#deterministic-fixture-contract">Deterministic Fixture Contract</a></h2>
+<p>The fixture is a small test-owned server with no dependency on a third-party
+API. It exposes bounded endpoints such as:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Endpoint</th><th>Behavior</th></tr>
+</thead>
+<tbody>
+<tr><td><code>/__regression/sse/declared/two-events</code></td><td>Sends event 1 immediately, waits, sends event 2, and closes.</td></tr>
+<tr><td><code>/__regression/sse/accept/two-events</code></td><td>Returns SSE for a request classified initially through <code>Accept</code>.</td></tr>
+<tr><td><code>/__regression/sse/promoted/two-events</code></td><td>Returns SSE when neither request path nor <code>Accept</code> predicts a stream.</td></tr>
+<tr><td><code>/__regression/sse/idle/heartbeat</code></td><td>Sends heartbeats more frequently than the idle deadline and then closes normally.</td></tr>
+<tr><td><code>/__regression/sse/idle/silence</code></td><td>Sends one event and then remains silent beyond the idle deadline.</td></tr>
+<tr><td><code>/__regression/ordinary/slow</code></td><td>Delays an ordinary response beyond <code>maxRequestTime</code>.</td></tr>
+<tr><td><code>/__regression/headers/stream</code></td><td>Returns parameterized content type, cache policy, and deliberately interesting framing headers.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Every endpoint has a fixed maximum lifetime. The fixture records request
+counts and timestamps so tests can prove whether a post-commit request was
+retried without retaining event payloads indefinitely.</p>
+<h2 id="initial-daily-test-cases"><a class="header" href="#initial-daily-test-cases">Initial Daily Test Cases</a></h2>
+<h3 id="bootstrap-and-readiness"><a class="header" href="#bootstrap-and-readiness">Bootstrap and readiness</a></h3>
+<p>Before feature probes, the harness verifies:</p>
+<ul>
+<li>the Gateway process is running from the requested image digest;</li>
+<li>Config Server bootstrap succeeded for the expected identity;</li>
+<li>runtime configuration validation completed;</li>
+<li>the expected listener became ready within a bounded interval; and</li>
+<li>the fixture is independently healthy.</li>
+</ul>
+<p>A startup failure is reported separately from an SSE behavior failure.</p>
+<h3 id="incremental-passthrough"><a class="header" href="#incremental-passthrough">Incremental passthrough</a></h3>
+<p>The client records the arrival time of each response chunk. It must receive
+event 1 while the upstream request remains open and before the fixture emits
+event 2. Receiving both events only after upstream completion fails the test,
+even if the final status is HTTP 200 and the response body is otherwise
+correct.</p>
+<p>This assertion requires a streaming-capable client. Hurl may validate status,
+headers, and complete bounded responses, but it must not be the only evidence
+for incremental delivery. A small Node client using the streaming HTTP APIs is
+the preferred first implementation.</p>
+<h3 id="request-path-classification"><a class="header" href="#request-path-classification">Request-path classification</a></h3>
+<p>The client calls <code>/__regression/sse/declared/two-events</code> without an SSE
+<code>Accept</code> header. The configured path prefix must select the stream policy
+before upstream headers arrive.</p>
+<h3 id="accept-classification"><a class="header" href="#accept-classification">Accept classification</a></h3>
+<p>The client exercises case-insensitive, parameterized, and comma-separated SSE
+media types. The upstream then confirms <code>text/event-stream</code>. The daily lane may
+rotate representative forms while the exhaustive normalization combinations
+remain in <code>light-fabric</code> unit tests.</p>
+<h3 id="response-side-promotion"><a class="header" href="#response-side-promotion">Response-side promotion</a></h3>
+<p>The client calls a path outside <code>streamPathPrefixes</code> without an SSE <code>Accept</code>
+header. When the upstream returns <code>Content-Type: text/event-stream</code>, the stream
+must continue beyond the shorter ordinary request deadline and complete within
+the stream deadline.</p>
+<h3 id="stream-idle-timeout"><a class="header" href="#stream-idle-timeout">Stream idle timeout</a></h3>
+<p>One endpoint sends heartbeats below the idle threshold and completes normally.
+Another sends an initial event and then becomes silent. The latter must close
+after the idle interval. Because response headers and data are already
+committed, the test expects stream termination rather than a replacement 504
+document.</p>
+<h3 id="ordinary-timeout"><a class="header" href="#ordinary-timeout">Ordinary timeout</a></h3>
+<p>A non-SSE upstream response that exceeds <code>maxRequestTime</code> must return HTTP 504
+before response commitment. This guards against accidentally applying the
+stream exemption to ordinary traffic.</p>
+<h3 id="header-and-framing-behavior"><a class="header" href="#header-and-framing-behavior">Header and framing behavior</a></h3>
+<p>The suite confirms that:</p>
+<ul>
+<li>the upstream parameterized <code>Content-Type</code> remains authoritative;</li>
+<li>configured upstream <code>Cache-Control</code> survives normal header mutation;</li>
+<li>an unknown-length stream does not expose a contradictory <code>Content-Length</code>;
+and</li>
+<li>downstream framing is valid for the tested protocol.</li>
+</ul>
+<p>The complete HTTP/1.0, HTTP/1.1, and HTTP/2 framing matrix remains in the
+<code>light-fabric</code> gate.</p>
+<h2 id="light-portal-test-layout"><a class="header" href="#light-portal-test-layout"><code>light-portal-test</code> Layout</a></h2>
+<p>The first implementation should use a core-profile entry point with
+feature-specific suites:</p>
+<pre><code class="language-text">light-portal-test/
+  config/gateway-core/
+    startup.yml
+  tests/gateway-core/
+    fixture-server.mjs
+    sse-passthrough.test.mjs
+  scripts/
+    run-gateway-managed.sh
+    run-gateway-core.sh
+    run-gateway-sse.sh
+</code></pre>
+<p>The Makefile initially adds:</p>
+<pre><code class="language-text">make gateway-core
+make gateway-sse
+</code></pre>
+<p><code>make gateway-core</code> starts the core runtime once and executes every core feature
+suite. <code>make gateway-sse</code> uses the same core Config Instance but selects only
+the SSE fixture cases for focused diagnosis. The normal daily batch invokes
+<code>gateway-core</code> and places its artifacts under the existing timestamped
+<code>reports/runs/&lt;run-id&gt;/</code> hierarchy.</p>
+<p><code>run-gateway-managed.sh</code> owns reusable mechanics:</p>
+<ul>
+<li>validating required tools and secret inputs;</li>
+<li>allocating the report directory;</li>
+<li>starting the fixture;</li>
+<li>starting the selected Gateway image;</li>
+<li>waiting for bounded readiness;</li>
+<li>invoking the selected feature test;</li>
+<li>capturing evidence; and</li>
+<li>terminating child processes and containers through an exit trap.</li>
+</ul>
+<p><code>run-gateway-core.sh</code> supplies the core runtime profile, fixture command,
+expected bootstrap identity, listener address, and ordered feature suite.
+<code>run-gateway-sse.sh</code> is a narrow selector over that same core lifecycle; it
+does not load a different Portal snapshot.</p>
+<h2 id="daily-execution-lifecycle"><a class="header" href="#daily-execution-lifecycle">Daily Execution Lifecycle</a></h2>
+<pre class="mermaid">sequenceDiagram
+    participant Scheduler
+    participant Harness as light-portal-test
+    participant Fixture as SSE fixture
+    participant Gateway as Fresh Gateway
+    participant Config as Config Server
+
+    Scheduler-&gt;&gt;Harness: make gateway-core
+    Harness-&gt;&gt;Fixture: Start bounded fixture
+    Harness-&gt;&gt;Gateway: Start requested image and startup.yml
+    Gateway-&gt;&gt;Config: Fetch current regression-core snapshot
+    Config--&gt;&gt;Gateway: Runtime configuration
+    Gateway--&gt;&gt;Harness: Listener ready
+    Harness-&gt;&gt;Gateway: Execute streaming probes
+    Gateway-&gt;&gt;Fixture: Proxy requests
+    Fixture--&gt;&gt;Gateway: Events, delays, and headers
+    Gateway--&gt;&gt;Harness: Incremental responses
+    Harness-&gt;&gt;Harness: Write JUnit and evidence
+    Harness-&gt;&gt;Gateway: Graceful stop
+    Harness-&gt;&gt;Fixture: Stop fixture
+</pre>
+
+<p>The harness must enforce one overall deadline. It must not leave a Gateway,
+fixture, temporary config cache, or listener behind after success, failure, or
+interruption.</p>
+<h2 id="inputs-and-secrets"><a class="header" href="#inputs-and-secrets">Inputs And Secrets</a></h2>
+<p>The scheduled environment supplies at least:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Input</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>LIGHT_GATEWAY_IMAGE</code></td><td>Exact release or daily image under test.</td></tr>
+<tr><td><code>LIGHT_CONFIG_SERVER_URI</code></td><td>Config Server bootstrap endpoint.</td></tr>
+<tr><td><code>LIGHT_PORTAL_AUTHORIZATION</code></td><td>Service credential used for authenticated bootstrap and any configured registration.</td></tr>
+<tr><td><code>LIGHT_GATEWAY_BOOTSTRAP_CA_CERT_PATH</code></td><td>Trust root for Config Server.</td></tr>
+<tr><td><code>LIGHT_GATEWAY_STARTUP_HOST</code></td><td>Defaults to <code>dev.networknt.com</code>.</td></tr>
+<tr><td><code>LIGHT_GATEWAY_SERVICE_ID</code></td><td>Defaults to the Light Gateway service ID.</td></tr>
+<tr><td><code>LIGHT_GATEWAY_ENVIRONMENT</code></td><td>Defaults to <code>regression-core</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Credentials are supplied through the regression host’s managed secret
+facility. The harness must not print the authorization value, include it in a
+command-line argument visible to other processes, persist it in reports, or
+copy it into the downloaded-config evidence.</p>
+<h2 id="evidence-and-reporting"><a class="header" href="#evidence-and-reporting">Evidence And Reporting</a></h2>
+<p>Each run records:</p>
+<ul>
+<li>UTC run identifier and test revision;</li>
+<li>requested image reference and resolved image digest;</li>
+<li>bootstrap Host, Service ID, and Env Tag;</li>
+<li>current snapshot identifier or version when the runtime exposes it safely;</li>
+<li>SHA-256 hashes of relevant downloaded configuration files;</li>
+<li>Gateway startup and terminal logs with secrets redacted;</li>
+<li>fixture request counts and bounded timing records;</li>
+<li>per-test event-arrival timings and outcomes;</li>
+<li>JUnit output for scheduled-test integration; and</li>
+<li>cleanup outcome.</li>
+</ul>
+<p>Downloaded configuration may contain sensitive values. The default evidence is
+file name, size, and digest, not raw file content. A deliberately sanitized
+allowlist may expose selected non-secret effective properties when it improves
+diagnosis.</p>
+<p>The report should classify the first failing boundary:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Classification</th><th>Example</th></tr>
+</thead>
+<tbody>
+<tr><td><code>HARNESS</code></td><td>Container engine or required test tool unavailable.</td></tr>
+<tr><td><code>FIXTURE</code></td><td>Fixture fails its independent health check.</td></tr>
+<tr><td><code>BOOTSTRAP_AUTH</code></td><td>Config Server rejects the service credential.</td></tr>
+<tr><td><code>CONFIG_LOOKUP</code></td><td>No current snapshot exists for the bootstrap tuple.</td></tr>
+<tr><td><code>CONFIG_VALIDATION</code></td><td>Downloaded Gateway configuration is invalid.</td></tr>
+<tr><td><code>GATEWAY_STARTUP</code></td><td>Gateway exits or never opens its listener.</td></tr>
+<tr><td><code>FEATURE_ASSERTION</code></td><td>Gateway starts but violates an SSE assertion.</td></tr>
+<tr><td><code>CLEANUP</code></td><td>Runtime or fixture cannot be stopped cleanly.</td></tr>
+</tbody>
+</table>
+</div>
+<p>This prevents a missing snapshot from being reported as an SSE transport
+regression.</p>
+<h2 id="security-and-isolation"><a class="header" href="#security-and-isolation">Security And Isolation</a></h2>
+<ul>
+<li>Bind the fixture and Gateway listener to loopback unless a later test
+explicitly requires remote reachability.</li>
+<li>Use a dedicated least-privilege Gateway service principal for regression.</li>
+<li>Permit that principal to retrieve only its intended configuration audience
+and perform only the controller operations required by the core or selected
+alternate profile.</li>
+<li>Do not place provider credentials, user tokens, or production endpoint
+secrets in the regression snapshot.</li>
+<li>Keep the fixture deterministic and synthetic. It must not proxy into a
+customer or production system.</li>
+<li>Preserve normal Gateway authentication and authorization on core or alternate
+paths that claim to test those handlers. Streaming classification must never
+be treated as an authorization bypass.</li>
+<li>Bound every fixture response, client request, readiness wait, and overall
+harness run.</li>
+<li>Redact authorization headers, cookies, token material, and raw downloaded
+secrets from reports.</li>
+</ul>
+<h2 id="configuration-change-and-rollback"><a class="header" href="#configuration-change-and-rollback">Configuration Change And Rollback</a></h2>
+<p>Snapshots are immutable. To change the core regression profile:</p>
+<ol>
+<li>update desired configuration through Portal;</li>
+<li>wait for the event projection to catch up;</li>
+<li>create and review a new snapshot;</li>
+<li>run the affected feature suites manually during a controlled candidate
+activation window, then restore the prior current pointer if validation
+fails;</li>
+<li>select the verified snapshot as current; and</li>
+<li>let the next fresh Gateway run consume it normally.</li>
+</ol>
+<p>Rollback moves the current pointer to a previously verified immutable snapshot
+and reruns the suite. The test harness never edits a snapshot in place.</p>
+<h2 id="extension-to-other-gateway-features"><a class="header" href="#extension-to-other-gateway-features">Extension To Other Gateway Features</a></h2>
+<p>After the SSE feature is stable, add compatible features to the core profile by
+allocating new path prefixes and extending the shared fixture. Each addition
+must define:</p>
+<ul>
+<li>its reserved path prefix and core handler-chain selection;</li>
+<li>required fixture behavior or external dependency;</li>
+<li>required handler chain and configuration ownership;</li>
+<li>startup and readiness contract;</li>
+<li>feature assertions;</li>
+<li>safe timeout and retry bounds;</li>
+<li>secrets and authorization scope;</li>
+<li>expected observability evidence; and</li>
+<li>cleanup behavior.</li>
+</ul>
+<p>The addition must also prove that its configuration remains compatible with
+all existing core paths. Only when that check fails for a legitimate product
+reason should the feature propose an alternate runtime profile, Env Tag, and
+Config Instance.</p>
+<p>Good early core candidates include ordinary proxy deadlines, request and
+response header rewrite, URL rewrite, rate limiting, access-control denial,
+and controller-backed router selection. Specialized LLM, MCP, A2A, and
+WebSocket protocol suites remain separate feature lanes, but they may use the
+same core Gateway instance when their global runtime requirements remain
+compatible.</p>
+<h2 id="delivery-plan-1"><a class="header" href="#delivery-plan-1">Delivery Plan</a></h2>
+<h3 id="phase-0-core-portal-profile"><a class="header" href="#phase-0-core-portal-profile">Phase 0: Core Portal profile</a></h3>
+<ul>
+<li>Create the <code>regression-core</code> Config Instance under <code>dev.networknt.com</code>.</li>
+<li>Add the minimal proxy, server, and handler properties through supported
+Portal commands or UI.</li>
+<li>Reserve the <code>/__regression/</code> namespace and add the initial SSE and ordinary
+control path prefixes.</li>
+<li>Create, inspect, and activate an immutable snapshot.</li>
+<li>Verify a manually started Gateway downloads the intended snapshot.</li>
+</ul>
+<p>Exit gate: a fresh Gateway starts using only the bootstrap file and runtime
+secrets, and its effective configuration hashes match the reviewed snapshot.</p>
+<h3 id="phase-1-local-harness"><a class="header" href="#phase-1-local-harness">Phase 1: Local harness</a></h3>
+<ul>
+<li>Add the deterministic fixture and streaming Node assertions to
+<code>light-portal-test</code>.</li>
+<li>Add bounded startup, readiness, evidence, and cleanup handling.</li>
+<li>Add independent <code>make gateway-core</code> and focused <code>make gateway-sse</code> targets.</li>
+<li>Qualify success and intentionally injected bootstrap, fixture, timeout, and
+cleanup failures.</li>
+</ul>
+<p>Exit gate: repeated local runs distinguish incremental delivery, promotion,
+idle termination, and ordinary timeout without leaked processes or ports.</p>
+<h3 id="phase-2-daily-core-integration"><a class="header" href="#phase-2-daily-core-integration">Phase 2: Daily core integration</a></h3>
+<ul>
+<li>Invoke <code>make gateway-core</code> from the daily batch.</li>
+<li>Publish JUnit and diagnostic artifacts with the other timestamped reports.</li>
+<li>Pin or explicitly select the daily image policy and record its resolved
+digest.</li>
+<li>Add notification using the existing daily regression failure channel.</li>
+</ul>
+<p>Exit gate: the scheduled job runs unattended, retains actionable evidence, and
+does not mutate Portal configuration.</p>
+<h3 id="phase-3-additional-core-features-and-incompatible-profiles"><a class="header" href="#phase-3-additional-core-features-and-incompatible-profiles">Phase 3: Additional core features and incompatible profiles</a></h3>
+<ul>
+<li>Add header, rewrite, limit, security, and router paths to the core profile
+when their configurations coexist safely.</li>
+<li>Reuse the core instance and lifecycle for every compatible feature.</li>
+<li>Create an alternate runtime profile only when a documented incompatibility
+prevents a feature from joining the core snapshot.</li>
+</ul>
+<p>Exit gate: at least one additional feature runs through a new core path without
+copying instance, secret handling, readiness, evidence, or cleanup logic; any
+alternate profile has a documented incompatibility.</p>
+<h2 id="acceptance-criteria-6"><a class="header" href="#acceptance-criteria-6">Acceptance Criteria</a></h2>
+<p>The first Portal-managed SSE regression is complete when:</p>
+<ul>
+<li>a dedicated active Config Instance exists under <code>dev.networknt.com</code> with Env
+Tag <code>regression-core</code>;</li>
+<li>the intended immutable snapshot is current and retrievable only through the
+normal authenticated bootstrap path;</li>
+<li>a fresh released Gateway image starts from the minimal <code>startup.yml</code>;</li>
+<li>the deterministic fixture requires no external or billable provider;</li>
+<li>the client proves event 1 arrives before upstream completion;</li>
+<li>path, Accept, and response-content-type classification are exercised;</li>
+<li>heartbeat progress and idle silence produce different outcomes;</li>
+<li>ordinary requests remain subject to the ordinary timeout;</li>
+<li>selected upstream streaming headers and valid framing are observed;</li>
+<li>image, bootstrap, snapshot/configuration, request timing, logs, and JUnit
+evidence are retained without secrets;</li>
+<li>all processes, containers, ports, and temporary caches are cleaned up; and</li>
+<li>the focused SSE target and complete core target are independently runnable;</li>
+<li><code>gateway-core</code> is included in the daily batch; and</li>
+<li>the core path-prefix model is ready to accept additional compatible Gateway
+features without creating another Config Instance.</li>
+</ul>
+<h2 id="related-documentation"><a class="header" href="#related-documentation">Related Documentation</a></h2>
+<ul>
+<li><a href="#control-plane-policy-publication-through-config-server">Control-Plane Policy Publication Through Config Server</a></li>
+<li><a href="#api-version-publication-to-gateway">API Version Publication To Gateway</a></li>
+<li><a href="#create-instance">Create Instance</a></li>
+<li><a href="#instance-admin">Instance Admin</a></li>
+<li><a href="https://github.com/networknt/light-fabric/blob/master/docs/src/product/light-gateway/sse-passthrough-parity.md">SSE Passthrough Parity</a></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="direct-event-replay-execution"><a class="header" href="#direct-event-replay-execution">Direct Event Replay Execution</a></h1>
+<h2 id="status-14"><a class="header" href="#status-14">Status</a></h2>
 <p>Implemented on 2026-08-19 as the replacement for the asynchronous
 replay-worker execution path in <a href="#event-replay">Event Replay</a>.</p>
 <p>This design changes only the trigger and invocation path for an approved replay.
@@ -24325,7 +24966,7 @@ runbook, and rollout tests. The durable database state remains authoritative;
 only the trigger changes from background discovery to the explicit user request.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="fast-snapshot-derived-database-bootstrap"><a class="header" href="#fast-snapshot-derived-database-bootstrap">Fast Snapshot-Derived Database Bootstrap</a></h1>
-<h2 id="status-14"><a class="header" href="#status-14">Status</a></h2>
+<h2 id="status-15"><a class="header" href="#status-15">Status</a></h2>
 <p>Implemented with a narrower ingestion-only boundary. The projection-aware
 bootstrap proposal retained below records the review history, but its barrier,
 materialization, convergence, DLQ, and database-ready requirements are
@@ -24407,7 +25048,7 @@ that relationship for synthetic snapshot events.</p>
 <p>The importer must not attempt to enrich snapshot-derived <code>events.json</code> with
 original transaction metadata. Original-history export is a separate problem
 and is outside this design.</p>
-<h2 id="decision-summary-10"><a class="header" href="#decision-summary-10">Decision Summary</a></h2>
+<h2 id="decision-summary-11"><a class="header" href="#decision-summary-11">Decision Summary</a></h2>
 <ol>
 <li>The existing top-level JSON array remains the canonical snapshot-derived
 <code>events.json</code> format.</li>
@@ -25275,7 +25916,7 @@ release-built archive sufficient for installation performance?</li>
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="composable-multi-host-snapshot-export-and-bootstrap"><a class="header" href="#composable-multi-host-snapshot-export-and-bootstrap">Composable Multi-Host Snapshot Export And Bootstrap</a></h1>
-<h2 id="status-15"><a class="header" href="#status-15">Status</a></h2>
+<h2 id="status-16"><a class="header" href="#status-16">Status</a></h2>
 <p>Accepted design. Phases 0 through 4 are implemented in the working
 repositories. The Phase 4 release cut-over requires signed v2 archives and
 trusted public-key publication; final release qualification still requires a
@@ -25286,7 +25927,7 @@ composition exercise.</p>
 That design defines how one generated <code>events.json</code> is imported efficiently;
 this design defines which user, membership, profile, and access events may be
 generated when the source environment contains more than one host.</p>
-<h2 id="decision-summary-11"><a class="header" href="#decision-summary-11">Decision Summary</a></h2>
+<h2 id="decision-summary-12"><a class="header" href="#decision-summary-12">Decision Summary</a></h2>
 <ol>
 <li>Treat <code>user_t</code> identity as environment-wide and emit at most one user birth
 event for each <code>user_id</code> in a complete environment bundle.</li>
@@ -26167,11 +26808,11 @@ without a satisfiable declared dependency and conversion disposition.</p>
 <h1 id="light-gateway-1"><a class="header" href="#light-gateway-1">Light Gateway</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="local-model-provider-transport-for-llm-gateway"><a class="header" href="#local-model-provider-transport-for-llm-gateway">Local Model Provider Transport For LLM Gateway</a></h1>
-<h2 id="status-16"><a class="header" href="#status-16">Status</a></h2>
+<h2 id="status-17"><a class="header" href="#status-17">Status</a></h2>
 <p>Proposed design for implementation and qualification.</p>
 <p>This design extends the completed OpenAI-compatible LLM gateway and the
 Embedding Space Contract. It does not change the public <code>/v1</code> client contract.</p>
-<h2 id="decision-summary-12"><a class="header" href="#decision-summary-12">Decision Summary</a></h2>
+<h2 id="decision-summary-13"><a class="header" href="#decision-summary-13">Decision Summary</a></h2>
 <p>The LLM gateway must support self-hosted model servers running on the same
 machine, in the same Kubernetes cluster, or elsewhere on an organization’s
 private network. Self-hosted models are a first-class production deployment,
@@ -27190,7 +27831,7 @@ host or in the model pod when the applicable policy requires encryption.</p>
 <h3 id="treat-network-isolation-as-equivalent-to-tls"><a class="header" href="#treat-network-isolation-as-equivalent-to-tls">Treat Network Isolation As Equivalent To TLS</a></h3>
 <p>Rejected as the general rule. Private networks reduce exposure but do not
 authenticate the model endpoint or protect against every internal observer.</p>
-<h2 id="delivery-plan-1"><a class="header" href="#delivery-plan-1">Delivery Plan</a></h2>
+<h2 id="delivery-plan-2"><a class="header" href="#delivery-plan-2">Delivery Plan</a></h2>
 <h3 id="phase-l1-contract-and-compiler"><a class="header" href="#phase-l1-contract-and-compiler">Phase L1: Contract And Compiler</a></h3>
 <ul>
 <li>Define the Network Profile, Network Zone, resolved trust-bundle,
@@ -27271,7 +27912,7 @@ embedding.</li>
 <li>Promote a KB index only after the Embedding Space Contract is verified through
 every eligible local deployment.</li>
 </ul>
-<h2 id="acceptance-criteria-6"><a class="header" href="#acceptance-criteria-6">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-7"><a class="header" href="#acceptance-criteria-7">Acceptance Criteria</a></h2>
 <ol>
 <li>An Ollama deployment may use an HTTPS Light Gateway sidecar or an explicitly
 approved, credential-free <code>private_plaintext</code> connection.</li>
@@ -27360,13 +28001,13 @@ and the gateway verifies producer authenticity and endpoint binding.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-workflow-tool-access-approval"><a class="header" href="#light-workflow-tool-access-approval">Light Workflow Tool Access Approval</a></h1>
-<h2 id="status-17"><a class="header" href="#status-17">Status</a></h2>
+<h2 id="status-18"><a class="header" href="#status-18">Status</a></h2>
 <p>Proposed.</p>
 <p>The design reuses the Portal Workflow application, <code>ask</code> tasks, role-based
 worklists, and the existing workflow Tool grant events. It changes the
 authoring and approval experience but does not weaken runtime Tool grant
 enforcement.</p>
-<h2 id="purpose-4"><a class="header" href="#purpose-4">Purpose</a></h2>
+<h2 id="purpose-5"><a class="header" href="#purpose-5">Purpose</a></h2>
 <p>A workflow author currently sees only Tools that are already granted to the
 workflow definition. This creates a circular authoring flow:</p>
 <ol>
@@ -27391,7 +28032,7 @@ acknowledgement task to the original author.</p>
 <li><a href="#endpoint-tools-and-workflow-access">Endpoint Tools and Workflow Access</a></li>
 <li><a href="#workflow-version-and-publication">Workflow Version and Publication</a></li>
 </ul>
-<h2 id="decision-summary-13"><a class="header" href="#decision-summary-13">Decision Summary</a></h2>
+<h2 id="decision-summary-14"><a class="header" href="#decision-summary-14">Decision Summary</a></h2>
 <ol>
 <li>Runtime authorization remains an explicit Tool grant scoped to one workflow
 definition. Version-scoped grants are deferred because the current active
@@ -27876,7 +28517,7 @@ request aggregate is keyed by <code>request_id</code> and must not reuse that ta
 <li>Consider preapproved Tool bundles for low-risk workflow namespaces while
 still materializing explicit per-workflow grants.</li>
 </ul>
-<h2 id="acceptance-criteria-7"><a class="header" href="#acceptance-criteria-7">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-8"><a class="header" href="#acceptance-criteria-8">Acceptance Criteria</a></h2>
 <p>The design is complete when:</p>
 <ol>
 <li>A new workflow receives a stable <code>wfDefId</code> before the author selects Tools.</li>
@@ -33278,7 +33919,7 @@ plan contains only properties whose parents remain selected.</p>
 <p>The immediate response is <code>ACCEPTED</code>, not completed. It contains the clone
 request ID, target instance ID, transaction ID, terminal event ID, event counts,
 and status URL/action.</p>
-<h3 id="status-18"><a class="header" href="#status-18">Status</a></h3>
+<h3 id="status-19"><a class="header" href="#status-19">Status</a></h3>
 <p><code>getInstanceCloneStatus</code> accepts <code>hostId</code> and <code>cloneRequestId</code> in a POST query
 and returns one of:</p>
 <ul>
@@ -33944,7 +34585,7 @@ WHERE h.sub_domain || '.' || h.domain = ?
 <p>The deployment service contains pipeline management, platform management and deployment management. It also integrates with product management and instance management services.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-portal-install-1"><a class="header" href="#light-portal-install-1">Light Portal Install</a></h1>
-<h2 id="purpose-5"><a class="header" href="#purpose-5">Purpose</a></h2>
+<h2 id="purpose-6"><a class="header" href="#purpose-6">Purpose</a></h2>
 <p><code>light-portal-install</code> provides a one-command local installation path for Light Portal. The target user should only need Docker Compose on the host machine and should not need to clone the individual service repositories, build Java or Rust projects, install Node.js, or manually copy static assets.</p>
 <p>The intended entrypoint is:</p>
 <pre><code class="language-bash">curl -sL https://raw.githubusercontent.com/networknt/light-portal-install/main/install.sh | bash
@@ -34456,7 +35097,7 @@ public class UuidUtil {
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="entity-creation-uniqueness"><a class="header" href="#entity-creation-uniqueness">Entity Creation Uniqueness</a></h1>
-<h2 id="status-19"><a class="header" href="#status-19">Status</a></h2>
+<h2 id="status-20"><a class="header" href="#status-20">Status</a></h2>
 <p>Implemented through Phase 5 for Role/Rule stream births and Category/Tag semantic
 identity, client retries, lifecycle alignment, verified historical materialization,
 snapshot/import guards, and policy-aware retry-ledger cleanup. Later aggregate
@@ -35784,7 +36425,7 @@ unprotected append path, importer problem, or policy drift.</p>
 create commands.</li>
 <li>Require elevated, audited authorization for identity release and legacy repair.</li>
 </ul>
-<h2 id="acceptance-criteria-8"><a class="header" href="#acceptance-criteria-8">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-9"><a class="header" href="#acceptance-criteria-9">Acceptance Criteria</a></h2>
 <p>These are program-wide criteria for issue 691. Phase 5 satisfies them only for
 the scoped Role/Rule stream and Category/Tag semantic-identity rollout described
 in Status; criteria involving the remaining 114 <code>REVIEW_PENDING</code> birth events
@@ -40442,7 +41083,7 @@ event-sourced product release model without duplicating standard mappings for
 every tenant.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="release-workflow"><a class="header" href="#release-workflow">Release Workflow</a></h1>
-<h2 id="status-20"><a class="header" href="#status-20">Status</a></h2>
+<h2 id="status-21"><a class="header" href="#status-21">Status</a></h2>
 <p>Proposed design.</p>
 <p>Light Portal should use <code>light-workflow</code> as the durable release orchestrator
 for Java and Rust releases. The workflow should coordinate repository checkout,
@@ -41482,7 +42123,7 @@ It also allows restoration of credentials that should be permanently revoked.</p
 lists drift across processors. The database already owns the foreign-key graph
 and executes projection transactions, so a validated database policy is the
 smaller consistency boundary.</p>
-<h2 id="acceptance-criteria-9"><a class="header" href="#acceptance-criteria-9">Acceptance Criteria</a></h2>
+<h2 id="acceptance-criteria-10"><a class="header" href="#acceptance-criteria-10">Acceptance Criteria</a></h2>
 <ul>
 <li>No trigger contains hard-coded domain table names.</li>
 <li>Every public foreign key from a parent with <code>active</code> and <code>delete_ts</code> has an
@@ -41601,7 +42242,7 @@ mutation.</li>
 <h1 id="distributed-scheduler-design"><a class="header" href="#distributed-scheduler-design">Distributed Scheduler Design</a></h1>
 <h2 id="introduction-1"><a class="header" href="#introduction-1">Introduction</a></h2>
 <p>The Distributed Scheduler is a robust, highly available component of the light-portal architecture that manages the periodic execution of tasks across a cluster of application instances. It ensures that scheduled tasks are executed exactly as defined, even in a distributed environment, by using a database-backed leader election and locking mechanism.</p>
-<h2 id="architecture-3"><a class="header" href="#architecture-3">Architecture</a></h2>
+<h2 id="architecture-4"><a class="header" href="#architecture-4">Architecture</a></h2>
 <p>The scheduler follows a <strong>Leader-Follower</strong> pattern to prevent redundant executions and ensure consistency.</p>
 <ol>
 <li><strong>Leader Election</strong>: All scheduler instances compete for a global lock in the <code>scheduler_lock_t</code> table.</li>
@@ -41676,7 +42317,7 @@ LIMIT ?;
 <h1 id="postgresql-pubsub-design"><a class="header" href="#postgresql-pubsub-design">PostgreSQL Pub/Sub Design</a></h1>
 <h2 id="introduction-2"><a class="header" href="#introduction-2">Introduction</a></h2>
 <p>The PostgreSQL Pub/Sub mechanism provides an alternative to Kafka for event distribution within the light-portal architecture. It is designed for smaller deployments or environments where Kafka is not available, offering a reliable, low-latency, and strictly ordered event delivery system using native PostgreSQL features.</p>
-<h2 id="architecture-4"><a class="header" href="#architecture-4">Architecture</a></h2>
+<h2 id="architecture-5"><a class="header" href="#architecture-5">Architecture</a></h2>
 <p>The system utilizes a hybrid <strong>Polling + LISTEN/NOTIFY</strong> approach to achieve both high reliability and low latency.</p>
 <h3 id="1-logical-partitioning"><a class="header" href="#1-logical-partitioning">1. Logical Partitioning</a></h3>
 <p>To support horizontal scalability and ensure ordered processing for multi-tenant environments, the system uses logical partitioning based on the <code>host_id</code>.</p>
@@ -41918,7 +42559,7 @@ waitPeriodMs: ${db-event-consumer.waitPeriodMs:1000}
 <h1 id="kafka-event-processor"><a class="header" href="#kafka-event-processor">Kafka Event Processor</a></h1>
 <h2 id="overview-2"><a class="header" href="#overview-2">Overview</a></h2>
 <p>The Kafka Event Processor (<code>PortalEventConsumerStartupHook</code>) consumes events from Kafka topics that are populated by Debezium CDC from the <code>outbox_message_t</code> table. It provides robust event processing with transaction-level granularity and Dead Letter Queue (DLQ) support.</p>
-<h2 id="architecture-5"><a class="header" href="#architecture-5">Architecture</a></h2>
+<h2 id="architecture-6"><a class="header" href="#architecture-6">Architecture</a></h2>
 <p>The processor uses a <strong>two-phase processing strategy</strong> with automatic fallback to ensure both performance and reliability:</p>
 <ol>
 <li><strong>Optimistic Batch Processing</strong>: Attempts to process all transactions in a single database transaction for maximum throughput</li>
@@ -42760,7 +43401,7 @@ Java-compatible unversioned arrays for migration compatibility.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="event-replay"><a class="header" href="#event-replay">Event Replay</a></h1>
-<h2 id="status-21"><a class="header" href="#status-21">Status</a></h2>
+<h2 id="status-22"><a class="header" href="#status-22">Status</a></h2>
 <p>This document defines the revised target design for event replay during the
 early development stage of light-portal. The implementation still contains
 legacy-backfill, staged-rollout, feature-gate, mandatory-encryption, and
@@ -44844,7 +45485,7 @@ The Importer processes the list in order:</p>
 </li>
 </ol>
 <h2 id="dry-run-technical-implementation"><a class="header" href="#dry-run-technical-implementation">Dry Run Technical Implementation</a></h2>
-<h3 id="purpose-6"><a class="header" href="#purpose-6">Purpose</a></h3>
+<h3 id="purpose-7"><a class="header" href="#purpose-7">Purpose</a></h3>
 <p>To guarantee the promotion will succeed without actually modifying the Higher Environment (Production).</p>
 <h3 id="option-1-application-layer-simulation-fast-recommended-for-planning"><a class="header" href="#option-1-application-layer-simulation-fast-recommended-for-planning">Option 1: Application-Layer Simulation (Fast, Recommended for Planning)</a></h3>
 <ul>
@@ -45844,7 +46485,7 @@ deployment intent and history, while the deployer owns safe cluster-local
 execution.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="release-signing-key-management-and-rotation"><a class="header" href="#release-signing-key-management-and-rotation">Release Signing Key Management and Rotation</a></h1>
-<h2 id="status-22"><a class="header" href="#status-22">Status</a></h2>
+<h2 id="status-23"><a class="header" href="#status-23">Status</a></h2>
 <p>Normative design. Implementation is partial.</p>
 <p><code>portal-config-dev</code> currently verifies the signed environment bundle before
 extracting its editable <code>events.json</code>. The other deployment repositories do
@@ -46198,7 +46839,7 @@ top-level release manifest.</li>
 <p>This evidence contains no private-key material.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="enterprise-ai-assisted-bootstrap-and-eks-deployment"><a class="header" href="#enterprise-ai-assisted-bootstrap-and-eks-deployment">Enterprise AI-Assisted Bootstrap and EKS Deployment</a></h1>
-<h2 id="status-23"><a class="header" href="#status-23">Status</a></h2>
+<h2 id="status-24"><a class="header" href="#status-24">Status</a></h2>
 <p>Proposed customer deployment and qualification design.</p>
 <h2 id="executive-decision-1"><a class="header" href="#executive-decision-1">Executive Decision</a></h2>
 <p>Create a dedicated Linux VM that continuously proves a complete Light Portal
@@ -46464,7 +47105,7 @@ references;</li>
 Amazon RDS for PostgreSQL and the enterprise Kafka offering. Exact products
 and high-availability profiles are customer architecture decisions, but they
 must be fixed before the production qualification run.</p>
-<h2 id="component-responsibilities"><a class="header" href="#component-responsibilities">Component Responsibilities</a></h2>
+<h2 id="component-responsibilities-1"><a class="header" href="#component-responsibilities-1">Component Responsibilities</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -53822,6 +54463,942 @@ client.tokenKeyServerUrl: https://localhost:6881
 client.tokenKeyUri: /oauth2/N2CMw0HGQXeLvC1wBfln2A/keys
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="operations"><a class="header" href="#operations">Operations</a></h1>
+<p>This section documents the deployed Light Portal runtime: how the supported
+Docker Compose distributions are assembled, how services receive configuration
+and secrets, and how operators can diagnose startup and readiness failures.</p>
+<p>Architecture and design pages explain why the platform is structured this way.
+The operations pages describe the current executable contract. The Compose file
+in each deployment repository remains the source of truth when a released
+version differs from this documentation.</p>
+<p>Start with <a href="#docker-compose-deployments">Docker Compose Deployments</a> to choose
+an environment and understand the configuration boundaries shared by all four
+distributions.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="docker-compose-deployments"><a class="header" href="#docker-compose-deployments">Docker Compose Deployments</a></h1>
+<p>Light Portal has four maintained Compose distributions. They share the same
+service architecture but serve different operational purposes.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Distribution</th><th>Intended use</th><th>Primary Compose input</th><th>Public entry point</th></tr>
+</thead>
+<tbody>
+<tr><td><code>portal-config-loc</code></td><td>Local platform and feature development</td><td><code>all-in-lt/docker-compose.yml</code></td><td><code>https://dev.lightapi.net</code> mapped to the local host by default</td></tr>
+<tr><td><code>portal-config-dev</code></td><td>Shared public development environment</td><td><code>docker-compose.yml</code></td><td><code>https://dev.lightapi.net</code></td></tr>
+<tr><td><code>portal-config-bootstrap</code></td><td>Enterprise VM bootstrap and Microsoft Entra SSO evaluation</td><td><code>docker-compose.yml</code> plus <code>docker-compose.bootstrap.yml</code></td><td>Customer DNS; the SSO listener defaults to host port <code>8445</code></td></tr>
+<tr><td><code>light-portal-install</code></td><td>End-user laptop installation</td><td><code>docker-compose.yml</code>, managed through <code>install.sh</code></td><td><code>https://local.localhost</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Use the distribution-specific pages for lifecycle commands and overrides:</p>
+<ul>
+<li><a href="#portal-config-loc">portal-config-loc</a></li>
+<li><a href="#portal-config-dev-1">portal-config-dev</a></li>
+<li><a href="#portal-config-bootstrap-1">portal-config-bootstrap</a></li>
+<li><a href="#light-portal-install-2">light-portal-install</a></li>
+</ul>
+<p>The <a href="#compose-service-catalog">service catalog</a> explains each shared service
+and its configuration contract once.</p>
+<h2 id="configuration-precedence"><a class="header" href="#configuration-precedence">Configuration precedence</a></h2>
+<p>Configuration crosses two precedence boundaries. Treating them as one list can
+hide the value that actually won.</p>
+<h3 id="compose-materialization"><a class="header" href="#compose-materialization">Compose materialization</a></h3>
+<p>The deployment wrapper assembles interpolation inputs from the invoking shell
+and its ordered <code>--env-file</code> arguments, then Compose creates the container’s
+final process environment from the service definition. The wrappers may add
+release image pins and private provider, database, token, or cryptographic
+values that a bare <code>docker compose</code> command does not load.</p>
+<p>Use the deployment wrapper whenever containers may be created or recreated.
+Inspect its ordered environment files and the resulting container environment
+when diagnosing an override. Do not publish a fully rendered Compose document,
+because it can contain secret values.</p>
+<h3 id="application-placeholder-resolution"><a class="header" href="#application-placeholder-resolution">Application placeholder resolution</a></h3>
+<p>For a placeholder such as <code>${gatewayEvidence.bindingId:...}</code>, the runtime checks
+the process environment first, using the normalized uppercase name, and then
+the active external <code>values.yml</code> supplied by the promoted Config Server
+snapshot. The template/default value is used only when neither source provides
+the property.</p>
+<p>The effective value order is therefore:</p>
+<ol>
+<li>Process environment, including explicit Compose <code>environment</code> entries.</li>
+<li>The promoted snapshot’s external <code>values.yml</code>.</li>
+<li>The selected configuration template’s placeholder default.</li>
+<li>Application defaults where no configured value is present.</li>
+</ol>
+<p>File selection is a separate rule: a snapshot-delivered file in the external
+configuration directory can replace the corresponding local template. After
+that file is selected, its placeholders still resolve process environment
+before <code>values.yml</code>.</p>
+<p>For example, a stale <code>GATEWAYEVIDENCE_BINDINGID</code> in Compose continues to win
+over a corrected <code>gatewayEvidence.bindingId</code> in a newly promoted snapshot.
+Check the container environment before concluding that the snapshot is wrong.</p>
+<h2 id="configuration-classes"><a class="header" href="#configuration-classes">Configuration classes</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Class</th><th>Examples</th><th>Handling rule</th></tr>
+</thead>
+<tbody>
+<tr><td>Runtime selector</td><td>host ID, service ID, environment, environment tag</td><td>Must identify the intended Config Server instance exactly.</td></tr>
+<tr><td>Non-secret property</td><td>port, timeout, feature state, schema name</td><td>May be stored in Compose or published configuration.</td></tr>
+<tr><td>Secret reference</td><td><code>env:NAME</code>, mounted secret path</td><td>May be published; it names the location but never contains the secret bytes.</td></tr>
+<tr><td>Secret material</td><td>provider API key, database password, signing or sealing key</td><td>Keep outside Config Server snapshots and source control.</td></tr>
+<tr><td>Generated artifact</td><td>config cache, event bundle, UI distribution, runtime credential file</td><td>Recreate through the owning deployment workflow; do not hand-edit container state.</td></tr>
+</tbody>
+</table>
+</div>
+<p>An environment variable is not automatically secret. Its value and purpose
+determine how it must be managed.</p>
+<h2 id="shared-startup-order"><a class="header" href="#shared-startup-order">Shared startup order</a></h2>
+<p>The detailed dependency graph varies slightly, but the supported stacks follow
+the same phases:</p>
+<ol>
+<li>Start PostgreSQL.</li>
+<li>Apply Portal, Knowledge and operational schemas.</li>
+<li>Materialize runtime credential files and validate the operational contract.</li>
+<li>Start OAuth, controller and Config Server.</li>
+<li>Start Portal command/query services and Portal service.</li>
+<li>Start Workflow, Gateway, LLM Gateway, Agent and Knowledge services.</li>
+<li>Start demo services and optional A2A components.</li>
+</ol>
+<p><code>depends_on</code> orders container startup; it does not prove application readiness
+unless the dependency uses a health check or a successful one-shot completion
+condition.</p>
+<h2 id="operational-database-boundary"><a class="header" href="#operational-database-boundary">Operational database boundary</a></h2>
+<p>The stacks may use one PostgreSQL container, but the logical databases and
+service roles remain separate. Portal catalog data belongs to <code>configserver</code>,
+Knowledge data belongs to <code>knowledge</code>, and runtime evidence/state belongs to an
+operational database such as <code>operations</code>. Each runtime identity has a bounded
+role and schema search path.</p>
+<p>Do not repair an operational projection by copying Portal catalog tables into
+an operational schema. Correct the publication/projection contract and rebuild
+derived state through its supported path.</p>
+<h2 id="safe-validation"><a class="header" href="#safe-validation">Safe validation</a></h2>
+<p>Before starting a changed stack, render it without printing secret values into
+logs:</p>
+<pre><code class="language-bash">docker compose config --quiet
+docker compose config --services
+docker compose config --profiles
+</code></pre>
+<p>After startup, verify health and then inspect the first service-specific error:</p>
+<pre><code class="language-bash">docker compose ps
+docker compose logs --since 10m SERVICE_NAME
+</code></pre>
+<p>Avoid publishing the output of a complete <code>docker compose config</code>; it expands
+environment variables and can expose credentials.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="portal-config-loc"><a class="header" href="#portal-config-loc">portal-config-loc</a></h1>
+<p><code>portal-config-loc</code> is the authoring and full-stack development distribution.
+The supported Rust-era stack is
+<code>portal-config-loc/all-in-lt/docker-compose.yml</code>; the retired Java/Rust overlay
+pair is not part of the current <code>all-in-lt</code> lifecycle.</p>
+<h2 id="intended-use"><a class="header" href="#intended-use">Intended use</a></h2>
+<ul>
+<li>Platform and Portal feature development.</li>
+<li>Creation and validation of the canonical local event baseline.</li>
+<li>Local testing of Gateway, Workflow, Agent, Knowledge and LLM features.</li>
+<li>Running Portal View from a sibling checkout while backend services run in
+Compose.</li>
+</ul>
+<h2 id="lifecycle-1"><a class="header" href="#lifecycle-1">Lifecycle</a></h2>
+<p>From the repository root, prefer the deployment wrapper because it obtains
+release assets, handles an empty event store and preserves the expected startup
+sequence:</p>
+<pre><code class="language-bash">./scripts/deploy-local.sh lt
+</code></pre>
+<p>For a complete recreation:</p>
+<pre><code class="language-bash">REFRESH_RELEASE_ASSETS=true CLEAN_VOLUMES=true ./scripts/deploy-local.sh lt
+</code></pre>
+<p>The wrapper also adds the release image environment file and the private Portal
+environment file, which defaults to
+<code>~/.config/lightapi/light-portal.env</code>. There is no equivalent checked-in
+<code>all-in-lt/.env</code>.</p>
+<p>Do not run a bare <code>docker compose up -d</code> from <code>all-in-lt</code> after a wrapper
+deployment. It targets the same default Compose project but omits those files,
+so it can silently recreate containers with fallback image tags and empty
+private inputs. Direct inspection and shutdown commands remain safe:</p>
+<pre><code class="language-bash">docker compose ps
+docker compose down --timeout 30 --remove-orphans
+</code></pre>
+<p>Deleting volumes destroys local databases and caches. Use the repository’s
+documented recreation path rather than adding volume removal to routine restarts.</p>
+<h2 id="runtime-shape-1"><a class="header" href="#runtime-shape-1">Runtime shape</a></h2>
+<p>The default stack includes PostgreSQL, schema/bootstrap jobs, Light OAuth,
+controller, Config Server, <code>hybrid-command</code>, <code>hybrid-query</code>, Portal service,
+Light Gateway, the dedicated LLM Gateway, Workflow, three Agent service
+instances (<code>light-agent</code>, <code>light-agent-advisor</code>, and
+<code>light-agent-tech-support</code>), Knowledge API/admin/worker, and three demo
+backends. <code>light-a2a</code> is under the <code>a2a</code> Compose profile.</p>
+<p>Important host ports include <code>443</code> for Light Gateway, <code>8444</code> for LLM Gateway,
+<code>8435</code> for Config Server, <code>8436</code> for Workflow, <code>6881</code> for OAuth, <code>8439</code> and
+<code>8440</code> for the hybrid services, <code>2498</code> for Portal service, and <code>5432</code> for local
+PostgreSQL access.</p>
+<h2 id="configuration-and-secrets"><a class="header" href="#configuration-and-secrets">Configuration and secrets</a></h2>
+<p>Service templates and startup selectors live under <code>all-in-lt/*/config</code>.
+Provider credentials and other operator inputs may be loaded from the local
+Portal environment file used by <code>deploy-local.sh</code>. Config Server supplies
+promoted service properties; persistent service caches retain validated
+snapshots across restarts.</p>
+<p>Development-only values embedded in Compose are conveniences, not production
+examples. In particular, cryptographic values must still satisfy the runtime
+format contract. A readable placeholder is not interchangeable with random key
+material.</p>
+<p>The LLM reasoning seal is active only when the published <code>llm-router</code> snapshot
+declares it active. In that case, <code>LLM_REASONING_SEAL_KEY</code> must be unpadded
+Base64URL that decodes to exactly 32 bytes. See
+<a href="#llm-gateway">LLM Gateway</a>.</p>
+<h2 id="source-of-truth-rule"><a class="header" href="#source-of-truth-rule">Source-of-truth rule</a></h2>
+<p>Author event-backed baseline changes here, validate them, export the signed
+environment bundle, and then recreate downstream dev/install environments from
+that bundle. Do not make <code>portal-config-dev</code> the canonical authoring database.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="portal-config-dev-1"><a class="header" href="#portal-config-dev-1">portal-config-dev</a></h1>
+<p><code>portal-config-dev</code> is the shared development deployment. It is derived from
+<code>portal-config-loc/all-in-lt</code> but keeps environment-specific DNS, certificates,
+tokens, service identities and persistent data.</p>
+<h2 id="intended-use-1"><a class="header" href="#intended-use-1">Intended use</a></h2>
+<ul>
+<li>The public development environment at <code>dev.lightapi.net</code>.</li>
+<li>Integration testing against shared services and realistic TLS/DNS routing.</li>
+<li>Validation of promoted Config Server snapshots and release images.</li>
+</ul>
+<p>It is not the authoring source for canonical event-backed Portal data. Author
+and validate that data in <code>portal-config-loc</code>, export it, then recreate or
+update dev through the supported bundle/import workflow.</p>
+<h2 id="runtime-shape-2"><a class="header" href="#runtime-shape-2">Runtime shape</a></h2>
+<p>The single <code>docker-compose.yml</code> contains PostgreSQL, schema and operational
+bootstrap jobs, OAuth, controller, Config Server, hybrid services, Portal
+service, Gateway, dedicated LLM Gateway, Workflow, Agent, Knowledge services and
+demo backends. <code>light-a2a</code> is optional through the <code>a2a</code> profile.</p>
+<p>Gateway normally publishes host port <code>443</code>; LLM Gateway publishes <code>8444</code>.
+Public routing uses <code>dev.lightapi.net</code> and <code>devsignin.lightapi.net</code>. Both names
+must resolve to the deployment host and match the promoted Gateway snapshot and
+TLS assets.</p>
+<h2 id="configuration-sources"><a class="header" href="#configuration-sources">Configuration sources</a></h2>
+<ul>
+<li><code>docker-compose.yml</code> defines the container topology and environment wiring.</li>
+<li>Service directories contain <code>startup.yml</code>, certificates and template files.</li>
+<li><code>~/.config/lightapi/light-portal.env</code> is the default private environment file
+consumed by <code>scripts/restart-dev-stack.sh</code>.</li>
+<li>Config Server supplies promoted runtime properties for the exact host,
+service ID and environment tag.</li>
+<li>Named config-cache volumes preserve the last validated snapshots.</li>
+</ul>
+<p>Keep provider keys, Portal authorization tokens, database credentials and
+cryptographic keys outside Git. A Compose variable that is absent can render as
+an empty value, but a feature published as active may reject that empty value.</p>
+<h2 id="lifecycle-2"><a class="header" href="#lifecycle-2">Lifecycle</a></h2>
+<p>Use the repository wrapper so database recreation, asset synchronization and
+startup order remain coordinated:</p>
+<pre><code class="language-bash">./scripts/restart-dev-stack.sh
+</code></pre>
+<p>Use <code>--recreate-database</code> only when intentionally rebuilding the environment
+from its canonical input. Review the repository README before destructive
+options.</p>
+<p>After a configuration change, distinguish three operations:</p>
+<ul>
+<li>Restart reloads process-local environment and startup files.</li>
+<li>Explicit Config Server reload applies only reloadable modules.</li>
+<li>Recreating a config-cache volume removes retained snapshots and should be a
+deliberate recovery action.</li>
+</ul>
+<h2 id="release-discipline"><a class="header" href="#release-discipline">Release discipline</a></h2>
+<p>Dev should run published, pinned release inputs wherever the Compose contract
+provides an image variable. A container restart does not refresh an image tag or
+a cached release environment automatically. Confirm image IDs and active
+snapshot generations when validating a newly released feature.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="portal-config-bootstrap-1"><a class="header" href="#portal-config-bootstrap-1">portal-config-bootstrap</a></h1>
+<p><code>portal-config-bootstrap</code> extends the public dev topology for an enterprise VM
+bootstrap and Microsoft Entra sign-in evaluation.</p>
+<h2 id="compose-inputs"><a class="header" href="#compose-inputs">Compose inputs</a></h2>
+<p>The base platform is defined by <code>docker-compose.yml</code>. The enterprise BFF is an
+additive overlay in <code>docker-compose.bootstrap.yml</code>. Do not extend a one-file
+<code>docker compose config</code> example into an <code>up</code> command: the lifecycle wrapper
+assembles additional image, private Portal, bootstrap and project-name inputs.</p>
+<p><code>restart-bootstrap-stack.sh</code> supplies environment files in this order when they
+exist:</p>
+<ol>
+<li>Repository <code>docker-images.env</code> for released image pins.</li>
+<li><code>LIGHT_PORTAL_ENV_FILE</code>, defaulting to
+<code>~/.config/lightapi/light-portal.env</code>, for shared private runtime inputs.</li>
+<li><code>BOOTSTRAP_ENV_FILE</code>, defaulting to <code>.env.bootstrap</code>, for enterprise
+overrides.</li>
+</ol>
+<p>It reads <code>COMPOSE_PROJECT_NAME</code> from the bootstrap file and defaults it to
+<code>light-portal-bootstrap</code>. The wrapper validates the resulting effective Compose
+model before changing the running stack.</p>
+<h2 id="lifecycle-3"><a class="header" href="#lifecycle-3">Lifecycle</a></h2>
+<p>Validate the Compose and shell-script structure with the checked-in example
+inputs:</p>
+<pre><code class="language-bash">./scripts/validate-bootstrap.sh
+</code></pre>
+<p>This is a repository contract check; it deliberately uses
+<code>.env.bootstrap.example</code> and is not a rendering of the live deployment.</p>
+<p>Validate the real private inputs and restart the deployed stack through:</p>
+<pre><code class="language-bash">./scripts/restart-bootstrap-stack.sh
+</code></pre>
+<p>The wrapper checks the required SSO artifact files and rejects missing or
+placeholder Entra, token-exchange and Portal authorization values before its
+effective <code>docker compose config --quiet</code> check.</p>
+<p>To deliberately recreate the database from the current signed baseline:</p>
+<pre><code class="language-bash">./scripts/restart-bootstrap-stack.sh --recreate-database
+</code></pre>
+<p>That option downloads and verifies <code>events.zip</code> against the trusted pinned
+Ed25519 release key, preserves the existing database as a timestamped backup,
+initializes a fresh database and forces the full baseline import. Do not use it
+for a routine restart.</p>
+<h2 id="runtime-difference"><a class="header" href="#runtime-difference">Runtime difference</a></h2>
+<p>The base OAuth BFF remains available while <code>portal-bff-sso</code> adds a second
+<code>light-gateway</code> runtime identity. The SSO BFF has its own Config Server
+selector, <code>msal-exchange</code> handler chain, Microsoft verifier, confidential token
+exchange client, cookies, TLS material, config cache and SSO-enabled Portal View
+artifact.</p>
+<p>The SSO listener defaults to host port <code>8445</code>; enterprise DNS or a load balancer
+normally presents it on <code>443</code>. Do not point two runtime identities at the same
+Config Server instance merely because they use the same container image.</p>
+<h2 id="required-private-inputs"><a class="header" href="#required-private-inputs">Required private inputs</a></h2>
+<p>Create <code>.env.bootstrap</code> from <code>.env.bootstrap.example</code> and keep it out of source
+control. Required inputs include the Microsoft tenant and client identity,
+token-exchange client credentials, Portal authorization for the SSO runtime,
+customer hostname and TLS configuration.</p>
+<p><code>VITE_SSO_ENABLED</code> and Microsoft SPA settings are build-time Portal View inputs.
+Changing them requires rebuilding the SSO UI artifact, not just restarting the
+container.</p>
+<h2 id="operational-rules"><a class="header" href="#operational-rules">Operational rules</a></h2>
+<ul>
+<li>Use customer-issued certificates for shared use; self-signed generation is
+for isolated evaluation only.</li>
+<li>Preserve the base and SSO Config Server identities independently.</li>
+<li>Validate redirect URI, cookie domain, certificate SAN and public DNS as one
+contract.</li>
+<li>Treat <code>.env.bootstrap</code>, token material and TLS private keys as secrets.</li>
+<li>Promote the enterprise snapshot before expecting the second BFF to become
+ready.</li>
+</ul>
+<p>See <a href="#enterprise-portal-bff">Portal BFF and SSO</a> for the service contract.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="light-portal-install-2"><a class="header" href="#light-portal-install-2">light-portal-install</a></h1>
+<p><code>light-portal-install</code> packages the local platform for users who want Docker
+Compose as the only runtime dependency and do not need sibling source checkouts.</p>
+<h2 id="intended-use-2"><a class="header" href="#intended-use-2">Intended use</a></h2>
+<ul>
+<li>A complete local Portal at <code>https://local.localhost</code>.</li>
+<li>Product evaluation and demonstrations.</li>
+<li>Repeatable installation from released images and signed assets.</li>
+</ul>
+<p>It is not a production secret-management example. Fixed local/demo identities
+exist to make installation self-contained.</p>
+<h2 id="lifecycle-4"><a class="header" href="#lifecycle-4">Lifecycle</a></h2>
+<p>For a checked-out repository:</p>
+<pre><code class="language-bash">./install.sh install
+./install.sh status
+./install.sh logs
+./install.sh stop
+</code></pre>
+<p>Use the README’s explicit reinstall procedure when intentionally recreating
+databases or refreshing release assets. Routine restart should preserve the
+PostgreSQL volume and service caches.</p>
+<h2 id="runtime-shape-3"><a class="header" href="#runtime-shape-3">Runtime shape</a></h2>
+<p>The Compose file includes the Portal database and bootstrap jobs, OAuth,
+controller, Config Server, hybrid services, Portal service, Gateway, dedicated
+LLM Gateway, Workflow, Agent, Knowledge API/admin/worker and demo services.
+<code>light-a2a</code> is available under the <code>a2a</code> profile.</p>
+<p>The primary browser endpoint is host port <code>443</code>. The local certificate is
+self-signed, so a browser warning is expected only for the documented local
+hostname.</p>
+<h2 id="configuration-and-secrets-1"><a class="header" href="#configuration-and-secrets-1">Configuration and secrets</a></h2>
+<p>The installer downloads and extracts versioned runtime/UI assets. Checked-in
+Compose supplies local-only identities and writes runtime secret material into
+protected container-local files where a service requires a file reference.
+Provider API keys remain user inputs in <code>.env</code> and must not be committed.</p>
+<p>The PostgreSQL container holds separate logical databases for Portal,
+Knowledge, and per-host operational state. Runtime roles and schema search paths
+enforce the boundary even though the databases share one container.</p>
+<p>When a released Config Server snapshot activates an optional cryptographic
+feature, its local secret must satisfy that feature’s encoding and length
+contract. Starting without an LLM provider key is allowed; activating a
+reasoning-seal reference with malformed key material is not.</p>
+<h2 id="upgrade-checks"><a class="header" href="#upgrade-checks">Upgrade checks</a></h2>
+<p>After upgrading, verify the downloaded asset version, running image IDs,
+database migration completion, Config Server snapshot generation, and health of
+the public Gateway. A successful installer command is not sufficient if the
+live endpoint is still using an older image or cached snapshot.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="compose-service-catalog"><a class="header" href="#compose-service-catalog">Compose Service Catalog</a></h1>
+<p>The four deployments use a common service architecture. A service may be
+omitted, duplicated under another runtime identity, or placed behind a Compose
+profile, but its configuration boundary remains the same.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Service or group</th><th>Responsibility</th><th>Default host port when published</th></tr>
+</thead>
+<tbody>
+<tr><td><a href="#postgresql-and-bootstrap-jobs">PostgreSQL and bootstrap jobs</a></td><td>Portal, Knowledge and operational persistence; schema and credential preparation</td><td><code>5432</code></td></tr>
+<tr><td><a href="#light-oauth-1">Light OAuth</a></td><td>OAuth/OIDC tokens, authorization and JWKS</td><td><code>6881</code></td></tr>
+<tr><td><a href="#controller">Controller</a></td><td>Runtime registration, control transport and execution coordination</td><td>Internal in current stacks</td></tr>
+<tr><td><a href="#config-server-2">Config Server</a></td><td>Host/service/environment-specific configuration snapshots</td><td><code>8435</code></td></tr>
+<tr><td><a href="#hybrid-command-and-query">Hybrid command and query</a></td><td>Java Portal command/query APIs and projections</td><td><code>8439</code>, <code>8440</code></td></tr>
+<tr><td><a href="#portal-service-1">Portal service</a></td><td>Rust Portal APIs and integration endpoints</td><td><code>2498</code></td></tr>
+<tr><td><a href="#light-gateway-4">Light Gateway</a></td><td>Public Portal BFF, API routing, MCP and static UI</td><td><code>443</code></td></tr>
+<tr><td><a href="#llm-gateway">LLM Gateway</a></td><td>Dedicated OpenAI-compatible model routing profile</td><td><code>8444</code></td></tr>
+<tr><td><a href="#light-workflow-1">Light Workflow</a></td><td>Workflow execution and workflow-backed MCP tools</td><td><code>8436</code></td></tr>
+<tr><td><a href="#light-agent-1">Light Agent</a></td><td>Agent runtime and optional specialized service instances</td><td><code>8083</code> and service-specific ports</td></tr>
+<tr><td><a href="#light-knowledge-1">Light Knowledge</a></td><td>Knowledge API, administration and asynchronous worker</td><td><code>8092</code> for the public API</td></tr>
+<tr><td><a href="#light-a2a">Light A2A</a></td><td>Optional Agent-to-Agent transport</td><td>Profile-dependent</td></tr>
+<tr><td><a href="#demo-services">Demo services</a></td><td>Regression and tutorial REST/MCP backends</td><td><code>8085</code>–<code>8087</code></td></tr>
+<tr><td><a href="#enterprise-portal-bff">Enterprise Portal BFF</a></td><td>Optional Microsoft Entra SSO BFF in bootstrap deployment</td><td><code>8445</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Image tags and exact environment assignments are deployment inputs and may
+change independently. Use this catalog for meaning and constraints, then check
+the selected distribution’s current Compose file for its concrete value.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="postgresql-and-bootstrap-jobs"><a class="header" href="#postgresql-and-bootstrap-jobs">PostgreSQL And Bootstrap Jobs</a></h1>
+<p>The supported Compose distributions use one PostgreSQL container while keeping
+Portal, Knowledge and operational responsibilities logically separated.</p>
+<h2 id="databases-and-ownership"><a class="header" href="#databases-and-ownership">Databases and ownership</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Database class</th><th>Typical name</th><th>Owner</th></tr>
+</thead>
+<tbody>
+<tr><td>Portal control plane</td><td><code>configserver</code></td><td>Portal command/query services, OAuth and configuration services</td></tr>
+<tr><td>Knowledge plane</td><td><code>knowledge</code></td><td>Light Knowledge API, admin and worker identities</td></tr>
+<tr><td>Operational plane</td><td><code>operations</code> and optional host-specific variants</td><td>Controller, Workflow, Gateway, Agent, A2A and evidence publishers through bounded roles</td></tr>
+<tr><td>LLM audit</td><td>Deployment-specific database or operational sink</td><td>LLM audit publisher/runtime contract</td></tr>
+</tbody>
+</table>
+</div>
+<p>Sharing a PostgreSQL container does not authorize cross-database or cross-schema
+queries. Service database roles carry explicit search paths and grants.</p>
+<h2 id="compose-services"><a class="header" href="#compose-services">Compose services</a></h2>
+<p><code>postgres</code> owns the durable volume. The one-shot helpers normally include:</p>
+<ul>
+<li><code>knowledge-schema-migration</code>, which installs or upgrades Knowledge objects;</li>
+<li><code>operational-store-bootstrap</code>, which installs the versioned operational
+bundle and creates bounded runtime roles;</li>
+<li><code>operational-runtime-secrets-init</code>, which materializes database URLs and
+related runtime keys into protected files where required;</li>
+<li><code>operational-schema-validation</code>, which verifies the expected database,
+schema generation and grants before runtime services start; and</li>
+<li>config-cache/artifact initialization jobs needed to correct volume ownership.</li>
+</ul>
+<p>The runtime services should depend on successful completion of the relevant
+bootstrap and validation jobs, not merely on the PostgreSQL TCP port opening.</p>
+<h2 id="important-environment-variables"><a class="header" href="#important-environment-variables">Important environment variables</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variable</th><th style="text-align: right">Secret</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>POSTGRES_PASSWORD</code></td><td style="text-align: right">Yes</td><td>PostgreSQL administrative bootstrap password.</td></tr>
+<tr><td><code>PORTAL_DB_NAME</code></td><td style="text-align: right">No</td><td>Portal database name.</td></tr>
+<tr><td><code>PORTAL_DB_KNOWLEDGE_NAME</code></td><td style="text-align: right">No</td><td>Knowledge database name.</td></tr>
+<tr><td><code>PORTAL_DB_OPERATIONAL_NAMES</code></td><td style="text-align: right">No</td><td>Operational database set created for the deployment.</td></tr>
+<tr><td><code>PORTAL_DB_TOPOLOGY</code></td><td style="text-align: right">No</td><td>Selects the supported logical layout.</td></tr>
+<tr><td><code>OPERATIONAL_BUNDLE_VERSION</code></td><td style="text-align: right">No</td><td>Required migration bundle version.</td></tr>
+<tr><td><code>OPERATIONAL_CONTRACT_GENERATION</code></td><td style="text-align: right">No</td><td>Minimum operational contract generation.</td></tr>
+<tr><td><code>OPERATIONAL_DATABASE_URL</code>, <code>WORKFLOW_DATABASE_URL</code>, <code>GATEWAY_DATABASE_URL</code></td><td style="text-align: right">Yes</td><td>Role-specific operational database credentials used during materialization.</td></tr>
+<tr><td><code>EXECUTION_DATABASE_URL</code>, <code>A2A_DATABASE_URL</code>, <code>AUDIT_DATABASE_URL</code>, <code>ARTIFACT_DATABASE_URL</code></td><td style="text-align: right">Yes</td><td>Additional bounded operational identities.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Some distributions mount secret sources; local/install distributions may inject
+development-only values and write protected files in an initialization step.
+Consumers should receive only their own URL or key.</p>
+<h2 id="persistence-and-reset"><a class="header" href="#persistence-and-reset">Persistence and reset</a></h2>
+<p>The PostgreSQL named volume is authoritative runtime state. <code>docker compose down</code> preserves it; a volume-removal or deployment-specific clean flag destroys
+it. Recreate event-backed Portal projections through the signed event bundle and
+supported importer, not through direct SQL seeding.</p>
+<p>Before a reset, identify which release bundle will be imported. Refresh and
+database deletion are separate actions in the deployment wrappers.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="light-oauth-1"><a class="header" href="#light-oauth-1">Light OAuth</a></h1>
+<p><code>light-oauth</code> issues and validates OAuth/OIDC tokens and exposes the JWKS used by
+other services. The Compose deployments normally publish HTTPS on host port
+<code>6881</code>.</p>
+<h2 id="configuration-7"><a class="header" href="#configuration-7">Configuration</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Input</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>LIGHT_RS_CONFIG_DIR</code></td><td>Mounted bootstrap/template directory.</td></tr>
+<tr><td><code>RUST_LOG</code></td><td>Rust logging filter.</td></tr>
+<tr><td><code>OAUTH_LOG_ANSI</code></td><td>Enables or disables ANSI log output.</td></tr>
+<tr><td>Portal database role</td><td>Reads OAuth client, key and user projections from the Portal database.</td></tr>
+<tr><td>Config files and TLS material</td><td>Listener, handler, certificate and client settings.</td></tr>
+</tbody>
+</table>
+</div>
+<p>OAuth normally starts after PostgreSQL and, where applicable, operational
+secret initialization. Config Server and most authenticated services depend on
+OAuth readiness because they require JWKS or tokens.</p>
+<h2 id="operational-notes"><a class="header" href="#operational-notes">Operational notes</a></h2>
+<ul>
+<li>The configured JWKS URL must resolve from inside each consuming container;
+<code>localhost</code> refers to that consumer, not the OAuth container.</li>
+<li>Issuer, audience, host name and certificate SAN must describe the same
+environment.</li>
+<li>OAuth key and client projections must exist before health at the transport
+layer is treated as authentication readiness.</li>
+<li>Never copy a Portal token between service identities merely to make startup
+pass. Each service token must have its intended subject, service ID and scope.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="controller"><a class="header" href="#controller">Controller</a></h1>
+<p><code>controller</code> is the Rust control-plane runtime used for service registration,
+control transport and bounded execution coordination. It is normally reachable
+inside the Compose network rather than published directly to the host.</p>
+<h2 id="configuration-groups"><a class="header" href="#configuration-groups">Configuration groups</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variables</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>CONTROLLER_ADDR</code>, <code>CONTROLLER_EXECUTION_PORT</code></td><td>Listener and execution transport addresses.</td></tr>
+<tr><td><code>CONTROLLER_HOST_ID</code>, <code>CONTROLLER_USER_ID</code></td><td>Portal identity and ownership context.</td></tr>
+<tr><td><code>DATABASE_URL</code>, <code>DATABASE_MAXIMUM_POOL_SIZE</code></td><td>Portal control-plane database connection.</td></tr>
+<tr><td><code>CONTROLLER_EXECUTION_DATABASE_URL_FILE</code></td><td>Protected operational execution database URL.</td></tr>
+<tr><td><code>CONTROLLER_EXECUTION_BINDING_ID</code>, <code>CONTROLLER_EXECUTION_BINDING_DIGEST</code></td><td>Approved operational-store binding.</td></tr>
+<tr><td><code>CONTROLLER_EXECUTION_EXPECTED_DATABASE</code>, <code>CONTROLLER_EXECUTION_MINIMUM_SCHEMA_GENERATION</code></td><td>Database and migration fences.</td></tr>
+<tr><td><code>CONTROLLER_EXECUTION_ENVIRONMENT</code>, <code>CONTROLLER_EXECUTION_REQUIRED_SCOPE</code></td><td>Runtime environment and authorization boundary.</td></tr>
+<tr><td><code>MICROSERVICE_JWKS_URL</code>, <code>MICROSERVICE_JWT_AUDIENCE</code></td><td>JWT verification contract.</td></tr>
+<tr><td><code>CONTROLLER_TLS_CERT_PATH</code>, <code>CONTROLLER_TLS_KEY_PATH</code>, <code>CONTROLLER_TLS_TRUST_CERT_PATH</code></td><td>TLS identity and trust.</td></tr>
+<tr><td><code>CONTROLLER_RUNNER_ENABLED</code>, <code>CONTROLLER_MCP_MUTATIONS_ENABLED</code></td><td>Explicit capability switches.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="dependencies-and-readiness"><a class="header" href="#dependencies-and-readiness">Dependencies and readiness</a></h2>
+<p>Controller depends on PostgreSQL, OAuth where JWT verification is required, and
+successful operational bootstrap/validation. A valid operational binding must
+match host, environment, database, schema generation and digest; bypassing one
+field weakens the binding contract.</p>
+<p>Runtime services often depend on Controller registration. Check Controller logs
+before diagnosing downstream registry timeouts.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="config-server-2"><a class="header" href="#config-server-2">Config Server</a></h1>
+<p><code>config-server</code> renders and serves runtime configuration selected by host,
+service ID and environment tag. The Compose distributions normally publish it
+on host port <code>8435</code> and mount Rust configuration through
+<code>LIGHT_RS_CONFIG_DIR</code>.</p>
+<h2 id="inputs"><a class="header" href="#inputs">Inputs</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Input</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td>Portal database connection</td><td>Reads configuration instance, property and snapshot projections.</td></tr>
+<tr><td><code>LIGHT_RS_CONFIG_DIR</code></td><td>Local startup and template directory.</td></tr>
+<tr><td><code>RUST_LOG</code></td><td>Logging filter.</td></tr>
+<tr><td><code>CONFIG_LOG_ANSI</code></td><td>ANSI log setting.</td></tr>
+<tr><td>OAuth/JWKS configuration</td><td>Authenticates configuration clients.</td></tr>
+<tr><td>Controller configuration</td><td>Registers the service and supports control-plane operations.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="snapshot-selection"><a class="header" href="#snapshot-selection">Snapshot selection</a></h2>
+<p>Clients identify an exact tuple including host, service and environment. A
+snapshot for a similarly named host or service is not a fallback. Each client
+also supplies a Portal authorization identity whose claims must be valid for
+the requested instance.</p>
+<p>Downloaded snapshots are commonly retained in a named <code>config-cache</code> volume.
+The cache is part of startup resilience, but it can hide a publication mismatch
+if an operator assumes a restart always fetches new configuration.</p>
+<h2 id="change-behavior"><a class="header" href="#change-behavior">Change behavior</a></h2>
+<p>Configuration becomes active at service startup or through an explicit reload
+of a reloadable module. Copying a file into a cache directory does not itself
+activate it. For a failed publication, compare the selected snapshot ID,
+generation and source level with the value expected from Compose.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="hybrid-command-and-query"><a class="header" href="#hybrid-command-and-query">Hybrid Command And Query</a></h1>
+<p><code>hybrid-command</code> and <code>hybrid-query</code> host the Java Portal command and query
+modules. They remain separate services even when they share a PostgreSQL
+database and Config Server environment.</p>
+<h2 id="network-role"><a class="header" href="#network-role">Network role</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Service</th><th style="text-align: right">Default host port</th><th>Responsibility</th></tr>
+</thead>
+<tbody>
+<tr><td><code>hybrid-command</code></td><td style="text-align: right"><code>8439</code></td><td>Validated state changes, event append, outbox and command-side integrations.</td></tr>
+<tr><td><code>hybrid-query</code></td><td style="text-align: right"><code>8440</code></td><td>Portal read models, projections, searches and scheduled projection work.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="important-environment-variables-1"><a class="header" href="#important-environment-variables-1">Important environment variables</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variable</th><th>Service</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>INSTANCE_CLONE_PLAN_HMAC_KEY</code>, <code>INSTANCE_CLONE_PLAN_HMAC_KEY_ID</code></td><td>Both</td><td>Signs/verifies instance-clone plans.</td></tr>
+<tr><td><code>WORKFLOW_TOOL_ACCESS_APPROVAL_WF_DEF_ID</code>, <code>WORKFLOW_TOOL_ACCESS_APPROVAL_VERSION</code>, <code>WORKFLOW_TOOL_ACCESS_APPROVAL_DIGEST</code></td><td>Command</td><td>Pins the approval workflow contract.</td></tr>
+<tr><td><code>A2A_SIGNING_SERVICE_URL</code></td><td>Command</td><td>Optional signing-service integration.</td></tr>
+<tr><td><code>LIGHT_KNOWLEDGE_ADMIN_COMMAND_URL</code></td><td>Command</td><td>Private Knowledge administration command endpoint.</td></tr>
+<tr><td><code>NOREPLAY_EMAIL_PASSWORD</code></td><td>Command</td><td>Notification integration secret where enabled.</td></tr>
+<tr><td><code>LIGHT_WORKFLOW_RULE_TEST_URL</code></td><td>Query</td><td>Workflow rule-test integration.</td></tr>
+<tr><td><code>LIGHT_KNOWLEDGE_CONTROL_SNAPSHOT_SIGNING_KEY</code></td><td>Query</td><td>Signs Knowledge control snapshots.</td></tr>
+<tr><td><code>embedding-task.enabled</code>, <code>embedding-task.provider</code>, <code>embedding-task.endpoint</code>, <code>embedding-task.model</code>, <code>embedding-task.dimension</code></td><td>Query</td><td>Optional asynchronous embedding-task configuration.</td></tr>
+<tr><td><code>embedding-task.apiKey</code></td><td>Query</td><td>Secret provider credential for the asynchronous embedding task; keep it outside source control.</td></tr>
+<tr><td><code>JAVA_TOOL_OPTIONS</code></td><td>Query</td><td>JVM runtime sizing and operational flags.</td></tr>
+</tbody>
+</table>
+</div>
+<p>These services consume event-backed Portal state. Repair projection lag through
+the consumer/replay lifecycle; do not edit read-model rows to simulate command
+success.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="portal-service-1"><a class="header" href="#portal-service-1">Portal Service</a></h1>
+<p><code>portal-service</code> is the Rust Portal-facing service for APIs and platform
+integrations that do not reside in the Java hybrid hosts. The Compose stacks
+normally publish host port <code>2498</code>.</p>
+<h2 id="configuration-8"><a class="header" href="#configuration-8">Configuration</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variable</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>LIGHT_RS_CONFIG_DIR</code></td><td>Mounted service configuration directory.</td></tr>
+<tr><td><code>LIGHT_PORTAL_AUTHORIZATION</code></td><td>Service identity used for protected Portal/configuration calls when required.</td></tr>
+<tr><td><code>RUST_LOG</code></td><td>Rust logging filter.</td></tr>
+<tr><td><code>PORTAL_LOG_ANSI</code></td><td>ANSI log setting.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Portal service depends on PostgreSQL and Config Server; some distributions also
+gate it on Controller or OAuth. The current Compose file is authoritative for
+the exact dependency conditions.</p>
+<p>When a route fails, distinguish the public Gateway response from Portal
+service behavior. Confirm that the request reached port <code>2498</code>, then inspect the
+service’s active snapshot and database identity.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="light-gateway-4"><a class="header" href="#light-gateway-4">Light Gateway</a></h1>
+<p><code>light-gateway</code> is the public Portal BFF and API gateway. It terminates TLS,
+serves Portal View assets, performs authentication/authorization, and routes
+Portal, MCP and backend API traffic. The standard Compose listener maps host
+port <code>443</code> to container port <code>8443</code>.</p>
+<h2 id="configuration-boundaries"><a class="header" href="#configuration-boundaries">Configuration boundaries</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variables</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>LIGHT_RS_CONFIG_DIR</code></td><td>Startup and local configuration templates.</td></tr>
+<tr><td><code>LIGHT_PORTAL_AUTHORIZATION</code></td><td>Gateway service identity for Config Server/Portal operations.</td></tr>
+<tr><td><code>WORKFLOW_INVOCATION_SCOPE_TOKEN</code></td><td>Gateway identity forwarded as <code>X-Scope-Token</code> for Workflow invocation.</td></tr>
+<tr><td><code>STATELESSAUTH_BOOTSTRAPTOKEN</code></td><td>Bootstrap token for the configured browser authentication flow.</td></tr>
+<tr><td><code>STATELESSAUTH_*CLIENTSECRET</code></td><td>Optional social-login client secrets.</td></tr>
+<tr><td><code>GROQ_API_KEY</code>, <code>GEMINI_API_KEY</code>, <code>NVIDIA_API_KEY</code></td><td>Provider keys only if the public Gateway profile contains LLM routes.</td></tr>
+<tr><td><code>CLIENT_CACERTPATH</code>, <code>CLIENT_VERIFYHOSTNAME</code></td><td>Outbound TLS trust and hostname validation.</td></tr>
+<tr><td><code>gatewayEvidence.*</code> or normalized <code>GATEWAYEVIDENCE_*</code></td><td>Operational evidence sink, binding and schema fences.</td></tr>
+<tr><td><code>RUST_LOG</code>, <code>GATEWAY_LOG_ANSI</code></td><td>Logging controls.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="runtime-configuration"><a class="header" href="#runtime-configuration">Runtime configuration</a></h2>
+<p>The mounted <code>startup.yml</code> selects Config Server. The promoted Gateway snapshot
+defines handler paths, virtual hosts, route policies, MCP tools, backend targets
+and static assets. Restarting Portal View does not alter that snapshot.</p>
+<p>Gateway evidence uses a protected role-specific operational database URL and a
+published binding. Do not substitute the Portal database connection.</p>
+<h2 id="diagnosis"><a class="header" href="#diagnosis">Diagnosis</a></h2>
+<p>For an unexpected response, inspect the access log fields for selected handler,
+policy outcome, backend target and backend status. A Gateway-generated 503 and
+a proxied backend 503 have different owners. For workflow-backed MCP, an
+<code>allowed</code> policy outcome followed by <code>WORKFLOW_INVOCATION_UNAVAILABLE</code> means the
+request passed Gateway policy and the Workflow service failed downstream.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="llm-gateway"><a class="header" href="#llm-gateway">LLM Gateway</a></h1>
+<p><code>llm-gateway</code> is a separately deployed profile of the <code>light-gateway</code> image. It
+loads the LLM handler and exposes OpenAI-compatible model, chat, responses and
+embedding APIs. The standard Compose mapping is host port <code>8444</code> to container
+port <code>8443</code>.</p>
+<p>It must have its own Config Server instance identity. The public Portal Gateway
+and LLM Gateway can use the same image without sharing the same snapshot.</p>
+<h2 id="important-environment-variables-2"><a class="header" href="#important-environment-variables-2">Important environment variables</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variable</th><th style="text-align: right">Required</th><th style="text-align: right">Secret</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>LLM_GATEWAY_ENVIRONMENT</code></td><td style="text-align: right">Yes</td><td style="text-align: right">No</td><td>Provider/routing environment selected by the runtime.</td></tr>
+<tr><td><code>llm_gateway_instance</code></td><td style="text-align: right">Conditional</td><td style="text-align: right">No</td><td>Optional LLM Gateway instance identity used by publication/inventory flows that configure it; only <code>portal-config-loc</code> currently declares it.</td></tr>
+<tr><td><code>LIGHT_PORTAL_AUTHORIZATION</code></td><td style="text-align: right">Yes</td><td style="text-align: right">Yes</td><td>Service token for protected Config Server/Portal access.</td></tr>
+<tr><td><code>GROQ_API_KEY</code></td><td style="text-align: right">For Groq routes</td><td style="text-align: right">Yes</td><td>Groq provider credential.</td></tr>
+<tr><td><code>GEMINI_API_KEY</code></td><td style="text-align: right">For Gemini routes</td><td style="text-align: right">Yes</td><td>Gemini provider credential.</td></tr>
+<tr><td><code>NVIDIA_API_KEY</code></td><td style="text-align: right">For NVIDIA routes</td><td style="text-align: right">Yes</td><td>NVIDIA provider credential.</td></tr>
+<tr><td><code>AWS_BEARER_TOKEN_BEDROCK</code></td><td style="text-align: right">For the configured bearer-based Bedrock route</td><td style="text-align: right">Yes</td><td>Bedrock provider credential.</td></tr>
+<tr><td><code>LIGHT_GATEWAY_LLM_AUDIT_DATABASE_URL</code></td><td style="text-align: right">When the configured audit sink requires it</td><td style="text-align: right">Yes</td><td>LLM audit database connection.</td></tr>
+<tr><td><code>llm-router.auditRuntime.sinkDatabaseUrlEnv</code></td><td style="text-align: right">When audit is enabled</td><td style="text-align: right">No</td><td>Names the environment variable containing the audit URL.</td></tr>
+<tr><td><code>LLM_REASONING_SEAL_KEY</code></td><td style="text-align: right">When reasoning sealing is prepared or active</td><td style="text-align: right">Yes</td><td>Base64URL-encoded 32-byte AES-256-GCM key material.</td></tr>
+<tr><td><code>CLIENT_CACERTPATH</code>, <code>CLIENT_VERIFYHOSTNAME</code></td><td style="text-align: right">Deployment-specific</td><td style="text-align: right">No</td><td>Outbound TLS trust policy.</td></tr>
+<tr><td><code>llm-router.requestTimeoutMs</code>, <code>llm-router.streamSetupTimeoutMs</code></td><td style="text-align: right">No</td><td style="text-align: right">No</td><td>Request and streaming setup limits.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="reasoning-seal"><a class="header" href="#reasoning-seal">Reasoning seal</a></h2>
+<p>Some providers return opaque continuation state for a reasoning/tool-use turn.
+For stateless <code>/v1/responses</code>, the Gateway cannot retain that state in process
+memory. It seals the provider bytes and returns them as the reasoning item’s
+<code>encrypted_content</code>; the client returns the item on the next request.</p>
+<p>The seal provides confidentiality and integrity and binds the envelope to the
+tenant, public alias, client protocol, selected deployment and provider material
+generation. On the next request, any replica with the same key set validates the
+envelope, restores the provider state and pins the compatible deployment. It is
+not a provider API key, database encryption key, audit key, or visible
+chain-of-thought store.</p>
+<p>The promoted non-secret snapshot carries only key IDs, generation, limits and a
+reference such as <code>env:LLM_REASONING_SEAL_KEY</code>. Key bytes remain in the runtime
+secret boundary. New envelopes use the current key; an optional previous key
+supports controlled rotation.</p>
+<p>When the state is <code>disabled</code>, no key is required. When it is <code>prepared</code> or
+<code>active</code>, the referenced value must be unpadded URL-safe Base64 that decodes to
+exactly 32 bytes. Every serving replica in the host/environment must resolve the
+same active key set.</p>
+<h2 id="distribution-wiring"><a class="header" href="#distribution-wiring">Distribution wiring</a></h2>
+<p>The reasoning-seal feature and the secret that enables it are separate changes.
+At the time of this documentation audit, the distributions wire them as follows:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Distribution</th><th>Compose wiring</th><th>Required operator action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>portal-config-loc/all-in-lt</code></td><td>Declares <code>LLM_REASONING_SEAL_KEY</code> on <code>llm-gateway</code>.</td><td>Ensure the development value is valid 32-byte Base64URL material; a readable phrase is not a valid substitute.</td></tr>
+<tr><td><code>portal-config-dev</code></td><td>Does not declare the variable on <code>llm-gateway</code>.</td><td>Keep reasoning seal disabled, or add secret wiring before promoting an active key reference.</td></tr>
+<tr><td><code>portal-config-bootstrap</code></td><td>Does not declare the variable on the base <code>llm-gateway</code>.</td><td>Supply it through the enterprise secret boundary before activating reasoning seal.</td></tr>
+<tr><td><code>light-portal-install</code></td><td>Does not declare the variable on <code>llm-gateway</code>.</td><td>Keep the feature disabled until the installer has a supported generated-secret path.</td></tr>
+</tbody>
+</table>
+</div>
+<p>This matrix describes wiring, not authorization to place key bytes in Git.</p>
+<h2 id="fail-closed-behavior"><a class="header" href="#fail-closed-behavior">Fail-closed behavior</a></h2>
+<p>The complete LLM router snapshot is compiled before it becomes active. A
+missing or malformed active provider credential, reasoning key, routing record,
+capability or pricing contract can reject the snapshot and place LLM routing in
+an unavailable state. In that state, even <code>/v1/models</code> or an unrelated alias
+can return <code>503</code> because no partial router is published.</p>
+<p>Start diagnosis with the first <code>llm-router</code> startup error. An immediate 503
+usually indicates local compilation/readiness failure; a delayed provider error
+indicates a different path.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="light-workflow-1"><a class="header" href="#light-workflow-1">Light Workflow</a></h1>
+<p><code>light-workflow</code> executes published workflow definitions and exposes direct and
+workflow-backed MCP invocation paths. The Compose deployments normally publish
+host port <code>8436</code>.</p>
+<h2 id="configuration-groups-1"><a class="header" href="#configuration-groups-1">Configuration groups</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variables</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>LIGHT_WORKFLOW_HTTP_ADDR</code></td><td>Workflow HTTP listener.</td></tr>
+<tr><td><code>SERVER_ADVERTISEDADDRESS</code>, <code>SERVER_ENVIRONMENT</code></td><td>Address and environment registered with Controller/Portal.</td></tr>
+<tr><td><code>SERVER_ENABLEREGISTRY</code>, <code>SERVER_STARTONREGISTRYFAILURE</code></td><td>Registry behavior and startup policy.</td></tr>
+<tr><td><code>PORTALREGISTRY_PORTALURL</code> or <code>portalRegistry.portalUrl</code></td><td>Portal registry endpoint.</td></tr>
+<tr><td><code>LIGHT_PORTAL_AUTHORIZATION</code></td><td>Workflow service identity for configuration and downstream calls.</td></tr>
+<tr><td><code>WORKFLOW_INVOCATION_CALLER_SERVICE_IDS</code></td><td>Allowed caller service identities.</td></tr>
+<tr><td><code>WORKFLOW_MAXIMUM_PARALLELISM</code></td><td>Execution concurrency bound.</td></tr>
+<tr><td><code>WORKFLOW_IGNORE_USER_JWT_EXPIRY</code></td><td>Explicit development/testing compatibility switch.</td></tr>
+<tr><td><code>WORKFLOW_A2A_AUTHORIZATIONCONTEXTKEYFILE</code></td><td>Protected A2A authorization-context key.</td></tr>
+<tr><td><code>OPERATIONALSTORE_*</code> or <code>operationalStore.*</code></td><td>Operational database, schema, binding and generation fences.</td></tr>
+<tr><td><code>RUST_LOG</code>, <code>WORKFLOW_LOG_ANSI</code></td><td>Logging controls.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Property names can appear in dotted form or as Compose-normalized uppercase
+environment names. Preserve the exact spelling used by the selected Compose
+file and service release.</p>
+<h2 id="configuration-and-storage"><a class="header" href="#configuration-and-storage">Configuration and storage</a></h2>
+<p>Workflow uses a mounted <code>startup.yml</code> to select its Config Server instance and
+retains a validated snapshot in <code>light-workflow-config-cache</code>. Its operational
+database URL is supplied through a protected file, not through the Portal
+catalog database connection.</p>
+<p>The approved binding includes host, environment, database, schema, service
+owner, credential generation and minimum schema generation. The operational
+schema contains workflow-owned runtime/projection data; Portal catalog tables
+must not be assumed to be co-located.</p>
+<h2 id="invocation-identity"><a class="header" href="#invocation-identity">Invocation identity</a></h2>
+<p>Gateway preserves the user’s JWT in <code>Authorization</code> and sends its own service
+identity in <code>X-Scope-Token</code>. Workflow authenticates both boundaries and uses its
+own service token for protected downstream calls.</p>
+<p><code>WORKFLOW_INVOCATION_UNAVAILABLE</code> means the Gateway reached Workflow and
+Workflow returned an unavailable response. Inspect Workflow logs and its
+database/configuration before changing Gateway policy.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="light-agent-1"><a class="header" href="#light-agent-1">Light Agent</a></h1>
+<p><code>light-agent</code> hosts agent execution. Some deployments run one general Agent;
+<code>portal-config-loc</code> additionally starts specialized advisor and technical
+support service instances from the same image with distinct service IDs and
+ports. These are ordinary Compose services, not Compose profiles.</p>
+<h2 id="important-environment-variables-3"><a class="header" href="#important-environment-variables-3">Important environment variables</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variable</th><th style="text-align: right">Secret</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>LIGHT_AGENT_HOST_ID</code></td><td style="text-align: right">No</td><td>Portal host identity.</td></tr>
+<tr><td><code>LIGHT_AGENT_SERVICE_ID</code>, <code>SERVER_SERVICEID</code></td><td style="text-align: right">No</td><td>Runtime service/profile identity.</td></tr>
+<tr><td><code>LIGHT_AGENT_ENVIRONMENT</code>, <code>LIGHT_ENV_TAG</code></td><td style="text-align: right">No</td><td>Config Server and runtime environment selectors.</td></tr>
+<tr><td><code>LIGHT_AGENT_ADVERTISED_ADDRESS</code></td><td style="text-align: right">No</td><td>Address registered for callers.</td></tr>
+<tr><td><code>LIGHT_PORTAL_AUTHORIZATION</code></td><td style="text-align: right">Yes</td><td>Agent service token.</td></tr>
+<tr><td><code>LIGHT_AGENT_DELEGATION_SECRET</code></td><td style="text-align: right">Yes</td><td>Authenticates bounded delegation where enabled.</td></tr>
+<tr><td><code>LIGHT_AGENT_MODEL</code>, <code>LIGHT_AGENT_TEMPERATURE</code>, <code>CODEX_REASONING_EFFORT</code></td><td style="text-align: right">No</td><td>Model/runtime behavior overrides for configured profiles.</td></tr>
+<tr><td><code>CODEX_API_KEY</code>, <code>CODEX_ACCOUNT_ID</code></td><td style="text-align: right">Yes</td><td>Codex provider identity where that runtime is selected.</td></tr>
+<tr><td><code>LIGHT_AGENT_KNOWLEDGE_URL</code></td><td style="text-align: right">No</td><td>Knowledge API endpoint.</td></tr>
+<tr><td><code>LIGHT_AGENT_KNOWLEDGE_ALLOW_PRIVATE_PLAINTEXT</code></td><td style="text-align: right">No</td><td>Explicit development policy switch.</td></tr>
+<tr><td><code>AGENT_OPERATIONALSTORE_DATABASEURLFILE</code></td><td style="text-align: right">Yes, by content</td><td>Protected operational database URL file.</td></tr>
+<tr><td><code>AGENT_A2APOLICY_AUTHORIZATIONCONTEXTKEYFILE</code>, <code>AGENT_A2AOUTBOUND_AUTHORIZATIONCONTEXTKEYFILE</code></td><td style="text-align: right">Yes, by content</td><td>A2A authorization-context key files.</td></tr>
+<tr><td><code>RUST_LOG</code>, <code>AGENT_LOG_ANSI</code></td><td style="text-align: right">No</td><td>Logging controls.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="isolation"><a class="header" href="#isolation">Isolation</a></h2>
+<p>Service instances sharing an image are still separate runtime identities. Give
+each instance its intended service ID, advertised address, Config Server
+snapshot and operational ownership. Do not route two instances through one
+identity merely to reduce configuration records.</p>
+<p>Agent artifacts belong on the designated persistent artifact volume. Database
+URLs and A2A keys are materialized before Agent starts; broad access to the
+initial secret source should not be carried into the runtime container.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="light-knowledge-1"><a class="header" href="#light-knowledge-1">Light Knowledge</a></h1>
+<p>The Knowledge subsystem is split into three services with separate runtime
+responsibilities.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Service</th><th style="text-align: right">Published port</th><th>Responsibility</th></tr>
+</thead>
+<tbody>
+<tr><td><code>light-knowledge</code></td><td style="text-align: right"><code>8092</code></td><td>Knowledge API, retrieval and MCP adapter.</td></tr>
+<tr><td><code>light-knowledge-admin</code></td><td style="text-align: right">Internal</td><td>Administrative commands and control snapshot application.</td></tr>
+<tr><td><code>light-knowledge-worker</code></td><td style="text-align: right">Internal</td><td>Asynchronous ingestion, embedding and maintenance jobs.</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>knowledge-schema-migration</code> prepares the Knowledge database before these
+services start.</p>
+<h2 id="shared-configuration"><a class="header" href="#shared-configuration">Shared configuration</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variable</th><th style="text-align: right">Secret</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>LIGHT_KNOWLEDGE_DATABASE_URL</code></td><td style="text-align: right">Yes</td><td>Knowledge API/admin database connection.</td></tr>
+<tr><td><code>LIGHT_KNOWLEDGE_WORKER_DATABASE_URL</code></td><td style="text-align: right">Yes</td><td>Worker-scoped database connection.</td></tr>
+<tr><td><code>LIGHT_PORTAL_AUTHORIZATION</code>, <code>KNOWLEDGE_PORTAL_AUTHORIZATION</code></td><td style="text-align: right">Yes</td><td>Service identities for protected integrations.</td></tr>
+<tr><td><code>LIGHT_AGENT_DELEGATION_SECRET</code></td><td style="text-align: right">Yes</td><td>Agent-to-Knowledge delegation verification where enabled.</td></tr>
+<tr><td><code>LIGHT_KNOWLEDGE_QUERY_CACHE_KEY</code></td><td style="text-align: right">Yes</td><td>Protects bounded query-cache material.</td></tr>
+<tr><td><code>CLIENT_CACERTPATH</code>, <code>CLIENT_VERIFYHOSTNAME</code></td><td style="text-align: right">No</td><td>Outbound TLS trust policy.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="admin-configuration"><a class="header" href="#admin-configuration">Admin configuration</a></h2>
+<p><code>light-knowledge-admin</code> uses <code>LIGHT_KNOWLEDGE_CONTROL_SNAPSHOT_SIGNING_KEY</code> and
+<code>LIGHT_KNOWLEDGE_ADMIN_OPAQUE_ACTOR_KEY</code> as cryptographic material. Its
+<code>KNOWLEDGE_ADMIN_SNAPSHOT_*</code> variables select and validate the Portal-owned
+control snapshot source. <code>SECURITY_ISSUER</code> and <code>SECURITY_AUDIENCE</code> must agree
+with the deployed OAuth environment.</p>
+<h2 id="worker-and-llm-dependency"><a class="header" href="#worker-and-llm-dependency">Worker and LLM dependency</a></h2>
+<p>The worker uses the configured LLM Gateway for embeddings. Provider selection,
+model alias and embedding-space contracts come from published configuration;
+the Knowledge worker should not receive provider keys directly. If LLM Gateway
+has no compiled router, embedding jobs remain unavailable even when the worker
+itself is healthy.</p>
+<p>Knowledge projections and migration state belong to the Knowledge database.
+Use the supported command, notification and worker lifecycle for repairs rather
+than directly advancing cursors or editing content/ACL projections.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="light-a2a"><a class="header" href="#light-a2a">Light A2A</a></h1>
+<p><code>light-a2a</code> provides optional Agent-to-Agent transport and policy enforcement.
+It is placed under the <code>a2a</code> Compose profile so the base Portal stack can run
+without exposing that transport.</p>
+<p>Start it explicitly only when the environment has the required A2A identity,
+signing and authorization-context material:</p>
+<pre><code class="language-bash">docker compose --profile a2a up -d
+</code></pre>
+<h2 id="configuration-boundary-1"><a class="header" href="#configuration-boundary-1">Configuration boundary</a></h2>
+<p>The service uses its own Config Server/runtime identity, operational database
+role, artifact storage and authorization-context key. Other services may mount
+the same key generation through their own protected files, but they should not
+share writable secret directories.</p>
+<p>The operational bootstrap and runtime-secret initialization jobs must complete
+before A2A starts. An open port is not sufficient readiness; verify its policy
+generation, signing identity, operational binding and registration.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="demo-services"><a class="header" href="#demo-services">Demo Services</a></h1>
+<p>The maintained Compose stacks include small backends used by tutorials,
+workflow/MCP examples and daily regression tests.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Service</th><th style="text-align: right">Default host port</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>demo-customer-profile-api</code></td><td style="text-align: right"><code>8085</code></td><td>Customer profile data used by Customer 360 workflows.</td></tr>
+<tr><td><code>demo-offer-decision-api</code></td><td style="text-align: right"><code>8086</code></td><td>Offer/decision backend used by orchestration examples.</td></tr>
+<tr><td><code>demo-insurance-claim-mcp-server</code></td><td style="text-align: right"><code>8087</code></td><td>MCP backend used by insurance claim and passthrough tests.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="configuration-9"><a class="header" href="#configuration-9">Configuration</a></h2>
+<p>Each service has a service-specific configuration-directory variable, an
+optional external configuration directory, <code>LIGHT_PORTAL_AUTHORIZATION</code>,
+<code>RUST_LOG</code>, and a service-specific ANSI logging switch. They depend on Config
+Server and Controller; some distributions also wait for OAuth.</p>
+<p>These are regression fixtures, not substitute implementations for customer
+services. Preserve stable response contracts used by Hurl and workflow tests.
+When a workflow test fails, call the demo service directly from the Compose
+network before attributing the result to Workflow or Gateway.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="enterprise-portal-bff"><a class="header" href="#enterprise-portal-bff">Enterprise Portal BFF</a></h1>
+<p><code>portal-bff-sso</code> exists only in the <code>portal-config-bootstrap</code> enterprise
+overlay. It uses the <code>light-gateway</code> image but is a distinct runtime identity
+from the base OAuth Portal BFF.</p>
+<h2 id="responsibilities"><a class="header" href="#responsibilities">Responsibilities</a></h2>
+<ul>
+<li>Terminate the enterprise Portal TLS connection.</li>
+<li>Serve the SSO-enabled Portal View artifact.</li>
+<li>Validate Microsoft Entra tokens through <code>security-msal</code>.</li>
+<li>Exchange the external token for the platform token expected by downstream
+Portal services.</li>
+<li>Apply its own cookies, handlers, host routing and Config Server snapshot.</li>
+</ul>
+<h2 id="required-private-inputs-1"><a class="header" href="#required-private-inputs-1">Required private inputs</a></h2>
+<p>The overlay requires values such as <code>MSAL_TENANT_ID</code>, <code>MSAL_CLIENT_ID</code>,
+<code>MSAL_EXCHANGE_CLIENT_ID</code>, <code>MSAL_EXCHANGE_CLIENT_SECRET</code>, and
+<code>PORTAL_BFF_SSO_LIGHT_PORTAL_AUTHORIZATION</code>. Exact names and required checks are
+defined in <code>.env.bootstrap.example</code> and <code>docker-compose.bootstrap.yml</code>.</p>
+<p>Client secret, Portal token and TLS private key are secrets. Tenant ID, public
+client ID, redirect URI and audience are identifiers but must still remain
+consistent across Entra, the built SPA and Gateway configuration.</p>
+<h2 id="listener-and-cache"><a class="header" href="#listener-and-cache">Listener and cache</a></h2>
+<p>The listener defaults to host port <code>8445</code>. The service uses its own config-cache
+volume so the base and SSO BFF snapshots cannot overwrite one another. A
+snapshot for the base Gateway identity is not valid for this BFF.</p>
+<p>Changing Entra SPA build-time values requires rebuilding Portal View. Changing
+runtime secret/environment values requires recreating the container. Changing a
+promoted Gateway module requires the supported snapshot/reload lifecycle.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="test"><a class="header" href="#test">Test</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="automated-integration-testing--ai-agent-strategy-for-light-portal"><a class="header" href="#automated-integration-testing--ai-agent-strategy-for-light-portal">Automated Integration Testing &amp; AI Agent Strategy for Light-Portal</a></h1>
@@ -53925,7 +55502,7 @@ steps:
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="tutorial"><a class="header" href="#tutorial">Tutorial</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="light-gateway-4"><a class="header" href="#light-gateway-4">light-gateway</a></h1>
+<h1 id="light-gateway-5"><a class="header" href="#light-gateway-5">light-gateway</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="onboard-an-llm-through-llm-gateway"><a class="header" href="#onboard-an-llm-through-llm-gateway">Onboard an LLM Through <code>llm-gateway</code></a></h1>
 <p>This tutorial onboards a hosted model into the Light Portal LLM control plane,
@@ -55576,7 +57153,7 @@ limit of this simplified demo. Do not present it as the customer’s required
 partial-response behavior; that needs the planned try/error-capture extension
 before failed branches can be appended beside successful responses.</p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="light-knowledge-1"><a class="header" href="#light-knowledge-1">light-knowledge</a></h1>
+<h1 id="light-knowledge-2"><a class="header" href="#light-knowledge-2">light-knowledge</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-fabric-document-ingest"><a class="header" href="#light-fabric-document-ingest">light-fabric-document-ingest</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
