@@ -35,7 +35,7 @@
             const path_to_root = "../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../searchindex-8dffa325.js";
+            window.path_to_searchindex_js = "../../../searchindex-e6a04846.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../../toc-70596051.js"></script>
@@ -211,6 +211,13 @@ catalog database connection.</p>
 owner, credential generation and minimum schema generation. The operational
 schema contains workflow-owned runtime/projection data; Portal catalog tables
 must not be assumed to be co-located.</p>
+<p>All four Compose distributions run a <code>workflow-projection-sync</code> service. It
+publishes the required Workflow definitions, bindings, grants, dependencies and
+resolved endpoint metadata from the Config Server database into the
+Workflow-owned operational schema every 30 seconds. Its initial minimum counts
+are zero so a fresh stack can start before Portal event replay has populated the
+catalog. <code>light-workflow</code> waits for the sync service’s first successful pass;
+later catalog changes are refreshed without restarting Workflow.</p>
 <h2 id="invocation-identity"><a class="header" href="#invocation-identity">Invocation identity</a></h2>
 <p>Gateway preserves the user’s JWT in <code>Authorization</code> and sends its own service
 identity in <code>X-Scope-Token</code>. Workflow authenticates both boundaries and uses its
