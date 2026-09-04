@@ -35,7 +35,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-ad5d6538.js";
+            window.path_to_searchindex_js = "../../searchindex-8dffa325.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-70596051.js"></script>
@@ -216,6 +216,19 @@ Light Gateway, the dedicated LLM Gateway, Workflow, three Agent service
 instances (<code>light-agent</code>, <code>light-agent-advisor</code>, and
 <code>light-agent-tech-support</code>), Knowledge API/admin/worker, and three demo
 backends. <code>light-a2a</code> is under the <code>a2a</code> Compose profile.</p>
+<p>After the operational schemas are migrated, the continuously running
+<code>workflow-projection-sync</code> service publishes the Host’s Workflow definitions,
+named tool bindings, grants and endpoint-resolution snapshots into
+<code>operations.workflow_ops</code>. An empty catalog is a valid initial snapshot on a
+fresh volume. The service refreshes the projection every 30 seconds, and Light
+Workflow waits only for the first successful refresh. Light Workflow reads
+only the Workflow-owned projection at runtime; it does not require Portal
+catalog tables such as <code>tool_t</code> in the operational database.</p>
+<p>Each projected LightAPI endpoint retains the validated operation and
+environment metadata needed by Workflow’s URL resolver. This preserves
+environment substitution and same-authority validation without copying the
+Portal catalog into the operational database. Deactivated bindings, tools and
+grants are projected as unavailable on the next refresh.</p>
 <p>Important host ports include <code>443</code> for Light Gateway, <code>8444</code> for LLM Gateway,
 <code>8435</code> for Config Server, <code>8436</code> for Workflow, <code>6881</code> for OAuth, <code>8439</code> and
 <code>8440</code> for the hybrid services, <code>2498</code> for Portal service, and <code>5432</code> for local
@@ -232,7 +245,9 @@ format contract. A readable placeholder is not interchangeable with random key
 material.</p>
 <p>The LLM reasoning seal is active only when the published <code>llm-router</code> snapshot
 declares it active. In that case, <code>LLM_REASONING_SEAL_KEY</code> must be unpadded
-Base64URL that decodes to exactly 32 bytes. See
+Base64URL that decodes to exactly 32 bytes. The Compose file supplies a valid,
+deterministic development fallback and permits <code>LLM_REASONING_SEAL_KEY</code> from
+the private Portal environment file to override it. See
 <a href="./services/llm-gateway.html">LLM Gateway</a>.</p>
 <h2 id="source-of-truth-rule"><a class="header" href="#source-of-truth-rule">Source-of-truth rule</a></h2>
 <p>Author event-backed baseline changes here, validate them, export the signed
