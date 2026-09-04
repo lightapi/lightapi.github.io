@@ -35,7 +35,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-e6a04846.js";
+            window.path_to_searchindex_js = "../../searchindex-0832ad96.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-70596051.js"></script>
@@ -192,10 +192,12 @@ Gateway can:</p>
 <li>provide the expected behavior through its real network listener.</li>
 </ul>
 <p>This design introduces a reusable regression harness in <code>light-portal-test</code>.
-For each scheduled run, the harness starts a deterministic fixture service and
-a fresh standalone Light Gateway runtime. The Gateway retrieves its
-configuration from a Portal-managed Config Instance and the test client probes
-the resulting black-box behavior.</p>
+For each scheduled run, the harness starts deterministic test workloads and a
+fresh Light Gateway runtime. The Gateway retrieves its configuration from a
+Portal-managed Config Instance and the test client probes the resulting
+black-box behavior. The same assertions can run against a standalone container,
+a Docker Compose topology, or a disposable deployment in a local Kubernetes
+cluster. Kubernetes is the authoritative target-platform lane.</p>
 <p>The first runtime profile is <code>regression-core</code>. It uses multiple reserved path
 prefixes so one Gateway instance and snapshot can exercise several compatible
 features. Generic Server-Sent Events (SSE) passthrough is the first feature in
@@ -238,6 +240,15 @@ profile or the test intentionally expects a different startup lifecycle.</li>
 <li>Config Instances are created and updated through Portal commands or UI
 workflows. Regression setup must not seed Portal projection tables
 directly.</li>
+<li>A standalone container remains a fast diagnostic option. Docker Compose is
+the fast multi-container integration lane, and a local Kubernetes cluster is
+the authoritative deployment and sidecar qualification lane.</li>
+<li>Kubernetes runs use a unique namespace per run. The harness deploys, tests,
+captures evidence, deletes the namespace, and verifies its deletion before
+reporting success.</li>
+<li>The local cluster is long-lived; application workloads are disposable. A
+complete cluster reset is reserved for tests that change cluster-scoped
+resources or leave the cluster unhealthy.</li>
 </ol>
 <h2 id="relationship-to-existing-qualification"><a class="header" href="#relationship-to-existing-qualification">Relationship To Existing Qualification</a></h2>
 <p>The SSE passthrough implementation already has a repeatable Phase 3 gate in
@@ -268,27 +279,34 @@ but less than complete protocol requalification.</p>
         H --&gt; I --&gt; S --&gt; CS
     end
 
-    subgraph RH[Daily regression host]
+    subgraph RH[Regression runner]
         O[light-portal-test orchestrator]
-        F[Deterministic regression fixture]
-        G[Fresh Light Gateway container]
-        T[Streaming test client]
         R[Reports and evidence]
-        O --&gt; F
-        O --&gt; G
-        O --&gt; T
-        CS --&gt;|startup bootstrap| G
-        T --&gt;|HTTP requests| G
-        G --&gt;|proxy requests| F
         O --&gt; R
-        G --&gt; R
-        T --&gt; R
     end
+
+    subgraph K8S[Local Kubernetes cluster: disposable run namespace]
+        G[Fresh Light Gateway]
+        A[Optional API container]
+        F[Deterministic fixture]
+        J[In-cluster test Job]
+        SVC[ClusterIP Service]
+        G -. same pod for sidecar profile .- A
+        G --&gt;|proxy requests| F
+        J --&gt; SVC --&gt; G
+    end
+
+    O --&gt;|render, deploy, status, cleanup| K8S
+    CS --&gt;|startup bootstrap| G
+    G --&gt; R
+    J --&gt; R
 </pre>
 
-<p>The Gateway can bind only to loopback on the regression host. The Portal Host
-value is used for configuration lookup and ownership; it is not the listener’s
-DNS name. A public Gateway hostname is unnecessary for the core profile.</p>
+<p>The Gateway does not require a public listener. Standalone runs bind to
+loopback, Compose runs publish only the ports required by the test client, and
+Kubernetes runs use a ClusterIP Service with an in-cluster test Job. The Portal
+Host value is used for configuration lookup and ownership; it is not the
+listener’s DNS name.</p>
 <h2 id="component-responsibilities"><a class="header" href="#component-responsibilities">Component Responsibilities</a></h2>
 <div class="table-wrapper">
 <table>
@@ -300,7 +318,10 @@ DNS name. A public Gateway hostname is unnecessary for the core profile.</p>
 <tr><td>Config Server</td><td>Authenticate the Gateway and return only the current runtime configuration for its bootstrap identity.</td></tr>
 <tr><td>Light Gateway image</td><td>Load the snapshot and provide the released proxy behavior under test.</td></tr>
 <tr><td>Regression fixture</td><td>Emit deterministic responses for SSE and other compatible core features, including headers, events, delays, heartbeats, silence, and upstream failures.</td></tr>
-<tr><td><code>light-portal-test</code></td><td>Start dependencies, wait for readiness, execute probes, classify failures, publish reports, and clean up.</td></tr>
+<tr><td><code>light-portal-test</code></td><td>Select an execution topology, start or deploy dependencies, wait for readiness, execute probes, classify failures, publish reports, and clean up.</td></tr>
+<tr><td>Docker Compose</td><td>Provide a fast, repeatable multi-container topology for local and pre-merge integration.</td></tr>
+<tr><td>Local Kubernetes cluster</td><td>Qualify pod composition, Services, mounted configuration and secrets, probes, rollout, resource constraints, and namespace cleanup on the target platform.</td></tr>
+<tr><td><code>light-deployer</code></td><td>Render, dry-run, apply, report status, and undeploy Kubernetes resources when the deployment-control path is in scope.</td></tr>
 <tr><td><code>light-fabric</code> gates</td><td>Qualify implementation details and the larger protocol/resource matrix before release.</td></tr>
 </tbody>
 </table>
@@ -434,11 +455,72 @@ externalConfigDir: ${LIGHT_GATEWAY_EXTERNAL_CONFIG_DIR:/app/config-cache}
 <p>The harness supplies the Config Server URI, service authorization, and CA at
 runtime. Tokens, private keys, and private CA material are never committed to
 <code>light-portal-test</code> or stored in Portal as ordinary configuration properties.</p>
-<p>The first implementation should run the Gateway container with host networking
-on the Linux regression host. That allows the fixture and Gateway to use
-stable loopback ports without publishing either service externally. A later
-portable container-network mode may replace host networking if both Docker and
-Podman behavior are qualified.</p>
+<p>The bootstrap contract is independent of the execution topology. Each topology
+mounts the same minimal <code>startup.yml</code>, injects secrets through its native secret
+mechanism, and gives the downloaded configuration a writable ephemeral cache.</p>
+<h2 id="execution-topologies"><a class="header" href="#execution-topologies">Execution Topologies</a></h2>
+<h3 id="standalone-container"><a class="header" href="#standalone-container">Standalone container</a></h3>
+<p>The standalone mode starts one Gateway container and a fixture on the Linux
+regression host. It is retained for fast diagnosis and initial harness
+development. Host networking may provide stable loopback ports, but success in
+this mode is not target-platform qualification.</p>
+<h3 id="docker-compose"><a class="header" href="#docker-compose">Docker Compose</a></h3>
+<p>Docker Compose is the default fast multi-container lane. A Compose project owns
+the Gateway, fixture, optional API, test client, networks, volumes, and health
+checks needed by one runtime profile. The project name includes the run ID so
+resources from two runs cannot collide. The harness always executes <code>docker compose down --volumes --remove-orphans</code> through its cleanup trap and verifies
+that no project containers remain.</p>
+<p>Ordinary Gateway-to-upstream profiles use a stable network alias such as
+<code>regression-fixture</code>. The Kubernetes lane exposes the same logical name through
+a Service when this allows both topologies to consume one Portal snapshot.</p>
+<p>A sidecar profile has a stronger requirement: Light Gateway and the backend API
+must share a network namespace when the configured upstream is
+<code>127.0.0.1</code>. Compose may model that explicitly with a shared service network
+namespace where the selected engine supports and qualifies it. A Compose setup
+that merely connects two containers to the same bridge network is useful
+integration coverage, but it is not evidence of Kubernetes sidecar semantics.</p>
+<h3 id="local-kubernetes-cluster"><a class="header" href="#local-kubernetes-cluster">Local Kubernetes cluster</a></h3>
+<p>The Kubernetes lane is the authoritative end-to-end lane because Kubernetes is
+the target runtime. The cluster remains available across runs, while every test
+deployment uses a unique namespace such as
+<code>gateway-regression-&lt;run-id&gt;</code>. Namespaces and names must be DNS-safe and bounded
+to Kubernetes length limits.</p>
+<p>For a standalone Gateway profile, the namespace contains the Gateway, fixture,
+ClusterIP Services, configuration, secrets, and an in-cluster test Job. For a
+sidecar profile, the Gateway and API are containers in the same pod, the API
+listens only on a pod-local port, and the Service selects only Gateway ingress
+ports. The test Job calls the Service from inside the cluster; port forwarding
+is optional diagnostic access and is not the authoritative probe path.</p>
+<p>The Kubernetes lifecycle is:</p>
+<ol>
+<li>preflight cluster connectivity, capacity, namespace uniqueness, image
+availability, required secrets, and Portal snapshot identity;</li>
+<li>render manifests and perform client-side and server-side dry-run validation;</li>
+<li>create the run namespace and apply resources, preferably through
+<code>light-deployer</code> when the deployment-control path is under test;</li>
+<li>wait for Deployment rollout, every container’s readiness, and fixture
+readiness within bounded deadlines;</li>
+<li>run the in-cluster test Job and collect its JUnit and timing output;</li>
+<li>capture manifests, image digests, pod descriptions, events, logs, restart
+counts, and termination states; and</li>
+<li>delete the namespace in an unconditional cleanup path, wait for namespace
+termination, and verify that labeled run resources no longer exist.</li>
+</ol>
+<p>A cleanup failure is classified as <code>CLEANUP</code>; the namespace is quarantined for
+operator diagnosis and must not be reused by the next application. The harness
+does not delete and recreate the entire cluster between ordinary application
+runs. Cluster reset is justified only for cluster-scoped fixtures such as CRDs,
+webhooks, or ClusterRoles, or when a health check proves that namespace cleanup
+did not restore a usable baseline.</p>
+<h3 id="topology-specific-configuration"><a class="header" href="#topology-specific-configuration">Topology-specific configuration</a></h3>
+<p>Behavioral assertions should remain identical across topologies. Addresses and
+deployment details should not leak into the feature contract. Prefer a stable
+logical upstream name that can be implemented as a Compose network alias and a
+Kubernetes Service. Profiles that require pod-local <code>127.0.0.1</code>, a different
+listener, or another incompatible topology property receive a dedicated
+runtime profile, Env Tag, and Config Instance under the existing incompatibility
+rule. The harness must never rewrite a current Portal snapshot just to switch
+execution topology.</p>
 <h2 id="core-profile-configuration-contract"><a class="header" href="#core-profile-configuration-contract">Core Profile Configuration Contract</a></h2>
 <p>The core snapshot defines the common server, handler, proxy, routing, and
 observability baseline once. Feature-specific rules are scoped to the reserved
@@ -562,6 +644,9 @@ feature-specific suites:</p>
 <pre><code class="language-text">light-portal-test/
   config/gateway-core/
     startup.yml
+  deploy/gateway-core/
+    compose.yaml
+    k8s/
   tests/gateway-core/
     fixture-server.mjs
     sse-passthrough.test.mjs
@@ -569,16 +654,24 @@ feature-specific suites:</p>
     run-gateway-managed.sh
     run-gateway-core.sh
     run-gateway-sse.sh
+    runtime-container.sh
+    runtime-compose.sh
+    runtime-kubernetes.sh
 </code></pre>
 <p>The Makefile initially adds:</p>
 <pre><code class="language-text">make gateway-core
 make gateway-sse
+make gateway-core-compose
+make gateway-core-k8s
 </code></pre>
 <p><code>make gateway-core</code> starts the core runtime once and executes every core feature
 suite. <code>make gateway-sse</code> uses the same core Config Instance but selects only
 the SSE fixture cases for focused diagnosis. The normal daily batch invokes
-<code>gateway-core</code> and places its artifacts under the existing timestamped
-<code>reports/runs/&lt;run-id&gt;/</code> hierarchy.</p>
+the Kubernetes core target and places its artifacts under the existing
+timestamped <code>reports/runs/&lt;run-id&gt;/</code> hierarchy. <code>gateway-core-compose</code> is the
+fast multi-container target; <code>gateway-core-k8s</code> is the authoritative
+target-platform target. The base targets may accept a <code>GATEWAY_RUNTIME</code> selector
+as long as reports record the selected topology unambiguously.</p>
 <p><code>run-gateway-managed.sh</code> owns reusable mechanics:</p>
 <ul>
 <li>validating required tools and secret inputs;</li>
@@ -588,38 +681,47 @@ the SSE fixture cases for focused diagnosis. The normal daily batch invokes
 <li>waiting for bounded readiness;</li>
 <li>invoking the selected feature test;</li>
 <li>capturing evidence; and</li>
-<li>terminating child processes and containers through an exit trap.</li>
+<li>terminating child processes, Compose projects, or Kubernetes namespaces
+through an exit trap.</li>
 </ul>
+<p>The three <code>runtime-*.sh</code> adapters implement the topology-specific deploy,
+readiness, endpoint discovery, evidence, and cleanup operations behind this
+shared lifecycle. Feature suites must not embed <code>docker</code>, <code>docker compose</code>, or
+<code>kubectl</code> commands.</p>
 <p><code>run-gateway-core.sh</code> supplies the core runtime profile, fixture command,
 expected bootstrap identity, listener address, and ordered feature suite.
 <code>run-gateway-sse.sh</code> is a narrow selector over that same core lifecycle; it
 does not load a different Portal snapshot.</p>
-<h2 id="daily-execution-lifecycle"><a class="header" href="#daily-execution-lifecycle">Daily Execution Lifecycle</a></h2>
+<h2 id="kubernetes-daily-execution-lifecycle"><a class="header" href="#kubernetes-daily-execution-lifecycle">Kubernetes Daily Execution Lifecycle</a></h2>
 <pre class="mermaid">sequenceDiagram
     participant Scheduler
     participant Harness as light-portal-test
-    participant Fixture as SSE fixture
-    participant Gateway as Fresh Gateway
+    participant Deployer as light-deployer or kubectl adapter
+    participant Cluster as Local Kubernetes cluster
+    participant Job as In-cluster test Job
+    participant Gateway as Fresh Gateway pod
     participant Config as Config Server
 
-    Scheduler-&gt;&gt;Harness: make gateway-core
-    Harness-&gt;&gt;Fixture: Start bounded fixture
-    Harness-&gt;&gt;Gateway: Start requested image and startup.yml
+    Scheduler-&gt;&gt;Harness: make gateway-core-k8s
+    Harness-&gt;&gt;Deployer: Render and dry-run unique namespace
+    Deployer-&gt;&gt;Cluster: Apply Gateway, fixture, Service, secrets
     Gateway-&gt;&gt;Config: Fetch current regression-core snapshot
     Config--&gt;&gt;Gateway: Runtime configuration
-    Gateway--&gt;&gt;Harness: Listener ready
-    Harness-&gt;&gt;Gateway: Execute streaming probes
-    Gateway-&gt;&gt;Fixture: Proxy requests
-    Fixture--&gt;&gt;Gateway: Events, delays, and headers
-    Gateway--&gt;&gt;Harness: Incremental responses
-    Harness-&gt;&gt;Harness: Write JUnit and evidence
-    Harness-&gt;&gt;Gateway: Graceful stop
-    Harness-&gt;&gt;Fixture: Stop fixture
+    Cluster--&gt;&gt;Harness: Rollout and all containers ready
+    Harness-&gt;&gt;Cluster: Create bounded test Job
+    Job-&gt;&gt;Gateway: Execute streaming probes through Service
+    Gateway--&gt;&gt;Job: Incremental responses
+    Job--&gt;&gt;Harness: JUnit, timings, and outcome
+    Harness-&gt;&gt;Cluster: Capture manifests, events, logs, status
+    Harness-&gt;&gt;Deployer: Delete run namespace
+    Deployer-&gt;&gt;Cluster: Undeploy all run resources
+    Cluster--&gt;&gt;Harness: Namespace deletion verified
 </pre>
 
-<p>The harness must enforce one overall deadline. It must not leave a Gateway,
-fixture, temporary config cache, or listener behind after success, failure, or
-interruption.</p>
+<p>The harness must enforce one overall deadline plus bounded rollout, Job, and
+cleanup deadlines. It must not leave a Gateway, API, fixture, test Job,
+temporary config cache, Compose project, listener, or reusable Kubernetes
+namespace behind after success, failure, or interruption.</p>
 <h2 id="inputs-and-secrets"><a class="header" href="#inputs-and-secrets">Inputs And Secrets</a></h2>
 <p>The scheduled environment supplies at least:</p>
 <div class="table-wrapper">
@@ -635,6 +737,9 @@ interruption.</p>
 <tr><td><code>LIGHT_GATEWAY_STARTUP_HOST</code></td><td>Defaults to <code>dev.networknt.com</code>.</td></tr>
 <tr><td><code>LIGHT_GATEWAY_SERVICE_ID</code></td><td>Defaults to the Light Gateway service ID.</td></tr>
 <tr><td><code>LIGHT_GATEWAY_ENVIRONMENT</code></td><td>Defaults to <code>regression-core</code>.</td></tr>
+<tr><td><code>GATEWAY_RUNTIME</code></td><td>Selects <code>container</code>, <code>compose</code>, or <code>kubernetes</code>; scheduled target-platform runs use <code>kubernetes</code>.</td></tr>
+<tr><td><code>KUBECONFIG</code> and cluster context</td><td>Select the approved local regression cluster without granting broader cluster access than required.</td></tr>
+<tr><td><code>GATEWAY_RUN_NAMESPACE</code></td><td>Optional generated namespace override; it must remain unique and carry the run ID.</td></tr>
 </tbody>
 </table>
 </div>
@@ -653,6 +758,11 @@ copy it into the downloaded-config evidence.</p>
 <li>Gateway startup and terminal logs with secrets redacted;</li>
 <li>fixture request counts and bounded timing records;</li>
 <li>per-test event-arrival timings and outcomes;</li>
+<li>selected execution topology and, for Compose, the rendered model and project
+resource inventory;</li>
+<li>for Kubernetes, the rendered and applied manifest hashes, namespace, node,
+pod and container image IDs, rollout state, restart counts, Events,
+descriptions, test Job result, and namespace-deletion result;</li>
 <li>JUnit output for scheduled-test integration; and</li>
 <li>cleanup outcome.</li>
 </ul>
@@ -669,12 +779,14 @@ diagnosis.</p>
 <tbody>
 <tr><td><code>HARNESS</code></td><td>Container engine or required test tool unavailable.</td></tr>
 <tr><td><code>FIXTURE</code></td><td>Fixture fails its independent health check.</td></tr>
+<tr><td><code>DEPLOYMENT_RENDER</code></td><td>Compose or Kubernetes resources fail rendering, policy, or dry-run validation.</td></tr>
+<tr><td><code>DEPLOYMENT_APPLY</code></td><td>Resources cannot be created or the rollout does not complete.</td></tr>
 <tr><td><code>BOOTSTRAP_AUTH</code></td><td>Config Server rejects the service credential.</td></tr>
 <tr><td><code>CONFIG_LOOKUP</code></td><td>No current snapshot exists for the bootstrap tuple.</td></tr>
 <tr><td><code>CONFIG_VALIDATION</code></td><td>Downloaded Gateway configuration is invalid.</td></tr>
 <tr><td><code>GATEWAY_STARTUP</code></td><td>Gateway exits or never opens its listener.</td></tr>
 <tr><td><code>FEATURE_ASSERTION</code></td><td>Gateway starts but violates an SSE assertion.</td></tr>
-<tr><td><code>CLEANUP</code></td><td>Runtime or fixture cannot be stopped cleanly.</td></tr>
+<tr><td><code>CLEANUP</code></td><td>Runtime, Compose project, or Kubernetes namespace cannot be removed and verified cleanly.</td></tr>
 </tbody>
 </table>
 </div>
@@ -683,7 +795,13 @@ regression.</p>
 <h2 id="security-and-isolation"><a class="header" href="#security-and-isolation">Security And Isolation</a></h2>
 <ul>
 <li>Bind the fixture and Gateway listener to loopback unless a later test
-explicitly requires remote reachability.</li>
+explicitly requires remote reachability. In Kubernetes, prefer ClusterIP
+Services and an in-cluster test Job over externally published ports.</li>
+<li>Give the runner namespace-scoped least-privilege RBAC. Cluster-scoped
+resources require a separately reviewed profile and cleanup policy.</li>
+<li>Generate a unique namespace and resource labels for every Kubernetes run;
+never deploy regression workloads into an application or control-plane
+namespace.</li>
 <li>Use a dedicated least-privilege Gateway service principal for regression.</li>
 <li>Permit that principal to retrieve only its intended configuration audience
 and perform only the controller operations required by the core or selected
@@ -739,6 +857,12 @@ and controller-backed router selection. Specialized LLM, MCP, A2A, and
 WebSocket protocol suites remain separate feature lanes, but they may use the
 same core Gateway instance when their global runtime requirements remain
 compatible.</p>
+<p>API sidecar suites are topology-specific feature lanes. Their authoritative
+Kubernetes manifest places Light Gateway and the API in one pod, exposes only
+Gateway ingress through the Service, verifies the API is reachable over the
+configured pod-local address, and proves that the backend is not independently
+published. Compose may provide a fast equivalent only when its network
+namespace behavior has been qualified for the selected container engine.</p>
 <h2 id="delivery-plan"><a class="header" href="#delivery-plan">Delivery Plan</a></h2>
 <h3 id="phase-0-core-portal-profile"><a class="header" href="#phase-0-core-portal-profile">Phase 0: Core Portal profile</a></h3>
 <ul>
@@ -752,38 +876,62 @@ control path prefixes.</li>
 </ul>
 <p>Exit gate: a fresh Gateway starts using only the bootstrap file and runtime
 secrets, and its effective configuration hashes match the reviewed snapshot.</p>
-<h3 id="phase-1-local-harness"><a class="header" href="#phase-1-local-harness">Phase 1: Local harness</a></h3>
+<h3 id="phase-1-shared-assertions-and-compose-harness"><a class="header" href="#phase-1-shared-assertions-and-compose-harness">Phase 1: Shared assertions and Compose harness</a></h3>
 <ul>
 <li>Add the deterministic fixture and streaming Node assertions to
 <code>light-portal-test</code>.</li>
-<li>Add bounded startup, readiness, evidence, and cleanup handling.</li>
-<li>Add independent <code>make gateway-core</code> and focused <code>make gateway-sse</code> targets.</li>
+<li>Add bounded startup, readiness, evidence, and cleanup handling behind the
+shared runtime-adapter contract.</li>
+<li>Add the Compose topology and independent <code>make gateway-core-compose</code> and
+focused <code>make gateway-sse</code> targets.</li>
 <li>Qualify success and intentionally injected bootstrap, fixture, timeout, and
 cleanup failures.</li>
 </ul>
-<p>Exit gate: repeated local runs distinguish incremental delivery, promotion,
-idle termination, and ordinary timeout without leaked processes or ports.</p>
-<h3 id="phase-2-daily-core-integration"><a class="header" href="#phase-2-daily-core-integration">Phase 2: Daily core integration</a></h3>
+<p>Exit gate: repeated Compose runs distinguish incremental delivery, promotion,
+idle termination, and ordinary timeout without leaked processes, containers,
+volumes, networks, or ports.</p>
+<h3 id="phase-2-local-kubernetes-lifecycle"><a class="header" href="#phase-2-local-kubernetes-lifecycle">Phase 2: Local Kubernetes lifecycle</a></h3>
 <ul>
-<li>Invoke <code>make gateway-core</code> from the daily batch.</li>
+<li>Add the namespace-scoped Kubernetes manifests and <code>runtime-kubernetes.sh</code>
+adapter.</li>
+<li>Render and dry-run before applying through <code>light-deployer</code> when its
+deployment path is in scope.</li>
+<li>Run the assertions through an in-cluster Job and capture workload, rollout,
+image, Event, log, and Job evidence.</li>
+<li>Qualify success plus intentionally injected render, apply, rollout, Job, and
+namespace-cleanup failures.</li>
+</ul>
+<p>Exit gate: repeated <code>make gateway-core-k8s</code> runs create unique namespaces,
+prove the same core behavior, delete their namespaces, verify deletion, and
+leave the long-lived local cluster ready for another application.</p>
+<h3 id="phase-3-daily-kubernetes-integration"><a class="header" href="#phase-3-daily-kubernetes-integration">Phase 3: Daily Kubernetes integration</a></h3>
+<ul>
+<li>Invoke <code>make gateway-core-k8s</code> from the daily batch.</li>
 <li>Publish JUnit and diagnostic artifacts with the other timestamped reports.</li>
 <li>Pin or explicitly select the daily image policy and record its resolved
 digest.</li>
 <li>Add notification using the existing daily regression failure channel.</li>
 </ul>
 <p>Exit gate: the scheduled job runs unattended, retains actionable evidence, and
-does not mutate Portal configuration.</p>
-<h3 id="phase-3-additional-core-features-and-incompatible-profiles"><a class="header" href="#phase-3-additional-core-features-and-incompatible-profiles">Phase 3: Additional core features and incompatible profiles</a></h3>
+does not mutate Portal configuration or retain a reusable application
+namespace.</p>
+<h3 id="phase-4-additional-core-features-and-sidecar-profiles"><a class="header" href="#phase-4-additional-core-features-and-sidecar-profiles">Phase 4: Additional core features and sidecar profiles</a></h3>
 <ul>
 <li>Add header, rewrite, limit, security, and router paths to the core profile
 when their configurations coexist safely.</li>
 <li>Reuse the core instance and lifecycle for every compatible feature.</li>
 <li>Create an alternate runtime profile only when a documented incompatibility
 prevents a feature from joining the core snapshot.</li>
+<li>Add an API sidecar profile whose Kubernetes Deployment places Light Gateway
+and the backend in one pod, routes to the backend over <code>127.0.0.1</code>, and
+exposes only Gateway ports through its Service.</li>
+<li>Add a Compose sidecar lane only if the chosen Docker or Podman Compose runtime
+provides qualified shared-network-namespace behavior.</li>
 </ul>
 <p>Exit gate: at least one additional feature runs through a new core path without
 copying instance, secret handling, readiness, evidence, or cleanup logic; any
-alternate profile has a documented incompatibility.</p>
+alternate profile has a documented incompatibility; and the sidecar lane proves
+pod-local routing and the absence of a directly published backend endpoint.</p>
 <h2 id="acceptance-criteria"><a class="header" href="#acceptance-criteria">Acceptance Criteria</a></h2>
 <p>The first Portal-managed SSE regression is complete when:</p>
 <ul>
@@ -800,9 +948,16 @@ normal authenticated bootstrap path;</li>
 <li>selected upstream streaming headers and valid framing are observed;</li>
 <li>image, bootstrap, snapshot/configuration, request timing, logs, and JUnit
 evidence are retained without secrets;</li>
-<li>all processes, containers, ports, and temporary caches are cleaned up; and</li>
-<li>the focused SSE target and complete core target are independently runnable;</li>
-<li><code>gateway-core</code> is included in the daily batch; and</li>
+<li>the Compose lane removes its processes, containers, volumes, networks,
+ports, and temporary caches;</li>
+<li>the Kubernetes lane uses a unique namespace, exercises the Gateway through
+an in-cluster Job and ClusterIP Service, and verifies namespace deletion;</li>
+<li>the focused SSE, Compose core, and Kubernetes core targets are independently
+runnable;</li>
+<li><code>gateway-core-k8s</code> is included in the daily batch as the authoritative
+target-platform lane;</li>
+<li>a successful run leaves the long-lived local cluster ready to deploy another
+application; and</li>
 <li>the core path-prefix model is ready to accept additional compatible Gateway
 features without creating another Config Instance.</li>
 </ul>
@@ -866,8 +1021,8 @@ features without creating another Config Instance.</li>
         <script src="../../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../../mermaid-3a6b472a.min.js"></script>
-        <script src="../../mermaid-init-025d9952.js"></script>
+        <script src="../../mermaid-c05fc885.min.js"></script>
+        <script src="../../mermaid-init-53b67c53.js"></script>
 
 
 
