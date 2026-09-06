@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-799020b1.js";
+            window.path_to_searchindex_js = "searchindex-fbd27c6f.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-0feb30fe.js"></script>
+        <script src="toc-97d04734.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -58011,6 +58011,225 @@ to perform; record them as passed only after the checks above succeed.</p>
 <h1 id="light-fabric-document-ingest"><a class="header" href="#light-fabric-document-ingest">light-fabric-document-ingest</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-fabric-rag-search"><a class="header" href="#light-fabric-rag-search">light-fabric-rag-search</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="workspace-setup"><a class="header" href="#workspace-setup">Workspace setup</a></h1>
+<ul>
+<li><a href="#setup-a-local-workspace-user-for-advanced-coding-agents-on-ubuntu-2404">Setup a local workspace user for coding agents on Ubuntu</a></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="setup-a-local-workspace-user-for-advanced-coding-agents-on-ubuntu-2404"><a class="header" href="#setup-a-local-workspace-user-for-advanced-coding-agents-on-ubuntu-2404">Setup a Local Workspace User for Advanced Coding Agents on Ubuntu 24.04</a></h1>
+<p>This tutorial helps you run terminal agents like OpenAI Codex CLI and Claude Code from an isolated Linux account so they cannot directly read your personal data in the normal desktop profile.</p>
+<h2 id="why-isolate-by-user-first"><a class="header" href="#why-isolate-by-user-first">Why isolate by user first</a></h2>
+<p>A dedicated user is usually the best tradeoff: easier than carrying a second laptop, safer than using your primary account, and easier to maintain than nested per-command sandboxes.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Approach</th><th>Security</th><th>Maintenance</th><th>Verdict</th></tr>
+</thead>
+<tbody>
+<tr><td>Primary user + built-in sandbox</td><td>🟡 Moderate</td><td>🟢 Very easy</td><td>Convenient, but OS permissions still expose personal keys, cookies, <code>.env</code>, and SSH material if a policy is too broad.</td></tr>
+<tr><td>Dedicated Linux user</td><td>🟢 High</td><td>🟢 Easy</td><td><strong>Recommended.</strong> A separate account isolates your normal profile with standard Unix permissions.</td></tr>
+<tr><td>Separate laptop</td><td>🟢 High</td><td>🔴 Tedious</td><td>Adds hardware/ops overhead and complicates coding workflow.</td></tr>
+</tbody>
+</table>
+</div>
+<p>For Ubuntu 24.04 specifically, this setup keeps each agent session scoped to one workspace and reduces blast radius from destructive commands.</p>
+<h2 id="what-this-tutorial-creates"><a class="header" href="#what-this-tutorial-creates">What this tutorial creates</a></h2>
+<ul>
+<li>A non-privileged <code>agent</code> account</li>
+<li>A shared agent workspace at <code>/data/ai-workspace</code></li>
+<li>A launch flow that keeps your main account separate while still giving access to shared code</li>
+<li>Optional hardening guidance for Codex CLI and Claude Code sandbox settings</li>
+</ul>
+<h2 id="step-1--create-the-dedicated-agent-user"><a class="header" href="#step-1--create-the-dedicated-agent-user">Step 1 — Create the dedicated agent user</a></h2>
+<p>Create a non-admin user that will run terminal coding agents.</p>
+<pre><code class="language-bash">sudo adduser agent
+</code></pre>
+<ul>
+<li>Do not add <code>agent</code> to <code>sudo</code>.</li>
+<li>Use a strong password when prompted, or a non-interactive password strategy if your policy requires one.</li>
+</ul>
+<h2 id="step-2--create-a-shared-workspace"><a class="header" href="#step-2--create-a-shared-workspace">Step 2 — Create a shared workspace</a></h2>
+<p>Create one workspace that both your main user and <code>agent</code> can access.</p>
+<pre><code class="language-bash">sudo mkdir -p /data/ai-workspace
+sudo chown -R agent:agent /data/ai-workspace
+sudo chmod 770 /data/ai-workspace
+sudo usermod -aG agent your_primary_username
+</code></pre>
+<p>The last command lets your primary account read/write the same workspace without using <code>sudo</code> each time.</p>
+<p>After this change, log out and log back in so the group update takes effect.</p>
+<h2 id="step-3--create-and-use-the-agent-session"><a class="header" href="#step-3--create-and-use-the-agent-session">Step 3 — Create and use the agent session</a></h2>
+<p>When you want to run coding agents, switch into the dedicated account:</p>
+<pre><code class="language-bash">su - agent
+cd /data/ai-workspace
+</code></pre>
+<p>Install Java, Node and Rust</p>
+<pre><code>curl -s "https://get.sdkman.io" | bash
+source "$HOME/.sdkman/bin/sdkman-init.sh"
+sdk version
+
+sdk list java
+sdk install java 25.0.4-amzn
+sdk list maven
+sdk insstall maven 3.9.16
+
+curl -fsSL https://bun.sh/install | bash
+bun --version
+ln -s $(which bun) $HOME/.bun/bin/node
+bun upgrade
+
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+rustc --version
+cargo --version
+
+
+</code></pre>
+<p>Run agent tooling in this account only. If you need a GUI app for files, do not launch it from the agent account unless you have a strict reason.</p>
+<p>When finished:</p>
+<pre><code class="language-bash">exit
+</code></pre>
+<p>Then return to your normal user context.</p>
+<h2 id="step-4--configure-git-and-github-access-for-each-agent"><a class="header" href="#step-4--configure-git-and-github-access-for-each-agent">Step 4 — Configure Git and GitHub access for each agent</a></h2>
+<p>For unattended agents with auto-approved execution, split Git transport from GitHub API access:</p>
+<ul>
+<li><strong>Blast-radius control:</strong> scoped PATs can only touch the selected repo(s), so a leaked token cannot affect your entire account.</li>
+<li><strong>Auditability:</strong> distinct token names and optional per-agent accounts make it easy to trace changes and revoke only one actor.</li>
+<li><strong>Separation of concerns:</strong> use SSH for Git transport and PATs for API actions (issues, PRs, Actions).</li>
+<li>Use separate keys/tokens per agent identity so permissions, audit trail, and revocation are isolated.</li>
+</ul>
+<h3 id="41-ssh-identity-for-git-transport"><a class="header" href="#41-ssh-identity-for-git-transport">4.1 SSH identity for Git transport</a></h3>
+<p>Create a dedicated SSH key inside <code>agent</code> and add the public key to GitHub:</p>
+<pre><code class="language-bash">su - agent
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+ssh-keygen -t ed25519 -C "agent@ubuntu-local"
+cat ~/.ssh/id_ed25519.pub
+</code></pre>
+<p>Copy the printed public key to <strong>GitHub → Settings → SSH and GPG keys</strong> (or use a repository Deploy Key if you want a single-repo limit).</p>
+<p>Test:</p>
+<pre><code class="language-bash">ssh -T git@github.com
+</code></pre>
+<p>For a deploy-only repo setup, add only a Deploy Key for that repository instead of a user key.</p>
+<h3 id="42-fine-grained-pats-for-api-actions"><a class="header" href="#42-fine-grained-pats-for-api-actions">4.2 Fine-grained PATs for API actions</a></h3>
+<p>Create one token per agent in <strong>GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens</strong> with:</p>
+<ul>
+<li><strong>Repository access:</strong> select only the workspace repository the agent needs</li>
+<li><strong>Permissions (minimum):</strong>
+<ul>
+<li><code>Contents</code>: Read and write</li>
+<li><code>Issues</code>: Read and write</li>
+<li><code>Pull requests</code>: Read and write</li>
+<li><code>Actions</code>: Read and write (only if the agent must trigger/cancel workflows)</li>
+</ul>
+</li>
+<li>Short expiry (30 or 90 days), then rotate regularly.</li>
+</ul>
+<p>Create two tokens (for example <code>agent-codex</code> and <code>agent-claude</code>) so a single credential leak or compromise stays contained.</p>
+<h3 id="43-safe-token-wiring-in-the-agent-user-shell"><a class="header" href="#43-safe-token-wiring-in-the-agent-user-shell">4.3 Safe token wiring in the agent user shell</a></h3>
+<p>Store tokens in a dedicated file with strict permissions and load it when <code>agent</code> starts:</p>
+<pre><code class="language-bash">mkdir -p ~/.config/agent
+cat &gt; ~/.config/agent/github-env.sh &lt;&lt;'EOF'
+export GITHUB_TOKEN="github_pat_your_default_agent_token_here"
+export CLAUDE_GITHUB_TOKEN="github_pat_your_claude_token_here"
+export CODEX_GITHUB_TOKEN="github_pat_your_codex_token_here"
+EOF
+chmod 600 ~/.config/agent/github-env.sh
+</code></pre>
+<p>Load tokens in <code>~/.bashrc</code>:</p>
+<pre><code class="language-bash">if [ -f ~/.config/agent/github-env.sh ]; then
+  . ~/.config/agent/github-env.sh
+fi
+</code></pre>
+<p>Use a shell wrapper or explicit env per tool when needed:</p>
+<pre><code class="language-bash">env CODEX_GITHUB_TOKEN="$CODEX_GITHUB_TOKEN" GITHUB_TOKEN="$CODEX_GITHUB_TOKEN" codex
+env GITHUB_TOKEN="$CLAUDE_GITHUB_TOKEN" claude
+</code></pre>
+<p>If you want to keep one default credential for both agents, use only <code>GITHUB_TOKEN</code> in
+<code>github-env.sh</code> and run both tools with <code>GITHUB_TOKEN</code>:</p>
+<pre><code class="language-bash">env GITHUB_TOKEN="$GITHUB_TOKEN" codex
+env GITHUB_TOKEN="$GITHUB_TOKEN" claude
+</code></pre>
+<blockquote class="blockquote-tag blockquote-tag-important">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Important</p>
+<p>Keep credentials outside repositories and never commit them. This file should stay on disk only under <code>agent</code> with mode <code>600</code>.</p>
+</blockquote>
+<h3 id="44-commit-author-identity"><a class="header" href="#44-commit-author-identity">4.4 Commit author identity</a></h3>
+<p>Set agent-specific Git identity so commit history stays attributable:</p>
+<pre><code class="language-bash">git config --global user.name "Codex Agent Workspace"
+git config --global user.email "agent-workspace@local"
+</code></pre>
+<p>Use separate names/emails for each dedicated agent if you want a clearer commit audit trail.</p>
+<h2 id="step-5--configure-safer-agent-sandboxes"><a class="header" href="#step-5--configure-safer-agent-sandboxes">Step 5 — Configure safer agent sandboxes</a></h2>
+<p>Keep the OS-level isolation and still enable built-in agent sandboxes.</p>
+<h3 id="codex-cli"><a class="header" href="#codex-cli">Codex CLI</a></h3>
+<p>Install bubblewrap and set a restrictive sandbox config in <code>~/.codex/config.toml</code>:</p>
+<pre><code class="language-toml">approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+</code></pre>
+<p>Use a workspace-owned path and keep your workspace directory owner-only where possible.</p>
+<h3 id="claude-code"><a class="header" href="#claude-code">Claude Code</a></h3>
+<p>On Ubuntu, install required helper tools:</p>
+<pre><code class="language-bash">sudo apt install -y bubblewrap socat
+</code></pre>
+<p>This helps avoid sandbox launch failures caused by missing utilities.</p>
+<h3 id="ubuntu-2404-namespace-exception"><a class="header" href="#ubuntu-2404-namespace-exception">Ubuntu 24.04 namespace exception</a></h3>
+<p>If a sandbox launch fails with user-namespace errors, enable unprivileged user namespaces:</p>
+<pre><code class="language-bash">sudo sysctl -w kernel.unprivileged_userns_clone=1
+</code></pre>
+<p>For permanent behavior, persist it in <code>/etc/sysctl.d/99-userns.conf</code>:</p>
+<pre><code class="language-bash">printf 'kernel.unprivileged_userns_clone=1\n' | sudo tee /etc/sysctl.d/99-userns.conf
+sudo sysctl --system
+</code></pre>
+<h2 id="step-6--quick-verification-checklist"><a class="header" href="#step-6--quick-verification-checklist">Step 6 — Quick verification checklist</a></h2>
+<p>Run this after setup:</p>
+<pre><code class="language-bash"># 1) Verify isolation account can access the shared workspace
+id -nG
+ls -ld /data/ai-workspace
+
+# 2) Verify key agents still run under the correct account context
+whoami
+pwd
+
+# 3) Verify sandbox helper binaries exist
+command -v bwrap
+command -v socat
+
+# 4) Verify GitHub API credentials for each tool
+env | grep GITHUB_TOKEN
+env | grep CODEX_GITHUB_TOKEN
+env | grep CLAUDE_GITHUB_TOKEN
+</code></pre>
+<p>If any command fails, fix that dependency first before enabling agent workflows.</p>
+<h2 id="alternative-container-based-isolation"><a class="header" href="#alternative-container-based-isolation">Alternative: container-based isolation</a></h2>
+<p>If you do not want to manage additional local users, you can run agents from Docker-based sandboxes (for example, <code>sbx</code> wrappers). This keeps workspaces mounted explicitly and avoids sharing Linux UID state, at the cost of more tooling to maintain.</p>
+<p>A common pattern:</p>
+<pre><code class="language-bash"># Example shape only
+sbx run codex
+sbx run claude
+</code></pre>
+<p>Use whichever model of container isolation your team already uses so updates and secrets are consistent.</p>
+<h2 id="security-notes-1"><a class="header" href="#security-notes-1">Security notes</a></h2>
+<ul>
+<li>Never store API keys, cookies, SSH private keys, or <code>.env</code> files in the shared workspace.</li>
+<li>Never run this agent user as <code>sudo</code>.</li>
+<li>Keep <code>.codex</code> and <code>.claude</code> folders inside the agent home when possible.</li>
+<li>Keep the primary profile and production credentials outside <code>/data/ai-workspace</code> and inject only required references when needed.</li>
+</ul>
+<h2 id="sources-1"><a class="header" href="#sources-1">Sources</a></h2>
+<ul>
+<li>https://nimbalyst.com/blog/orchestrating-claude-code-and-codex-together/</li>
+<li>https://mikemcquaid.com/sandboxed-agent-worktrees-my-coding-and-ai-setup-in-2026/</li>
+<li>https://learn.chatgpt.com/docs/sandboxing</li>
+<li>https://yeet.cx/topical-takes/sandbox-ai-coding-agent-linux</li>
+<li>https://www.reddit.com/r/ClaudeAI/comments/1qvwtye/i_reviewed_claudes_sandboxing_codexs_approach_and/</li>
+<li>https://prince-arora-aws.medium.com/how-to-create-a-secure-sandbox-environment-for-claude-code-on-ubuntu-2b8a80872fa5</li>
+<li>https://github.com/openai/codex/issues/29908</li>
+<li>https://community.openai.com/t/codex-in-chatgpt-desktop-app-for-linux-is-now-in-preview/1390027?page=2</li>
+<li>https://www.youtube.com/watch?v=b7ThC0eE29E&amp;t=687</li>
+<li>https://www.youtube.com/watch?v=zb2LyMro77M</li>
+<li>https://meridianlabs-ai.github.io/inspect_swe/codex_cli.html</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="license"><a class="header" href="#license">License</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
