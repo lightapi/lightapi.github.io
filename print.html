@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-731bf405.js";
+            window.path_to_searchindex_js = "searchindex-bed0a507.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-b4a3508c.js"></script>
+        <script src="toc-430f75ff.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -183,6 +183,237 @@
 <h1 id="design"><a class="header" href="#design">Design</a></h1>
 <p>Light Portal is an application that connect the providers to the consumers, and it contains many components or applications. Each component will have some API endpoints and a user interface in the portal view single page application.</p>
 <p>To allow the users to understand each component in detail in term of design, we have collected all the design documents in this section.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="portal-db-ci-design"><a class="header" href="#portal-db-ci-design">Portal DB CI Design</a></h1>
+<p>Portal DB CI verifies that a fresh installation, the explicitly supported upgrade paths, and the runtime database policies agree. It also verifies that the checked-in installation artifacts can be reproduced from their authoritative sources. A successful schema load alone is insufficient: retained data, migration rejection, replay behavior, documentation, and environment isolation are part of the contract.</p>
+<p>This document describes the implementation reviewed on September 9, 2026. Paths beginning with <code>postgres/</code> or <code>.github/</code> refer to the <code>portal-db</code> repository. The implementation and its executable contracts remain authoritative as the schema evolves.</p>
+<h2 id="qualification-status"><a class="header" href="#qualification-status">Qualification status</a></h2>
+<p>The completed review independently reproduced a clean run of <code>postgres/tests/run-ci-schema-gates.sh</code> against the pinned PostgreSQL 17.10 image: <strong>23/23 gates passed, exit 0</strong>. This includes generation under a different authenticated role, install-time seed attribution, and repeated seed insertion. The four previously failing jobs have been addressed locally.</p>
+<p>At that review checkpoint, GitHub Actions had not run the revised implementation. Its composite action, workspace bind mount under <code>GITHUB_WORKSPACE</code>, and service-container connectivity still required remote qualification. Local success must not be described as a verified green GitHub run.</p>
+<p>Repository ruleset and branch-protection API requests previously returned HTTP 403 with the requirement to upgrade the GitHub plan or make the private repository public. This is a recorded operational constraint, not a continuously verified repository setting. Passing CI does not currently establish enforced merge protection.</p>
+<h2 id="motivation-and-failure-model"><a class="header" href="#motivation-and-failure-model">Motivation and failure model</a></h2>
+<p>The repair began with four failed jobs in run <code>34364264434</code>: <code>execution-schema-gate</code>, <code>llm-control-plane-schema-gate</code>, <code>cascade-delete-policy-schema-gate</code>, and <code>multi-schema-environment-gate</code>. Documentation and cascade behavior were steps within one job; they were not two failed jobs.</p>
+<p>Several failures had shared structural causes:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Failure</th><th>Design response</th></tr>
+</thead>
+<tbody>
+<tr><td>Canonical schema and hand-maintained upgrade chains drifted apart</td><td>Declare baseline-specific migration phases and compare the resulting schema with canonical state</td></tr>
+<tr><td>A dump conversion lost the runtime-section markers expected by a shell script</td><td>Generate an explicit repeatable cascade installer from authoritative inputs</td></tr>
+<tr><td>Documentation and cascade steps attempted to load the standalone DDL into the same database</td><td>Give independent installation gates separate disposable databases</td></tr>
+<tr><td>A bare <code>psql</code> invocation authenticated as the runner OS user</td><td>Set <code>PGUSER</code> explicitly for environment-driven bootstrap calls</td></tr>
+<tr><td>An earlier failed step hid later independent gates</td><td>Continue independent steps after failures while preserving real prerequisite dependencies</td></tr>
+<tr><td>Generated seed values captured the generating role</td><td>Emit install-time defaults for session-owned attribution and test a distinct authenticated role</td></tr>
+<tr><td>Dump regeneration depended on floating tool versions</td><td>Pin database server and clients together and narrowly normalize dump metadata</td></tr>
+</tbody>
+</table>
+</div>
+<p>The initial observed failures did not define the complete defect set. The workflow-tool gate and shared-grants transaction gate were previously masked by earlier failures. Isolation and failure reporting therefore precede conclusions about how many repairs are necessary.</p>
+<h2 id="architecture-1"><a class="header" href="#architecture-1">Architecture</a></h2>
+<pre class="mermaid">flowchart TD
+    Sources[Authoritative schema inputs] --&gt; Generate[Materialize in an empty pinned database]
+    Generate --&gt; Dump[Dump catalog and assemble seeds and runtime]
+    Dump --&gt; Artifacts[Checked-in generated SQL]
+    Artifacts --&gt; Fresh[Fresh-install gates]
+    Sources --&gt; Reproduce[Regenerate and compare]
+    Artifacts --&gt; Reproduce
+    Baselines[Declared historical baselines] --&gt; Phases[Ordered migration phases and retained-data fixtures]
+    Phases --&gt; Compare[Canonical and migrated schema comparison]
+    Artifacts --&gt; Compare
+    Fresh --&gt; Behavior[Documentation, seed, cascade and isolation assertions]
+    Phases --&gt; Safety[Abort, rollback and replay assertions]
+    Inventory[Patch inventory and dependency contracts] --&gt; Coverage[Coverage disposition and workflow filter checks]
+</pre>
+
+<p>These checks establish complementary properties. A generation comparison detects stale artifacts. A migration comparison detects an incomplete upgrade path. Behavioral fixtures detect defects that identical table definitions cannot expose. Inventory checks make the limits of qualification visible.</p>
+<h2 id="canonical-generation-contract"><a class="header" href="#canonical-generation-contract">Canonical generation contract</a></h2>
+<h3 id="sources-and-outputs"><a class="header" href="#sources-and-outputs">Sources and outputs</a></h3>
+<p><code>postgres/bin/generate-ddl.py</code> materializes these inputs in order:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Input</th><th>Responsibility</th></tr>
+</thead>
+<tbody>
+<tr><td><code>postgres/schema/base.sql</code></td><td>Final-state schema and schema-owned seed source, initialized from commit <code>4d6842a</code></td></tr>
+<tr><td><code>postgres/schema/comments.sql</code></td><td>Explicit table and column documentation introduced by the CI repair</td></tr>
+<tr><td><code>postgres/schema/policies.sql</code></td><td>Reviewed additions to the cascade relationship inventory</td></tr>
+<tr><td><code>postgres/schema/cascade-finalize.sql</code></td><td>Policy validation and repeatable trigger installation</td></tr>
+<tr><td><code>postgres/schema/toolchain.env</code></td><td>Pinned PostgreSQL image and Node version used by the tooling</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>base.sql</code> is an authoring input. Subsequent generation does not overwrite it. Fresh-install changes belong in these sources, with corresponding upgrade patches where required.</p>
+<p>The generator writes five outputs:</p>
+<ul>
+<li><code>postgres/ddl.sql</code>: the complete standalone fresh-install script.</li>
+<li><code>postgres/schema/seeds.generated.sql</code>: the non-cascade schema-owned seed section, also embedded in <code>ddl.sql</code>.</li>
+<li><code>postgres/schema/cascade-runtime.generated.sql</code>: the repeatable cascade installer, also embedded in <code>ddl.sql</code>.</li>
+<li><code>postgres/patch_20260909_02_schema_documentation.sql</code>: the documentation upgrade wrapped in a transaction.</li>
+<li><code>postgres/patch_20260909_03_cascade_install.sql</code>: the generated cascade upgrade installer.</li>
+</ul>
+<p>Do not hand-edit these outputs. Regenerate them after changing their sources. <code>--check</code> compares regenerated content with the checked-in artifacts and fails on drift.</p>
+<p>The standalone contract includes stored procedures, trigger functions, trigger installation, cascade-policy synchronization, comments, and schema-owned seeds. It introduces no <code>\i</code> or <code>\ir</code> dependency into <code>ddl.sql</code>. Application bootstrap data such as <code>init-lightapi.sql</code> remains a separate installation step.</p>
+<p>The canonical DDL is a <strong>fresh-install artifact</strong>, not an idempotent upgrade script. Replaying its bare <code>CREATE TABLE</code> statements into a populated database is invalid. Replay guarantees apply to the designated seed section, cascade installer, and qualified migration transitions.</p>
+<h3 id="reproducibility-and-toolchain"><a class="header" href="#reproducibility-and-toolchain">Reproducibility and toolchain</a></h3>
+<p>The reviewed toolchain uses PostgreSQL server and client version <strong>17.10</strong>, Node <strong>24.14.0</strong>, and this database image:</p>
+<pre><code class="language-text">pgvector/pgvector@sha256:d2ef61f42ef767baa5a1475393303cc235bcd92febd9d7014eddb48b41f3bad0
+</code></pre>
+<p>The generator checks the server version and <code>pg_dump</code> version before generation. The comparison normalizes only:</p>
+<ol>
+<li>The matching random <code>\restrict</code> and <code>\unrestrict</code> token.</li>
+<li>The <code>Dumped from database version</code> header.</li>
+<li>The <code>Dumped by pg_dump version</code> header.</li>
+</ol>
+<p>Missing, mismatched, or multiple restriction-token pairs fail validation. Catalog definitions and seed data are not normalized away. Header normalization does not authorize a version change because the toolchain is checked separately.</p>
+<p>The canonical script’s restriction commands require a compatible <code>psql</code>; the repository README documents 17.6+, 16.10+, 15.14+, or 14.19+. Reproducible generation has the stricter pinned 17.10 requirement. JDBC-only consumers can generate a DBVisualizer copy with the repository converters; that copy is not another maintained canonical artifact.</p>
+<p>The composite action <code>.github/actions/schema-toolchain/action.yml</code> installs Node, installs ripgrep, pulls the pinned image, and puts wrappers for <code>psql</code>, <code>pg_dump</code>, <code>createdb</code>, and <code>dropdb</code> on <code>GITHUB_PATH</code>. <code>postgres/bin/pg-client.sh</code> executes those clients in the image, forwards PostgreSQL environment variables, uses host networking, and mounts the current working directory at the same path plus <code>/tmp</code>.</p>
+<p>This pins the schema-sensitive database tools; it does not make the entire runner immutable. Ubuntu, apt-provided utilities, and version-tagged GitHub actions remain separate dependencies. Update the toolchain source, workflow service images, and composite-action version settings together when deliberately upgrading.</p>
+<h3 id="seed-semantics"><a class="header" href="#seed-semantics">Seed semantics</a></h3>
+<p>Seed serialization preserves installation behavior:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Seed table</th><th>Attribution and replay contract</th></tr>
+</thead>
+<tbody>
+<tr><td><code>scheduler_lock_t</code></td><td><code>last_heartbeat</code> uses <code>CURRENT_TIMESTAMP</code>; conflict on <code>lock_id</code> does nothing</td></tr>
+<tr><td><code>log_counter</code></td><td>Conflict on <code>id</code> does nothing</td></tr>
+<tr><td><code>pii_token_scheme_t</code></td><td><code>update_user</code> uses <code>DEFAULT</code>, resolving to installing <code>SESSION_USER</code>; conflict on <code>scheme_id</code> does nothing</td></tr>
+<tr><td><code>operational_store_profile_t</code></td><td>Explicit source authors remain intact; conflict on <code>(profile_id, profile_version)</code> does nothing</td></tr>
+<tr><td><code>cascade_relationship_policy_t</code></td><td>Seed attribution uses <code>DEFAULT</code>; synchronization updates attribution with <code>SESSION_USER</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Runtime seed timestamps use <code>CURRENT_TIMESTAMP</code>. Generation-time role names and timestamps must not become installation data. In particular, the operational profile authors <code>p7-compatibility-closure</code> and <code>registration-v2-bootstrap</code> are intentional source values and remain unchanged.</p>
+<p><code>run-generated-seed-gate.sh</code> authenticates as a distinct login role, checks reproducibility, loads canonical DDL, verifies attribution, applies the non-cascade seed section twice, and compares existing seed rows. It also replays cascade installation and checks policy attribution. The profile seed section temporarily disables its legacy-profile write guard inside a transaction and restores it afterward.</p>
+<h2 id="migration-qualification"><a class="header" href="#migration-qualification">Migration qualification</a></h2>
+<h3 id="baselines-and-phase-order"><a class="header" href="#baselines-and-phase-order">Baselines and phase order</a></h3>
+<p>There is no universal chronological migration list. <code>postgres/migrations/workflow_runner.json</code> and <code>llm_control_plane.json</code> declare a baseline, a gate, and named phases containing the target schema and ordered patch sequence. <code>postgres/bin/migration-path.py</code> renders patches for the selected schema and produces include files consumed at explicit positions in the SQL gates.</p>
+<p>The include positions matter: gates reconstruct historical prerequisites, insert retained-data fixtures, apply transitions, and assert results between phases. Repeated patch entries deliberately exercise replay at the supported transition boundary. Reapplying an old patch after a later transition has removed its prerequisites is not an equivalent test.</p>
+<p>The execution path reconstructs the runner and agent foundations. It restores historical prerequisites such as <code>agent_memory_directive_t.bank_id</code> before operational decoupling; the later publication transition removes that column again. The LLM paths cover historical reconstruction and a retained-data bridge before endpoint ownership becomes authoritative.</p>
+<p>Schema comparisons report the collected differences rather than stopping at the first differing column. Retained-data and behavioral assertions complement those comparisons. A matching final catalog alone cannot prove that a destructive migration preserved user data.</p>
+<h3 id="endpoint-ownership-safety"><a class="header" href="#endpoint-ownership-safety">Endpoint-ownership safety</a></h3>
+<p><code>postgres/patch_20260909_01_llm_endpoint_ownership.sql</code> moves transport ownership fully to the endpoint. The migration itself locks endpoint and deployment tables and checks reconciliation before dropping deployment <code>base_url</code> and <code>provider_protocol</code>. It updates the embedding qualification view to read endpoint-owned protocol before removing those columns.</p>
+<p>The reconciliation gate exercises four failure cases:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Fixture</th><th>Required rejection</th></tr>
+</thead>
+<tbody>
+<tr><td>Deployment transport differs from its endpoint</td><td>Transport reconciliation error</td></tr>
+<tr><td>Referenced endpoint is absent</td><td>Missing-endpoint reconciliation error</td></tr>
+<tr><td>Only one legacy transport column remains</td><td>Partial-migration error</td></tr>
+<tr><td>Active deployment Bedrock policy disagrees with endpoint protocol</td><td>Bedrock-contract error</td></tr>
+</tbody>
+</table>
+</div>
+<p>Each fixture matches its own expected error message, then verifies that the failed migration retained the data and expected legacy-column count. The successful path checks retained data and applies the patch twice. Row fingerprints use <code>to_jsonb</code>, avoiding false differences when dropping and re-adding a column changes its physical order.</p>
+<p>These are executable pre-drop protections. A review instruction to reconcile rows outside the patch would not prevent an unsafe invocation from silently losing divergent values.</p>
+<h3 id="inventory-boundaries"><a class="header" href="#inventory-boundaries">Inventory boundaries</a></h3>
+<p><code>postgres/migrations/inventory.json</code> requires every discovered patch to have a declared path or an explicit disposition. At the reviewed checkpoint it accounted for <strong>153 patches</strong>, including <strong>41 on the declared execution/LLM paths</strong> and <strong>69 explicitly unqualified</strong>; the remaining entries referenced standalone gates.</p>
+<p>A standalone gate reference does not establish that the main CI workflow executes it. The unqualified entries have SHA-256 locks so an edit requires a reviewed disposition update or new qualification. These locks are review tripwires, not execution coverage. Adding manifests must never be reported as qualification of every historical patch.</p>
+<p><code>postgres/bin/check-schema-contracts.py</code> rejects missing inventory entries and unexpected changes to locked artifacts. Do not regenerate the inventory merely to make that failure disappear. Select a supported baseline and a meaningful qualification path for each new migration.</p>
+<h2 id="documentation-and-cascade-gates"><a class="header" href="#documentation-and-cascade-gates">Documentation and cascade gates</a></h2>
+<p>The documentation gate loads canonical DDL into its own database and checks table and column comments together. It also revalidates routine bodies after their dependencies exist; <code>pg_dump</code> disables those checks during initial loading. Required runtime routines and triggers are asserted explicitly.</p>
+<p>The negative documentation fixture uses <code>pg_description</code> to discover the targets supplied by <code>comments.sql</code>. It clears comments and reapplies the source inside an exploratory transaction, emits target-specific <code>COMMENT ... IS NULL</code> statements, and rolls back that exploration. The emitted fixture is then applied to the installed schema. The gate requires a failure reporting missing table and column comments before replaying the documentation patch twice and requiring success.</p>
+<p>This makes multiline comments and text containing <code>IS</code> safe: fixture construction depends on catalog identity, not line-oriented SQL rewriting.</p>
+<p>The cascade behavior gate uses a different database. It loads canonical DDL once and uses <code>cascade-runtime.generated.sql</code> for repeat installation. There is no runtime-section marker extraction and no second complete DDL load.</p>
+<p>The cascade installer runs transactionally. It handles the legacy <code>enabled</code> policy shape, restores the canonical view and routines, synchronizes policies, validates relationships, and reinstalls application-schema triggers. Policies owned entirely by the application schema and absent from the authoritative inventory are removed; external-schema policies are preserved. An invalid relationship must roll back the installation. Named application schemas use <code>postgres/bin/render-schema.sh</code> to render the installer.</p>
+<h2 id="workflow-topology-and-failure-visibility"><a class="header" href="#workflow-topology-and-failure-visibility">Workflow topology and failure visibility</a></h2>
+<p>The main <code>ci.yml</code> runs on pull requests, pushes to <code>master</code> or <code>main</code>, and manual dispatch. Its six job identifiers remain stable:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Job</th><th>Responsibilities</th></tr>
+</thead>
+<tbody>
+<tr><td><code>multi-schema-environment-gate</code></td><td>Deterministic rendering, environment isolation, repository-layout container bootstrap, public-schema leakage checks, shared-grants transaction safety</td></tr>
+<tr><td><code>bootstrap-seed-schema-gate</code></td><td>Contract unit tests, inventory/dependency contracts, explicit bootstrap seed schema qualification</td></tr>
+<tr><td><code>runtime-instance-operational-metadata-schema-gate</code></td><td>Canonical and migration equivalence for runtime operational metadata</td></tr>
+<tr><td><code>cascade-delete-policy-schema-gate</code></td><td>Generation, cross-role seeds, documentation, cascade behavior and atomic installation</td></tr>
+<tr><td><code>execution-schema-gate</code></td><td>Runner migration equivalence and the separately isolated workflow-tool gate</td></tr>
+<tr><td><code>llm-control-plane-schema-gate</code></td><td>LLM equivalence followed by dependent endpoint reconciliation</td></tr>
+</tbody>
+</table>
+</div>
+<p>Independent steps use:</p>
+<pre><code class="language-yaml">if: ${{ !cancelled() &amp;&amp; steps.toolchain.outcome == 'success' }}
+</code></pre>
+<p>This allows later independent checks to run after a failure without running after cancellation or failed toolchain setup. It does not convert a failed step into success. Dependent operations remain sequential: LLM reconciliation needs a row established by the LLM equivalence gate, and container validation needs successful initialization.</p>
+<p>Separate databases prevent earlier installation or failed fixtures from contaminating unrelated gates. Explicit <code>PGUSER</code> is necessary for bare environment-driven <code>psql</code> calls; the service’s <code>POSTGRES_USER</code> setting alone does not select the client’s login role.</p>
+<p>Retain job identifiers when refactoring. Moving jobs into a matrix can change check names and invalidate a future required-check configuration. Service-block deduplication is deferred until that naming and enforcement contract is settled.</p>
+<h3 id="knowledge-workflows-and-path-filters"><a class="header" href="#knowledge-workflows-and-path-filters">Knowledge workflows and path filters</a></h3>
+<p>Three additional schema workflows qualify Knowledge phase 1, phase 2, and the admin API boundary. <code>sync-auto-pr.yml</code> is a synchronization workflow and is outside the schema-gate set.</p>
+<p>The contract checker follows literal shell and SQL dependencies transitively and validates both push and pull-request path filters. Dynamic dependencies require explicit declarations in <code>postgres/migrations/workflow-dependencies.json</code>. Reviewed filter changes can be generated with:</p>
+<pre><code class="language-bash">postgres/bin/check-schema-contracts.py --write-filters
+postgres/bin/check-schema-contracts.py
+</code></pre>
+<p>For example, the admin API gate reads <code>postgres/tests/light_knowledge_phase1_schema_fingerprint.sql</code>; editing that helper must trigger its workflow. That workflow loads <code>postgres/knowledge/ddl.sql</code>, so adding the unrelated configuration <code>postgres/ddl.sql</code> to its filter is unnecessary. Deriving filters from executable dependencies prevents shared helpers from silently falling outside the trigger set.</p>
+<h2 id="local-qualification-procedure"><a class="header" href="#local-qualification-procedure">Local qualification procedure</a></h2>
+<p>Use a disposable PostgreSQL cluster, not a shared development or production cluster. These gates create databases and cluster roles and exercise intentionally invalid data. The generated-seed gate creates a temporary login superuser with a test password equal to its generated role name. Its exit trap cannot clean up after <code>SIGKILL</code>; destroying the disposable cluster is the final cleanup boundary. Its <code>REASSIGN OWNED</code> cleanup can also fail independently of successful assertions, so inspect cleanup errors when interpreting a nonzero exit.</p>
+<p>The following example assumes Linux host networking, Docker, Python 3, Node 24.14.0, and ripgrep. Run it from the <code>portal-db</code> root. The wrappers reproduce the pinned client boundary used by CI.</p>
+<pre><code class="language-bash">source postgres/schema/toolchain.env
+
+docker run -d --name portal-db-ci-local \
+  -p 127.0.0.1:55439:5432 \
+  -e POSTGRES_PASSWORD=postgres \
+  "$PORTAL_DB_IMAGE"
+
+client_bin="$(mktemp -d /tmp/portal-db-clients.XXXXXX)"
+for tool in psql pg_dump createdb dropdb; do
+  printf '#!/usr/bin/env bash\nexec "%s/postgres/bin/pg-client.sh" "%s" "$@"\n' \
+    "$PWD" "$tool" &gt; "$client_bin/$tool"
+  chmod +x "$client_bin/$tool"
+done
+export PATH="$client_bin:$PATH"
+
+# Continue when PostgreSQL reports that it is accepting connections.
+docker exec portal-db-ci-local pg_isready -U postgres
+psql --version
+pg_dump --version
+node --version
+
+postgres/tests/run-ci-schema-gates.sh \
+  postgresql://postgres:postgres@localhost:55439/postgres \
+  /tmp/portal-db-ci-results
+</code></pre>
+<p>Use a fresh log directory for each qualification run and avoid concurrent runs writing to the same logs. The driver writes per-gate logs and <code>results.txt</code>, continues independent gates after failures, and returns a nonzero result if a gate fails. Provisioning failures can still terminate the driver; do not infer complete coverage from a partial results file. At this checkpoint a complete successful run has 23 named results, including <code>generated_seeds</code> and all three Knowledge gates.</p>
+<p>After collecting results, remove the disposable cluster and client wrappers:</p>
+<pre><code class="language-bash">docker stop portal-db-ci-local
+docker rm portal-db-ci-local
+rm -r -- "$client_bin"
+</code></pre>
+<p>For a source change, regenerate before checking using two separately created empty databases:</p>
+<pre><code class="language-bash">postgres/bin/generate-ddl.py postgresql://.../empty_generation_database
+postgres/bin/generate-ddl.py postgresql://.../empty_verification_database --check
+</code></pre>
+<p>Run the affected behavioral gates after regeneration, then the full qualification driver when the change spans shared schema contracts. SQL syntax checks or skipped PostgreSQL tests cannot replace a live migration and replay test.</p>
+<h2 id="change-and-release-acceptance"><a class="header" href="#change-and-release-acceptance">Change and release acceptance</a></h2>
+<p>A schema change should carry its authoritative source edit, generated outputs, applicable migration path, retained-data or behavior assertions, and inventory/dependency updates together. Reviewers should be able to identify the baseline being upgraded and the exact state protected by each rejection test.</p>
+<p>Before declaring this repair remotely qualified:</p>
+<ol>
+<li>Run the revised workflows on GitHub Actions for the exact reviewed commit.</li>
+<li>Confirm all six main jobs ran and passed, including the formerly masked independent steps.</li>
+<li>Run the three Knowledge boundary workflows when qualifying the complete schema suite; a path-filtered workflow that did not execute provides no evidence for that commit.</li>
+<li>Verify the composite action’s client versions, workspace mounts, and connectivity to PostgreSQL service containers.</li>
+<li>Record the commit and run results separately from any decision about merge enforcement.</li>
+</ol>
+<p>Enforced merge protection requires a repository plan or visibility decision, or an explicitly designed alternative mechanism. A local pre-push hook is bypassable. Gating the synchronization PR flow would only protect that route unless other write routes were also controlled. Neither alternative is implemented or implied by a passing test suite.</p>
+<h2 id="implementation-references"><a class="header" href="#implementation-references">Implementation references</a></h2>
+<p>The main reference points in <code>portal-db</code> are:</p>
+<ul>
+<li><code>postgres/schema/README.md</code> and <code>postgres/bin/generate-ddl.py</code> for generation and seed contracts.</li>
+<li><code>postgres/migrations/README.md</code>, the two path manifests, and <code>postgres/bin/migration-path.py</code> for historical qualification.</li>
+<li><code>postgres/bin/check-schema-contracts.py</code> for inventory and transitive workflow dependencies.</li>
+<li><code>.github/workflows/ci.yml</code> and <code>.github/actions/schema-toolchain/action.yml</code> for remote execution.</li>
+<li><code>postgres/tests/run-ci-schema-gates.sh</code> for local orchestration and its complete result set.</li>
+<li><code>postgres/tests/run-generated-seed-gate.sh</code>, <code>run-llm-endpoint-reconciliation-gate.sh</code>, <code>documentation_negative_fixture.sql</code>, and <code>run-cascade-delete-policy-schema-gate.sh</code> for the regression contracts discussed here.</li>
+</ul>
+<p>Related Portal design documents describe <a href="#operational-storage-registration-and-development-postgresql-topology">operational storage and database topology</a> and <a href="#fast-snapshot-derived-database-bootstrap">snapshot-derived database bootstrap</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="portal-view"><a class="header" href="#portal-view">Portal View</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
@@ -968,6 +1199,288 @@ wizards in the same style. The long-term solution should be:</p>
 </ul>
 <p>This gives new users guided paths while still letting experienced users jump
 directly to the page or form they already know.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="action-menu-and-expanded-buttons"><a class="header" href="#action-menu-and-expanded-buttons">Action Menu and Expanded Buttons</a></h1>
+<p>Status: Implemented.</p>
+<p>Portal pages share an action menu with an optional expanded button view.
+One flag in localStorage controls the display across all pages, set from a
+single control in the header. There are no page-specific settings or overrides.</p>
+<h2 id="problem-1"><a class="header" href="#problem-1">Problem</a></h2>
+<p>Before this change, <code>/app/instance/InstanceAdmin</code> displayed 11 common row actions and two
+additional actions for product ID <code>agt</code>: Publish Agent policy and Open Agent
+chat. The buttons share an unwrapped row, putting pressure on the action column
+and causing alignment problems when different products have different actions.</p>
+<p>Icon-only buttons also require new users to hover to discover their purpose.
+Pages with many actions consume considerable table space. Experienced users
+still need the option to access actions directly with one click.</p>
+<h2 id="display-modes"><a class="header" href="#display-modes">Display Modes</a></h2>
+<h3 id="menu-default"><a class="header" href="#menu-default">Menu (Default)</a></h3>
+<ul>
+<li>Display a labeled <strong>Actions</strong> button with a dropdown indicator in each row.</li>
+<li>Use a consistent action-column width, independent of the row’s action count.</li>
+<li>Show an icon, a clear action label, and a short description for each menu item.</li>
+<li>Render actions as a single flat list without category headings or submenus.</li>
+<li>Place destructive actions last, below a divider, and preserve their existing
+confirmation dialogs.</li>
+<li>Keep menus within the viewport, with scrolling when the full list cannot fit.</li>
+</ul>
+<p>Descriptions explain the action rather than repeating its label. For example,
+<strong>Open agent chat</strong> can use <strong>Open Chat with this instance selected</strong>. When a
+definition supplies no description, render the label alone. Never fall back to
+repeating the label as its own description.</p>
+<h3 id="expanded-buttons"><a class="header" href="#expanded-buttons">Expanded Buttons</a></h3>
+<ul>
+<li>Render the same available actions as icon-only buttons in one compact,
+unwrapped row, restoring the presentation from before this refactoring.</li>
+<li>Keep the same order, disabled states, and handlers as the menu. Place
+destructive actions last and retain their destructive color.</li>
+<li>Do not show visible button labels or wrap buttons onto additional lines.
+Experienced users can recognize the icons and invoke an action directly.</li>
+<li>Keep accessible names on every button. Tooltips show the disabled reason,
+description, or action label, in that priority order. Preserve the <code>&lt;span&gt;</code>
+wrapper so disabled buttons still expose their tooltips.</li>
+<li>Size the action column to the widest currently rendered icon row, including
+cell padding. A page with only a few actions must not reserve a large fixed
+width. All rows in the same table retain a common column width for alignment.</li>
+</ul>
+<p>Expanded mode trades table space for direct access. Keep the single icon row on
+narrow screens and use the table’s horizontal scrolling when necessary rather
+than wrapping buttons or silently changing the preference. Menu mode remains
+the option for visible labels and descriptions without hover.</p>
+<h3 id="why-not-a-split-button"><a class="header" href="#why-not-a-split-button">Why Not a Split Button</a></h3>
+<p>A split button that keeps one primary action visible and collapses the rest was
+considered and rejected. Row actions across Portal have no consistent primary:
+Update leads on InstanceAdmin, but other pages lead with navigation or with a
+page-specific verb. Choosing a primary per page reintroduces the per-page
+variation this design removes, so the two modes stay all-menu or all-buttons.</p>
+<h2 id="one-shared-preference"><a class="header" href="#one-shared-preference">One Shared Preference</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Setting</th><th>Contract</th></tr>
+</thead>
+<tbody>
+<tr><td>localStorage key</td><td><code>portal.actionDisplay.v1</code></td></tr>
+<tr><td>Expanded buttons</td><td>String <code>"expanded"</code></td></tr>
+<tr><td>Menu</td><td>String <code>"menu"</code></td></tr>
+<tr><td>Missing or unrecognized value</td><td>Menu</td></tr>
+<tr><td>Scope</td><td>All Portal pages on the same browser origin</td></tr>
+</tbody>
+</table>
+</div>
+<p>The value is a mode name rather than a boolean so a later third mode does not
+require a second key or a key whose name no longer describes its values. The
+<code>.v1</code> suffix matches the existing <code>portal.tablePageSize.v1:&lt;userId&gt;</code> key in
+<code>usePersistentPagination</code> and leaves room to change the value set later.</p>
+<p>This is a browser preference, not a user preference. Unlike page size, it is
+deliberately <strong>not</strong> keyed by user ID: page size changes which rows a query
+returns, so it resets on an account switch, while action display changes only
+presentation and carries nothing across accounts that matters. It survives
+navigation, reloads, and sign-out; accounts using the same browser profile and
+origin share it. Other browsers and origins have their own localStorage, so
+dev, test, and production each keep a separate value. No backend preference API
+is required. Do not add a route, table, host, or user ID to the key.</p>
+<h3 id="control-placement"><a class="header" href="#control-placement">Control Placement</a></h3>
+<p>The preference is global, so it has exactly one control: a checkable
+<strong>Expanded buttons</strong> item in the header profile menu, with <strong>Action display ·
+Applies to all pages</strong> helper text. Checked selects Expanded; unchecked selects
+Menu. The item participates in menu arrow-key navigation and toggles with Enter
+or Space. Every Portal page exposes the same setting.</p>
+<p>Per-page toolbar controls are deliberately excluded. A global setting repeated
+in 86 toolbars costs space on the pages this design is meant to declutter, and
+needs helper text on each copy to explain that it is not page-specific.
+InstanceAdmin’s top toolbar already carries Create, Compare, Clear selection,
+selection chips, and an ownership label; a second entry point there earns
+nothing. If discoverability proves to be a problem after rollout, a toolbar
+control can be added later without changing the stored contract.</p>
+<h3 id="state-provider"><a class="header" href="#state-provider">State Provider</a></h3>
+<p>Add a typed <code>ActionDisplayProvider</code> and <code>useActionDisplay</code> hook under
+<code>src/contexts/</code>, following the typed pattern in <code>UserContext</code> rather than the
+untyped <code>LayoutContext</code>. Mount it in <code>main.tsx</code> inside <code>ThemeProvider</code> and
+outside <code>UserProvider</code>, since the preference is not user-scoped.</p>
+<ol>
+<li>Initialize the state from localStorage when the application starts.</li>
+<li>On a mode change, update the shared React state immediately and persist the
+value. Already mounted consumers update without a reload.</li>
+<li>Listen for the browser <code>storage</code> event to synchronize other tabs on the same
+origin. Ignore events for other keys. Treat <code>event.key === null</code>, which the
+browser sends for <code>clear()</code>, and removal of the key as a return to Menu.</li>
+<li>If storage access fails, keep the control working through in-memory state
+for the current application session. A failed read or write must never throw
+out of the toggle or out of a table render.</li>
+</ol>
+<p>The writing tab must update React state directly because its own localStorage
+write does not generate a <code>storage</code> event in that tab. Switching modes closes
+any open action menu without resetting filters, pagination, or row selection.</p>
+<h2 id="shared-action-component"><a class="header" href="#shared-action-component">Shared Action Component</a></h2>
+<p>Introduce a reusable <code>PortalActions</code> renderer and <code>ActionDisplayToggle</code>, backed
+by the shared preference provider. Each page supplies action definitions:</p>
+<pre><code class="language-ts">type PortalAction&lt;T&gt; = {
+  id: string;                        // stable, unique within the group
+  label: string;                     // menu label and expanded accessible name
+  description?: string;              // menu secondary line; omit rather than
+                                     // repeat the label
+  icon: React.ReactNode;
+  destructive?: boolean;             // sorted last, below the divider
+  hidden?: (row: T) =&gt; boolean;      // action does not apply to this record
+  disabledReason?: (row: T) =&gt; string | null;  // null means enabled
+  loading?: (row: T) =&gt; boolean;
+  onSelect: (row: T) =&gt; void;        // existing handler or navigation callback
+};
+</code></pre>
+<p>Actions render in list order. Hidden actions are omitted, so a row without the
+<code>agt</code> actions closes the gap rather than reserving empty positions; alignment
+across rows comes from consistent column sizing, not from fixed button slots.
+Reserving positions for actions a record cannot use would add complexity for no
+benefit, since the reserved slot carries no meaning to the reader.</p>
+<p>Both modes consume the same definitions. Pages retain their business rules and
+handlers; the shared renderer owns presentation and interaction. Custom tables
+and secondary toolbar action groups use the same renderer.</p>
+<h3 id="material-react-table-integration"><a class="header" href="#material-react-table-integration">Material React Table Integration</a></h3>
+<p><code>PortalActions</code> renders inside the existing <code>renderRowActions</code> callback for both
+modes. MRT’s built-in <code>renderRowActionMenuItems</code> is a workable alternative for
+menu mode alone: it returns <code>ReactNode[]</code>, so descriptions render fine. It does
+not provide the labeled <strong>Actions</strong> trigger this design specifies, and it covers
+only MRT row actions. Custom tables and secondary toolbar action groups need the
+same renderer regardless, so rendering both modes through <code>renderRowActions</code>
+keeps one integration point across every migration rather than two paths to
+maintain.</p>
+<p>Render one <code>Menu</code> instance per table, anchored on demand with the active row
+held in state. A closed MUI menu unmounts its children, so this is not about
+idle DOM; it is about holding open/anchor state and item rendering in one place
+so every row opens an identical menu.</p>
+<p>Menu mode uses a consistent 120px action-column width. Expanded mode uses
+content-based sizing instead of a fixed 360px width or a hand-maintained action
+count on each page:</p>
+<ul>
+<li><code>PortalActionScope</code> measures the rendered icon groups and actual cell padding,
+then applies the widest row’s width to the action column. Hidden actions do
+not contribute to a row’s measured width.</li>
+<li>Resize observation keeps measurements current when button visibility, row
+content, or table density changes. Removing the widest row lets the column
+shrink to the remaining rows, subject to a small minimum width.</li>
+<li>Header and body cells share the resulting width. Mixed <code>agt</code> and non-<code>agt</code>
+rows therefore remain aligned; shorter rows may have space left over only
+because another rendered row needs it.</li>
+<li>Native table layout reserves the content width rather than distributing spare
+table width into the action column. Resizable MRT grids use the measured pixel
+width. Native MUI tables use <code>PortalActionTableCell</code> with the same scope.</li>
+<li>Derive sizing from the rendered buttons, not a duplicated action-count literal
+or a fixed assumption about horizontal cell padding.</li>
+</ul>
+<p>The shared <code>usePortalActionTableOptions</code> helper marks MRT action columns for this
+sizing. ConfigUpdatePage’s inline MRT configuration uses the same
+<code>portalActionColumn</code> helper. Toolbar groups remain content-sized, and catalog
+lists share one scope around their cards.</p>
+<p>Action column position stays as each page has it today. Roughly two thirds of
+current call sites set <code>positionActionsColumn: 'first'</code> and the rest do not;
+standardizing that is a separate change and is out of scope here.</p>
+<h3 id="availability-and-state"><a class="header" href="#availability-and-state">Availability and State</a></h3>
+<p>Hide actions that do not apply to a record. For example, agent actions appear
+only when <code>productId === 'agt'</code>. Keep applicable but unavailable actions visible
+and disabled. Preserve existing ownership, active/current/read-only checks,
+loading indicators, confirmation dialogs, and task-aware navigation in both
+modes.</p>
+<p>Disabled actions must state their reason differently in each mode, because
+disabled elements do not fire pointer events and cannot drive a tooltip:</p>
+<ul>
+<li>Menu mode renders the reason as inline secondary text on the disabled item.</li>
+<li>Expanded mode keeps the existing <code>&lt;span&gt;</code> wrapper around the disabled button
+so its tooltip still opens.</li>
+</ul>
+<p>Opening the menu, or clicking an expanded button, must not toggle row selection
+or fire the row click handler. Stop propagation at the trigger. InstanceAdmin’s
+Compare workflow depends on selection state that a stray toggle would corrupt.</p>
+<h3 id="interaction-and-focus"><a class="header" href="#interaction-and-focus">Interaction and Focus</a></h3>
+<p>Use accessible names, keyboard opening and navigation, visible focus, Escape to
+close, and appropriate focus restoration. Menu labels and descriptions must also
+work on touch devices without hover.</p>
+<p>Actions that open a dialog need explicit ordering. MUI returns focus to the
+menu’s anchor when the menu closes, which can pull focus out of a dialog that
+mounts in the same tick. Close the menu first, then open the dialog, so focus
+lands and stays inside the dialog. Publish Agent policy on InstanceAdmin is the
+first case of this.</p>
+<h2 id="scope-and-rollout"><a class="header" href="#scope-and-rollout">Scope and Rollout</a></h2>
+<p>Apply this pattern to row actions and secondary page or toolbar action groups
+throughout Portal. Keep primary workflow controls such as Create, Save, Cancel,
+and selection-based Compare directly visible. They keep their existing role
+in the page rather than becoming row-menu items.</p>
+<ol>
+<li>Add the shared preference, the header control, and the action components,
+then migrate InstanceAdmin with every existing action, including the two
+<code>agt</code> actions.</li>
+<li>Inventory and migrate the remaining pages. The initial source survey found
+86 non-test components using <code>renderRowActions</code>; also inspect custom action
+columns and toolbar groups that do not use that callback.</li>
+<li>Use the same display rules across the migrated pages. The rollout is complete
+when all applicable action groups use the shared pattern, not only
+InstanceAdmin.</li>
+</ol>
+<h3 id="during-the-rollout"><a class="header" href="#during-the-rollout">During the Rollout</a></h3>
+<p>The header control is added in step 1, so the preference is reachable from every
+page from the start. Migrated pages respond to it; unmigrated pages keep their
+current icon-only rows and ignore it. This mixed state is expected and
+acceptable for the length of step 2. A single header control makes the mixed
+state easier to explain than a control that appears on some pages only.</p>
+<p>The description text for each action is written by whoever migrates that page,
+as part of that page’s migration. A migration is not complete while its actions
+carry labels alone, except where a label is already self-explanatory.</p>
+<h3 id="holding-the-pattern"><a class="header" href="#holding-the-pattern">Holding the Pattern</a></h3>
+<p>After a page is migrated, nothing in the build prevents the next new page from
+hand-rolling an action column again. Add a lint rule, or a line in the code
+review checklist, that flags a <code>renderRowActions</code> implementation that does not
+go through <code>PortalActions</code>.</p>
+<h3 id="rollback"><a class="header" href="#rollback">Rollback</a></h3>
+<p>Each page’s migration is independent and revertible on its own. If the shared
+renderer has to be withdrawn after several pages have migrated, the preference
+and the header control can stay in place while individual pages revert, since
+an unmigrated page simply ignores the flag. There is no data migration and no
+stored state to unwind beyond a single localStorage key.</p>
+<p>Per-page preferences, pinned favorites, custom action ordering, and backend
+profile synchronization are outside this design.</p>
+<h2 id="testing"><a class="header" href="#testing">Testing</a></h2>
+<p>Unit tests, following the pattern in <code>usePersistentPagination.test.tsx</code>:</p>
+<ul>
+<li>The provider defaults to Menu with no stored value, an unrecognized value, a
+cleared key, and a <code>localStorage</code> accessor that throws.</li>
+<li>A <code>storage</code> event for <code>portal.actionDisplay.v1</code> updates the mode; an event for
+an unrelated key does not; <code>event.key === null</code> returns the mode to Menu.</li>
+<li>A write failure leaves the in-memory mode changed and does not throw.</li>
+<li>Both modes render the same action set from one definition list, including
+hidden, disabled, and loading actions.</li>
+<li>Selecting an action that opens a dialog leaves focus inside the dialog.</li>
+<li>Activating the trigger does not change row selection.</li>
+<li>Expanded buttons have accessible names but no visible labels and stay on one
+line.</li>
+<li>Action columns fit the widest visible button group, shrink when that row is
+removed, and account for actual padding and density in native and MRT tables.</li>
+<li>The header preference is reachable with arrow keys and toggles with Enter or
+Space.</li>
+</ul>
+<h2 id="acceptance-checks"><a class="header" href="#acceptance-checks">Acceptance Checks</a></h2>
+<ul>
+<li>With no stored value, every applicable page uses Menu mode.</li>
+<li>Selecting Expanded buttons updates other mounted consumers, subsequently
+visited pages, and other open tabs on the same origin.</li>
+<li>Reloading preserves the mode; selecting Menu anywhere switches it back
+everywhere. Missing, invalid, cleared, or unavailable storage is handled.</li>
+<li>Both modes expose the same applicable actions and preserve their behavior,
+authorization checks, disabled states, loading states, and confirmations.</li>
+<li>A disabled action states its reason without hover in menu mode and on hover in
+expanded mode.</li>
+<li>Mixed <code>agt</code> and other-product rows remain aligned without button overlap in
+both modes.</li>
+<li>Pages with only a few expanded buttons have compact action columns with no
+large fixed blank area. Normal and resizable tables use the same sizing rule.</li>
+<li>Long menus scroll within the viewport. Expanded icon rows stay on one line
+and remain reachable through horizontal table scrolling on narrow screens.</li>
+<li>Menu labels and descriptions let keyboard and touch users identify actions
+without hover. Expanded icons retain accessible names and hover tooltips.</li>
+<li>Invoking an action that opens a dialog leaves focus inside the dialog.</li>
+<li>Switching modes preserves table filters, pagination, and selected rows.</li>
+<li>Opening a table of 100 rows in either mode shows no perceptible delay
+relative to the current implementation.</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="config-update-page"><a class="header" href="#config-update-page">Config Update Page</a></h1>
 <p>The current <code>portal-view</code> configuration admin area is complete but split across
@@ -2136,7 +2649,7 @@ route.</li>
 metadata are already materialized. The dependent cross-instance workflow does
 require the partial unique current-snapshot index above; the per-snapshot
 output/comparison workflow can ship independently of that index.</p>
-<h2 id="testing"><a class="header" href="#testing">Testing</a></h2>
+<h2 id="testing-1"><a class="header" href="#testing-1">Testing</a></h2>
 <h3 id="backend"><a class="header" href="#backend">Backend</a></h3>
 <ul>
 <li>An explicit historical <code>snapshotId</code> is returned even when <code>current = false</code>.</li>
@@ -3265,7 +3778,7 @@ eventually be enforced in the query and command services with fine-grained
 authorization from the rule engine. The UI implementation is still useful
 because it improves day-to-day user experience and gives us a concrete policy
 shape to move into the service layer.</p>
-<h2 id="problem-1"><a class="header" href="#problem-1">Problem</a></h2>
+<h2 id="problem-2"><a class="header" href="#problem-2">Problem</a></h2>
 <p>Portal admin pages were originally designed for a small set of trusted
 operators. Many tables expose all host-scoped records once the user can access
 the admin page.</p>
@@ -3814,7 +4327,7 @@ path to real fine-grained authorization.</p>
 Even with the task-oriented navigation work, users still need page-specific and
 form-specific help when they are making a decision or filling a field. This
 document proposes a contextual help-link model for pages and forms.</p>
-<h2 id="problem-2"><a class="header" href="#problem-2">Problem</a></h2>
+<h2 id="problem-3"><a class="header" href="#problem-3">Problem</a></h2>
 <p>Users often need help at the exact point where they are working:</p>
 <ul>
 <li>what this page is for</li>
@@ -5627,7 +6140,7 @@ provide equivalent deep-route fallback.</p>
 <p>This document defines the target contract. It does not claim that the runtime
 configuration loader, gateway HTML rendering, release archive, or all
 qualification gates have been implemented.</p>
-<h2 id="problem-3"><a class="header" href="#problem-3">Problem</a></h2>
+<h2 id="problem-4"><a class="header" href="#problem-4">Problem</a></h2>
 <p><code>portal-view</code> is deployed in more than one network topology:</p>
 <ul>
 <li>directly on a host through Docker Compose or a native process;</li>
@@ -5730,7 +6243,7 @@ trailing slash;</li>
 <li><code>gatewayBasePath</code> starts with <code>/</code> and has no trailing slash, except <code>/</code>; and</li>
 <li>the HTML renderer produces exactly one trailing slash for <code>&lt;base href&gt;</code>.</li>
 </ul>
-<h2 id="architecture-1"><a class="header" href="#architecture-1">Architecture</a></h2>
+<h2 id="architecture-2"><a class="header" href="#architecture-2">Architecture</a></h2>
 <pre class="mermaid">flowchart LR
     CDN[CDN&lt;br/&gt;signed portal-view archive] --&gt; VERIFY[Installer verifies signature&lt;br/&gt;and member digests]
     VERIFY --&gt; CORE[Read-only signed SPA files]
@@ -6479,7 +6992,7 @@ recorded evidence.</p>
 <h1 id="light-oauth"><a class="header" href="#light-oauth">Light OAuth</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-oauth-ipv6-support"><a class="header" href="#light-oauth-ipv6-support">Light OAuth IPv6 Support</a></h1>
-<h2 id="problem-4"><a class="header" href="#problem-4">Problem</a></h2>
+<h2 id="problem-5"><a class="header" href="#problem-5">Problem</a></h2>
 <p>The Rust <code>light-oauth</code> service binds its HTTPS listener to <code>0.0.0.0</code>.
 That is correct for IPv4, but it does not accept connections sent to an IPv6
 address.</p>
@@ -6557,7 +7070,7 @@ curl -k -v https://light-oauth:6881/oauth2/&lt;providerId&gt;/keys
 <h1 id="light-controller"><a class="header" href="#light-controller">Light Controller</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-controller-ipv6-support"><a class="header" href="#light-controller-ipv6-support">Light Controller IPv6 Support</a></h1>
-<h2 id="problem-5"><a class="header" href="#problem-5">Problem</a></h2>
+<h2 id="problem-6"><a class="header" href="#problem-6">Problem</a></h2>
 <p>The Rust <code>controller-rs</code> service is the control-plane endpoint for runtime
 registration, discovery, MCP admin traffic, and portal event streams. In
 dual-stack deployments, clients can resolve the controller hostname to either
@@ -6857,7 +7370,7 @@ reload alone is not an immediate revocation mechanism for an existing tunnel.</p
 manifest, and baseline gate live under
 <code>implementation/light-controller/stabilization/s0</code>. They are contract inputs,
 not runtime dependencies shared between TypeScript and Rust.</p>
-<h2 id="problem-6"><a class="header" href="#problem-6">Problem</a></h2>
+<h2 id="problem-7"><a class="header" href="#problem-7">Problem</a></h2>
 <p>Rust services currently connect to <code>controller-rs</code> through
 <code>/ws/microservice</code>. The channel carries JSON-RPC messages for:</p>
 <ul>
@@ -9332,7 +9845,7 @@ the exact source commit, image digest, configuration/projection digest,
 database migration set, and live qualification run.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="agent-skill-and-api-endpoint-discovery"><a class="header" href="#agent-skill-and-api-endpoint-discovery">Agent Skill And API Endpoint Discovery</a></h1>
-<h2 id="problem-7"><a class="header" href="#problem-7">Problem</a></h2>
+<h2 id="problem-8"><a class="header" href="#problem-8">Problem</a></h2>
 <p>The GenAI chat flow has two separate concepts that are easy to confuse:</p>
 <ul>
 <li>The <code>light-gateway</code> MCP endpoint is the runtime server that lists and executes
@@ -10405,7 +10918,7 @@ portal operators a clean path to organize tools into skills, assign those
 skills to agents, and improve retrieval over time.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="agent-api-compose-and-multi-agent-workflow"><a class="header" href="#agent-api-compose-and-multi-agent-workflow">Agent API Compose And Multi-Agent Workflow</a></h1>
-<h2 id="problem-8"><a class="header" href="#problem-8">Problem</a></h2>
+<h2 id="problem-9"><a class="header" href="#problem-9">Problem</a></h2>
 <p><code>portal-config-loc</code> and <code>portal-config-dev</code> are being updated so local Docker
 Compose stacks can run <code>light-agent</code> beside the portal services, demo APIs, and
 gateway. The first implementation adds one <code>light-agent</code> directly to the main
@@ -11201,7 +11714,7 @@ emits synthetic Hindsight events in dependency order.</li>
 </code></pre>
 <p>Do not remove skip rules for production exports until backfill has been run or
 the deployment has no legacy direct-write rows.</p>
-<h2 id="testing-1"><a class="header" href="#testing-1">Testing</a></h2>
+<h2 id="testing-2"><a class="header" href="#testing-2">Testing</a></h2>
 <p>Add focused tests:</p>
 <ul>
 <li><code>GlobalSnapshotPersistenceImplTest</code>: memory tables remain skipped before
@@ -11230,7 +11743,7 @@ platform can re-embed after model upgrades.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="tool-description-embedding-population"><a class="header" href="#tool-description-embedding-population">Tool Description Embedding Population</a></h1>
-<h2 id="problem-9"><a class="header" href="#problem-9">Problem</a></h2>
+<h2 id="problem-10"><a class="header" href="#problem-10">Problem</a></h2>
 <p>The GenAI Tool page lets users update <code>tool_t.description</code> through the
 <code>updateTool</code> form. Endpoint-backed tools are also projected into <code>tool_t</code> when
 <code>api_endpoint_t</code> is populated from OpenAPI, MCP <code>tools/list</code>, or LightAPI
@@ -12168,7 +12681,7 @@ workflow editor provides YAML editing, step preview, validation, and test runs
 for every workflow authoring use case in Portal.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="portal-catalog-scope"><a class="header" href="#portal-catalog-scope">Portal Catalog Scope</a></h1>
-<h2 id="problem-10"><a class="header" href="#problem-10">Problem</a></h2>
+<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
 <p>Light Portal supports multiple tenants through <code>host_id</code> and can also host
 multiple runtime environments in one portal instance. A common deployment shape
 is:</p>
@@ -15136,7 +15649,7 @@ shortcuts.</li>
 version is immutable and remains addressable by its stable <code>wfDefId</code> and
 version string.</li>
 </ol>
-<h2 id="architecture-2"><a class="header" href="#architecture-2">Architecture</a></h2>
+<h2 id="architecture-3"><a class="header" href="#architecture-3">Architecture</a></h2>
 <pre><code class="language-text">Light Portal policy authoring
             |
             v
@@ -24051,7 +24564,7 @@ resources or leave the cluster unhealthy.</li>
 purpose is to prove the released artifact and the real control-plane delivery
 path together. A daily success therefore means more than a unit-test success,
 but less than complete protocol requalification.</p>
-<h2 id="architecture-3"><a class="header" href="#architecture-3">Architecture</a></h2>
+<h2 id="architecture-4"><a class="header" href="#architecture-4">Architecture</a></h2>
 <pre class="mermaid">flowchart LR
     subgraph CP[Light Portal control plane]
         H[Host: dev.networknt.com]
@@ -25154,7 +25667,7 @@ passes the parity gates in this document.</p>
 <p>Related designs are <a href="#rust-event-importer-design">Rust Event Importer</a>,
 <a href="#event-replay">Event Replay</a>, and
 <a href="#light-portal-install-1">Light Portal Install</a>.</p>
-<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
+<h2 id="problem-12"><a class="header" href="#problem-12">Problem</a></h2>
 <p>Database recreation currently imports <code>events.json</code> one event at a time. Each
 event opens and commits a PostgreSQL transaction. Guarded graph appends also
 commit and then poll projection convergence at 250 ms intervals before the next
@@ -26117,7 +26630,7 @@ exported row with no declared conversion disposition blocks publication.</li>
 mark a self-contained <code>standalone-host</code> bundle as non-composable and
 normalize exactly one membership as current.</li>
 </ol>
-<h2 id="problem-12"><a class="header" href="#problem-12">Problem</a></h2>
+<h2 id="problem-13"><a class="header" href="#problem-13">Problem</a></h2>
 <p>The current snapshot exporter selects active users through active
 <code>user_host_t</code> membership for one source host. It intentionally includes an
 active membership even when <code>current = FALSE</code>. This is correct for a user who
@@ -28695,7 +29208,7 @@ the workflow.</li>
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="claim-org-role-bootstrap"><a class="header" href="#claim-org-role-bootstrap">Claim Org Role Bootstrap</a></h1>
-<h2 id="problem-13"><a class="header" href="#problem-13">Problem</a></h2>
+<h2 id="problem-14"><a class="header" href="#problem-14">Problem</a></h2>
 <p>The Claim Org action lets a signed-in user create an organization and its default host from the profile menu. The <code>createOrg</code> form captures the organization owner, default subdomain, host description, and host owner. The backend create-org flow then creates the organization, the default host, and user-host membership rows in one transaction.</p>
 <p>That transaction is not sufficient for a usable tenant. A new host membership without role assignments can leave the owner unable to authorize after switching to the newly claimed host. The user profile/login query joins roles through <code>role_user_t</code> by the current <code>user_host_t.host_id</code>; if the current host has no active role rows for that user, role-dependent reads can return no user context.</p>
 <p>The Claim Org bootstrap must create the minimum administration roles and assignments for the default host at the same time as the organization and host.</p>
@@ -28846,7 +29359,7 @@ the workflow.</li>
 <p>The owner-transfer role policy also remains open. The system should decide whether owner changes imply role grants, role revokes, both, or neither before adding role side effects to <code>UpdateOrg</code> or <code>UpdateHost</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="master-oauth-host-tenant-login"><a class="header" href="#master-oauth-host-tenant-login">Master OAuth Host Tenant Login</a></h1>
-<h2 id="problem-14"><a class="header" href="#problem-14">Problem</a></h2>
+<h2 id="problem-15"><a class="header" href="#problem-15">Problem</a></h2>
 <p>In a deployed portal instance, <code>dev.lightapi.net</code> is the master host for the instance. Its host ID is:</p>
 <pre><code class="language-text">01964b05-552a-7c4b-9184-6857e7f3dc5f
 </code></pre>
@@ -29700,7 +30213,7 @@ The backend lookup must enforce this even if the UI sends a forged <code>hostId<
 only return active schemas that are explicitly marked <code>external_visible = TRUE</code>.
 It should return <code>404</code> for missing, private, draft, inactive, or unauthorized
 aliases so external callers cannot enumerate private schema names.</p>
-<h2 id="testing-2"><a class="header" href="#testing-2">Testing</a></h2>
+<h2 id="testing-3"><a class="header" href="#testing-3">Testing</a></h2>
 <p>The first hardening pass should include tests for:</p>
 <ul>
 <li>create draft schema</li>
@@ -30888,7 +31401,7 @@ GROUP BY
 <p>This approach provides a seamless experience while maintaining compatibility with applications requiring roles for authorization or UI customization.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="private-messages"><a class="header" href="#private-messages">Private Messages</a></h1>
-<h2 id="problem-15"><a class="header" href="#problem-15">Problem</a></h2>
+<h2 id="problem-16"><a class="header" href="#problem-16">Problem</a></h2>
 <p>Portal users need a way to exchange private messages from the user profile
 without exposing email addresses to each other. The sender should only need a
 recipient user id or a display-safe user label. The backend can resolve email
@@ -31224,7 +31737,7 @@ and hide/delete APIs.</li>
 purges only messages deleted by all participants after the retention window.</li>
 <li>Add optional push delivery later if polling becomes insufficient.</li>
 </ul>
-<h2 id="testing-3"><a class="header" href="#testing-3">Testing</a></h2>
+<h2 id="testing-4"><a class="header" href="#testing-4">Testing</a></h2>
 <p>Backend tests should cover:</p>
 <ul>
 <li>Sender is derived from token and cannot be spoofed.</li>
@@ -33078,7 +33591,7 @@ public class ConfigRollbackService {
 <p>This approach provides a clean and relatively robust way to restore the specific override state from your snapshots using the DELETE/INSERT strategy. Remember to test thoroughly!</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="sid-and-host-verification"><a class="header" href="#sid-and-host-verification">SID and Host Verification</a></h1>
-<h2 id="problem-16"><a class="header" href="#problem-16">Problem</a></h2>
+<h2 id="problem-17"><a class="header" href="#problem-17">Problem</a></h2>
 <p>GitHub issue https://github.com/lightapi/portal-service/issues/39 reports that
 <code>config-server</code> accepted a valid JWT whose service identity did not match the
 requested service configuration.</p>
@@ -34553,7 +35066,7 @@ retries return a retryable conflict with no committed clone state.</li>
 <li>Non-standard instance files are copied into <code>snapshot_instance_file_t</code>.</li>
 </ul>
 <p>The <code>/config-server/files</code> endpoint must return both sets. It already filters standard files by <code>config_phase</code> through <code>config_snapshot_property_t.config_phase</code>, but <code>instance_file_t</code> and <code>snapshot_instance_file_t</code> do not currently carry <code>config_phase</code>. That makes it impossible to union the two sources while preserving runtime, deployment, and generator phase semantics.</p>
-<h2 id="problem-17"><a class="header" href="#problem-17">Problem</a></h2>
+<h2 id="problem-18"><a class="header" href="#problem-18">Problem</a></h2>
 <p>When a service starts through <code>DefaultConfigLoader</code>, it calls <code>/config-server/files</code> with <code>host</code>, <code>serviceId</code>, and <code>envTag</code>. The endpoint resolves the current snapshot and returns the files that should be written into <code>/config</code>.</p>
 <p>For the sidecar case, <code>openapi.yaml</code> exists in both <code>instance_file_t</code> and <code>snapshot_instance_file_t</code>, but it does not exist in <code>config_snapshot_property_t</code>. Since the current <code>/files</code> query reads only <code>config_snapshot_property_t</code>, the response does not include <code>openapi.yaml</code>, and the sidecar cannot write it to <code>/config</code>.</p>
 <p>The correct endpoint behavior is:</p>
@@ -35282,7 +35795,7 @@ name are equal.</p>
 <code>entity_identity_t</code> reservation table. The identity reservation, event-store
 append, outbox write, nonce allocation, and idempotency record must commit in one
 PostgreSQL transaction.</p>
-<h2 id="problem-18"><a class="header" href="#problem-18">Problem</a></h2>
+<h2 id="problem-19"><a class="header" href="#problem-19">Problem</a></h2>
 <p>Issue 691 demonstrates the same-aggregate form of the defect:</p>
 <ol>
 <li>A role such as <code>abc-123</code> already exists at aggregate version 1.</li>
@@ -40488,7 +41001,7 @@ scale well if every Java or Rust release requires a hand-maintained set of
 mapping events across all portal instances. This design proposes a release
 mapping automation model that keeps the existing event-sourced write path and
 removes the need to manually recreate mapping files for every product release.</p>
-<h2 id="problem-19"><a class="header" href="#problem-19">Problem</a></h2>
+<h2 id="problem-20"><a class="header" href="#problem-20">Problem</a></h2>
 <p>Product versions are released often. Each new release can introduce a new
 <code>productVersionId</code>, and the config update page only knows which configs and
 properties are applicable when mappings exist for that exact product version.</p>
@@ -41248,7 +41761,7 @@ artifact publishing, AI-assisted failure diagnosis, and human approval.</p>
 portal service process. Command execution belongs in a sandboxed release
 runner, with <code>light-workflow</code> owning state, task routing, retries, approvals,
 and audit history.</p>
-<h2 id="problem-20"><a class="header" href="#problem-20">Problem</a></h2>
+<h2 id="problem-21"><a class="header" href="#problem-21">Problem</a></h2>
 <p>Java releases currently depend on <code>light-bot</code>, while Rust releases are handled
 through separate command-line and repository-specific steps. This works, but it
 keeps release knowledge outside the same workflow model used by Light Portal
@@ -42397,7 +42910,7 @@ mutation.</li>
 <h1 id="distributed-scheduler-design"><a class="header" href="#distributed-scheduler-design">Distributed Scheduler Design</a></h1>
 <h2 id="introduction-1"><a class="header" href="#introduction-1">Introduction</a></h2>
 <p>The Distributed Scheduler is a robust, highly available component of the light-portal architecture that manages the periodic execution of tasks across a cluster of application instances. It ensures that scheduled tasks are executed exactly as defined, even in a distributed environment, by using a database-backed leader election and locking mechanism.</p>
-<h2 id="architecture-4"><a class="header" href="#architecture-4">Architecture</a></h2>
+<h2 id="architecture-5"><a class="header" href="#architecture-5">Architecture</a></h2>
 <p>The scheduler follows a <strong>Leader-Follower</strong> pattern to prevent redundant executions and ensure consistency.</p>
 <ol>
 <li><strong>Leader Election</strong>: All scheduler instances compete for a global lock in the <code>scheduler_lock_t</code> table.</li>
@@ -42472,7 +42985,7 @@ LIMIT ?;
 <h1 id="postgresql-pubsub-design"><a class="header" href="#postgresql-pubsub-design">PostgreSQL Pub/Sub Design</a></h1>
 <h2 id="introduction-2"><a class="header" href="#introduction-2">Introduction</a></h2>
 <p>The PostgreSQL Pub/Sub mechanism provides an alternative to Kafka for event distribution within the light-portal architecture. It is designed for smaller deployments or environments where Kafka is not available, offering a reliable, low-latency, and strictly ordered event delivery system using native PostgreSQL features.</p>
-<h2 id="architecture-5"><a class="header" href="#architecture-5">Architecture</a></h2>
+<h2 id="architecture-6"><a class="header" href="#architecture-6">Architecture</a></h2>
 <p>The system utilizes a hybrid <strong>Polling + LISTEN/NOTIFY</strong> approach to achieve both high reliability and low latency.</p>
 <h3 id="1-logical-partitioning"><a class="header" href="#1-logical-partitioning">1. Logical Partitioning</a></h3>
 <p>To support horizontal scalability and ensure ordered processing for multi-tenant environments, the system uses logical partitioning based on the <code>host_id</code>.</p>
@@ -42714,7 +43227,7 @@ waitPeriodMs: ${db-event-consumer.waitPeriodMs:1000}
 <h1 id="kafka-event-processor"><a class="header" href="#kafka-event-processor">Kafka Event Processor</a></h1>
 <h2 id="overview-2"><a class="header" href="#overview-2">Overview</a></h2>
 <p>The Kafka Event Processor (<code>PortalEventConsumerStartupHook</code>) consumes events from Kafka topics that are populated by Debezium CDC from the <code>outbox_message_t</code> table. It provides robust event processing with transaction-level granularity and Dead Letter Queue (DLQ) support.</p>
-<h2 id="architecture-6"><a class="header" href="#architecture-6">Architecture</a></h2>
+<h2 id="architecture-7"><a class="header" href="#architecture-7">Architecture</a></h2>
 <p>The processor uses a <strong>two-phase processing strategy</strong> with automatic fallback to ensure both performance and reliability:</p>
 <ol>
 <li><strong>Optimistic Batch Processing</strong>: Attempts to process all transactions in a single database transaction for maximum throughput</li>
@@ -45025,7 +45538,7 @@ containing the reviewed config digest.</p>
 <p>Record <code>VERIFIED</code> only after dashboards, APIs, offsets, audit, and alerts are
 reviewed. Stage <code>ROLLBACK</code> refuses to proceed while requests, barriers, pauses,
 or deferred work remain.</p>
-<h2 id="rollback"><a class="header" href="#rollback">Rollback</a></h2>
+<h2 id="rollback-1"><a class="header" href="#rollback-1">Rollback</a></h2>
 <ol>
 <li>Stop new execute requests and set <code>executionEnabled: false</code>.</li>
 <li>Run the <code>ROLLBACK</code> preflight. If blocked, retain the current processor and give
@@ -45257,7 +45770,7 @@ Location: https://portal.lightapi.net/authorization?code=auth_code_abc&amp;state
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="auth-client-secret-regeneration"><a class="header" href="#auth-client-secret-regeneration">Auth Client Secret Regeneration</a></h1>
-<h2 id="problem-21"><a class="header" href="#problem-21">Problem</a></h2>
+<h2 id="problem-22"><a class="header" href="#problem-22">Problem</a></h2>
 <p>An OAuth auth client receives a <code>client_id</code> and <code>client_secret</code> when it is
 created. The clear text <code>client_secret</code> is intentionally a one-time value. The
 database projection stores only a verifier value in <code>auth_client_t.client_secret</code>
@@ -46098,7 +46611,7 @@ Kubernetes cluster from the Instance Admin page.</p>
 <p>The goal is to provide a production-like deployment path for small businesses
 and enterprise tenants without requiring Light Portal to have direct network
 access to every customer cluster.</p>
-<h2 id="problem-22"><a class="header" href="#problem-22">Problem</a></h2>
+<h2 id="problem-23"><a class="header" href="#problem-23">Problem</a></h2>
 <p>Each API or application repository can contain a <code>k8s/</code> folder with Kubernetes
 deployment templates. The templates contain variables in the following format:</p>
 <pre><code class="language-text">${key:defaultValue}
@@ -46650,7 +47163,7 @@ status table identifies those gaps explicitly.</p>
 <a href="#enterprise-ai-assisted-bootstrap-and-eks-deployment">Enterprise AI-Assisted Bootstrap and EKS Deployment</a>
 and the bundle signature contract in
 <a href="#composable-multi-host-snapshot-export-and-bootstrap">Composable Multi-Host Snapshot Export and Bootstrap</a>.</p>
-<h2 id="problem-23"><a class="header" href="#problem-23">Problem</a></h2>
+<h2 id="problem-24"><a class="header" href="#problem-24">Problem</a></h2>
 <p>Light Portal release artifacts are consumed through several paths:</p>
 <ul>
 <li><code>portal-config-loc</code> recreates disposable development databases;</li>
@@ -46865,7 +47378,7 @@ trust set for forensic use.</li>
 <p>Availability does not override revocation. A consumer with only a revoked key
 must stop with an actionable error instead of accepting an unsigned artifact
 or downloading a replacement trust anchor from the artifact CDN.</p>
-<h2 id="rollback-1"><a class="header" href="#rollback-1">Rollback</a></h2>
+<h2 id="rollback-2"><a class="header" href="#rollback-2">Rollback</a></h2>
 <p>During normal overlap, rollback means selecting the last qualified artifact
 signed by either still-trusted key. It does not mean changing a manifest’s
 <code>keyId</code>, replacing the signature file, or re-enrolling an old removed key
@@ -47916,7 +48429,7 @@ security and operations teams require.</p>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-oauth-and-oauth-kafka-agentcore-oidc-discovery"><a class="header" href="#light-oauth-and-oauth-kafka-agentcore-oidc-discovery">Light OAuth and OAuth Kafka AgentCore OIDC Discovery</a></h1>
-<h2 id="problem-24"><a class="header" href="#problem-24">Problem</a></h2>
+<h2 id="problem-25"><a class="header" href="#problem-25">Problem</a></h2>
 <p>Issue https://github.com/lightapi/portal-service/issues/44 asks whether
 <code>portal-service/apps/light-oauth</code> can support AWS AgentCore JWT inbound
 authorization.</p>
