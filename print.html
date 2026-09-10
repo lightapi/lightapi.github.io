@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-7c53d1e9.js";
+            window.path_to_searchindex_js = "searchindex-ad5a8792.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-430f75ff.js"></script>
+        <script src="toc-6125a086.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -49917,6 +49917,98 @@ gateway/service logs. Common causes are a missing access-control route, an old
 GenAI command/query deployment that lacks a new handler, an unapplied database
 patch, an unavailable service, or an object outside the selected tenant.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="genai-chat"><a class="header" href="#genai-chat">GenAI Chat</a></h1>
+<p>Open <strong>GenAI Chat</strong> at <code>/app/genai/chat</code>, select an agent in the current Host,
+and click <strong>Connect</strong>. The connected session determines the available turn types.
+Tech Support normally offers Chat. A published coding-only policy shows a fixed
+<strong>Coding implementation</strong> label and opens the repository form automatically.
+An agent with both types shows a selector. Reconnect with a new session after
+changing the published policy.</p>
+<h2 id="repository-input-for-coding"><a class="header" href="#repository-input-for-coding">Repository input for coding</a></h2>
+<p>The current coding implementation accepts one immutable <strong>Git bundle</strong> per
+request. <strong>Repository bundle URI is not a GitHub HTTPS URL</strong>, a repository
+directory, or a ZIP download. It must be an absolute <code>file:///...</code> URI for a
+regular bundle file on the <strong>workflow runner host</strong>, under the repository URI
+prefix allowed by the published coding profile. The runner must be able to read
+the file and traverse its parent directories. Symlink inputs are rejected.</p>
+<p>If the repository is on GitHub, clone it yourself on the runner host using your
+normal Git credentials, then create a bundle. The current request does not ask
+the worker to clone GitHub or pass it Git credentials. A bundle contains committed
+Git objects; uncommitted and untracked working-tree changes are not included.</p>
+<h2 id="prepare-and-fill-the-form"><a class="header" href="#prepare-and-fill-the-form">Prepare and fill the form</a></h2>
+<p>Run these commands on the runner host. Replace both paths. <code>bundle_dir</code> must be
+the approved repository spool directory from the published profile, not an
+arbitrary temporary directory. Use a complete clone and a new bundle filename.</p>
+<pre><code class="language-bash">repo=/absolute/path/to/your/repository
+bundle_dir=/absolute/path/to/approved/repositories
+bundle="$bundle_dir/my-repository-$(date +%Y%m%d-%H%M%S).bundle"
+base_revision=$(git -C "$repo" rev-parse HEAD)
+git -C "$repo" bundle create "$bundle" --all
+git -C "$repo" bundle verify "$bundle"
+chmod 400 "$bundle"
+python3 - "$bundle" "$base_revision" &lt;&lt;'PY'
+import hashlib
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1]).resolve()
+with path.open('rb') as source:
+    digest = hashlib.file_digest(source, 'sha256').hexdigest()
+print('Repository bundle URI:', path.as_uri())
+print('Bundle SHA-256: sha256:' + digest)
+print('Bundle size (bytes):', path.stat().st_size)
+print('Base commit:', sys.argv[2])
+PY
+</code></pre>
+<p>Python 3.11 or later is required for this example. Run as the runner’s user, or
+arrange read access for that user before submitting. Keep the bundle unchanged
+and available while the request runs.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Form field</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>Repository bundle URI</td><td>Printed <code>file:///...</code> URI on the runner host</td></tr>
+<tr><td>Bundle SHA-256</td><td>Printed <code>sha256:</code> prefix plus 64 lowercase hex digits</td></tr>
+<tr><td>Bundle size (bytes)</td><td>Printed size of the bundle file, not the checkout</td></tr>
+<tr><td>Base commit</td><td>Full commit hash printed above, contained in the bundle</td></tr>
+<tr><td>Worker workspace root</td><td><code>/workspace/repository</code>, the logical worker path rather than your host checkout</td></tr>
+<tr><td>Maximum patch bytes</td><td>Positive output limit; start with <code>65536</code> for a small task</td></tr>
+<tr><td>Maximum changed files</td><td>Positive output limit; start with <code>1</code> for a one-file task</td></tr>
+</tbody>
+</table>
+</div>
+<p>Enter the implementation instruction in the message box and send it after the
+session initializes. The worker reconstructs a checkout from the bundle and
+returns a patch for review; this does not directly modify your original checkout
+or push changes to GitHub. Request acceptance is not completion.</p>
+<p><strong>Import coding request JSON</strong> is an alternative to typing the fields. It imports
+a typed request with <code>profile: "coding"</code>, prompt <code>text</code>, and a <code>coding</code> object;
+it does not upload the bundle. See the
+<a href="#9-submit-one-small-coding-turn-after-the-runner-gate-passes">Codex personal tutorial</a>
+for the request-generation helper and a complete smoke test.</p>
+<h2 id="multiple-repositories"><a class="header" href="#multiple-repositories">Multiple repositories</a></h2>
+<p>Each request currently carries one repository bundle, one base commit, and one
+worker workspace root. Multiple independent repositories in a single turn are
+not supported. Submit a separate request for each repository. A monorepo can
+contain multiple projects in one bundle, but submodules are separate repositories
+and their contents are not automatically included by bundling the parent.</p>
+<h2 id="troubleshooting"><a class="header" href="#troubleshooting">Troubleshooting</a></h2>
+<ul>
+<li><strong>Two turn options for codex-personal:</strong> setting the authoring policy alone is
+insufficient. Publish its Agent policy, refresh/activate the configuration
+snapshot, restart the agent, and establish a new session.</li>
+<li><strong>Invalid repository URI:</strong> use the runner-local bundle URI, not a GitHub URL
+or a path on the browser’s computer.</li>
+<li><strong>Repository staging rejected:</strong> check the approved URI prefix, file ownership
+and permissions, and exact bundle hash and size.</li>
+<li><strong>Base commit unavailable:</strong> recreate the bundle from a complete clone that
+contains the requested commit.</li>
+<li><strong>Output limit exceeded:</strong> choose limits appropriate to the task within the
+published policy’s constraints, or split the task into smaller changes.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="create-llm-model"><a class="header" href="#create-llm-model">Create LLM Model</a></h1>
 <p>Use the <strong>Create LLM Model</strong> form to add a physical provider model to the LLM
 global Model Catalog shared by every host. Open it from <strong>Marketplace &gt; LLM
@@ -50130,7 +50222,7 @@ and optional parent skill.</li>
 <li>Start the primary workflow for a manual test.</li>
 <li>Edit the skill if metadata, taxonomy, or instructions need adjustment.</li>
 </ol>
-<h2 id="troubleshooting"><a class="header" href="#troubleshooting">Troubleshooting</a></h2>
+<h2 id="troubleshooting-1"><a class="header" href="#troubleshooting-1">Troubleshooting</a></h2>
 <p>If categories or tags are missing, edit the skill and confirm taxonomy values
 are selected.</p>
 <p>If a tool or workflow is missing, add the structured link from the workspace.
@@ -52734,7 +52826,7 @@ replica acknowledgement, and repeat the same probe.</p>
 <p>Retain only the bounded report when operational policy requires evidence. Do
 not retain the bearer header file, raw response, provider response, API key,
 request body, or embedding values.</p>
-<h2 id="troubleshooting-1"><a class="header" href="#troubleshooting-1">Troubleshooting</a></h2>
+<h2 id="troubleshooting-2"><a class="header" href="#troubleshooting-2">Troubleshooting</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -56900,7 +56992,7 @@ Pricing exactly as above.</p>
 <li><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/inference-chat-completions-mantle.html">Amazon Bedrock Chat Completions</a></li>
 <li><a href="#local-model-provider-transport-for-llm-gateway">Local Model Provider Transport</a></li>
 </ul>
-<h2 id="troubleshooting-2"><a class="header" href="#troubleshooting-2">Troubleshooting</a></h2>
+<h2 id="troubleshooting-3"><a class="header" href="#troubleshooting-3">Troubleshooting</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -57416,7 +57508,7 @@ development <code>light-portal-install</code> deployment, run the corresponding
 <pre><code class="language-bash">cd /home/steve/workspace/light-portal-test
 make workflow-mcp
 </code></pre>
-<h2 id="troubleshooting-3"><a class="header" href="#troubleshooting-3">Troubleshooting</a></h2>
+<h2 id="troubleshooting-4"><a class="header" href="#troubleshooting-4">Troubleshooting</a></h2>
 <h3 id="the-workflow-create-event-goes-to-the-dlq"><a class="header" href="#the-workflow-create-event-goes-to-the-dlq">The workflow Create event goes to the DLQ</a></h3>
 <p>Check for an older projection-only row with the same host, namespace, name,
 and version. Do not edit the new event payload. Remove or quarantine the
@@ -57811,7 +57903,7 @@ token from this tutorial:</p>
 <pre><code class="language-bash">cd /home/steve/workspace/light-portal-test
 make workflow-mcp
 </code></pre>
-<h2 id="troubleshooting-4"><a class="header" href="#troubleshooting-4">Troubleshooting</a></h2>
+<h2 id="troubleshooting-5"><a class="header" href="#troubleshooting-5">Troubleshooting</a></h2>
 <h3 id="the-create-event-goes-to-the-dlq"><a class="header" href="#the-create-event-goes-to-the-dlq">The Create event goes to the DLQ</a></h3>
 <p>Check for an older active resource with the same workflow identity or tool
 name. Also confirm the tool event references the active workflow ID and exact
@@ -59050,7 +59142,7 @@ over time.</p>
 trusting the whole workspace is current:</p>
 <pre><code class="language-bash">codebase-memory-mcp cli index_status --project &lt;name-from-list_projects&gt;
 </code></pre>
-<h2 id="troubleshooting-5"><a class="header" href="#troubleshooting-5">Troubleshooting</a></h2>
+<h2 id="troubleshooting-6"><a class="header" href="#troubleshooting-6">Troubleshooting</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
