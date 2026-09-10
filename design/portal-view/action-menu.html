@@ -35,7 +35,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-bed0a507.js";
+            window.path_to_searchindex_js = "../../searchindex-1dca6b84.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-430f75ff.js"></script>
@@ -308,14 +308,15 @@ across rows comes from consistent column sizing, not from fixed button slots.
 Reserving positions for actions a record cannot use would add complexity for no
 benefit, since the reserved slot carries no meaning to the reader.</p>
 <p>Both modes consume the same definitions. Pages retain their business rules and
-handlers; the shared renderer owns presentation and interaction. Custom tables
-and secondary toolbar action groups use the same renderer.</p>
+handlers; the shared renderer owns presentation and interaction. Custom table rows
+and card action groups use the same renderer. Page-level and toolbar buttons
+retain their visible text labels and do not use this renderer.</p>
 <h3 id="material-react-table-integration"><a class="header" href="#material-react-table-integration">Material React Table Integration</a></h3>
 <p><code>PortalActions</code> renders inside the existing <code>renderRowActions</code> callback for both
 modes. MRT’s built-in <code>renderRowActionMenuItems</code> is a workable alternative for
 menu mode alone: it returns <code>ReactNode[]</code>, so descriptions render fine. It does
 not provide the labeled <strong>Actions</strong> trigger this design specifies, and it covers
-only MRT row actions. Custom tables and secondary toolbar action groups need the
+only MRT row actions. Custom table rows and card action groups need the
 same renderer regardless, so rendering both modes through <code>renderRowActions</code>
 keeps one integration point across every migration rather than two paths to
 maintain.</p>
@@ -344,7 +345,7 @@ or a fixed assumption about horizontal cell padding.</li>
 </ul>
 <p>The shared <code>usePortalActionTableOptions</code> helper marks MRT action columns for this
 sizing. ConfigUpdatePage’s inline MRT configuration uses the same
-<code>portalActionColumn</code> helper. Toolbar groups remain content-sized, and catalog
+<code>portalActionColumn</code> helper. Page-level toolbar buttons remain independent of this sizing, and catalog
 lists share one scope around their cards.</p>
 <p>Action column position stays as each page has it today. Roughly two thirds of
 current call sites set <code>positionActionsColumn: 'first'</code> and the rest do not;
@@ -375,17 +376,20 @@ mounts in the same tick. Close the menu first, then open the dialog, so focus
 lands and stays inside the dialog. Publish Agent policy on InstanceAdmin is the
 first case of this.</p>
 <h2 id="scope-and-rollout"><a class="header" href="#scope-and-rollout">Scope and Rollout</a></h2>
-<p>Apply this pattern to row actions and secondary page or toolbar action groups
-throughout Portal. Keep primary workflow controls such as Create, Save, Cancel,
-and selection-based Compare directly visible. They keep their existing role
-in the page rather than becoming row-menu items.</p>
+<p>Apply this pattern to row and card action groups throughout Portal. All page-level
+and toolbar buttons retain their visible text labels in both display modes,
+including Update Config Values, configuration sync, policy overview, snapshot
+history, refresh status, catalog administration, profile editing, clone-result
+links, and snapshot Copy/Download controls. Do not classify these buttons as
+secondary actions to move them into the shared renderer. Create, Save, Cancel,
+selection-based Compare, and other workflow controls also remain directly visible.</p>
 <ol>
 <li>Add the shared preference, the header control, and the action components,
 then migrate InstanceAdmin with every existing action, including the two
 <code>agt</code> actions.</li>
 <li>Inventory and migrate the remaining pages. The initial source survey found
 86 non-test components using <code>renderRowActions</code>; also inspect custom action
-columns and toolbar groups that do not use that callback.</li>
+columns and card action groups that do not use that callback.</li>
 <li>Use the same display rules across the migrated pages. The rollout is complete
 when all applicable action groups use the shared pattern, not only
 InstanceAdmin.</li>
@@ -455,6 +459,10 @@ without hover. Expanded icons retain accessible names and hover tooltips.</li>
 <li>Opening a table of 100 rows in either mode shows no perceptible delay
 relative to the current implementation.</li>
 </ul>
+<p>Page-level buttons preserve disabled-state explanations in tooltips, using a
+span wrapper so disabled buttons can expose the reason. Delete buttons use
+error styling to distinguish destructive actions from adjacent Edit or Update
+buttons. These affordances apply in both action-display modes.</p>
 
                     </main>
 
