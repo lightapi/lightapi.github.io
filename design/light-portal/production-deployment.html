@@ -1,0 +1,459 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Production Deployment: An Independent Control Plane - Light Portal Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../../css/general-e96d0476.css">
+        <link rel="stylesheet" href="../../css/chrome-d279d366.css">
+        <link rel="stylesheet" href="../../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../../searchindex-a09f269d.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../../toc-93fc6719.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Light Portal Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="production-deployment-an-independent-light-portal-control-plane"><a class="header" href="#production-deployment-an-independent-light-portal-control-plane">Production Deployment: An Independent Light Portal Control Plane</a></h1>
+<h2 id="decision-and-scope"><a class="header" href="#decision-and-scope">Decision and scope</a></h2>
+<p><strong>Deploy the enterprise Light Portal control plane on dedicated infrastructure VMs by default, outside the application Kubernetes clusters it manages.</strong> Run its services as supervised containers or native processes, use stable private endpoints, and operate its database, signing keys, backups, and recovery procedures as infrastructure.</p>
+<p>Light Portal is the control plane for the Rust light-fabric AI and API ecosystem and the Java light-4j API ecosystem. Its placement should follow the availability and recovery requirements of the entire managed estate, rather than the deployment convention of one application team.</p>
+<p>The normal exception is an organization with one Kubernetes cluster, where every controller-connected application is in that cluster and the organization explicitly accepts their shared failure and maintenance boundary. This exception still requires the networking, controller ownership, recovery, and qualification controls below.</p>
+<p>A dedicated management cluster can also satisfy an enterprise infrastructure boundary if it is independently operated and recoverable. That is an architecture exception requiring evidence, not a reason to place Portal in an arbitrary shared application cluster. Multiple clusters do not make Kubernetes technically incapable of hosting Portal.</p>
+<p><strong>Status:</strong> proposed production deployment standard, dated September 11, 2026. This document defines a target topology and acceptance criteria; it does not certify automatic controller failover or a production HA package as implemented.</p>
+<h2 id="why-this-is-infrastructure"><a class="header" href="#why-this-is-infrastructure">Why this is infrastructure</a></h2>
+<p>Portal does more than serve an administrative UI. Connected services use the controller channel for registration, discovery updates, remote administration, and permitted communication. Controller-mediated workflow-to-runner and agent execution therefore introduces a runtime dependency as well as an operational dependency.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Service</th><th>Responsibility</th><th>Deployment consequence</th></tr>
+</thead>
+<tbody>
+<tr><td>light-gateway, Portal BFF</td><td>Serve SPAs and route browser API requests to Portal services</td><td>Stable browser origin, correct host/path handling, and independent operator access</td></tr>
+<tr><td>light-oauth</td><td>Issue tokens and sign policies</td><td>Protect signing keys; preserve issuance and trust distribution during maintenance</td></tr>
+<tr><td>light-controller</td><td>Maintain persistent service channels, discovery, administrative commands, and authorized relay/execution interactions</td><td>Treat live connections and their owning process as state</td></tr>
+<tr><td>config-server</td><td>Provide immutable configuration snapshots at startup and explicit reload</td><td>Stable bootstrap endpoint; preserve snapshot integrity and audience isolation</td></tr>
+<tr><td>llm-gateway</td><td>Separate light-gateway instance routing LLM traffic</td><td>Separate capacity and resource limits from controller and Portal BFF</td></tr>
+<tr><td>PostgreSQL</td><td>Hold control-plane data and Portal knowledge</td><td>Database HA, durable backup, restore, and workload isolation are required</td></tr>
+<tr><td>hybrid-command</td><td>Validate commands and append user events</td><td>Preserve authorization, event durability, and command idempotency</td></tr>
+<tr><td>hybrid-query</td><td>Process events into projections and answer queries</td><td>Coordinate projection ownership/checkpoints and expose projection lag</td></tr>
+<tr><td>portal-service</td><td>Supply reference APIs, including UI dropdown data</td><td>Internal API availability and consistent reference data</td></tr>
+</tbody>
+</table>
+</div>
+<p>These are logical services, not a requirement to place nine containers on one machine. Stateless HTTP services may scale independently after their session and consistency requirements are checked. Projection processing cannot be duplicated blindly. Knowledge ingestion and LLM traffic must not exhaust the CPU, memory, I/O, or database connections needed for control operations.</p>
+<h3 id="what-a-controller-outage-actually-affects"><a class="header" href="#what-a-controller-outage-actually-affects">What a controller outage actually affects</a></h3>
+<p>An interruption prevents operations over the disconnected channel until recovery: live administration, new discovery updates, and controller-mediated requests. An in-flight operation may time out or have an unknown outcome; automatically retrying a side effect can duplicate it.</p>
+<p>It does <strong>not</strong> follow that every business API immediately stops. Applications may continue with already loaded configuration, locally validated tokens, and cached discovery endpoints. Their behavior depends on cache expiry, token/JWKS availability, discovery mode, and whether the business path actually relays through the controller. New starts and explicit reloads separately depend on config-server availability.</p>
+<p>Specify these failure modes per workload. “The control plane is down” and “all data-plane requests are down” are different incidents.</p>
+<h2 id="recommended-topology-dedicated-vms"><a class="header" href="#recommended-topology-dedicated-vms">Recommended topology: dedicated VMs</a></h2>
+<p>Place Portal in a private infrastructure network reachable from every approved cluster, VM environment, and runner network. Use enterprise DNS and explicit routing/firewall rules, not cluster-local service names as the enterprise contract.</p>
+<pre class="mermaid">flowchart TB
+    U["Operators and browsers"] --&gt; BFF
+    R["Managed Java and Rust runtimes&lt;br/&gt;Cluster A, Cluster B, VMs and runners"]
+    subgraph INFRA["Independent infrastructure network"]
+        BFF["Portal HTTPS endpoint&lt;br/&gt;light-gateway BFF and SPAs"]
+        API["Portal APIs&lt;br/&gt;hybrid-command, hybrid-query, portal-service"]
+        OAUTH["light-oauth&lt;br/&gt;tokens and policy signing"]
+        WSS["Dedicated controller endpoint&lt;br/&gt;direct TLS or qualified L4 path"]
+        CTRL["light-controller&lt;br/&gt;one active owner per routing domain"]
+        CFG["config-server&lt;br/&gt;immutable snapshots"]
+        LLM["llm-gateway&lt;br/&gt;separate capacity"]
+        DB[("PostgreSQL&lt;br/&gt;HA and tested backups")]
+        BFF --&gt; API
+        BFF --&gt; OAUTH
+        WSS --&gt; CTRL
+        API --&gt; DB
+        CFG --&gt; DB
+    end
+    R &lt;--&gt;|"Persistent WSS"| WSS
+    R --&gt;|"Startup and reload HTTPS"| CFG
+    R --&gt;|"Model requests"| LLM
+</pre>
+
+<p>The diagram shows principal dependencies, not every authorized request. Controller arrows are bidirectional after the runtime initiates the outbound connection; exposing arbitrary inbound admin ports on every workload is unnecessary.</p>
+<p>Recommended placement:</p>
+<ul>
+<li>Place Portal HTTP services across separate failure domains as their availability target requires. Containers on VMs remain containerized deployments; Kubernetes is not a prerequisite for image immutability.</li>
+<li>Give the controller dedicated resources and a separately controlled maintenance schedule. Its endpoint must remain reachable when an application cluster is unavailable.</li>
+<li>Isolate PostgreSQL from disposable application hosts. Use a managed database or an operated HA database deployment, with explicit RPO/RTO and tested point-in-time recovery.</li>
+<li>Reserve capacity for reconnection and bootstrap peaks, not just steady-state traffic. Separate llm-gateway and heavy knowledge workloads when they contend with control-plane services.</li>
+<li>Retain out-of-band access, infrastructure configuration, signing-key recovery material, and database backups outside the managed clusters.</li>
+</ul>
+<p>An F5 virtual server can be part of this topology, but “F5” alone does not specify the connection behavior. Review its TCP, TLS, HTTP, idle-timeout, health-check, and draining configuration. Some F5 configurations also maintain separate client-side and server-side connections. A VM plus an unqualified proxy is not automatically safer.</p>
+<h2 id="multi-cluster-placement-and-recovery-independence"><a class="header" href="#multi-cluster-placement-and-recovery-independence">Multi-cluster placement and recovery independence</a></h2>
+<p>Putting Portal in application Cluster A makes operators in Clusters B and C depend on A’s network, capacity, storage, ingress, upgrades, and recovery procedures. A namespace separates access and policy; it does not remove these infrastructure dependencies.</p>
+<pre class="mermaid">flowchart LR
+    subgraph A["Application Cluster A"]
+        NET["Cluster networking and ingress"]
+        P["Portal and controller"]
+        NET --&gt; P
+        APP["Cluster A applications"] --&gt; P
+    end
+    B["Cluster B applications"] --&gt; NET
+    C["Cluster C applications"] --&gt; NET
+    OPS["Operators restoring Cluster A"] --&gt; NET
+    FAIL["Cluster A failure or maintenance"] -.-&gt; NET
+    FAIL -.-&gt; P
+</pre>
+
+<p>The concern is correlated failure: the management system needed during a cluster incident shares that cluster’s outage. A Kubernetes API outage does not necessarily stop existing Pods, but it can prevent the rescheduling and configuration changes needed to recover them. Independent placement reduces that dependency; it does not eliminate failures in shared WAN, DNS, identity, cloud accounts, or physical sites.</p>
+<p>Equitable access comes from routable endpoints, trust, authorization, and network policy. It is not physically impossible to expose an in-cluster controller to other clusters. The VM recommendation instead avoids making one application cluster the enterprise management dependency.</p>
+<p>Avoid bootstrap cycles. A replacement control-plane host must be recoverable using protected bootstrap configuration and credentials without requiring its own unavailable controller, config-server, or UI. Document the dependency order: infrastructure networking and database recovery; trust and signing services; configuration and controller services according to their actual startup dependencies; Portal APIs/BFF; then managed workload reconnection.</p>
+<h2 id="persistent-websockets-and-the-network-boundary"><a class="header" href="#persistent-websockets-and-the-network-boundary">Persistent WebSockets and the network boundary</a></h2>
+<h3 id="separate-browser-ingress-from-controller-transport"><a class="header" href="#separate-browser-ingress-from-controller-transport">Separate browser ingress from controller transport</a></h3>
+<p>The preferred controller path has no shared application HTTP ingress. Use a dedicated service endpoint, either directly or through a qualified transport-level load-balancing path. Keep browser BFF traffic on its own HTTPS endpoint.</p>
+<pre class="mermaid">flowchart TB
+    subgraph DIRECT["Preferred controller path"]
+        C1["Runtime client"] &lt;--&gt;|"WSS"| L4["Optional dedicated L4 endpoint"]
+        L4 &lt;--&gt; CT1["Controller owner"]
+    end
+    subgraph PROXY["Additional shared proxy boundary"]
+        C2["Runtime client"] &lt;--&gt;|"Client-side connection"| I["HTTP ingress or gateway"]
+        I &lt;--&gt;|"Backend connection"| CT2["Controller owner"]
+    end
+</pre>
+
+<p>A proxy opening a backend connection does not inherently break WebSockets or discovery. NGINX supports WebSocket tunneling, and Traefik supports WS/WSS. The added component must preserve the negotiated protocol and carry the bidirectional stream for its lifetime. Its timeouts, resource limits, reloads, restarts, and TLS trust boundary become part of the controller service contract. <a href="https://nginx.org/en/docs/http/websocket.html">NGINX WebSocket documentation</a>, <a href="https://doc.traefik.io/traefik/v3.4/user-guides/websocket/">Traefik WebSocket documentation</a>.</p>
+<p>The transport contract must cover:</p>
+<ul>
+<li>TLS termination location, certificate rotation, runtime authentication, and any required client certificate identity;</li>
+<li>upgrade headers and subprotocol negotiation, binary frames, message sizes, and backpressure;</li>
+<li>the shortest idle timeout across all intermediaries, with heartbeat timing and failure detection below that timeout;</li>
+<li>connection admission, queue bounds, file descriptors, and behavior under slow readers;</li>
+<li>controlled draining, forced disconnect deadlines, and client reconnect behavior.</li>
+</ul>
+<p>TLS passthrough preserves end-to-end TLS termination at the controller; it does not remove all intermediate TCP state or timeouts. For AWS NLB, a TCP listener is the documented way to forward encrypted traffic without terminating TLS at the load balancer. A TLS listener has a different termination contract. <a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-listeners.html">AWS NLB listeners</a>.</p>
+<h3 id="do-not-base-the-recommendation-on-universal-disconnect-claims"><a class="header" href="#do-not-base-the-recommendation-on-universal-disconnect-claims">Do not base the recommendation on universal disconnect claims</a></h3>
+<p>NGINX configuration reloads normally start new workers and gracefully retire old workers. A reload is not proof that every active WebSocket is severed. Shutdown limits, ingress-controller implementation, Pod termination, and load-balancer timeouts can still end a stream and must be tested. Traefik or Envoy also cannot preserve a connection after its owning process or node disappears. <a href="https://nginx.org/en/docs/control.html">NGINX process control</a>.</p>
+<p>Similarly, kube-proxy need not be a userspace proxy hop for each packet. Kubernetes routing can use kernel forwarding or other dataplanes, and some load balancers target Pods directly. Measure the deployed path; do not assume one fixed chain of proxy allocations.</p>
+<p>There is no justified universal “10,000 connections is safe” cutoff or fixed 15–100 KB overhead per proxied connection. Connection memory, TLS state, buffers, message rate, queue growth, and reconnect authentication determine capacity.</p>
+<h2 id="controller-replicas-and-high-availability"><a class="header" href="#controller-replicas-and-high-availability">Controller replicas and high availability</a></h2>
+<h3 id="current-implementation-evidence"><a class="header" href="#current-implementation-evidence">Current implementation evidence</a></h3>
+<p>In the inspected Rust controller revision, general runtime instances, service membership, discovery subscribers, and pending administrative commands are stored in process-local maps and channels. Command dispatch looks up the local runtime sender; discovery snapshots are built from that process’s registered instances. These paths do not become cluster-wide simply because replicas share PostgreSQL.</p>
+<p>Source anchors: <a href="https://github.com/lightapi/controller-rs/blob/3ef48edee3edf47ea7ee42662f141c6d3fa3c542/src/state.rs">AppState and discovery snapshots</a>, <a href="https://github.com/lightapi/controller-rs/blob/3ef48edee3edf47ea7ee42662f141c6d3fa3c542/src/command_router.rs">CommandRouter</a>. This finding concerns the general registry/administrative transport; database-backed execution state is a separate mechanism and does not prove transparent failover for every channel.</p>
+<pre class="mermaid">flowchart LR
+    WA["Workflow or operator"] --&gt; LB["Load-balanced endpoint"]
+    RB["Runner or managed service"] --&gt; LB
+    LB --&gt; C1["Controller 1&lt;br/&gt;owns connection A"]
+    LB --&gt; C2["Controller 2&lt;br/&gt;owns connection B"]
+    C1 -.-&gt;|"Required: owner-aware routing&lt;br/&gt;not supplied by the load balancer"| C2
+</pre>
+
+<p>Two arbitrary active replicas can yield incomplete discovery or “not connected” command responses. Sticky sessions do not ensure that two different clients, or an operator and its target, reach the same owner. This is fragmented connection ownership; reserve “split brain” for cases involving conflicting authorities or unfenced writers.</p>
+<p>The issue is the same on two VMs behind F5. Replicas, a shared database, and a StatefulSet do not constitute controller HA by themselves.</p>
+<h3 id="production-ha-choices"><a class="header" href="#production-ha-choices">Production HA choices</a></h3>
+<p>Until a release has demonstrated cross-replica routing, use one active controller owner per defined routing domain. A standby may reduce recovery time, but promotion must fence the previous owner and reconnect/re-register clients. Do not advertise seamless failover: live sockets and in-memory pending responses do not migrate.</p>
+<p>An active/standby design needs an independently reliable lease or fencing mechanism, health-aware endpoint switching, prevention of two active owners during a partition, and a tested promotion runbook. This document recommends those requirements; it does not assert they already exist. Without them, describe the deployment honestly as a single active service with supervised restart and a measured recovery interval.</p>
+<p>An active/active design must demonstrate ownership lookup, cross-owner command forwarding, complete and authorized discovery, subscription propagation, partition handling, and response correlation. A Redis/NATS backplane is one possible building block, not a complete solution. Deterministic partitioning is another option only when the routing domains and cross-domain behavior are explicit.</p>
+<p>For workflow execution, preserve durable operation identity, deadlines, leases/fencing where applicable, and outcome reconciliation. A lost response is not evidence that the action did not occur.</p>
+<h2 id="spa-serving-and-ingress-complexity"><a class="header" href="#spa-serving-and-ingress-complexity">SPA serving and ingress complexity</a></h2>
+<p>The simplest browser contract is a dedicated hostname, for example <code>https://portal.example.com</code>, forwarded to the BFF with the host and path preserved. The gateway owns SPA assets, deep-link fallback, and API routing.</p>
+<p>Kubernetes can use host-based ingress for this same contract; a static path prefix is not mandatory. Complexity grows when a shared ingress imposes an external prefix, rewrites it, and leaves the SPA, API callbacks, cookies, and gateway interpreting different paths. Kubernetes Ingress supports host/path routing, while implementation-specific rewrites require controller-specific configuration. <a href="https://kubernetes.io/docs/concepts/services-networking/ingress/">Kubernetes Ingress</a>.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Contract</th><th>Dedicated hostname, unchanged path</th><th>Shared prefix with rewriting</th></tr>
+</thead>
+<tbody>
+<tr><td>Browser assets and deep links</td><td>One application base</td><td>Browser base and gateway-received path may differ</td></tr>
+<tr><td>BFF API routing</td><td>Stable API namespace</td><td>Must preserve namespace and prevent SPA fallback for API errors</td></tr>
+<tr><td>OAuth redirects</td><td>One registered external origin/path</td><td>Redirect URI must match browser-visible prefix exactly</td></tr>
+<tr><td>Cookies</td><td>Explicit domain/path for the dedicated origin</td><td>Scope to the correct external API path; avoid sibling application leakage</td></tr>
+<tr><td>Release portability</td><td>Fewer environment-dependent paths</td><td>Requires a qualified build/runtime configuration contract</td></tr>
+<tr><td>Troubleshooting</td><td>Gateway sees the user’s path</td><td>Operator must reconstruct every rewrite boundary</td></tr>
+</tbody>
+</table>
+</div>
+<p>The Rust gateway already has virtual-host static serving and SPA fallback in <a href="https://github.com/networknt/light-fabric/blob/17359e1c73273d65e9a27d6dc82f01583f29f3d6/frameworks/light-pingora/src/resource.rs">resource.rs</a>. The <a href="../portal-view/portable-signed-runtime-configuration.html">portable signed Portal View design</a> distinguishes <code>publicBasePath</code>, <code>apiBasePath</code>, and <code>gatewayBasePath</code>; it is a proposed contract, not blanket evidence that every release supports arbitrary ingress prefixes.</p>
+<p>For either platform, qualify direct navigation to a deep link, asset fetches, login/logout callbacks, token exchange, cookie scope, and an API 404 that must remain JSON rather than becoming <code>index.html</code>.</p>
+<h2 id="detailed-comparison"><a class="header" href="#detailed-comparison">Detailed comparison</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Concern</th><th>Dedicated infrastructure VMs</th><th>Shared application Kubernetes cluster</th><th>Dedicated management Kubernetes cluster</th></tr>
+</thead>
+<tbody>
+<tr><td>Failure boundary</td><td>Independent of application cluster failures when networking/storage are also independent</td><td>Portal shares cluster infrastructure and recovery constraints</td><td>Can be independent of application clusters</td></tr>
+<tr><td>Persistent channels</td><td>Operator controls process and host maintenance</td><td>Adds Pod, node, ingress and operator reconciliation lifecycles</td><td>Similar mechanisms, with dedicated ownership and capacity</td></tr>
+<tr><td>Controller HA</td><td>Requires connection ownership and fenced failover</td><td>Same application requirements; replica count does not solve them</td><td>Same application requirements</td></tr>
+<tr><td>Multi-cluster access</td><td>Stable enterprise endpoint and routing</td><td>Requires external reachability into the hosting cluster</td><td>Stable enterprise endpoint remains necessary</td></tr>
+<tr><td>Bootstrap recovery</td><td>Can recover without an application Kubernetes API</td><td>Risk of circular dependency on the cluster being repaired</td><td>Needs its own independent bootstrap and recovery plan</td></tr>
+<tr><td>SPA routing</td><td>Dedicated origin is straightforward</td><td>Straightforward with dedicated host; shared rewrites add work</td><td>Infrastructure team can reserve a dedicated host</td></tr>
+<tr><td>PostgreSQL</td><td>Managed service or dedicated database VMs</td><td>Stateful storage/operator and cluster failure coupling if colocated</td><td>Managed database or separately qualified operator deployment</td></tr>
+<tr><td>Signing material</td><td>Dedicated secret distribution/HSM integration</td><td>Secret access shares cluster administration boundary</td><td>Can have separate administrators and secret policies</td></tr>
+<tr><td>Scheduling and replacement</td><td>Supervisor and VM automation must be operated</td><td>Strong built-in reconciliation and scheduling</td><td>Same Kubernetes benefits with a larger platform footprint</td></tr>
+<tr><td>CI/CD and observability</td><td>Must integrate VM deployment and telemetry</td><td>Reuses established pipelines and collectors</td><td>Reuses tooling, but runs a separate platform</td></tr>
+<tr><td>Resource efficiency</td><td>Reserved capacity may cost more at low utilization</td><td>Pooling can be efficient; contention needs control</td><td>Reserved infrastructure node capacity reduces pooling advantage</td></tr>
+<tr><td>Maintenance ownership</td><td>Clear infrastructure change window</td><td>Coordination across application and platform teams</td><td>Clear infrastructure ownership if organizationally enforced</td></tr>
+<tr><td>Portability</td><td>OCI images plus OS/network automation</td><td>Manifests still vary for EKS/OpenShift networking, storage and security</td><td>Similar platform-specific qualification</td></tr>
+<tr><td>Operational cost</td><td>VM lifecycle, patching, backup and failover automation</td><td>Less separate tooling, more connection/cluster qualification</td><td>Often highest fixed complexity unless already operated</td></tr>
+</tbody>
+</table>
+</div>
+<p>VMs do not require a monitoring silo: use the same metrics, logs, tracing, alerting, image registry, and release pipeline. Conversely, an organization with a mature Kubernetes platform and little VM operating capability has a real reason to prefer Kubernetes. Compare total ownership cost and recovery competence, not just manifest count.</p>
+<h2 id="kubernetes-exception-requirements"><a class="header" href="#kubernetes-exception-requirements">Kubernetes exception requirements</a></h2>
+<p>The single-cluster exception is reasonable only if all managed applications share that cluster, independent management during its total outage is not required, and the customer accepts the combined outage boundary. If additional clusters or external runners are planned, revisit the decision before onboarding them.</p>
+<p>A separately operated management cluster may qualify for a multi-cluster estate, but it must meet the same independence objectives as dedicated VMs. A dedicated namespace in an application cluster does not qualify.</p>
+<p>For either Kubernetes exception:</p>
+<ol>
+<li>Reserve infrastructure capacity with suitable node placement, resource requests/limits, topology separation, and a deliberate maintenance policy. Do not let automatic scaling reduce controller capacity without a connection-drain plan.</li>
+<li>Provide a dedicated controller endpoint. Prefer the qualified direct/L4 transport path; a shared HTTP ingress is outside the default profile.</li>
+<li>Choose Deployment versus StatefulSet from actual identity/storage requirements. StatefulSet provides stable identities and ordered lifecycle behavior, not socket persistence or immunity to replacement. <a href="https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/">Kubernetes StatefulSets</a>.</li>
+<li>Configure rollout limits, startup/readiness probes, termination grace periods, and application-level draining. A PodDisruptionBudget constrains covered voluntary evictions; it does not prevent involuntary failures or govern Deployment/StatefulSet rolling updates. Infinite-lived connections require a bounded disconnect/reconnect plan. <a href="https://kubernetes.io/docs/concepts/workloads/pods/disruptions/">Kubernetes disruptions</a>.</li>
+<li>Use an approved application PriorityClass if needed. Do not assign <code>system-cluster-critical</code> to Portal as a purported zero-eviction switch; Kubernetes reserves system priority classes for critical system components, and priority is not an availability guarantee. <a href="https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/">Pod priority and preemption</a>.</li>
+<li>Keep database recovery, signing-key recovery, administrative access, and bootstrap artifacts available outside the cluster being recovered.</li>
+<li>Prove the controller ownership model before enabling multiple active replicas. Affinity and readiness do not replace it.</li>
+<li>Publish runbooks for node drain, ingress maintenance, certificate rotation, controller failure, storage failure, and cluster restoration.</li>
+</ol>
+<p>For <strong>EKS</strong>, evaluate an NLB TCP listener and the selected target mode for the controller separately from the BFF HTTP ingress. Verify the actual TLS and draining behavior rather than assuming ALB, NLB, and ingress are interchangeable.</p>
+<p>For <strong>OpenShift</strong>, qualify the router and Route termination mode, tunnel timeout, security constraints, and storage integration. Passthrough Routes preserve encrypted traffic to the backend but still introduce a router lifecycle and tunnel limits. They are a possible qualified alternative, not the same as removing ingress. <a href="https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html-single/ingress_and_load_balancing/index">OpenShift 4.20 ingress and load balancing</a>.</p>
+<h2 id="availability-and-capacity-qualification"><a class="header" href="#availability-and-capacity-qualification">Availability and capacity qualification</a></h2>
+<p>Define the targets before deciding the host count or declaring either topology production ready. Required inputs are peak connected runtimes, message rates and sizes, in-flight operations, maximum acceptable discovery staleness, reconnect recovery time, outage budget, database RPO/RTO, and deployment/maintenance frequency.</p>
+<p>A useful estimate is <code>disconnected clients / reconnect spreading window</code>. For example, reconnecting 20,000 clients over 120 seconds averages about 167 attempts/second before retries. This is illustrative, not a capacity claim; synchronized retries, TLS handshakes, token verification, configuration reads, and registration processing can produce much larger peaks.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Qualification exercise</th><th>Required evidence</th></tr>
+</thead>
+<tbody>
+<tr><td>Kill the active controller process</td><td>Bounded detection, jittered reconnect, re-registration, restored subscriptions, measured time to a usable channel</td></tr>
+<tr><td>Upgrade the controller or drain its node/VM</td><td>No new admissions to the draining owner; bounded termination; reconciled in-flight outcomes</td></tr>
+<tr><td>Put caller and target on different replicas</td><td>Correct discovery and command routing, or enforced single-owner placement</td></tr>
+<tr><td>Partition active and standby</td><td>Fencing prevents conflicting active ownership; promotion follows the defined authority</td></tr>
+<tr><td>Restart or reconfigure the actual load balancer/ingress</td><td>Observed connection loss and recovery within budget; no assumption of zero disconnects</td></tr>
+<tr><td>Rotate certificates and signing keys</td><td>Existing/new session behavior and trust overlap work as designed</td></tr>
+<tr><td>Saturate LLM/knowledge traffic</td><td>Control commands, discovery and snapshot reads retain their latency/resource budgets</td></tr>
+<tr><td>Lose an application cluster</td><td>External Portal remains operable; unaffected clusters continue to use it</td></tr>
+<tr><td>Lose PostgreSQL or OAuth</td><td>Documented degradation, recovery, token/cache behavior, and no unsafe side-effect replay</td></tr>
+<tr><td>Restore from backup without Portal UI</td><td>Database, keys, snapshots and configuration restored to agreed RPO/RTO</td></tr>
+<tr><td>Reconcile events and projections</td><td>Projection lag/checkpoints and publication readiness verified before resuming changes</td></tr>
+<tr><td>Exercise SPA/auth routing</td><td>Deep links, assets, callbacks, cookies, and API errors meet the browser contract</td></tr>
+</tbody>
+</table>
+</div>
+<p>Measure connected sessions, connection churn, authentication failures, discovery staleness, command queue depth, timeout/unknown-outcome rates, snapshot-read errors, database saturation, and projection lag. Validate both Java and Rust clients: reconnect, discovery transport, authentication, and recovery capabilities can differ by release.</p>
+<h2 id="customer-decision-statement"><a class="header" href="#customer-decision-statement">Customer decision statement</a></h2>
+<p>Light Portal should normally run outside the application clusters because it manages those clusters’ workloads and must remain available while they are being repaired or maintained. Dedicated VMs provide a clear infrastructure boundary and a smaller set of lifecycle dependencies for persistent controller connections.</p>
+<p>Kubernetes is an acceptable exception when the entire managed estate intentionally shares one cluster’s failure boundary, or when an independently governed management cluster demonstrates equivalent isolation and recovery. In either case, production acceptance depends on controller connection ownership, tested recovery, and the actual network path—not on choosing a StatefulSet or adding replicas.</p>
+<p>Related designs: <a href="llm-gateway-topology.html">LLM gateway topology</a>, <a href="control-plane-policy-config-server.html">policy publication through config-server</a>, <a href="development-database-topology.html">database topology</a>, and <a href="../portal-view/portable-signed-runtime-configuration.html">portable Portal View configuration</a>.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../../design/light-portal.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../../design/light-portal/llm-gateway-topology.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../../design/light-portal.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../../design/light-portal/llm-gateway-topology.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../../mark-09e88c2c.min.js"></script>
+        <script src="../../searcher-09f2665d.js"></script>
+
+        <script src="../../clipboard-1626706a.min.js"></script>
+        <script src="../../highlight-abc7f01d.js"></script>
+        <script src="../../book-609e4cb8.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../../mermaid-c05fc885.min.js"></script>
+        <script src="../../mermaid-init-53b67c53.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

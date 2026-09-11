@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-ad5a8792.js";
+            window.path_to_searchindex_js = "searchindex-a09f269d.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-6125a086.js"></script>
+        <script src="toc-93fc6719.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -14563,6 +14563,230 @@ clearest ownership model.</li>
 </div>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-portal-1"><a class="header" href="#light-portal-1">Light Portal</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="production-deployment-an-independent-light-portal-control-plane"><a class="header" href="#production-deployment-an-independent-light-portal-control-plane">Production Deployment: An Independent Light Portal Control Plane</a></h1>
+<h2 id="decision-and-scope"><a class="header" href="#decision-and-scope">Decision and scope</a></h2>
+<p><strong>Deploy the enterprise Light Portal control plane on dedicated infrastructure VMs by default, outside the application Kubernetes clusters it manages.</strong> Run its services as supervised containers or native processes, use stable private endpoints, and operate its database, signing keys, backups, and recovery procedures as infrastructure.</p>
+<p>Light Portal is the control plane for the Rust light-fabric AI and API ecosystem and the Java light-4j API ecosystem. Its placement should follow the availability and recovery requirements of the entire managed estate, rather than the deployment convention of one application team.</p>
+<p>The normal exception is an organization with one Kubernetes cluster, where every controller-connected application is in that cluster and the organization explicitly accepts their shared failure and maintenance boundary. This exception still requires the networking, controller ownership, recovery, and qualification controls below.</p>
+<p>A dedicated management cluster can also satisfy an enterprise infrastructure boundary if it is independently operated and recoverable. That is an architecture exception requiring evidence, not a reason to place Portal in an arbitrary shared application cluster. Multiple clusters do not make Kubernetes technically incapable of hosting Portal.</p>
+<p><strong>Status:</strong> proposed production deployment standard, dated September 11, 2026. This document defines a target topology and acceptance criteria; it does not certify automatic controller failover or a production HA package as implemented.</p>
+<h2 id="why-this-is-infrastructure"><a class="header" href="#why-this-is-infrastructure">Why this is infrastructure</a></h2>
+<p>Portal does more than serve an administrative UI. Connected services use the controller channel for registration, discovery updates, remote administration, and permitted communication. Controller-mediated workflow-to-runner and agent execution therefore introduces a runtime dependency as well as an operational dependency.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Service</th><th>Responsibility</th><th>Deployment consequence</th></tr>
+</thead>
+<tbody>
+<tr><td>light-gateway, Portal BFF</td><td>Serve SPAs and route browser API requests to Portal services</td><td>Stable browser origin, correct host/path handling, and independent operator access</td></tr>
+<tr><td>light-oauth</td><td>Issue tokens and sign policies</td><td>Protect signing keys; preserve issuance and trust distribution during maintenance</td></tr>
+<tr><td>light-controller</td><td>Maintain persistent service channels, discovery, administrative commands, and authorized relay/execution interactions</td><td>Treat live connections and their owning process as state</td></tr>
+<tr><td>config-server</td><td>Provide immutable configuration snapshots at startup and explicit reload</td><td>Stable bootstrap endpoint; preserve snapshot integrity and audience isolation</td></tr>
+<tr><td>llm-gateway</td><td>Separate light-gateway instance routing LLM traffic</td><td>Separate capacity and resource limits from controller and Portal BFF</td></tr>
+<tr><td>PostgreSQL</td><td>Hold control-plane data and Portal knowledge</td><td>Database HA, durable backup, restore, and workload isolation are required</td></tr>
+<tr><td>hybrid-command</td><td>Validate commands and append user events</td><td>Preserve authorization, event durability, and command idempotency</td></tr>
+<tr><td>hybrid-query</td><td>Process events into projections and answer queries</td><td>Coordinate projection ownership/checkpoints and expose projection lag</td></tr>
+<tr><td>portal-service</td><td>Supply reference APIs, including UI dropdown data</td><td>Internal API availability and consistent reference data</td></tr>
+</tbody>
+</table>
+</div>
+<p>These are logical services, not a requirement to place nine containers on one machine. Stateless HTTP services may scale independently after their session and consistency requirements are checked. Projection processing cannot be duplicated blindly. Knowledge ingestion and LLM traffic must not exhaust the CPU, memory, I/O, or database connections needed for control operations.</p>
+<h3 id="what-a-controller-outage-actually-affects"><a class="header" href="#what-a-controller-outage-actually-affects">What a controller outage actually affects</a></h3>
+<p>An interruption prevents operations over the disconnected channel until recovery: live administration, new discovery updates, and controller-mediated requests. An in-flight operation may time out or have an unknown outcome; automatically retrying a side effect can duplicate it.</p>
+<p>It does <strong>not</strong> follow that every business API immediately stops. Applications may continue with already loaded configuration, locally validated tokens, and cached discovery endpoints. Their behavior depends on cache expiry, token/JWKS availability, discovery mode, and whether the business path actually relays through the controller. New starts and explicit reloads separately depend on config-server availability.</p>
+<p>Specify these failure modes per workload. “The control plane is down” and “all data-plane requests are down” are different incidents.</p>
+<h2 id="recommended-topology-dedicated-vms"><a class="header" href="#recommended-topology-dedicated-vms">Recommended topology: dedicated VMs</a></h2>
+<p>Place Portal in a private infrastructure network reachable from every approved cluster, VM environment, and runner network. Use enterprise DNS and explicit routing/firewall rules, not cluster-local service names as the enterprise contract.</p>
+<pre class="mermaid">flowchart TB
+    U["Operators and browsers"] --&gt; BFF
+    R["Managed Java and Rust runtimes&lt;br/&gt;Cluster A, Cluster B, VMs and runners"]
+    subgraph INFRA["Independent infrastructure network"]
+        BFF["Portal HTTPS endpoint&lt;br/&gt;light-gateway BFF and SPAs"]
+        API["Portal APIs&lt;br/&gt;hybrid-command, hybrid-query, portal-service"]
+        OAUTH["light-oauth&lt;br/&gt;tokens and policy signing"]
+        WSS["Dedicated controller endpoint&lt;br/&gt;direct TLS or qualified L4 path"]
+        CTRL["light-controller&lt;br/&gt;one active owner per routing domain"]
+        CFG["config-server&lt;br/&gt;immutable snapshots"]
+        LLM["llm-gateway&lt;br/&gt;separate capacity"]
+        DB[("PostgreSQL&lt;br/&gt;HA and tested backups")]
+        BFF --&gt; API
+        BFF --&gt; OAUTH
+        WSS --&gt; CTRL
+        API --&gt; DB
+        CFG --&gt; DB
+    end
+    R &lt;--&gt;|"Persistent WSS"| WSS
+    R --&gt;|"Startup and reload HTTPS"| CFG
+    R --&gt;|"Model requests"| LLM
+</pre>
+
+<p>The diagram shows principal dependencies, not every authorized request. Controller arrows are bidirectional after the runtime initiates the outbound connection; exposing arbitrary inbound admin ports on every workload is unnecessary.</p>
+<p>Recommended placement:</p>
+<ul>
+<li>Place Portal HTTP services across separate failure domains as their availability target requires. Containers on VMs remain containerized deployments; Kubernetes is not a prerequisite for image immutability.</li>
+<li>Give the controller dedicated resources and a separately controlled maintenance schedule. Its endpoint must remain reachable when an application cluster is unavailable.</li>
+<li>Isolate PostgreSQL from disposable application hosts. Use a managed database or an operated HA database deployment, with explicit RPO/RTO and tested point-in-time recovery.</li>
+<li>Reserve capacity for reconnection and bootstrap peaks, not just steady-state traffic. Separate llm-gateway and heavy knowledge workloads when they contend with control-plane services.</li>
+<li>Retain out-of-band access, infrastructure configuration, signing-key recovery material, and database backups outside the managed clusters.</li>
+</ul>
+<p>An F5 virtual server can be part of this topology, but “F5” alone does not specify the connection behavior. Review its TCP, TLS, HTTP, idle-timeout, health-check, and draining configuration. Some F5 configurations also maintain separate client-side and server-side connections. A VM plus an unqualified proxy is not automatically safer.</p>
+<h2 id="multi-cluster-placement-and-recovery-independence"><a class="header" href="#multi-cluster-placement-and-recovery-independence">Multi-cluster placement and recovery independence</a></h2>
+<p>Putting Portal in application Cluster A makes operators in Clusters B and C depend on A’s network, capacity, storage, ingress, upgrades, and recovery procedures. A namespace separates access and policy; it does not remove these infrastructure dependencies.</p>
+<pre class="mermaid">flowchart LR
+    subgraph A["Application Cluster A"]
+        NET["Cluster networking and ingress"]
+        P["Portal and controller"]
+        NET --&gt; P
+        APP["Cluster A applications"] --&gt; P
+    end
+    B["Cluster B applications"] --&gt; NET
+    C["Cluster C applications"] --&gt; NET
+    OPS["Operators restoring Cluster A"] --&gt; NET
+    FAIL["Cluster A failure or maintenance"] -.-&gt; NET
+    FAIL -.-&gt; P
+</pre>
+
+<p>The concern is correlated failure: the management system needed during a cluster incident shares that cluster’s outage. A Kubernetes API outage does not necessarily stop existing Pods, but it can prevent the rescheduling and configuration changes needed to recover them. Independent placement reduces that dependency; it does not eliminate failures in shared WAN, DNS, identity, cloud accounts, or physical sites.</p>
+<p>Equitable access comes from routable endpoints, trust, authorization, and network policy. It is not physically impossible to expose an in-cluster controller to other clusters. The VM recommendation instead avoids making one application cluster the enterprise management dependency.</p>
+<p>Avoid bootstrap cycles. A replacement control-plane host must be recoverable using protected bootstrap configuration and credentials without requiring its own unavailable controller, config-server, or UI. Document the dependency order: infrastructure networking and database recovery; trust and signing services; configuration and controller services according to their actual startup dependencies; Portal APIs/BFF; then managed workload reconnection.</p>
+<h2 id="persistent-websockets-and-the-network-boundary"><a class="header" href="#persistent-websockets-and-the-network-boundary">Persistent WebSockets and the network boundary</a></h2>
+<h3 id="separate-browser-ingress-from-controller-transport"><a class="header" href="#separate-browser-ingress-from-controller-transport">Separate browser ingress from controller transport</a></h3>
+<p>The preferred controller path has no shared application HTTP ingress. Use a dedicated service endpoint, either directly or through a qualified transport-level load-balancing path. Keep browser BFF traffic on its own HTTPS endpoint.</p>
+<pre class="mermaid">flowchart TB
+    subgraph DIRECT["Preferred controller path"]
+        C1["Runtime client"] &lt;--&gt;|"WSS"| L4["Optional dedicated L4 endpoint"]
+        L4 &lt;--&gt; CT1["Controller owner"]
+    end
+    subgraph PROXY["Additional shared proxy boundary"]
+        C2["Runtime client"] &lt;--&gt;|"Client-side connection"| I["HTTP ingress or gateway"]
+        I &lt;--&gt;|"Backend connection"| CT2["Controller owner"]
+    end
+</pre>
+
+<p>A proxy opening a backend connection does not inherently break WebSockets or discovery. NGINX supports WebSocket tunneling, and Traefik supports WS/WSS. The added component must preserve the negotiated protocol and carry the bidirectional stream for its lifetime. Its timeouts, resource limits, reloads, restarts, and TLS trust boundary become part of the controller service contract. <a href="https://nginx.org/en/docs/http/websocket.html">NGINX WebSocket documentation</a>, <a href="https://doc.traefik.io/traefik/v3.4/user-guides/websocket/">Traefik WebSocket documentation</a>.</p>
+<p>The transport contract must cover:</p>
+<ul>
+<li>TLS termination location, certificate rotation, runtime authentication, and any required client certificate identity;</li>
+<li>upgrade headers and subprotocol negotiation, binary frames, message sizes, and backpressure;</li>
+<li>the shortest idle timeout across all intermediaries, with heartbeat timing and failure detection below that timeout;</li>
+<li>connection admission, queue bounds, file descriptors, and behavior under slow readers;</li>
+<li>controlled draining, forced disconnect deadlines, and client reconnect behavior.</li>
+</ul>
+<p>TLS passthrough preserves end-to-end TLS termination at the controller; it does not remove all intermediate TCP state or timeouts. For AWS NLB, a TCP listener is the documented way to forward encrypted traffic without terminating TLS at the load balancer. A TLS listener has a different termination contract. <a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-listeners.html">AWS NLB listeners</a>.</p>
+<h3 id="do-not-base-the-recommendation-on-universal-disconnect-claims"><a class="header" href="#do-not-base-the-recommendation-on-universal-disconnect-claims">Do not base the recommendation on universal disconnect claims</a></h3>
+<p>NGINX configuration reloads normally start new workers and gracefully retire old workers. A reload is not proof that every active WebSocket is severed. Shutdown limits, ingress-controller implementation, Pod termination, and load-balancer timeouts can still end a stream and must be tested. Traefik or Envoy also cannot preserve a connection after its owning process or node disappears. <a href="https://nginx.org/en/docs/control.html">NGINX process control</a>.</p>
+<p>Similarly, kube-proxy need not be a userspace proxy hop for each packet. Kubernetes routing can use kernel forwarding or other dataplanes, and some load balancers target Pods directly. Measure the deployed path; do not assume one fixed chain of proxy allocations.</p>
+<p>There is no justified universal “10,000 connections is safe” cutoff or fixed 15–100 KB overhead per proxied connection. Connection memory, TLS state, buffers, message rate, queue growth, and reconnect authentication determine capacity.</p>
+<h2 id="controller-replicas-and-high-availability"><a class="header" href="#controller-replicas-and-high-availability">Controller replicas and high availability</a></h2>
+<h3 id="current-implementation-evidence"><a class="header" href="#current-implementation-evidence">Current implementation evidence</a></h3>
+<p>In the inspected Rust controller revision, general runtime instances, service membership, discovery subscribers, and pending administrative commands are stored in process-local maps and channels. Command dispatch looks up the local runtime sender; discovery snapshots are built from that process’s registered instances. These paths do not become cluster-wide simply because replicas share PostgreSQL.</p>
+<p>Source anchors: <a href="https://github.com/lightapi/controller-rs/blob/3ef48edee3edf47ea7ee42662f141c6d3fa3c542/src/state.rs">AppState and discovery snapshots</a>, <a href="https://github.com/lightapi/controller-rs/blob/3ef48edee3edf47ea7ee42662f141c6d3fa3c542/src/command_router.rs">CommandRouter</a>. This finding concerns the general registry/administrative transport; database-backed execution state is a separate mechanism and does not prove transparent failover for every channel.</p>
+<pre class="mermaid">flowchart LR
+    WA["Workflow or operator"] --&gt; LB["Load-balanced endpoint"]
+    RB["Runner or managed service"] --&gt; LB
+    LB --&gt; C1["Controller 1&lt;br/&gt;owns connection A"]
+    LB --&gt; C2["Controller 2&lt;br/&gt;owns connection B"]
+    C1 -.-&gt;|"Required: owner-aware routing&lt;br/&gt;not supplied by the load balancer"| C2
+</pre>
+
+<p>Two arbitrary active replicas can yield incomplete discovery or “not connected” command responses. Sticky sessions do not ensure that two different clients, or an operator and its target, reach the same owner. This is fragmented connection ownership; reserve “split brain” for cases involving conflicting authorities or unfenced writers.</p>
+<p>The issue is the same on two VMs behind F5. Replicas, a shared database, and a StatefulSet do not constitute controller HA by themselves.</p>
+<h3 id="production-ha-choices"><a class="header" href="#production-ha-choices">Production HA choices</a></h3>
+<p>Until a release has demonstrated cross-replica routing, use one active controller owner per defined routing domain. A standby may reduce recovery time, but promotion must fence the previous owner and reconnect/re-register clients. Do not advertise seamless failover: live sockets and in-memory pending responses do not migrate.</p>
+<p>An active/standby design needs an independently reliable lease or fencing mechanism, health-aware endpoint switching, prevention of two active owners during a partition, and a tested promotion runbook. This document recommends those requirements; it does not assert they already exist. Without them, describe the deployment honestly as a single active service with supervised restart and a measured recovery interval.</p>
+<p>An active/active design must demonstrate ownership lookup, cross-owner command forwarding, complete and authorized discovery, subscription propagation, partition handling, and response correlation. A Redis/NATS backplane is one possible building block, not a complete solution. Deterministic partitioning is another option only when the routing domains and cross-domain behavior are explicit.</p>
+<p>For workflow execution, preserve durable operation identity, deadlines, leases/fencing where applicable, and outcome reconciliation. A lost response is not evidence that the action did not occur.</p>
+<h2 id="spa-serving-and-ingress-complexity"><a class="header" href="#spa-serving-and-ingress-complexity">SPA serving and ingress complexity</a></h2>
+<p>The simplest browser contract is a dedicated hostname, for example <code>https://portal.example.com</code>, forwarded to the BFF with the host and path preserved. The gateway owns SPA assets, deep-link fallback, and API routing.</p>
+<p>Kubernetes can use host-based ingress for this same contract; a static path prefix is not mandatory. Complexity grows when a shared ingress imposes an external prefix, rewrites it, and leaves the SPA, API callbacks, cookies, and gateway interpreting different paths. Kubernetes Ingress supports host/path routing, while implementation-specific rewrites require controller-specific configuration. <a href="https://kubernetes.io/docs/concepts/services-networking/ingress/">Kubernetes Ingress</a>.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Contract</th><th>Dedicated hostname, unchanged path</th><th>Shared prefix with rewriting</th></tr>
+</thead>
+<tbody>
+<tr><td>Browser assets and deep links</td><td>One application base</td><td>Browser base and gateway-received path may differ</td></tr>
+<tr><td>BFF API routing</td><td>Stable API namespace</td><td>Must preserve namespace and prevent SPA fallback for API errors</td></tr>
+<tr><td>OAuth redirects</td><td>One registered external origin/path</td><td>Redirect URI must match browser-visible prefix exactly</td></tr>
+<tr><td>Cookies</td><td>Explicit domain/path for the dedicated origin</td><td>Scope to the correct external API path; avoid sibling application leakage</td></tr>
+<tr><td>Release portability</td><td>Fewer environment-dependent paths</td><td>Requires a qualified build/runtime configuration contract</td></tr>
+<tr><td>Troubleshooting</td><td>Gateway sees the user’s path</td><td>Operator must reconstruct every rewrite boundary</td></tr>
+</tbody>
+</table>
+</div>
+<p>The Rust gateway already has virtual-host static serving and SPA fallback in <a href="https://github.com/networknt/light-fabric/blob/17359e1c73273d65e9a27d6dc82f01583f29f3d6/frameworks/light-pingora/src/resource.rs">resource.rs</a>. The <a href="#portable-signed-portal-view-artifact-and-runtime-configuration">portable signed Portal View design</a> distinguishes <code>publicBasePath</code>, <code>apiBasePath</code>, and <code>gatewayBasePath</code>; it is a proposed contract, not blanket evidence that every release supports arbitrary ingress prefixes.</p>
+<p>For either platform, qualify direct navigation to a deep link, asset fetches, login/logout callbacks, token exchange, cookie scope, and an API 404 that must remain JSON rather than becoming <code>index.html</code>.</p>
+<h2 id="detailed-comparison"><a class="header" href="#detailed-comparison">Detailed comparison</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Concern</th><th>Dedicated infrastructure VMs</th><th>Shared application Kubernetes cluster</th><th>Dedicated management Kubernetes cluster</th></tr>
+</thead>
+<tbody>
+<tr><td>Failure boundary</td><td>Independent of application cluster failures when networking/storage are also independent</td><td>Portal shares cluster infrastructure and recovery constraints</td><td>Can be independent of application clusters</td></tr>
+<tr><td>Persistent channels</td><td>Operator controls process and host maintenance</td><td>Adds Pod, node, ingress and operator reconciliation lifecycles</td><td>Similar mechanisms, with dedicated ownership and capacity</td></tr>
+<tr><td>Controller HA</td><td>Requires connection ownership and fenced failover</td><td>Same application requirements; replica count does not solve them</td><td>Same application requirements</td></tr>
+<tr><td>Multi-cluster access</td><td>Stable enterprise endpoint and routing</td><td>Requires external reachability into the hosting cluster</td><td>Stable enterprise endpoint remains necessary</td></tr>
+<tr><td>Bootstrap recovery</td><td>Can recover without an application Kubernetes API</td><td>Risk of circular dependency on the cluster being repaired</td><td>Needs its own independent bootstrap and recovery plan</td></tr>
+<tr><td>SPA routing</td><td>Dedicated origin is straightforward</td><td>Straightforward with dedicated host; shared rewrites add work</td><td>Infrastructure team can reserve a dedicated host</td></tr>
+<tr><td>PostgreSQL</td><td>Managed service or dedicated database VMs</td><td>Stateful storage/operator and cluster failure coupling if colocated</td><td>Managed database or separately qualified operator deployment</td></tr>
+<tr><td>Signing material</td><td>Dedicated secret distribution/HSM integration</td><td>Secret access shares cluster administration boundary</td><td>Can have separate administrators and secret policies</td></tr>
+<tr><td>Scheduling and replacement</td><td>Supervisor and VM automation must be operated</td><td>Strong built-in reconciliation and scheduling</td><td>Same Kubernetes benefits with a larger platform footprint</td></tr>
+<tr><td>CI/CD and observability</td><td>Must integrate VM deployment and telemetry</td><td>Reuses established pipelines and collectors</td><td>Reuses tooling, but runs a separate platform</td></tr>
+<tr><td>Resource efficiency</td><td>Reserved capacity may cost more at low utilization</td><td>Pooling can be efficient; contention needs control</td><td>Reserved infrastructure node capacity reduces pooling advantage</td></tr>
+<tr><td>Maintenance ownership</td><td>Clear infrastructure change window</td><td>Coordination across application and platform teams</td><td>Clear infrastructure ownership if organizationally enforced</td></tr>
+<tr><td>Portability</td><td>OCI images plus OS/network automation</td><td>Manifests still vary for EKS/OpenShift networking, storage and security</td><td>Similar platform-specific qualification</td></tr>
+<tr><td>Operational cost</td><td>VM lifecycle, patching, backup and failover automation</td><td>Less separate tooling, more connection/cluster qualification</td><td>Often highest fixed complexity unless already operated</td></tr>
+</tbody>
+</table>
+</div>
+<p>VMs do not require a monitoring silo: use the same metrics, logs, tracing, alerting, image registry, and release pipeline. Conversely, an organization with a mature Kubernetes platform and little VM operating capability has a real reason to prefer Kubernetes. Compare total ownership cost and recovery competence, not just manifest count.</p>
+<h2 id="kubernetes-exception-requirements"><a class="header" href="#kubernetes-exception-requirements">Kubernetes exception requirements</a></h2>
+<p>The single-cluster exception is reasonable only if all managed applications share that cluster, independent management during its total outage is not required, and the customer accepts the combined outage boundary. If additional clusters or external runners are planned, revisit the decision before onboarding them.</p>
+<p>A separately operated management cluster may qualify for a multi-cluster estate, but it must meet the same independence objectives as dedicated VMs. A dedicated namespace in an application cluster does not qualify.</p>
+<p>For either Kubernetes exception:</p>
+<ol>
+<li>Reserve infrastructure capacity with suitable node placement, resource requests/limits, topology separation, and a deliberate maintenance policy. Do not let automatic scaling reduce controller capacity without a connection-drain plan.</li>
+<li>Provide a dedicated controller endpoint. Prefer the qualified direct/L4 transport path; a shared HTTP ingress is outside the default profile.</li>
+<li>Choose Deployment versus StatefulSet from actual identity/storage requirements. StatefulSet provides stable identities and ordered lifecycle behavior, not socket persistence or immunity to replacement. <a href="https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/">Kubernetes StatefulSets</a>.</li>
+<li>Configure rollout limits, startup/readiness probes, termination grace periods, and application-level draining. A PodDisruptionBudget constrains covered voluntary evictions; it does not prevent involuntary failures or govern Deployment/StatefulSet rolling updates. Infinite-lived connections require a bounded disconnect/reconnect plan. <a href="https://kubernetes.io/docs/concepts/workloads/pods/disruptions/">Kubernetes disruptions</a>.</li>
+<li>Use an approved application PriorityClass if needed. Do not assign <code>system-cluster-critical</code> to Portal as a purported zero-eviction switch; Kubernetes reserves system priority classes for critical system components, and priority is not an availability guarantee. <a href="https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/">Pod priority and preemption</a>.</li>
+<li>Keep database recovery, signing-key recovery, administrative access, and bootstrap artifacts available outside the cluster being recovered.</li>
+<li>Prove the controller ownership model before enabling multiple active replicas. Affinity and readiness do not replace it.</li>
+<li>Publish runbooks for node drain, ingress maintenance, certificate rotation, controller failure, storage failure, and cluster restoration.</li>
+</ol>
+<p>For <strong>EKS</strong>, evaluate an NLB TCP listener and the selected target mode for the controller separately from the BFF HTTP ingress. Verify the actual TLS and draining behavior rather than assuming ALB, NLB, and ingress are interchangeable.</p>
+<p>For <strong>OpenShift</strong>, qualify the router and Route termination mode, tunnel timeout, security constraints, and storage integration. Passthrough Routes preserve encrypted traffic to the backend but still introduce a router lifecycle and tunnel limits. They are a possible qualified alternative, not the same as removing ingress. <a href="https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html-single/ingress_and_load_balancing/index">OpenShift 4.20 ingress and load balancing</a>.</p>
+<h2 id="availability-and-capacity-qualification"><a class="header" href="#availability-and-capacity-qualification">Availability and capacity qualification</a></h2>
+<p>Define the targets before deciding the host count or declaring either topology production ready. Required inputs are peak connected runtimes, message rates and sizes, in-flight operations, maximum acceptable discovery staleness, reconnect recovery time, outage budget, database RPO/RTO, and deployment/maintenance frequency.</p>
+<p>A useful estimate is <code>disconnected clients / reconnect spreading window</code>. For example, reconnecting 20,000 clients over 120 seconds averages about 167 attempts/second before retries. This is illustrative, not a capacity claim; synchronized retries, TLS handshakes, token verification, configuration reads, and registration processing can produce much larger peaks.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Qualification exercise</th><th>Required evidence</th></tr>
+</thead>
+<tbody>
+<tr><td>Kill the active controller process</td><td>Bounded detection, jittered reconnect, re-registration, restored subscriptions, measured time to a usable channel</td></tr>
+<tr><td>Upgrade the controller or drain its node/VM</td><td>No new admissions to the draining owner; bounded termination; reconciled in-flight outcomes</td></tr>
+<tr><td>Put caller and target on different replicas</td><td>Correct discovery and command routing, or enforced single-owner placement</td></tr>
+<tr><td>Partition active and standby</td><td>Fencing prevents conflicting active ownership; promotion follows the defined authority</td></tr>
+<tr><td>Restart or reconfigure the actual load balancer/ingress</td><td>Observed connection loss and recovery within budget; no assumption of zero disconnects</td></tr>
+<tr><td>Rotate certificates and signing keys</td><td>Existing/new session behavior and trust overlap work as designed</td></tr>
+<tr><td>Saturate LLM/knowledge traffic</td><td>Control commands, discovery and snapshot reads retain their latency/resource budgets</td></tr>
+<tr><td>Lose an application cluster</td><td>External Portal remains operable; unaffected clusters continue to use it</td></tr>
+<tr><td>Lose PostgreSQL or OAuth</td><td>Documented degradation, recovery, token/cache behavior, and no unsafe side-effect replay</td></tr>
+<tr><td>Restore from backup without Portal UI</td><td>Database, keys, snapshots and configuration restored to agreed RPO/RTO</td></tr>
+<tr><td>Reconcile events and projections</td><td>Projection lag/checkpoints and publication readiness verified before resuming changes</td></tr>
+<tr><td>Exercise SPA/auth routing</td><td>Deep links, assets, callbacks, cookies, and API errors meet the browser contract</td></tr>
+</tbody>
+</table>
+</div>
+<p>Measure connected sessions, connection churn, authentication failures, discovery staleness, command queue depth, timeout/unknown-outcome rates, snapshot-read errors, database saturation, and projection lag. Validate both Java and Rust clients: reconnect, discovery transport, authentication, and recovery capabilities can differ by release.</p>
+<h2 id="customer-decision-statement"><a class="header" href="#customer-decision-statement">Customer decision statement</a></h2>
+<p>Light Portal should normally run outside the application clusters because it manages those clusters’ workloads and must remain available while they are being repaired or maintained. Dedicated VMs provide a clear infrastructure boundary and a smaller set of lifecycle dependencies for persistent controller connections.</p>
+<p>Kubernetes is an acceptable exception when the entire managed estate intentionally shares one cluster’s failure boundary, or when an independently governed management cluster demonstrates equivalent isolation and recovery. In either case, production acceptance depends on controller connection ownership, tested recovery, and the actual network path—not on choosing a StatefulSet or adding replicas.</p>
+<p>Related designs: <a href="#llm-gateway-configuration-topology">LLM gateway topology</a>, <a href="#control-plane-policy-publication-through-config-server">policy publication through config-server</a>, <a href="#operational-storage-registration-and-development-postgresql-topology">database topology</a>, and <a href="#portable-signed-portal-view-artifact-and-runtime-configuration">portable Portal View configuration</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="llm-gateway-configuration-topology"><a class="header" href="#llm-gateway-configuration-topology">LLM Gateway Configuration Topology</a></h1>
 <h2 id="decision-1"><a class="header" href="#decision-1">Decision</a></h2>
@@ -49921,11 +50145,34 @@ patch, an unavailable service, or an object outside the selected tenant.</p>
 <p>Open <strong>GenAI Chat</strong> at <code>/app/genai/chat</code>, select an agent in the current Host,
 and click <strong>Connect</strong>. The connected session determines the available turn types.
 Tech Support normally offers Chat. A published coding-only policy shows a fixed
-<strong>Coding implementation</strong> label and opens the repository form automatically.
+<strong>Coding implementation</strong> label and opens the code source form automatically.
 An agent with both types shows a selector. Reconnect with a new session after
 changing the published policy.</p>
-<h2 id="repository-input-for-coding"><a class="header" href="#repository-input-for-coding">Repository input for coding</a></h2>
-<p>The current coding implementation accepts one immutable <strong>Git bundle</strong> per
+<h2 id="shared-workspace-tasks"><a class="header" href="#shared-workspace-tasks">Shared workspace tasks</a></h2>
+<p>When the published agent policy grants access to a registered workspace, choose
+<strong>Shared workspace</strong> as the code source. No repository bundle is needed.</p>
+<ol>
+<li>Select the workspace, such as <code>personal</code>. Every registered repository belongs
+to the task; there is no separate repository access selector.</li>
+<li>Select <strong>Understand code</strong> for read-only inspection, or <strong>Implement changes</strong>
+to permit file edits.</li>
+<li>Select <strong>Existing task</strong> and enter its task ID to continue working on the same
+worktrees. Select <strong>New task</strong> to provision separate worktrees for a new task.</li>
+<li>Enter a concrete instruction, including repository names and relevant paths,
+and send it. For example: <code>Read README.md in light-fabric and portal-view and report both project titles. Do not edit files.</code></li>
+<li>Wait for the terminal result. Acceptance only means the request was queued.
+A successful result includes the task ID and checkpoint digest for follow-up.</li>
+</ol>
+<p>Edits affect the task’s worktrees, not the original repository checkouts. This
+Chat milestone supports repository/file listing, reading, and guarded file edits.
+Running tests, indexing, review approvals, GitHub publication, and workflow
+orchestration are not available through these Chat tools yet.</p>
+<p>The host runner and the agent must have matching workspace bindings and worker
+digests. Registering a local MCP server alone does not enable the Chat option.
+After a policy change, reconnect and choose <strong>New session</strong> if the previous
+session cannot resume. See the <a href="#shared-task-workspaces-with-local-codex-and-claude-agents">workspace tutorial</a>.</p>
+<h2 id="repository-bundle-input-for-coding"><a class="header" href="#repository-bundle-input-for-coding">Repository bundle input for coding</a></h2>
+<p>The <strong>Repository bundle</strong> code source accepts one immutable <strong>Git bundle</strong> per
 request. <strong>Repository bundle URI is not a GitHub HTTPS URL</strong>, a repository
 directory, or a ZIP download. It must be an absolute <code>file:///...</code> URI for a
 regular bundle file on the <strong>workflow runner host</strong>, under the repository URI
@@ -49989,9 +50236,9 @@ it does not upload the bundle. See the
 <a href="#9-submit-one-small-coding-turn-after-the-runner-gate-passes">Codex personal tutorial</a>
 for the request-generation helper and a complete smoke test.</p>
 <h2 id="multiple-repositories"><a class="header" href="#multiple-repositories">Multiple repositories</a></h2>
-<p>Each request currently carries one repository bundle, one base commit, and one
-worker workspace root. Multiple independent repositories in a single turn are
-not supported. Submit a separate request for each repository. A monorepo can
+<p>Shared workspace tasks include all registered repositories in one task. The
+repository bundle source carries one bundle, one base commit, and one worker
+workspace root per request. A monorepo can
 contain multiple projects in one bundle, but submodules are separate repositories
 and their contents are not automatically included by bundling the parent.</p>
 <h2 id="troubleshooting"><a class="header" href="#troubleshooting">Troubleshooting</a></h2>
@@ -58660,14 +58907,24 @@ the personal-assistant profile.</p>
 <p>Tutorials for setting up and operating a multi-repo workspace for coding
 agents, rather than a single service.</p>
 <ul>
-<li><a href="#setup-a-local-workspace-user-for-advanced-coding-agents-on-ubuntu-2404">Setup a local workspace user for coding agents on Ubuntu</a>:
+<li>
+<p><a href="#setup-a-local-workspace-user-for-advanced-coding-agents-on-ubuntu-2404">Setup a local workspace user for coding agents on Ubuntu</a>:
 run terminal agents like OpenAI Codex CLI and Claude Code from an isolated
 Linux account so they cannot directly read your personal data in the
-normal desktop profile.</li>
-<li><a href="#index-the-multi-repo-workspace-with-codebase-memory-mcp">codebase-memory-mcp</a>: install the
+normal desktop profile.</p>
+</li>
+<li>
+<p><a href="#index-the-multi-repo-workspace-with-codebase-memory-mcp">codebase-memory-mcp</a>: install the
 <code>codebase-memory-mcp</code> MCP server, index a workspace containing many
 <code>light-4j</code>-style repos, and keep separate index databases for a private
-workspace and a Linux-desktop workspace shared with other users.</li>
+workspace and a Linux-desktop workspace shared with other users.</p>
+</li>
+<li>
+<p><a href="#shared-task-workspaces-with-local-codex-and-claude-agents">Shared task workspaces with local Codex and Claude agents</a>:
+register a workspace, connect the local MCP service, and implement/review the
+same uncommitted task across repositories. Includes concrete host paths,
+terminal commands, expected results, and setup troubleshooting.</p>
+</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="setup-a-local-workspace-user-for-advanced-coding-agents-on-ubuntu-2404"><a class="header" href="#setup-a-local-workspace-user-for-advanced-coding-agents-on-ubuntu-2404">Setup a Local Workspace User for Advanced Coding Agents on Ubuntu 24.04</a></h1>
@@ -58883,6 +59140,331 @@ sbx run claude
 <li>https://www.youtube.com/watch?v=zb2LyMro77M</li>
 <li>https://meridianlabs-ai.github.io/inspect_swe/codex_cli.html</li>
 </ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="shared-task-workspaces-with-local-codex-and-claude-agents"><a class="header" href="#shared-task-workspaces-with-local-codex-and-claude-agents">Shared task workspaces with local Codex and Claude agents</a></h1>
+<p>This tutorial connects terminal agents to <code>light-workspace</code>, the owner-local
+workspace manager in <code>light-fabric</code>. You will register repositories, connect
+Codex CLI, create a task, and let Claude Code review the same uncommitted files.</p>
+<p><strong>This is a local terminal workflow.</strong> It does not enable workspace selection in
+Portal’s <code>/app/genai/chat</code>, change the Docker <code>codex-personal</code> service, or replace
+the repository bundle field. Controller/runner and Portal integration remain
+unfinished. No <code>portal-config-loc</code> Compose change is needed for this walkthrough.</p>
+<p>If you already have <code>/home/steve/.local/share/light-workspace/personal/workspace.json</code>,
+skip to <a href="#connect-a-local-agent">Connect a local agent</a>. Do not repeat discovery
+or registration just to connect a client.</p>
+<h2 id="paths-and-identities"><a class="header" href="#paths-and-identities">Paths and identities</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Item</th><th>Value in this walkthrough</th></tr>
+</thead>
+<tbody>
+<tr><td>Existing source repositories</td><td><code>/home/steve/workspace</code></td></tr>
+<tr><td>Executable</td><td><code>/home/steve/workspace/light-fabric/target/release/light-workspace</code></td></tr>
+<tr><td>Persistent private store</td><td><code>/home/steve/.local/share/light-workspace</code></td></tr>
+<tr><td>Workspace ID</td><td><code>personal</code></td></tr>
+<tr><td>First task ID</td><td><code>workspace-smoke-1</code></td></tr>
+<tr><td>Codex identity</td><td><code>com.networknt.agent.codex-personal-1.0.0</code></td></tr>
+<tr><td>Claude identity</td><td><code>com.networknt.agent.claude-personal-1.0.0</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>These two agent identities are entries in one workspace grant. They do not create
+Linux accounts or configure model subscriptions. Both clients run as <code>steve</code> and
+use the same store. The <a href="#setup-a-local-workspace-user-for-advanced-coding-agents-on-ubuntu-2404">dedicated-user tutorial</a> describes
+a different host isolation setup; its <code>/data/ai-workspace</code> paths are not required
+here. If you choose a dedicated account, substitute that account’s paths throughout.</p>
+<p>The source directory is used for discovery. Task branches and worktrees live in
+the private store; agents do not switch branches in your existing checkouts.
+Creating another task creates another worktree per repository, allowing parallel
+workflows. A task always includes the workspace’s full repository membership.</p>
+<h2 id="build-and-register"><a class="header" href="#build-and-register">Build and register</a></h2>
+<p>Run these commands in a Linux terminal as the user that will launch the agents.
+The examples use Steve’s host paths. Prerequisites are Rust/Cargo, Git, <code>jq</code>,
+bubblewrap (<code>/usr/bin/bwrap</code>) for <code>execute</code>, and authenticated <code>gh</code> for GitHub
+operations. Git must be able to read each registered origin without interactive
+credential prompts. Index providers are optional and must be configured before
+registration if you intend to use them.</p>
+<pre><code class="language-bash">cd /home/steve/workspace/light-fabric
+cargo build --release -p light-workspace
+umask 077
+# Replace HOST_ID with the Portal Host ID that owns this workspace.
+# Discovery reads origins and local refs without changing source checkouts.
+target/release/light-workspace discover /home/steve/workspace personal HOST_ID \
+  com.networknt.agent.codex-personal-1.0.0 \
+  com.networknt.agent.claude-personal-1.0.0 &gt; discovery.json
+
+# Set grants BEFORE the first registration. Do not redirect onto discovery.json.
+jq '.workspace | .operations = ["edit", "execute", "review", "commit", "push", "issue", "pull-request"]' \
+  discovery.json &gt; workspace.json
+jq '{id, hostId, agents, operations, indexers, repositoryCount: (.repositories | length)}' workspace.json
+</code></pre>
+<p>If you already registered successfully, skip discovery and registration and go to
+<a href="#connect-a-local-agent">Connect a local agent</a>. Use the persisted registration
+when checking IDs and grants; changing the input file does not update it.</p>
+<p>The result has <code>workspace</code>, <code>integrationBranchNotKnownLocally</code>, and
+<code>skippedRepositories</code> with directory/reason diagnostics for unsuitable names or
+unreadable origins. A skipped child does not stop discovery. Extract the
+<code>workspace</code> object into a private registration file. Select its operation grants
+explicitly; discovery grants none. Each agent grant covers all repositories.
+Example (replace paths and identities):</p>
+<pre><code class="language-json">{
+  "schemaVersion": 1,
+  "id": "personal",
+  "hostId": "HOST_ID",
+  "agents": ["com.networknt.agent.codex-personal-1.0.0", "com.networknt.agent.claude-personal-1.0.0"],
+  "operations": ["edit", "execute", "review", "commit", "push", "issue", "pull-request"],
+  "repositories": [
+    {
+      "name": "service",
+      "source": "git@github.com:OWNER/SERVICE.git",
+      "integrationBranch": "develop",
+      "releaseBranch": "master"
+    }
+  ],
+  "indexers": {
+    "gitnexus": {
+      "executable": "/absolute/path/to/gitnexus",
+      "args": ["analyze", "--force"],
+      "timeoutSeconds": 300
+    },
+    "codebase-memory-mcp": {
+      "executable": "/absolute/path/to/codebase-memory-mcp",
+      "args": [],
+      "timeoutSeconds": 300
+    }
+  }
+}
+</code></pre>
+<p>Register the extracted <code>workspace.json</code>, not the discovery wrapper. Keep the
+persistent store outside the source tree:</p>
+<pre><code class="language-bash">install -d -m 700 /home/steve/.local/share/light-workspace
+target/release/light-workspace \
+  /home/steve/.local/share/light-workspace register workspace.json
+</code></pre>
+<p>Expected output: <code>{"registered":"personal"}</code>. The private directory stores managed
+repositories, task worktrees, checkpoints, and indexes. Both agents use this path.</p>
+<p>Registration is metadata-only and idempotent for identical input. It rejects
+changes to an existing registration. The current implementation does not yet
+provide membership migration or live grant revocation. Do not edit registration
+files while tasks or clients are active. Credentials stay in host-managed Git
+and GitHub authentication, not this JSON or the model’s tool arguments.</p>
+<h2 id="connect-a-local-agent"><a class="header" href="#connect-a-local-agent">Connect a local agent</a></h2>
+<p>Here, <strong>local agent</strong> means the Codex CLI or Claude Code application running as
+<code>steve</code> on this Linux host. Open an ordinary terminal to run the commands below.
+These steps do not configure the <code>codex-personal</code> service in Portal Chat or require
+a Compose restart. The MCP client starts <code>light-workspace</code> as a child process and
+exchanges JSON over stdin/stdout; there is no URL or port to enter, and you do not
+start <code>serve</code> manually in another terminal.</p>
+<h3 id="check-the-registered-identities"><a class="header" href="#check-the-registered-identities">Check the registered identities</a></h3>
+<pre><code class="language-bash">jq '{id, agents, operations}' \
+  /home/steve/.local/share/light-workspace/personal/workspace.json
+</code></pre>
+<p>The examples below assume the full agent IDs produced by the discovery command.
+Every launch identity must match an entry in <code>agents</code> exactly. The MCP server name
+<code>personal-workspace</code> is only a client-side label; the workspace ID is <code>personal</code>.
+Both clients use the same private store, with a different agent identity. This is
+an owner-local launch setting, not network authentication or isolation between
+host administrators. Do not run the clients as different Linux users against this
+0700 store without designing an authenticated shared service first.</p>
+<h3 id="add-the-server-to-codex-cli"><a class="header" href="#add-the-server-to-codex-cli">Add the server to Codex CLI</a></h3>
+<p>Run this once in your Linux terminal, using your existing Codex installation and
+login. It updates your local Codex configuration, not <code>workspace.json</code>:</p>
+<pre><code class="language-bash">codex mcp add personal-workspace -- \
+  /home/steve/workspace/light-fabric/target/release/light-workspace \
+  /home/steve/.local/share/light-workspace serve personal \
+  com.networknt.agent.codex-personal-1.0.0
+
+codex mcp list
+</code></pre>
+<p>The list should contain <code>personal-workspace</code> and the command above. Start a new
+Codex CLI session by running <code>codex</code>; in its interactive prompt enter <code>/mcp</code>.
+Check that <code>personal-workspace</code> connects and exposes <code>task_workspace</code>.
+An existing session may need to be restarted to pick up the new configuration.</p>
+<p>Codex stores this entry in <code>~/.codex/config.toml</code>. Do not paste an <code>mcpServers</code>
+JSON object into that TOML file. For long workspace operations you can add
+<code>tool_timeout_sec = 600</code> inside the existing <code>[mcp_servers.personal-workspace]</code>
+table. That is a client timeout, not a guarantee that indexing all repositories
+will finish in ten minutes. Prefer the direct CLI for the initial clone and large
+index builds. See the <a href="https://developers.openai.com/codex/mcp/">official Codex MCP documentation</a>.</p>
+<h3 id="add-the-server-to-claude-code-optional-second-agent"><a class="header" href="#add-the-server-to-claude-code-optional-second-agent">Add the server to Claude Code (optional second agent)</a></h3>
+<p>In your Linux terminal, with Claude Code installed and signed in:</p>
+<pre><code class="language-bash">claude mcp add --transport stdio --scope user personal-workspace -- \
+  /home/steve/workspace/light-fabric/target/release/light-workspace \
+  /home/steve/.local/share/light-workspace serve personal \
+  com.networknt.agent.claude-personal-1.0.0
+
+claude mcp get personal-workspace
+</code></pre>
+<p>Start a new session with <code>claude</code>, then use <code>/mcp</code> to inspect the connection.
+<code>--scope user</code> keeps this setting in your user configuration instead of creating
+a repository <code>.mcp.json</code>. See the <a href="https://code.claude.com/docs/en/mcp">Claude Code MCP documentation</a>.
+You can connect Codex first and add Claude later; two separate processes share
+persistent tasks through the same store and task locks.</p>
+<h3 id="create-the-first-task-outside-the-model-session"><a class="header" href="#create-the-first-task-outside-the-model-session">Create the first task outside the model session</a></h3>
+<p>Run this in your Linux terminal after checking Git access to the registered
+origins. The first creation clones <strong>every registered repository</strong> and fetches its
+integration branch. For a 129-repository workspace this can take time and disk
+space; registration itself did not download these repositories. The managed copies
+come from the recorded origins, so uncommitted edits in <code>/home/steve/workspace</code>
+are not imported.</p>
+<pre><code class="language-bash">printf '%s\n' '{"operation":"create","task":"workspace-smoke-1"}' | \
+  /home/steve/workspace/light-fabric/target/release/light-workspace \
+  /home/steve/.local/share/light-workspace call personal \
+  com.networknt.agent.codex-personal-1.0.0
+</code></pre>
+<p>Expected output includes <code>"state": "ready"</code> and <code>checkouts</code> with one managed path
+per repository, each on <code>agent/workspace-smoke-1</code>. Retrying the same task ID resumes
+provisioning or returns the existing task. Do not invent a new task ID on every
+retry. Missing <code>develop</code> branches must be resolved explicitly; there is no fallback
+to <code>master</code>. Task creation makes no commits, pushes, issues, or PRs.</p>
+<h3 id="ask-the-connected-agent-to-use-it"><a class="header" href="#ask-the-connected-agent-to-use-it">Ask the connected agent to use it</a></h3>
+<p>In the <strong>Codex conversation</strong>, enter:</p>
+<blockquote>
+<p>Use the personal-workspace MCP server’s task_workspace tool. Call status for
+task workspace-smoke-1 and report its state and repository names. Use only the
+workspace tools for this task; do not access its files through host shell or
+native file tools. Do not edit, commit, push, or create GitHub resources.</p>
+</blockquote>
+<p>The tool arguments for that first call are:</p>
+<pre><code class="language-json">{"operation":"status","task":"workspace-smoke-1"}
+</code></pre>
+<p>Then ask it to read a specific file, for example:</p>
+<blockquote>
+<p>For workspace-smoke-1, use task_workspace read to read README.md in repository
+light-fabric and summarize the project. Do not change files.</p>
+</blockquote>
+<p>Use a repository name returned by <code>status</code> if <code>light-fabric</code> is not registered.
+This confirms the model can use the tool rather than merely seeing its name.
+The model client handles its own model login; the workspace server does not log
+in to Codex/Claude on your behalf.</p>
+<p>The manager must remain the only agent write path. Instructions to use MCP are
+workflow guidance, not a security boundary: an agent with unrestricted host file
+or shell access can bypass the freeze. This tutorial does not configure a hardened
+native-agent sandbox. Workspace <code>execute</code> does sandbox the commands it launches.</p>
+<h2 id="make-a-small-change-and-hand-it-to-the-reviewer"><a class="header" href="#make-a-small-change-and-hand-it-to-the-reviewer">Make a small change and hand it to the reviewer</a></h2>
+<p>After the read-only connection check succeeds, choose a small real change and
+name the task and repository in your Codex conversation. For example:</p>
+<blockquote>
+<p>In task workspace-smoke-1, read README.md in light-fabric through task_workspace.
+Propose a clearer sentence and show me the proposed change before editing.</p>
+</blockquote>
+<p>After you accept the wording, tell Codex to use <code>edit</code> with the digest returned by
+<code>read</code>. The tool expects this shape (the agent supplies the real content/digest):</p>
+<pre><code class="language-json">{
+  "operation": "edit",
+  "task": "workspace-smoke-1",
+  "edit": {
+    "repository": "light-fabric",
+    "path": "README.md",
+    "content": "COMPLETE_UPDATED_FILE_CONTENT",
+    "expectedDigest": "DIGEST_FROM_READ"
+  }
+}
+</code></pre>
+<p><code>content</code> replaces the whole file. For a new file <code>expectedDigest</code> is <code>null</code>; to
+delete a file <code>content</code> is <code>null</code> and the current digest is still required.
+Do not use the literal placeholder strings above as a real edit.</p>
+<p>When the changes are ready, ask Codex:</p>
+<blockquote>
+<p>Freeze workspace-smoke-1 using task_workspace and report the checkpoint digest.
+Do not commit or push yet.</p>
+</blockquote>
+<p>Expected result: state <code>frozen</code> and a <code>checkpoint.digest</code>. In the <strong>Claude Code
+conversation</strong>, after connecting its server, ask:</p>
+<blockquote>
+<p>Use only personal-workspace task_workspace tools. Inspect task workspace-smoke-1
+using status, files, and read. Review the proposed README.md change in light-fabric
+against the frozen checkpoint. Do not modify files or use native shell/file tools.
+Submit review with that exact checkpoint digest, approved true only if acceptable,
+and concrete findings. Do not commit or push.</p>
+</blockquote>
+<p>Claude sees the same managed files; no bundle, copy, commit, or push is needed
+for the handoff. Successful approval sets state <code>approved</code>. An agent that made
+edits cannot approve its own task. If changes are requested, ask Codex to call
+<code>remediate</code>, make corrections, freeze again, and ask Claude to review the new digest.
+Remediation invalidates the previous approval.</p>
+<p>You can verify state independently from the terminal:</p>
+<pre><code class="language-bash">printf '%s\n' '{"operation":"status","task":"workspace-smoke-1"}' | \
+  /home/steve/workspace/light-fabric/target/release/light-workspace \
+  /home/steve/.local/share/light-workspace call personal \
+  com.networknt.agent.codex-personal-1.0.0
+</code></pre>
+<h2 id="commit-and-publish-when-ready"><a class="header" href="#commit-and-publish-when-ready">Commit and publish when ready</a></h2>
+<p>This section performs real Git/GitHub writes only when you request them. Configure
+Git committer identity and GitHub authentication for the host user before delivery.
+An existing host <code>git config --global user.name</code> and <code>user.email</code> can supply the
+identity. <code>gh auth status</code> checks the CLI account; Git clone/push authentication
+must also work for the configured origin URLs.</p>
+<ol>
+<li>Tell the implementer to call <code>commit</code> for the approved task with your intended
+message. It commits changed repositories on <code>agent/workspace-smoke-1</code>.</li>
+<li>Tell it to call <code>push</code>. The manager creates absent task refs or accepts refs
+already at the reviewed commit; it does not overwrite unrelated remote changes.</li>
+<li>For each changed repository, request <code>github</code> with <code>action: "pull-request"</code>,
+the repository name, title, and body. Include an existing issue reference in the
+body when appropriate. PRs target the configured integration branch (<code>develop</code>).</li>
+</ol>
+<p>The command to create an issue instead uses <code>action: "issue"</code>. Existing issue
+editing, PR merging, CI tracking, and release promotion are not implemented by
+this service. Merging <code>develop</code> into <code>master</code> before a release remains your normal
+release process. Retrying delivery requires the same original inputs.</p>
+<h2 id="optional-indexing-and-command-execution"><a class="header" href="#optional-indexing-and-command-execution">Optional indexing and command execution</a></h2>
+<p>Start with the read/edit/review workflow. Discovery produces <code>indexers: {}</code>;
+installing GitNexus or codebase-memory-mcp alone does not enable <code>index</code> in this
+workspace. Use the provider registration example above <strong>before registering</strong> if
+indexing is required. The current service cannot update an existing registration;
+with existing tasks, use a separate registration until migration is implemented.
+Do not alter stored metadata to add providers.</p>
+<p>For a configured provider, freeze the task first, then call from a terminal:</p>
+<pre><code class="language-bash">printf '%s\n' '{"operation":"index","task":"workspace-smoke-1","provider":"gitnexus"}' | \
+  /home/steve/workspace/light-fabric/target/release/light-workspace \
+  /home/steve/.local/share/light-workspace call personal \
+  com.networknt.agent.codex-personal-1.0.0
+</code></pre>
+<p>Indexing runs sequentially across all repositories and may exceed a model client’s
+tool timeout. It uses independent checkpoint copies. A successful index for the
+same checkpoint is reused; a failed replacement retains the previous index.
+Use <code>index-status</code> to check freshness and <code>index-query</code> with a repository and query.
+Direct indexer MCP servers configured elsewhere do not automatically point at this
+task’s checkpoint copies.</p>
+<p>The workspace <code>execute</code> operation launches Linux bubblewrap commands under <code>/usr</code>,
+with no network, host home, or credential access. Review execution is read-only.
+It is suitable for available inspection/build tools, but it does not mount your
+host SDK installations or provide online dependency installation. A native client
+with unrestricted host tools can bypass workspace freezes; this local walkthrough
+is not a complete security configuration for that client.</p>
+<h2 id="checkpoint-reached"><a class="header" href="#checkpoint-reached">Checkpoint reached</a></h2>
+<p>You should now have a connected local MCP client, a managed task containing all
+registered repositories, and an explicit implementer/reviewer handoff. You can
+stop after the read-only connection check; GitHub writes are not required to
+verify the setup. Portal Chat can also use this registration when the native
+runner is configured and the agent’s published coding policy includes a matching
+workspace binding. In Chat choose <strong>Shared workspace</strong>, <code>personal</code>, <strong>Understand
+code</strong>, and <strong>Existing task</strong>, then enter <code>workspace-smoke-1</code>. Start with a small
+read-only request. See <a href="#genai-chat">GenAI Chat help</a>
+for the form and current tool limitations. Local MCP registration alone does not
+configure the Portal runner or publish the binding.</p>
+<h2 id="setup-troubleshooting"><a class="header" href="#setup-troubleshooting">Setup troubleshooting</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Symptom</th><th>Check or next step</th></tr>
+</thead>
+<tbody>
+<tr><td><code>No such file or directory</code> from registration</td><td>Run from the directory containing <code>workspace.json</code>, or give its absolute path. Extract <code>.workspace</code> from discovery first.</td></tr>
+<tr><td>Shell says the binary does not exist</td><td>Build with <code>--release</code> and use <code>target/release/light-workspace</code> consistently.</td></tr>
+<tr><td><code>workspace already registered with different membership or grants</code></td><td>Registrations are immutable. Before any tasks or active clients exist, back up the unused workspace directory and register the corrected input. With existing tasks, retain the registration and use a new workspace ID/store until migration is implemented. Never overwrite stored metadata to bypass the guard.</td></tr>
+<tr><td><code>agent has no workspace grant</code></td><td>Match the full agent ID in the stored <code>agents</code> array; a shortened name is a different identity.</td></tr>
+<tr><td><code>serve</code> appears to hang in a terminal</td><td>It is waiting for MCP JSON. Let the client launch it; use <code>call</code> for a direct JSON operation.</td></tr>
+<tr><td><code>/mcp</code> does not show the server</td><td>Check the client registration and absolute binary path, then start a new client session.</td></tr>
+<tr><td>Tool timeout during first task creation</td><td>Use the terminal <code>call</code> command above and retry the same task ID; check Git authentication and integration branches.</td></tr>
+<tr><td><code>index provider is not configured by host</code></td><td>Discovery leaves <code>indexers</code> empty. Add provider configuration before registration; merely installing an indexer does not register it. Existing registrations have no update command.</td></tr>
+<tr><td>Review command cannot write</td><td>Review mounts source files read-only. Writable build/test copies are not yet implemented.</td></tr>
+<tr><td>Portal Chat still requests a repository bundle</td><td>Publish a coding profile with the matching workspace binding, deploy the workspace-capable agent and native runner, then reconnect with a new session. Local MCP registration alone is insufficient.</td></tr>
+</tbody>
+</table>
+</div>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="index-the-multi-repo-workspace-with-codebase-memory-mcp"><a class="header" href="#index-the-multi-repo-workspace-with-codebase-memory-mcp">Index the Multi-Repo Workspace with codebase-memory-mcp</a></h1>
 <p>This tutorial sets up <a href="https://github.com/DeusData/codebase-memory-mcp"><code>codebase-memory-mcp</code></a>,
