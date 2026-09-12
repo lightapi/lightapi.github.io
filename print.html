@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-a09f269d.js";
+            window.path_to_searchindex_js = "searchindex-03708ce4.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-93fc6719.js"></script>
+        <script src="toc-4d23e149.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -58184,6 +58184,286 @@ router entry.</p>
 limit of this simplified demo. Do not present it as the customer’s required
 partial-response behavior; that needs the planned try/error-capture extension
 before failed branches can be appended beside successful responses.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="build-an-external-agent-with-a-light-a2a-sidecar"><a class="header" href="#build-an-external-agent-with-a-light-a2a-sidecar">Build an external agent with a light-a2a sidecar</a></h1>
+<p>The Rust support-triage example shows how to integrate your own agent into Light
+Fabric. You implement business behavior. <code>light-a2a</code> supplies the A2A protocol
+boundary and the platform’s published authorization and task-handling machinery.
+The first example is deterministic: it needs no LLM subscription or model key.</p>
+<h2 id="understand-the-components"><a class="header" href="#understand-the-components">Understand the components</a></h2>
+<pre><code class="language-text">A2A client -&gt; light-gateway -&gt; light-a2a -&gt; support-triage backend
+                               |            127.0.0.1:9010
+                               +-&gt; operational database / artifact storage
+</code></pre>
+<p>The last hop is private loopback in a shared container network namespace. The
+backend implements <code>light-a2a-backend/v1</code>; it is not a public A2A server. The
+sidecar translates authorized A2A operations into signed backend requests.
+It does not forward the caller’s raw bearer token. The backend still enforces
+business rules and task ownership.</p>
+<p>Portal models the layers separately:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Entity</th><th>Meaning in this example</th></tr>
+</thead>
+<tbody>
+<tr><td>Product/version <code>agt</code></td><td>Runtime and configuration contract; existing publication code requires this product</td></tr>
+<tr><td>Runtime instance</td><td>The deployed <code>light-a2a</code>, with its own service ID, environment and credential</td></tr>
+<tr><td>API/API version and Agent definition</td><td>The logical support-triage agent; <code>agentDefId == apiVersionId</code></td></tr>
+<tr><td>Skill</td><td>The published <code>support-triage</code> capability</td></tr>
+<tr><td>Gateway instance/API association</td><td>Where the logical agent is exposed</td></tr>
+<tr><td>A2A binding</td><td>Selects the runtime, local backend, signing and retention profiles, and access policy</td></tr>
+</tbody>
+</table>
+</div>
+<p>Do not create a new <code>a2a</code> product solely for this example. A native <code>light-agent</code>
+already supports A2A without this sidecar. An existing remote A2A server uses
+<code>REMOTE_A2A</code> federation, which is a different deployment from this local
+<code>EXTERNAL_SIDECAR</code> example.</p>
+<h2 id="build-and-test-the-business-backend"><a class="header" href="#build-and-test-the-business-backend">Build and test the business backend</a></h2>
+<p>Clone <code>networknt/light-example-rs</code> and <code>networknt/light-fabric</code> into sibling
+directories. Use the toolchain required by their Cargo workspaces. From
+<code>light-example-rs</code>:</p>
+<pre><code class="language-sh">cargo test --locked -p demo-support-triage-agent
+./build.sh 0.1.0-local-triage --local --app demo-support-triage-agent
+python3 apps/demo-support-triage-agent/scripts/smoke-demo.py
+</code></pre>
+<p>The smoke starts a disposable backend container, signs a test request, checks
+replay rejection and idempotent retry, then restarts it and queries the stored
+result. It uses temporary test identities and never changes your Portal database.
+This establishes backend contract behavior. It does <strong>not</strong> establish Portal
+publication, Gateway authorization or complete sidecar readiness.</p>
+<p>Example input is a text message: “Production outage affecting all users”. The
+result includes <code>category: availability</code>, <code>priority: high</code>, suggested next steps,
+and <code>automaticActionTaken: false</code>. The default mode does not create tickets or call a model. The optional local
+LLM mode below calls the existing LLM Gateway and still performs no actions.</p>
+<p>Read <code>apps/demo-support-triage-agent/src/lib.rs</code> to change the classification.
+The <code>a2a-backend</code> crate supplies the HTTP adapter and signature verification.
+The example advertises synchronous invocation and status reconciliation. It
+rejects streaming and cancellation and advertises those capabilities as false.</p>
+<h2 id="exercise-the-actual-light-a2a-router"><a class="header" href="#exercise-the-actual-light-a2a-router">Exercise the actual light-a2a router</a></h2>
+<p>With the sibling <code>portal-config-loc</code> checkout available, run from <code>light-example-rs</code>:</p>
+<pre><code class="language-sh">python3 apps/demo-support-triage-agent/scripts/test-sidecar.py
+</code></pre>
+<p>This provisions an isolated PostgreSQL container using the canonical operational
+migration bundle, then runs the actual <code>light-a2a</code> router against the backend.
+It verifies A2A message invocation, task persistence and retrieval after sidecar
+state restart. The script deletes its own database container and temporary files.
+It never accesses the running Portal database.</p>
+<p>This is a debug-build integration fixture with an explicitly unsigned test Agent
+Card and simulated Gateway-signed invocation. It verifies the real sidecar and
+backend code, but does not test Config Server bootstrap, live Portal publication,
+Agent Card signing or Gateway policy. Production deployment still requires the
+normal signed publication described below. Release builds reject the fixture’s
+unsigned Agent Card.</p>
+<h2 id="prepare-portal-authority"><a class="header" href="#prepare-portal-authority">Prepare Portal authority</a></h2>
+<p>This section requires a running Portal with operational-store provisioning,
+A2A authoring support and a configured light-oauth signing service. These are
+prerequisites, not artifacts supplied by the disposable backend smoke.</p>
+<ol>
+<li>Create an <code>agt</code> runtime instance for your chosen Host and environment. For the
+local standalone service use <code>com.networknt.light-a2a-1.0.0</code>, environment <code>dev</code>.
+Give it its own bootstrap/registration credential and map the A2A configuration
+catalog. Use only one live deployment for that workload identity.</li>
+<li>Register the logical support-triage API/API version and Agent definition,
+assign its Skill and public alias <code>support-triage</code>, and publish the definition
+and Skills. Create its association with the target Gateway instance.</li>
+<li>Author a retention profile and an external-facade signing profile, with a
+current managed signing-key reference. The signing purpose is
+<code>A2A_CARD_EXTERNAL_FACADE</code>; private key material stays in the signing service.</li>
+<li>Create the backend transport profile using the exact values below.</li>
+<li>Create the A2A binding with <code>implementationKind=EXTERNAL_SIDECAR</code>,
+<code>deploymentMode=SIDECAR</code>, agent reference <code>support-triage</code>, the runtime instance,
+Gateway association, approved backend profile, retention and signing profiles.
+Select <code>a2a-v03-jsonrpc</code> for the text-message example below. Set an inbound
+public path, such as <code>/a2a/support-triage</code>, your allowed public host, and explicit
+allowed principal prefixes appropriate to your organization.</li>
+<li>In the A2A publication dialog, select <strong>Preview</strong>, review the candidate, and
+<strong>Sign and stage</strong>. This prepares and signs the Agent Card and stages the
+generated property changes. It does not move the active snapshot.</li>
+<li>Create and activate the runtime and Gateway Config Server snapshots, then
+perform the normal reload/redeployment. Export the activated runtime values
+as a flat JSON object for the backend configuration helper.</li>
+</ol>
+<p>The transport profile is:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td><code>contractVersion</code></td><td><code>light-a2a-backend/v1</code></td></tr>
+<tr><td><code>contractDigest</code></td><td>Output of the command below; do not invent a digest</td></tr>
+<tr><td><code>origin</code></td><td><code>http://127.0.0.1:9010/</code></td></tr>
+<tr><td><code>audience</code></td><td><code>support-triage-backend</code></td></tr>
+<tr><td><code>contextKeyFile</code></td><td><code>/run/secrets/triage-context-key</code></td></tr>
+<tr><td><code>requestTimeoutMs</code></td><td><code>5000</code></td></tr>
+<tr><td><code>maximumRequestBytes</code></td><td><code>16384</code></td></tr>
+<tr><td><code>maximumResponseBytes</code></td><td><code>16384</code></td></tr>
+<tr><td><code>dataBoundaryDigest</code></td><td>Digest of your reviewed data-boundary policy</td></tr>
+</tbody>
+</table>
+</div>
+<pre><code class="language-sh">docker run --rm networknt/demo-support-triage-agent:0.1.0-local-triage \
+  /app/service --contract-digest
+</code></pre>
+<p>Publish these exact capabilities:</p>
+<pre><code class="language-json">{
+  "contractVersion": "light-a2a-backend/v1",
+  "streaming": false,
+  "cancellation": false,
+  "statusReconciliation": true,
+  "acceptedContentModes": ["text/plain"],
+  "maximumArtifactBytes": 65536
+}
+</code></pre>
+<p>Configure the retention profile’s maximum artifact bytes to at least 65536.
+This example emits no artifacts, but the contract and publication require a
+positive declared artifact limit. Use no streaming, push or extended-card
+features in the public profile unless the selected implementation supports them.</p>
+<h2 id="configure-and-deploy-the-pair"><a class="header" href="#configure-and-deploy-the-pair">Configure and deploy the pair</a></h2>
+<p>Generate the backend expectation from the activated values rather than manually
+copying publication IDs or computing a replacement policy digest:</p>
+<pre><code class="language-sh">python3 apps/demo-support-triage-agent/scripts/prepare-backend.py \
+  --values /absolute/private/active-a2a-values.json \
+  --host-id YOUR_HOST_UUID \
+  --output /absolute/private/backend.json
+</code></pre>
+<p>Use a flat JSON object with either Config Server keys
+<code>a2a.a2aPolicy.bindings</code> and <code>a2a.runtimePolicy.envTag</code>, or raw snapshot property
+keys <code>a2aPolicy.bindings</code> and <code>runtimePolicy.envTag</code>. Do not mix the forms. The
+bindings value can be a JSON list or a string containing that list. The environment
+tag is required; no <code>dev</code> default is inferred. Export a resolved tag explicitly
+when the snapshot relies on a template default. The selected binding must be the activated <code>support-triage</code> binding.
+The helper trusts the operator-provided export and refuses to overwrite a file.
+It does not publish or activate Portal data.</p>
+<p>Copy the canonical <code>light-fabric/apps/light-a2a/config/*.yml</code> templates into a
+private runtime config directory and provide <code>values.yml</code> for your deployment.
+It must identify the Host, service and environment, Config Server URI/CA, registry
+URL, operational and artifact stores, and secret file paths. For the supplied
+Compose pair set <code>server.advertisedAddress: support-triage-a2a</code>, HTTP port 8448,
+and disable HTTPS on that internal listener if the environment defaults differ.
+<code>runtimePolicy</code> and <code>a2aPolicy.bindings</code> come from the activated snapshot.</p>
+<p>Provision three distinct kinds of credentials:</p>
+<ul>
+<li>The runtime’s Portal bootstrap/registration credential, supplied as
+<code>TRIAGE_LIGHT_PORTAL_AUTHORIZATION</code> in a private env file.</li>
+<li>The backend context key shared only by this backend and its sidecar, mounted
+in both at <code>/run/secrets/triage-context-key</code>.</li>
+<li>The sidecar’s scoped database URL files and Gateway-to-sidecar authorized-context
+key, at the paths specified in its effective configuration.</li>
+</ul>
+<p>Use protected files readable by UID/GID 999. The generated <code>backend.json</code> is mode
+0600 and initially owned by the generating user; transfer it and the secret
+files to the runtime owner before mounting. Do not commit runtime files. The
+Docker build excludes <code>.runtime</code> directories.</p>
+<p>Copy <code>apps/demo-support-triage-agent/deploy/example.env</code> to a private file and
+replace every placeholder. <code>TRIAGE_PORTAL_NETWORK</code> selects the existing network
+where Config Server, Controller, PostgreSQL and Gateway are reachable. Build the
+sidecar with <code>light-fabric/apps/light-a2a/build.sh VERSION --local</code> and select
+that exact image. Then, from <code>light-example-rs</code>:</p>
+<pre><code class="language-sh">docker compose --env-file /absolute/private/triage.env \
+  -f apps/demo-support-triage-agent/deploy/compose.yml up -d --wait
+</code></pre>
+<p>A dedicated <code>triage-network</code> container owns the shared namespace. Both applications
+join it, so either application can restart without replacing the namespace. The
+sidecar waits for backend health. Use Compose to restart or recreate the namespace
+container and its dependents together.
+The backend port has no host mapping. The host A2A mapping defaults to
+<code>127.0.0.1:8458</code>; Gateway uses <code>support-triage-a2a:8448</code> internally.</p>
+<p>For a deployment already running the standalone <code>all-in-lt</code> light-a2a service,
+replace that deployment with this pair for the same instance. Do not register
+two sidecars with the same service identity or treat this separate Compose
+project as an automatic repair of the existing full-stack deployment.</p>
+<h2 id="call-the-public-a2a-endpoint"><a class="header" href="#call-the-public-a2a-endpoint">Call the public A2A endpoint</a></h2>
+<p>Use the path and host selected in the published binding, through the Gateway.
+Supply your authorized caller credential through your usual client configuration.
+First fetch the Agent Card at the discovery path for that binding and verify
+that the supported skills and non-streaming capability match your publication.</p>
+<p>For the published A2A 0.3 JSON-RPC profile, send this body to the agent’s public
+path (generate a new message ID for each new request):</p>
+<pre><code class="language-json">{
+  "jsonrpc": "2.0",
+  "id": "triage-1",
+  "method": "message/send",
+  "params": {
+    "message": {
+      "role": "user",
+      "messageId": "triage-example-1",
+      "metadata": {"skillId": "support-triage"},
+      "parts": [{"kind": "text", "text": "Production outage affecting all users"}]
+    }
+  }
+}
+</code></pre>
+<p>The Gateway authorizes the public request and signs its internal invocation.
+The sidecar admits the A2A task, signs a new private backend invocation and calls
+loopback. The business result is persisted before being returned; the sidecar
+updates its own task record. Directly sending the public JSON-RPC body to the
+backend will not work: that endpoint requires the private signed contract.</p>
+<h2 id="qualification-and-troubleshooting"><a class="header" href="#qualification-and-troubleshooting">Qualification and troubleshooting</a></h2>
+<p>After completing Portal authoring, verify both Compose health checks, retrieve
+the public Agent Card, invoke through Gateway, and inspect the completed task.
+Repeat a normal pair restart and verify task retrieval. Recreate both containers
+together after backend replacement or publication changes, because the shared
+network namespace and pinned publication identity must remain aligned.</p>
+<p>A Config Server 401 followed by <code>missing portal registration token</code> means the
+runtime has no usable bootstrap/registration credential. An empty binding list
+or expired projection requires publication/activation work. A backend capability
+or signature mismatch requires comparing the activated profile, generated
+backend configuration, contract digest and mounted key. Increasing readiness
+wait time does not repair any of these conditions.</p>
+<p>The example’s file store is deliberately single-process and bounded to 1,000
+tasks/16 MiB. It has no retention worker. Replace it with transactional durable
+storage and defined retention before using the example as a production agent.
+The automated tests establish backend contract, Docker restart behavior, and
+real sidecar routing/task persistence against disposable PostgreSQL;
+full Portal/Gateway qualification is a separate deployment step.</p>
+<h3 id="local-llm-backed-deployment"><a class="header" href="#local-llm-backed-deployment">Local LLM-backed deployment</a></h3>
+<p>For the <code>portal-config-loc/all-in-lt</code> demonstration, the AgentDefinition selects
+the real <code>assistant-dev</code> model alias. The backend calls the existing
+<code>llm-gateway</code> using the optional <code>llm</code> configuration:</p>
+<pre><code class="language-json">"llm": {
+  "endpoint": "https://llm-gateway:8443/v1/chat/completions",
+  "model": "assistant-dev",
+  "tokenFile": "/run/triage-llm/user.jwt",
+  "caFile": "/app/config/ca.pem"
+}
+</code></pre>
+<p>Add this object to the generated backend JSON before mounting it. Provision an
+authorized local operator token in <code>.runtime/llm-user.jwt</code>; authorize that user
+and Host for the LLM endpoint and alias using the existing Gateway access policy.
+This is a local test credential, separate from the incoming A2A caller token and
+from the sidecar’s service registration credential. Renew it through OAuth when
+it expires. Never put token contents in events, source control or the tutorial.</p>
+<p>The base <code>all-in-lt/docker-compose.yml</code> includes <code>demo-support-triage-agent</code>,
+its <code>light-a2a</code> sidecar, and a secret initialization service. No extra overlay is
+needed. A dedicated infrastructure container owns their shared network namespace;
+the backend listens only on <code>127.0.0.1:9010</code>; it receives only its own context key and LLM credential.
+The sidecar also mounts a distinct Gateway-to-sidecar authorization key.</p>
+<p>Before starting a fresh copy, provision the Git-ignored <code>.runtime/backend.json</code>,
+<code>service.jwt</code>, <code>llm-user.jwt</code>, <code>triage-context-key</code>, and <code>gateway-context-key</code>.
+Files must be readable by UID 999. The two context keys are independently
+generated random secrets; publish the backend key path in its transport profile.
+Keep the managed Agent Card signing private key in the OAuth signing directory.</p>
+<p>Use the regular local deployment command after publishing and activating both
+runtime and Gateway snapshots. In this stack, the Portal Gateway has logical
+environment <code>dev</code> and deployment tag <code>loc</code>; the A2A runtime uses <code>dev</code> for both.
+Choose the Gateway instance actually serving the public endpoint when creating
+the Instance API association.</p>
+<p>The exact imported events, immutable publication references, image digests and
+live qualification results are recorded in
+<code>light-portal-event/genai/20260912-support-triage/README.md</code>.</p>
+<p>An LLM-backed result identifies <code>classifier: llm-gateway</code> and
+<code>model: assistant-dev</code>. Model errors fail the task instead of silently switching
+to deterministic output. Category, priority and suggested steps are validated;
+<code>automaticActionTaken</code> always remains false.</p>
+<p>As of the local September 12 qualification, the backend and sidecar start and
+register, but Gateway publication 2 is still STAGED. An earlier failed snapshot
+blocked the Gateway graph; its event is excluded from replay by the current
+policy. The event record above documents the required recovery. Public discovery,
+invocation and restart-persistence checks must pass before calling this deployment
+fully activated.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-agent-2"><a class="header" href="#light-agent-2">light-agent</a></h1>
 <p>These tutorials connect Portal agent authoring to a locally deployed native
