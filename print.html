@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-03708ce4.js";
+            window.path_to_searchindex_js = "searchindex-a0d93ac4.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-4d23e149.js"></script>
+        <script src="toc-a66f94db.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -41982,6 +41982,288 @@ exception path.</p>
 event-sourced product release model without duplicating standard mappings for
 every tenant.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="product-upgrade-runtime-contract"><a class="header" href="#product-upgrade-runtime-contract">Product Upgrade Runtime Contract</a></h1>
+<p>This design note supports the <a href="#product-upgrade-and-rollback">Product Upgrade and Rollback runbook</a>.
+It separates implementation evidence and proposed work from operator procedures.</p>
+<p>Source review: September 14, 2026, against the local checkouts listed below.
+These are source findings, not qualification of a deployed fleet. Java runtime
+observations refer specifically to light-4j’s <code>DefaultConfigLoader</code> (DCL), not
+every custom loader or the Rust runtime.</p>
+<h2 id="decision-selection-and-compatibility-are-different"><a class="header" href="#decision-selection-and-compatibility-are-different">Decision: selection and compatibility are different</a></h2>
+<p>Keep the Portal Config Server lookup identity as <code>host + serviceId + envTag</code>.
+A product upgrade uses a version-specific authoring instance and an explicitly
+approved snapshot. Activating that snapshot changes what the identity serves.
+<code>productVersion</code> is not required as another lookup selector, and legacy
+product/API parameters are tolerated but ignored by the Portal server.</p>
+<p>This does <strong>not</strong> provide either product-version filtering of every generated
+property or a runtime compatibility check. A 2.3.7 binary can currently load
+the current 2.3.8 snapshot without a version-mismatch warning. The database
+snapshot record contains <code>product_id</code> and <code>product_version</code>; the HTTP response
+does not currently expose a product-version header.</p>
+<p>An <code>expectedProductVersion</code> guard would assert compatibility with the selected
+snapshot, not select a different snapshot. It should be implemented as a
+separate contract. Incompatible binaries fetching different configurations from
+Config Server at the same time must use separate authorized rollout identities
+today. Merely adding a product-version parameter does not establish a complete
+deployment, authorization, snapshot-retention, or rollback contract.</p>
+<h2 id="database-identity"><a class="header" href="#database-identity">Database identity</a></h2>
+<p>Keep the version in the authoring-instance unique index:</p>
+<pre><code class="language-sql">CREATE UNIQUE INDEX instance_uk
+ON public.instance_t (host_id, service_id, env_tag, product_version_id);
+</code></pre>
+<p><code>config_snapshot_t</code> uses <code>snapshot_id</code> as its primary key and these partial
+unique indexes:</p>
+<pre><code class="language-sql">CREATE UNIQUE INDEX uq_config_snapshot_current_instance
+ON public.config_snapshot_t (host_id, instance_id)
+WHERE current IS TRUE;
+
+CREATE UNIQUE INDEX uq_config_snapshot_current_logical_identity
+ON public.config_snapshot_t (host_id, service_id, env_tag)
+WHERE current IS TRUE;
+</code></pre>
+<p>Multiple version-specific instances and historical snapshots are allowed, but
+only one snapshot is current per runtime identity. Removing the instance’s
+version key would prevent retaining both release authoring graphs under that
+identity. Neither <code>instance_t.current</code> nor <code>instance_t.active</code> selects the
+runtime snapshot.</p>
+<h2 id="implementation-status-1"><a class="header" href="#implementation-status-1">Implementation status</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Area</th><th>Verified behavior</th><th>Consequence or follow-up</th></tr>
+</thead>
+<tbody>
+<tr><td>Candidate clone</td><td><code>createSnapshot=true</code> creates a current snapshot and resets the previous current selection for the same identity.</td><td>Clone with it disabled; create a non-current candidate snapshot separately.</td></tr>
+<tr><td>Snapshot selection</td><td><code>/configs</code> selects current even when <code>snapshotId</code> is supplied; <code>/certs</code> and <code>/files</code> honor explicit snapshot IDs within the authorized identity.</td><td>Current-only values selection does not support per-deployment pinning. See F5.</td></tr>
+<tr><td>DCL startup</td><td>Three separate requests; no capture of the values response’s snapshot ID or pinning of ancillary calls.</td><td>Activation between calls can mix values and files from different snapshots. See F3.</td></tr>
+<tr><td>DCL provenance</td><td>Ignores snapshot/instance/digest headers; the legacy <code>isHeadersMatchedJar</code> call is commented out.</td><td>No runtime-reported snapshot/digest evidence or active version check. See F3/F4.</td></tr>
+<tr><td>DCL reload</td><td><code>ConfigReloadHandler</code> calls the loader; default reload fetches values only, not certs/files.</td><td>Hold reloads during incompatible overlap; a reload is not a whole-bundle transition. See F3/F7.</td></tr>
+<tr><td>DCL failed fetch</td><td>On connection/connect-timeout or HTTP &gt;=300 failure, the missing-values exception is inside a directory-exists check. A missing directory can fall through without values; an existing cache can permit fallback.</td><td>For pipeline-controlled remote release starts, pre-create the directory without <code>values.yml</code> and reject fallback. Steady-state restart policy is unchanged. Fail-fast behavior must not depend on directory existence; see F7.</td></tr>
+<tr><td>DCL ancillary errors</td><td>After values are cached, tolerated cert/file HTTP errors return an empty map. <code>loadFiles</code> checks null, so it writes nothing without a files-specific failure. The shared error still says “configs.”</td><td>Check all shared failures, not just the values source log. Distinguish an empty successful inventory from a failed fetch; see F3/F7.</td></tr>
+<tr><td>DCL local state</td><td>File downloads do not remove obsolete files. Values write errors can be logged while the caller still reports Config Server as the source.</td><td>Source logs alone do not prove successful adoption. Use release-specific directories and inventory checks; see F7.</td></tr>
+<tr><td>DCL sensitive logs</td><td><code>loadFiles</code> dumps complete cert/file maps at DEBUG; <code>loadConfigs</code> dumps values at TRACE; HTTP failure messages include response bodies at ERROR.</td><td>Keep the DCL logger at INFO or more restrictive, restrict error-log access, and remove/redact payloads in F3.</td></tr>
+<tr><td>Version applicability</td><td>Editor uses mappings/profiles; snapshot generation does not enforce their applicability.</td><td>Review actual output, including inherited overrides. See F1.</td></tr>
+<tr><td>Inheritance/defaults</td><td>Editor prefers environment over product version; snapshot generation prefers product version over environment. Catalog defaults are not a snapshot inheritance layer.</td><td>Align resolution and define default materialization. See F2.</td></tr>
+<tr><td>Snapshot reproducibility</td><td>Serving joins <code>config_t</code> for configuration names.</td><td>Retaining snapshot rows alone does not isolate output from incompatible catalog renames; retain catalog compatibility and verify exports.</td></tr>
+<tr><td>Pipelines</td><td>Clone preserves the referenced pipeline ID and resets job/runtime state. Pipeline definitions and external jobs are mutable.</td><td>Select the target pipeline and retain immutable source/artifact/input references. See F6.</td></tr>
+<tr><td>Authorization</td><td>Config Server validates host/service/env context, not an instance UUID.</td><td>Same-identity clones do not inherently need new Config Server tokens; a new rollout identity needs matching authorization.</td></tr>
+<tr><td>Retirement</td><td>Soft delete hides inactive instances in normal listings and cascades to owned graph rows; snapshots are retained separately. Snapshot lookup does not check <code>instance_t.active</code>.</td><td>Retirement does not revoke a selected snapshot. Guard it operationally; see F6.</td></tr>
+<tr><td>Retry</td><td><code>instance_uk</code> and clone collision queries include retired rows.</td><td>Restore/reconcile the same target-version instance instead of cloning over it.</td></tr>
+<tr><td>Fleet lifecycle</td><td>Individual operations exist; no complete two-release retention/reservation/orchestration workflow.</td><td>Runbook controls are manual today. See F6.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="limits-of-current-dcl-evidence"><a class="header" href="#limits-of-current-dcl-evidence">Limits of current DCL evidence</a></h3>
+<p>The startup source message distinguishes a usable values response from the
+fallback path, but does not prove a local cache exists. It is not snapshot
+attestation, and a write failure can still produce the Config Server source
+message. The corresponding reload message has the same limitation. Absence of
+an exception does not prove usable values or all files arrived. With a missing
+directory, DCL can continue past failed fetches; whether the rest of the
+application starts depends on its other configuration requirements.</p>
+<p><code>x-light-config-content-digest</code> is a digest of the server’s emitted values YAML,
+not a digest of all certs/files or all in-memory merged configuration. DCL parses
+and reserializes values before writing, so comparing that header directly with
+the local file’s raw hash is not a valid verification method. The runbook uses
+external fetch/inventory/behavior evidence and explicitly leaves runtime-reported
+snapshot identity unknown until instrumentation exists.</p>
+<h3 id="release-start-gates-versus-steady-state-policy"><a class="header" href="#release-start-gates-versus-steady-state-policy">Release-start gates versus steady-state policy</a></h3>
+<p>The runbook’s no-cache gate is preparation for rollout/rollback starts and retries
+controlled by the release pipeline. It is not a permanent init-container cache
+deletion policy. After verification, automatic restarts and scale-out retain
+their normal fallback behavior; F7 separately owns any change to that behavior.</p>
+<p>A remote-only rollback requiring a restart depends on Config Server availability.
+Qualifying a local-export contingency before an upgrade, or explicitly accepting
+that dependency, is an operational prerequisite for the release record. A running
+old blue/green cohort avoids that restart only while it remains healthy.</p>
+<h2 id="proposed-follow-up-work"><a class="header" href="#proposed-follow-up-work">Proposed follow-up work</a></h2>
+<p>F1–F7 identify the implementation work below. Each has a GitHub issue with the
+scope and acceptance criteria from this design. F4 is split into coordinated
+runtime and server issues. All were assigned to <code>stevehu</code> as coordinating owner
+when filed; use the linked issues for current assignment and implementation status.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Work</th><th>Tracking issue</th><th>Coordinating owner</th></tr>
+</thead>
+<tbody>
+<tr><td>F1 — snapshot applicability</td><td><a href="https://github.com/lightapi/portal-db/issues/342">portal-db#342</a></td><td><code>stevehu</code></td></tr>
+<tr><td>F2 — editor/snapshot resolution</td><td><a href="https://github.com/lightapi/light-portal/issues/809">light-portal#809</a></td><td><code>stevehu</code></td></tr>
+<tr><td>F3 — DCL pinning and safe provenance</td><td><a href="https://github.com/networknt/light-4j/issues/2790">light-4j#2790</a></td><td><code>stevehu</code></td></tr>
+<tr><td>F4 — compatibility guard</td><td><a href="https://github.com/networknt/light-4j/issues/2792">light-4j#2792 (runtime)</a>, <a href="https://github.com/lightapi/portal-service/issues/83">portal-service#83 (server)</a></td><td><code>stevehu</code></td></tr>
+<tr><td>F5 — explicit values snapshot selection</td><td><a href="https://github.com/lightapi/portal-service/issues/82">portal-service#82</a></td><td><code>stevehu</code></td></tr>
+<tr><td>F6 — retention and fleet orchestration</td><td><a href="https://github.com/lightapi/light-portal/issues/808">light-portal#808</a></td><td><code>stevehu</code></td></tr>
+<tr><td>F7 — DCL bundle/cache/reload policy</td><td><a href="https://github.com/networknt/light-4j/issues/2791">light-4j#2791</a></td><td><code>stevehu</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>F1/F2/F6 coordinate schema and Portal changes across <code>portal-db</code> and
+<code>light-portal</code>. F3/F7 are cross-linked for DCL failure-state ownership; the two
+F4 issues are cross-linked for the response-metadata and runtime guard contract.</p>
+<h3 id="f1-validate-product-version-applicability-at-snapshot-creation"><a class="header" href="#f1-validate-product-version-applicability-at-snapshot-creation">F1. Validate product-version applicability at snapshot creation</a></h3>
+<p>Define the authoritative release configuration contract across direct mappings,
+profiles, inherited overrides, and approved custom/generated properties. Reject
+unsupported or incomplete candidate output with actionable diagnostics; do not
+silently drop extensions or delete older releases’ catalog properties.</p>
+<p>Acceptance: snapshot tests cover additions, removals, renamed/changed properties,
+required values, inherited unsupported overrides, profile mappings, and approved
+extensions. An old release’s retained snapshot/authoring state is unchanged by
+qualifying a new release.</p>
+<h3 id="f2-align-editor-and-snapshot-resolution"><a class="header" href="#f2-align-editor-and-snapshot-resolution">F2. Align editor and snapshot resolution</a></h3>
+<p>Choose and document one inheritance order, then use it for both preview and
+snapshot creation. Explicitly decide which defaults are emitted and which are
+provided by the pinned binary; do not assume that a new catalog mapping emits
+its default automatically.</p>
+<p>Acceptance: table-driven tests exercise every competing layer, null/empty
+semantics, explicit overrides, and target-release defaults. The same input graph
+produces the same effective preview and generated output.</p>
+<h3 id="f3-pin-dcl-ancillary-downloads-and-expose-safe-provenance"><a class="header" href="#f3-pin-dcl-ancillary-downloads-and-expose-safe-provenance">F3. Pin DCL ancillary downloads and expose safe provenance</a></h3>
+<p>Capture <code>x-light-config-snapshot-id</code> from the successful <code>/configs</code> response and
+pass that exact <code>snapshotId</code> to <code>/certs</code> and <code>/files</code>. This uses existing server
+support and does not depend on F5. Preserve the authorized host/service/env and
+phase on all requests. Do not resolve current again between these calls.</p>
+<p>Capture the host, instance, snapshot, and values-content-digest response headers
+as non-secret provenance. Log/expose them through a supported runtime information
+surface only with accurate state: fetched, written, and successfully adopted are
+different stages. Track startup versus reload, remote versus local source, and
+partial/failed bundle status. Verify the digest over the raw response before
+parsing if claiming transport-content verification; do not imply it attests
+in-memory values or ancillary files.</p>
+<p>Report endpoint-specific success/failure without logging response payloads:
+the present shared “configs” error and empty-map result obscure whether certs
+or files failed. Remove/redact <code>loadFiles</code> DEBUG payloads, <code>loadConfigs</code> TRACE
+values, and raw HTTP error bodies, including exception messages. Preserve useful
+endpoint category, status, and non-secret provenance rather than secret content.</p>
+<p>Acceptance: activate snapshot B between values and ancillary calls for A and
+verify every downloaded asset still belongs to A. Exercise missing/malformed
+headers, older servers, unavailable snapshots, and write failures with explicit
+behavior. After a successful values fetch, make <code>/certs</code> and <code>/files</code> independently
+return &gt;=300 or fail to connect; each failure must be distinguishable from a
+successful empty inventory and must not yield a complete-bundle success claim.
+Test at INFO, DEBUG, and TRACE with sentinel secrets in values, binary file maps,
+and error bodies; none may appear in logs or exposed provenance. Do not claim
+bundle-wide reload support while reload only fetches values. Coordinate F3 and
+F7 as linked light-4j DCL work items with clear failure-state ownership.</p>
+<h3 id="f4-add-a-product-version-compatibility-guard"><a class="header" href="#f4-add-a-product-version-compatibility-guard">F4. Add a product-version compatibility guard</a></h3>
+<p>Return <code>x-light-config-product-version</code> from the <strong>selected snapshot’s recorded
+version</strong>, not a fresh lookup of a mutable instance’s version. Include recorded
+product identity as needed to make the comparison unambiguous. The runtime
+compares this metadata with its expected deployed product release.</p>
+<p>Treat <code>expectedProductVersion</code> as a proposed assertion contract, not an existing
+configuration option and not a second lookup selector. For ordinary packaged
+products, validate the artifact’s release metadata. Do not blindly compare every
+application with <code>Server.getLight4jVersion()</code>: it reads the package’s
+<code>Implementation-Version</code>, which may identify the framework in a custom build
+rather than the deployed product. Define an explicit, verifiable product/version
+source for such artifacts.</p>
+<p>Start with an explicit warning-only adoption mode if needed for compatibility;
+provide a strict rejection mode for releases requiring an exact match. Define
+missing metadata, legacy servers, and any declared cross-version compatibility
+policy. A strict mismatch must not silently become a successful startup using
+an unverified cache. Do not simply uncomment the legacy header check: it expects
+the older product/API header contract, not the proposed snapshot metadata.</p>
+<p>Acceptance: matching releases succeed, mismatches warn or fail according to the
+selected policy, missing metadata is observable, custom/shaded artifact identity
+is tested, and incompatible cached configurations cannot bypass strict mode.
+The guard is compatibility validation, not authorization or property filtering.</p>
+<h3 id="f5-define-explicit-values-snapshot-selection"><a class="header" href="#f5-define-explicit-values-snapshot-selection">F5. Define explicit values snapshot selection</a></h3>
+<p>Decide the contract for <code>/configs?snapshotId=...</code>, including how deployments
+choose and retain a snapshot. If implemented, authorize it against the same
+host/service/env and return provenance for exactly that snapshot. Never silently
+fall back to current when an explicit ID is invalid or unavailable. Until then,
+document that the accepted query field is ignored; consider a separately
+qualified rejection/deprecation policy to avoid implying pinning works.</p>
+<p>Acceptance: cover historical/current selections, wrong host/service/env,
+missing/retired dependencies, and consistent values/certs/files. Per-deployment
+selection needs pipeline/client wiring and retention guarantees in addition to
+the endpoint change. This is not required for F3’s within-startup pinning.</p>
+<h3 id="f6-release-retention-and-fleet-orchestration"><a class="header" href="#f6-release-retention-and-fleet-orchestration">F6. Release retention and fleet orchestration</a></h3>
+<p>Implement durable release records/reservations if Portal is to own them, explicit
+pipeline/artifact revision binding, target-pipeline validation, bounded clone
+batches, and progress through projection and runtime verification. Apply one
+two-instance limit/reservation per logical deployment group across all cohort
+identities and replicas, as defined in the runbook. Retirement guards must
+consider selected snapshots, running workloads, dependencies, and
+rollback obligations. Retry a retired version through safe restoration and
+reconciliation; do not make clone silently overwrite an archived aggregate.</p>
+<p>Acceptance: exercise two-slot transitions, alternating blue/green env tags,
+sidecar compatible-overlap and stop/activate/start policies, interrupted/retried
+runs, reservation takeover, mixed fleet success/failure, safe retirement, and
+restoration of a failed target whose source has since changed. No instance may be retired solely
+because another fleet member succeeded. The runbook’s manifest and manual lock
+conventions are not a substitute for implementing these guarantees.</p>
+<h3 id="f7-qualify-dcl-bundle-adoption-and-cachereload-policy"><a class="header" href="#f7-qualify-dcl-bundle-adoption-and-cachereload-policy">F7. Qualify DCL bundle adoption and cache/reload policy</a></h3>
+<p>Keep broad fallback-policy changes separately scoped from the selector decision.
+Define release-scoped cache ownership and file inventories, failure propagation,
+and transactional adoption if a whole-bundle guarantee is required. Pinning HTTP
+requests alone does not make writes atomic or remove obsolete files.</p>
+<p>Fail fast when required remote values cannot be obtained and no policy-approved,
+compatible cache exists, <strong>whether or not the target directory exists</strong>. Do not
+infer cache presence from the directory or emit a cache-source success claim
+without verifying the cache. Define explicit outcomes for unusable/empty values
+and partial bundle failures. The runbook rejects fallback for pipeline-controlled
+release starts, not all subsequent automatic restarts. Enforce that gate in the
+release workflow rather than permanently deleting caches on each boot. Any
+broader change to normal-runtime fallback policy requires compatibility approval.</p>
+<p>Acceptance must cover:</p>
+<ul>
+<li>Absent directory, existing directory without <code>values.yml</code>, approved cache,
+and incompatible/stale cache, crossed with HTTP &gt;=300 (including no-current
+snapshot 404), connection/connect-timeout failure, and empty/unusable values.
+No-cache failure must not silently continue in either directory state.</li>
+<li>A successful values fetch followed by separate cert/file failures. Failed
+empty-map responses must not be accepted as valid empty inventories or silently
+reuse stale assets. Coordinate endpoint-specific diagnostics and outcome state
+with F3; no complete-bundle success claim after a partial failure.</li>
+<li>Values/file write failures, partial-start retries, obsolete files on volume
+reuse, and concurrent reload. Do not remove independent local credentials or
+bootstrap files. Decide whether reload updates the whole bundle or explicitly
+requires restart for cert/file changes.</li>
+<li>Release-start gates versus verified-release steady-state restarts: applying
+the pipeline gate must not silently disable the existing cache fallback for
+later liveness restarts, evictions, or scale-out.</li>
+</ul>
+<p>F7 is tracked in <a href="https://github.com/networknt/light-4j/issues/2791">light-4j#2791</a>,
+coordinated with F3 in <a href="https://github.com/networknt/light-4j/issues/2790">light-4j#2790</a>.</p>
+<h2 id="issue-disposition"><a class="header" href="#issue-disposition">Issue disposition</a></h2>
+<p>The original <a href="https://github.com/networknt/light-4j/issues/2789">light-4j issue #2789</a>
+asks whether DCL and Config Server should support a product-version parameter.
+The design answer is no required selector, but that does not mean the current
+runtime already supplies compatibility checking or consistent bundle loading.</p>
+<p>The selector decision and implementation completion are separate. Once these
+documents are published and linked in the reporter response alongside the
+tracking issues, #2789 can close as the decision to keep the existing selector.
+F1–F7 remain tracked independently until their acceptance criteria are met.
+Closing the selector question does not claim that runtime compatibility,
+consistent bundle adoption, unattended upgrades, or live fleet qualification
+have been delivered by this documentation change.</p>
+<h2 id="source-references"><a class="header" href="#source-references">Source references</a></h2>
+<p>Paths identify the reviewed implementation, not permanent line-number anchors.
+Recheck them when the contract changes.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Repository</th><th>Path and relevant implementation</th></tr>
+</thead>
+<tbody>
+<tr><td><code>portal-db</code></td><td><code>postgres/schema/base.sql</code>: <code>instance_uk</code>, snapshot columns/indexes, <code>create_snapshot</code>, pipeline/deployment tables, cascade policy.</td></tr>
+<tr><td><code>portal-db</code></td><td><code>postgres/schema/cascade-runtime.generated.sql</code>: soft-delete/restore triggers and snapshot exclusions.</td></tr>
+<tr><td><code>light-portal</code></td><td><code>db-provider/src/main/java/net/lightapi/portal/db/clone/InstanceCloneExecutor.java</code>: optional snapshot activation and target identity collision check.</td></tr>
+<tr><td><code>light-portal</code></td><td><code>db-provider/src/main/java/net/lightapi/portal/db/clone/InstanceCloneQueryService.java</code>: plan-time target collision check includes retired rows.</td></tr>
+<tr><td><code>light-portal</code></td><td><code>db-provider/src/main/java/net/lightapi/portal/db/clone/InstanceCloneEventFactory.java</code>: copied deployment bindings retain pipeline references and reset job/runtime state.</td></tr>
+<tr><td><code>light-portal</code></td><td><code>db-provider/src/main/java/net/lightapi/portal/db/persistence/ConfigPersistenceImpl.java</code>: editor applicability/inheritance and snapshot activation.</td></tr>
+<tr><td><code>light-portal</code></td><td><code>db-provider/src/main/java/net/lightapi/portal/db/persistence/InstanceDeploymentPersistenceImpl.java</code>: deployment pipeline updates and soft deletion.</td></tr>
+<tr><td><code>config-command</code></td><td><code>src/main/java/net/lightapi/portal/config/command/handler/CreateConfigSnapshot.java</code>: projection readiness and graph revision check.</td></tr>
+<tr><td><code>portal-service</code></td><td><code>apps/config-server/src/main.rs</code>: <code>ConfigQuery</code>, <code>get_configs</code>, <code>get_certs</code>, <code>get_files</code>, <code>authorize_config_request</code>, response provenance.</td></tr>
+<tr><td><code>portal-service</code></td><td><code>crates/portal-core/src/lib.rs</code>: <code>get_current_config_snapshot</code>, <code>get_snapshot_entries</code>, explicit snapshot resolution.</td></tr>
+<tr><td><code>light-4j</code></td><td><code>server/src/main/java/com/networknt/server/DefaultConfigLoader.java</code>: <code>init</code>, <code>reloadConfig</code>, <code>loadConfigs</code>, <code>loadFiles</code>, <code>getServiceConfigs</code>, inactive <code>isHeadersMatchedJar</code>.</td></tr>
+<tr><td><code>light-4j</code></td><td><code>server/src/main/java/com/networknt/server/Server.java</code>: package metadata in <code>getLight4jVersion</code> and <code>getLight4jProduct</code>.</td></tr>
+<tr><td><code>light-4j</code></td><td><code>config-reload/src/main/java/com/networknt/config/reload/handler/ConfigReloadHandler.java</code>: loader invocation on reload.</td></tr>
+<tr><td><code>portal-view</code></td><td><code>src/pages/instance/InstanceClone.tsx</code> and <code>InstanceAdmin.tsx</code>: current-snapshot option and default active filter.</td></tr>
+</tbody>
+</table>
+</div>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="release-workflow"><a class="header" href="#release-workflow">Release Workflow</a></h1>
 <h2 id="status-21"><a class="header" href="#status-21">Status</a></h2>
 <p>Proposed design.</p>
@@ -55476,14 +55758,549 @@ client.tokenKeyUri: /oauth2/N2CMw0HGQXeLvC1wBfln2A/keys
 <h1 id="operations"><a class="header" href="#operations">Operations</a></h1>
 <p>This section documents the deployed Light Portal runtime: how the supported
 Docker Compose distributions are assembled, how services receive configuration
-and secrets, and how operators can diagnose startup and readiness failures.</p>
+and secrets, how product releases are upgraded and rolled back, and how
+operators can diagnose startup and readiness failures.</p>
 <p>Architecture and design pages explain why the platform is structured this way.
 The operations pages describe the current executable contract. The Compose file
 in each deployment repository remains the source of truth when a released
 version differs from this documentation.</p>
+<p>Read <a href="#product-upgrade-and-rollback">Product Upgrade and Rollback</a> for
+version-specific instances, configuration snapshots, deployment pipelines, and
+bounded release retention. The companion
+<a href="#product-upgrade-runtime-contract">Product Upgrade Runtime Contract</a>
+records implementation limits and proposed code follow-ups.</p>
 <p>Start with <a href="#docker-compose-deployments">Docker Compose Deployments</a> to choose
 an environment and understand the configuration boundaries shared by all four
 distributions.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="product-upgrade-and-rollback"><a class="header" href="#product-upgrade-and-rollback">Product Upgrade and Rollback</a></h1>
+<p>For sidecars and centralized gateways, clone a version-specific instance when
+scheduling an upgrade. Retain the previous instance, configuration, and pipeline
+for rollback and continued editing. Publishing a product release alone changes
+no deployments; upgrade fleets in batches.</p>
+<p>This is an operator-controlled policy. The
+<a href="#product-upgrade-runtime-contract">runtime contract</a> records current
+limitations, including Java DCL snapshot consistency, provenance, and compatibility.</p>
+<h2 id="emergency-rollback-checklist"><a class="header" href="#emergency-rollback-checklist">Emergency rollback checklist</a></h2>
+<p>Use the prequalified rollback mode. For a healthy old blue/green cohort, verify
+it and switch traffic without restarting it or changing its files. A remote-only
+rollback needing a restart depends on Config Server availability; see
+<a href="#rollback-availability">rollback availability</a>.</p>
+<ol>
+<li><strong>Record:</strong> retrieve the <a href="#release-record-location-and-template">previous release record</a>,
+artifact, snapshot/bundle, pipeline inputs, and migration recovery constraints.</li>
+<li><strong>Reservation:</strong> take control of the <a href="#release-controls">existing release reservation</a>
+with its owner; prevent competing deployments and configuration changes.</li>
+<li><strong>Hold:</strong> block new traffic to unhealthy workloads and hold incompatible
+reloads/restarts. For a same-identity restart, stop the incompatible cohort
+before changing its snapshot. See <a href="#rollback-procedure">rollback coordination</a>.</li>
+<li><strong>Directory, for this pipeline-controlled start:</strong> <a href="#java-dcl-startup-and-configuration-evidence">remote mode</a>
+needs a pre-created writable directory without <code>values.yml</code>; local mode needs
+the recorded export. Preserve bootstrap material and exclude candidate files.</li>
+<li><strong>Activate or install:</strong> <a href="#rollback-procedure">activate the saved snapshot or install the qualified
+local bundle</a>, then start the old artifact with its old pipeline.</li>
+<li><strong>Startup checks:</strong> reject fallback and any download/write failure, verify the
+file inventory and runtime health, and keep the <a href="#java-dcl-startup-and-configuration-evidence">DCL logger at INFO</a>.</li>
+<li><strong>Traffic:</strong> admit traffic only to verified old-version workloads; for
+<a href="#centralized-gateway-bluegreen-example">blue/green</a>, switch to the healthy old pool.</li>
+<li><strong>Evidence:</strong> record results and verification limits, obtain <a href="#release-controls">rollback approval</a>,
+then end the freeze/reservation. Defer retirement until the group is stable.</li>
+</ol>
+<h2 id="configuration-identity-decision"><a class="header" href="#configuration-identity-decision">Configuration identity decision</a></h2>
+<p>Keep the Config Server lookup identity:</p>
+<pre><code class="language-text">host + serviceId + envTag
+</code></pre>
+<p>Activate the approved snapshot for that identity; <code>configPhase</code> selects its
+phase. Keep <code>product_version_id</code> in the instance and its unique index to retain
+version-specific authoring state. Instance UI flags do not select the served
+snapshot or identify the running binary.</p>
+<p>Qualify binary/configuration compatibility before activation: the Portal server
+ignores legacy <code>productVersion</code> parameters, and Java DCL has no active version
+guard. See the <a href="#decision-selection-and-compatibility-are-different">identity and compatibility decision</a>.</p>
+<h2 id="preserve-the-complete-deployable-release"><a class="header" href="#preserve-the-complete-deployable-release">Preserve the complete deployable release</a></h2>
+<p>Record the instance/product version, runtime identity, snapshot, deployment
+binding, pipeline, artifact, inputs, and verification evidence using the template
+below. Pin pipeline source/scripts/templates and binary/image checksums: pipeline
+IDs and moving image tags alone cannot reproduce a release. Preserve access to
+the required credentials through secret-manager references.</p>
+<p>Retain both the editable instance and deployment recipe. Snapshot activation
+selects configuration; redeployment installs the old binary. Shared settings,
+external-state migrations, and editable graphs require their own recovery plan.</p>
+<h3 id="release-record-location-and-template"><a class="header" href="#release-record-location-and-template">Release record location and template</a></h3>
+<p>The owning service/platform team designates a deployment configuration repository
+and publishes its URL/on-call owner in the service catalog or change register.
+Store records at <code>release-records/&lt;host-id&gt;/&lt;deployment-group&gt;/&lt;release-id&gt;.yml</code>,
+using a stable, path-safe group name. Link commit permalinks from the change
+ticket, pipeline run, and snapshot description. Retain input revisions and
+attempt history, accessible to on-call staff even when Portal is unavailable.</p>
+<p>This template is an operational convention, not an automatic Portal export.
+Use one record per deployment binding, with fleet records linking members.
+Keep secrets and configuration bundles in restricted artifact storage.</p>
+<pre><code class="language-yaml">releaseId: "gateway-2.3.9-attempt-1"
+recordRepository: "&lt;canonical team deployment configuration repository URL&gt;"
+recordOwner: "&lt;owning service/platform team and on-call contact&gt;"
+deploymentGroup: "production-gateway"
+runtimeIdentity:
+  hostId: "&lt;host UUID&gt;"
+  host: "&lt;host name&gt;"
+  serviceId: "light-gateway"
+  envTag: "prod"
+instanceId: "&lt;instance UUID&gt;"
+productVersionId: "&lt;product-version UUID&gt;"
+productVersion: "2.3.9"
+deploymentInstanceId: "&lt;deployment binding UUID&gt;"
+artifact: "&lt;immutable image digest or binary URI plus checksum&gt;"
+pipeline:
+  id: "&lt;pipeline UUID&gt;"
+  sourceRevision: "&lt;immutable pipeline/scripts/templates revision&gt;"
+  inputsRef: "&lt;restricted input artifact URI plus checksum&gt;"
+  credentialRef: "&lt;secret-manager reference, never a credential&gt;"
+configuration:
+  mode: "current-snapshot" # or qualified local-export deployment
+  modeQualificationRef: "&lt;successful pre-upgrade test of this release/mode&gt;"
+  rollbackAvailabilityRef: "&lt;tested local-export contingency or approved Config Server dependency&gt;"
+  snapshotId: "&lt;approved snapshot UUID&gt;"
+  configPhase: "R"
+  responseDigest: null # capture the raw /configs response digest when served
+  bundleRef: "&lt;restricted values/certs/files artifact plus inventory/checksums&gt;"
+  authoringBaselineRef: "&lt;reviewed graph revision/export/diff reference&gt;"
+rollbackRecord: "&lt;previous release record commit permalink&gt;"
+coordination:
+  reservationRef: "&lt;exclusive pipeline lock/run or serialized change ticket&gt;"
+  changeFreeze: "clone through observation completion"
+  observation: "24h production, including a representative traffic cycle"
+  rollbackCriteriaRef: "&lt;approved health, traffic and compatibility thresholds&gt;"
+  operator: "&lt;deployment owner/on-call role&gt;"
+  approver: "&lt;service/release owner&gt;"
+evidence:
+  pipelineRun: null
+  runtimeVersionRef: null
+  fetchAndFileVerificationRef: null
+  runtimeReportedSnapshotId: null # unavailable in unmodified Java DCL
+  assurance: "pending; distinguish external evidence from runtime attestation"
+  completionApprovalRef: null
+  retirementApprovalRef: null
+</code></pre>
+<p>The response digest covers <code>/configs</code> YAML, not a complete certificate/file
+bundle. Keep separate export/file checksums; a non-current candidate’s exported
+output is not itself a <code>/configs</code> response. DCL reserializes values before
+writing <code>values.yml</code>, so its local file hash need not equal the response digest.</p>
+<h2 id="retain-at-most-two-available-instances"><a class="header" href="#retain-at-most-two-available-instances">Retain at most two available instances</a></h2>
+<p>Apply one limit per <strong>logical deployment group</strong>: at most two available Portal
+instances and one upgrade in progress across all its versions, runtime
+identities, and replicas. Record the group’s member identities in the release
+plan. Normally a group has one <code>(host_id, service_id, env_tag)</code>; blue/green adds
+two cohort identities to the same group, not two separate retention budgets.
+For sidecars, the group normally represents one API’s sidecar deployment and
+all its replicas, not each Pod and not the entire fleet. Keep:</p>
+<ol>
+<li>The currently deployed, verified instance.</li>
+<li>Either the previous working instance or the next upgrade candidate.</li>
+</ol>
+<p>The words <strong>current release</strong>, <strong>rollback release</strong>, <strong>candidate</strong>, and
+<strong>retired</strong> describe operational roles in this guide; they are not new database
+status values.</p>
+<p>A strict two-instance policy uses the following transitions:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Stage</th><th>Available instance</th><th>Available instance</th><th>Retired instance</th></tr>
+</thead>
+<tbody>
+<tr><td>2.3.8 is running and verified</td><td>2.3.8 current</td><td>2.3.7 rollback</td><td>Older releases</td></tr>
+<tr><td>Begin the 2.3.9 upgrade</td><td>2.3.8 current</td><td>2.3.9 candidate</td><td>2.3.7</td></tr>
+<tr><td>2.3.9 succeeds and passes the observation period</td><td>2.3.9 current</td><td>2.3.8 rollback</td><td>2.3.7</td></tr>
+<tr><td>2.3.9 fails</td><td>2.3.8 current</td><td>Optionally restore 2.3.7</td><td>Failed 2.3.9</td></tr>
+</tbody>
+</table>
+</div>
+<p>Before creating 2.3.9, retire 2.3.7 only after 2.3.8 is verified stable and the
+operator accepts that 2.3.7 will require restoration if needed again. Do not
+retire an older release just because a higher version exists. If retaining
+immediate access to both existing releases during preparation is required, the
+policy must explicitly allow a temporary third candidate.</p>
+<p>The limit bounds the normal UI working set, not database storage. Soft-deleted
+instances, events, snapshots, and deployment history still occupy storage and
+need a separate retention/recovery policy. Do not hard-delete old instances as
+routine cleanup: snapshot foreign keys include <code>ON DELETE CASCADE</code>.</p>
+<h2 id="release-controls"><a class="header" href="#release-controls">Release controls</a></h2>
+<p>Record these operator-managed controls before starting:</p>
+<ul>
+<li>Reserve the deployment group with an exclusive pipeline lock covering all
+cohorts and manual operations. Without a shared lock, designate a release
+manager to serialize runs in one change register. Record the owner/active run,
+investigate abandoned runs before takeover, and release the reservation only
+after completion or verified rollback. A ticket alone provides no lock.</li>
+<li>Freeze API onboarding and configuration changes from the source baseline
+through observation completion. This has an onboarding cost for shared
+gateways. Blue/green shortens cutover downtime; ending the freeze early also
+requires an approved dual-update policy. For that policy or an emergency
+exception, apply equivalent supported changes to both retained instances,
+requalify snapshots/rollback records, and restart observation. Complete both
+records before declaring onboarding complete. If the rollback version cannot
+support equivalent behavior, maintain the freeze or pause the upgrade.</li>
+<li>Use a default observation period of 24 hours in production, including a
+representative traffic cycle, and 30 minutes in staging. The service owner may
+approve a different period in the release record before rollout.</li>
+<li>Define readiness deadlines and error-rate/latency thresholds and intervals.
+Roll back on missed deadlines, failed required route/authentication/authorization
+checks, incompatible configuration, or sustained threshold breaches. Require
+fetch/file evidence for promotion. Use the qualified migration recovery plan
+when external-state changes make binary rollback unsafe.</li>
+<li>The deployment operator executes the change and may invoke the preapproved
+rollback criteria without waiting for another approval. The service/release
+owner approves completion and retirement after reviewing evidence. Record
+these approvals explicitly; passing a pipeline job is not approval.</li>
+</ul>
+<h2 id="upgrade-procedure"><a class="header" href="#upgrade-procedure">Upgrade procedure</a></h2>
+<h3 id="1-qualify-the-target-release"><a class="header" href="#1-qualify-the-target-release">1. Qualify the target release</a></h3>
+<p>Register the target product version, its configuration/property mappings,
+configuration profiles, schemas/defaults, and supported deployment pipelines.
+Record property additions, removals, renamed keys, changed types/defaults, and
+any deployment or external-state migration requirements.</p>
+<p>Check that the old pipeline and binary can still run. If the new release makes
+an irreversible external-state change, an old instance and snapshot alone are
+not sufficient recovery; qualify that release’s migration/recovery procedure.</p>
+<p>Record and test the previous release’s rollback loading mode now. Local-export
+mode is eligible only after that old artifact, pipeline, bootstrap, and complete
+exported bundle have passed a deployment test together. Do not first switch to
+local-export mode during an emergency because Config Server is unavailable.</p>
+<h4 id="rollback-availability"><a class="header" href="#rollback-availability">Rollback availability</a></h4>
+<p>If only remote mode was qualified and Config Server is unavailable, rollback
+requiring an old-binary restart is blocked. A healthy running blue/green cohort
+can still receive traffic; this protection ends if it also needs a restart.
+For critical centralized gateways, qualify a local-export contingency before
+the upgrade, or record Config Server availability as an explicitly accepted
+rollback dependency. Link the test or dependency approval in the release record.</p>
+<h3 id="2-prepare-the-source-and-retention-slot"><a class="header" href="#2-prepare-the-source-and-retention-slot">2. Prepare the source and retention slot</a></h3>
+<p>Identify the deployed instance, rollback snapshot, and pipeline inputs. Compare
+its editable graph with the deployed snapshot: cloning copies the projected
+authoring graph. Resolve or explicitly include pending changes before cloning.</p>
+<p>Acquire the release reservation and begin the change freeze. Reconcile any
+changes since the recorded baseline before cloning. Keep the freeze through
+observation unless the approved dual-update policy is in place, so the rollback
+instance does not lose newly onboarded APIs.</p>
+<p>If two instances are already available, apply the retention rule before creating
+another. Never retire the current release or a release with running workloads,
+an unfinished deployment, or a required immediate rollback role.</p>
+<h3 id="3-clone-the-version-specific-candidate"><a class="header" href="#3-clone-the-version-specific-candidate">3. Clone the version-specific candidate</a></h3>
+<p>Use <strong>Instance Admin → Clone</strong> and the <a href="#clone-an-instance">Clone an Instance</a>
+workflow. For a same-identity rollout, retain the production service ID and
+environment tag; for a separate-cohort rollout, select the approved cohort
+identity. Explicitly select the target product version. Select <code>Environment</code>
+independently from <code>Env Tag</code>; they are different inputs.</p>
+<p>Review APIs, apps, properties, and optional files/deployments (excluded by
+default). Verify credentials separately: OAuth clients/tokens, deployment runs,
+and runtime instances are outside clone scope. A same-identity clone may reuse
+valid Config Server authorization; separate cohort identities need credentials
+authorized for their host/service/env context.</p>
+<p><strong>Leave “Create current snapshot” unchecked (<code>createSnapshot=false</code>).</strong> Enabling
+it would replace the served snapshot for a shared identity before review/deploy.</p>
+<p>Plan and execute once, then wait for <code>PROJECTED</code>. Reuse the original request
+identity when checking a timed-out request. Treat <code>FAILED_DLQ</code> as a recovery
+case; do not blindly submit a fresh clone request.</p>
+<h3 id="4-review-configuration-and-select-the-target-pipeline"><a class="header" href="#4-review-configuration-and-select-the-target-pipeline">4. Review configuration and select the target pipeline</a></h3>
+<p>Validate the candidate against the target release:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Change</th><th>Required review</th></tr>
+</thead>
+<tbody>
+<tr><td>New optional property</td><td>Confirm its target default and whether an override is needed.</td></tr>
+<tr><td>New required property</td><td>Supply a valid value if no usable default exists.</td></tr>
+<tr><td>Changed default</td><td>Compare effective values and retained explicit overrides.</td></tr>
+<tr><td>Renamed property or changed type/meaning</td><td>Apply the release migration and validate the resulting value.</td></tr>
+<tr><td>Deprecated property</td><td>Retain it only while supported by the target release.</td></tr>
+<tr><td>Removed property</td><td>Omit it from the candidate output while preserving the older instance/history.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Preserve catalog properties used by older releases. Review mappings, profiles,
+approved extensions, inherited overrides, and required defaults in the actual
+generated output. Editor visibility alone cannot establish release support.
+If excluding an unsupported inherited value would affect other instances’
+shared settings, stop and resolve the generation gap. See
+<a href="#proposed-follow-up-work">applicability/defaults follow-ups</a>.</p>
+<p>Explicitly bind every candidate deployment to a pipeline supported by the target
+version/environment; cloned deployments retain their original pipeline IDs.</p>
+<h3 id="5-create-and-verify-a-candidate-snapshot"><a class="header" href="#5-create-and-verify-a-candidate-snapshot">5. Create and verify a candidate snapshot</a></h3>
+<p>After configuration/deployment projections catch up, create a snapshot with
+<code>current=false</code> and pass the graph-readiness/revision check.</p>
+<p>Use <a href="#config-snapshot-output-and-comparison">snapshot output and comparison</a>
+to review the candidate against the retained rollback snapshot. Check both
+values and their sources, required configuration, selected files/certificates,
+API routes, and the deployment inputs. Record the candidate snapshot ID and
+checksums of the approved exports. Freeze its release inputs or repeat
+validation if they change.</p>
+<p>Check actual snapshot output where environment and product-version values
+compete; editor precedence currently differs. Preserve referenced catalog names
+and metadata through retention to keep output reproducible. See the
+<a href="#implementation-status-1">implementation limits</a>.</p>
+<h3 id="6-deploy-activate-and-observe"><a class="header" href="#6-deploy-activate-and-observe">6. Deploy, activate, and observe</a></h3>
+<p>Test the target artifact using the approved exported configuration, or use an
+isolated test deployment with its own authorized identity. Do not activate a
+candidate on the production identity merely to download it for a test.</p>
+<p><code>/configs</code> always selects current, ignoring <code>snapshotId</code>. Ancillary endpoint
+pinning alone does not enable a pinned deployment. See the
+<a href="#f5-define-explicit-values-snapshot-selection">snapshot-selection contract</a>.</p>
+<p>Choose a rollout procedure that respects this limitation:</p>
+<ul>
+<li>If old and new binaries can consume the same configuration during overlap,
+validate that compatibility and coordinate activation with deployment.</li>
+<li>If they require different configurations, use a maintenance window that
+drains/stops the old release before activation/startup, or use the
+<a href="#centralized-gateway-bluegreen-example">separate-cohort procedure</a>.
+Hold automatic restarts and all manual/controller-triggered configuration
+reloads on old processes during the transition. Snapshot activation affects
+subsequent reloads as well as new starts; it is not itself a reload broadcast.
+Transparent per-deployment snapshot selection under one identity requires
+code changes.</li>
+</ul>
+<p>Run the selected target pipeline with the approved artifact and inputs. Activate
+the candidate snapshot at the point required by the chosen rollout procedure,
+then follow the <a href="#java-dcl-startup-and-configuration-evidence">DCL startup checks</a>.
+Verify the running product version, readiness, and representative API traffic.
+A submitted job, successful clone, or UI flag alone does not establish success.</p>
+<p>Keep the previous instance available throughout the observation period. Mark
+the release transition complete only after runtime verification. Do not start
+the next upgrade for the deployment group while this transition is unresolved.</p>
+<h2 id="java-dcl-startup-and-configuration-evidence"><a class="header" href="#java-dcl-startup-and-configuration-evidence">Java DCL startup and configuration evidence</a></h2>
+<p>These gates apply to <strong>rollout/rollback starts and retries controlled by the
+release pipeline</strong>. The pipeline enforces the no-cache preparation and rejects
+fallback for those attempts; do not install a permanent init step that deletes
+<code>values.yml</code> on every boot. After release verification, steady-state liveness
+restarts, evictions, and scale-out follow the normal runtime fallback policy.
+Retain release-scoped storage; changing that ongoing policy belongs to F7.
+Custom loaders and Rust runtimes need their own qualified procedure.</p>
+<p>Keep <code>com.networknt.server.DefaultConfigLoader</code> at <strong>INFO or more restrictive</strong>,
+even when parent loggers use DEBUG. Use INFO for source verification; DEBUG/TRACE
+can expose values and base64 certificates/files. Restrict access to error logs,
+which can contain response bodies. See the
+<a href="#implementation-status-1">implementation table</a>
+for the code paths behind these gates.</p>
+<ol>
+<li><strong>Prepare the controlled start.</strong> In remote mode, pre-create a writable
+release directory with approved bootstrap templates/trust material and
+<strong>no <code>values.yml</code></strong>. For prequalified local-export mode, install the recorded
+complete bundle, including values, and disable remote loading. Qualify any
+bootstrap that requires seeded values before adopting the remote-mode gate.
+When reusing a volume, stop the process, archive it securely, and reconcile
+loader-owned files against the approved inventory. Preserve independent
+credentials/bootstrap files. Repeat preparation for a pipeline retry after
+partial startup; exclude the candidate’s values/files from an old release.</li>
+<li><strong>Hold activation and reloads.</strong> Keep the selected snapshot fixed across
+<code>/configs</code>, <code>/certs</code>, <code>/files</code>, and retries. Use a controlled restart for
+cert/file changes; DCL reload refreshes values only.</li>
+<li><strong>Reject failed remote starts.</strong> Require
+<code>Server startup config source: config server</code>, successful downloads, and
+successful writes. Any fallback/source-cache message, empty/unusable values,
+or download/write error fails the release attempt: stop/quarantine it and
+admit no traffic. The shared <code>Failed to load configs from config server with status</code>
+message also covers cert/file calls. A values-source success message alone
+is insufficient; verify all three downloads and the resulting inventory.</li>
+<li><strong>Verify and record.</strong> Check the running version, health, representative
+traffic, effective values, and complete file inventory. While activation is
+held, compare an authorized server fetch with local YAML semantically and
+verify file checksums. Correlate deployment/server-side request evidence where
+available. Java DCL provides no runtime-reported snapshot ID/digest: leave
+that manifest field unset and label the evidence external. If runtime
+attestation is required, hold the rollout pending instrumentation. See
+<a href="#limits-of-current-dcl-evidence">evidence limits</a>.</li>
+</ol>
+<h2 id="centralized-gateway-bluegreen-example"><a class="header" href="#centralized-gateway-bluegreen-example">Centralized gateway blue/green example</a></h2>
+<p>For incompatible releases, use two runtime identities behind one stable public
+gateway address. Both use the same tenant host and <code>serviceId=light-gateway</code>;
+blue uses <code>envTag=prod-blue</code>, green uses <code>envTag=prod-green</code>. The cohorts alternate:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Stage</th><th>Blue (<code>prod-blue</code>)</th><th>Green (<code>prod-green</code>)</th><th>Public traffic before canary</th></tr>
+</thead>
+<tbody>
+<tr><td>Prepare 2.3.9</td><td>2.3.8 current</td><td>2.3.9 candidate</td><td>Blue 100%</td></tr>
+<tr><td>2.3.9 passes observation</td><td>2.3.8 rollback</td><td>2.3.9 current</td><td>Green 100%</td></tr>
+<tr><td>Prepare 2.3.10</td><td>2.3.10 candidate; 2.3.8 retired first</td><td>2.3.9 current</td><td>Green 100%</td></tr>
+</tbody>
+</table>
+</div>
+<p>The strict two-instance limit leaves 2.3.9 without a warm rollback during
+2.3.10 preparation. Recovering retired 2.3.8 can require rebuilding its pools,
+routing, and credentials as well as restoring Portal state. Accept that recovery
+time explicitly, or approve a temporary third instance and retain its warm
+infrastructure through preparation.</p>
+<p>Both instances can select the production <code>Environment</code>; <code>Env Tag</code> is the
+separate snapshot/authorization identity, not that environment selector.</p>
+<ol>
+<li>Preserve the blue instance, approved snapshot, pipeline, and deployment.
+Clone green with the target product version and <code>prod-green</code>, with automatic
+current-snapshot creation disabled. Use the shared reservation and
+<a href="#retain-at-most-two-available-instances">deployment-group retention rule</a>.</li>
+<li>Bind green’s pipeline/bootstrap to <code>prod-green</code> and credentials authorized
+for that host/service/env context. Review env-tag-dependent discovery,
+controller registration, routing, and policies. Provision separate upstream
+pools so the traffic switch can distinguish blue and green replicas.</li>
+<li>Approve and activate green’s snapshot only on <code>prod-green</code>; leave blue’s
+current snapshot unchanged. Start green using its own config volume and run
+the startup checks. Route test/canary traffic through the load balancer, then
+increase its share against the recorded health/traffic criteria. Snapshot
+activation is not the traffic switch.</li>
+<li>During observation keep blue ready with its own pipeline/configuration.
+Roll back by directing traffic to healthy blue replicas, redeploying blue
+with the saved inputs if needed. Never point a blue binary at <code>prod-green</code>.</li>
+<li>After completion keep blue as the retained rollback release. At a later
+authorized retirement, remove it from routing/discovery, drain/stop its
+workloads, disable redeploy/reload triggers, and clear its current snapshot
+selection before soft retirement. Retire unused cohort credentials only
+when no retained recovery procedure or other deployment needs them. Do not
+rename the surviving instance’s identity to collapse the cohorts.</li>
+<li>For 2.3.10, obtain retirement approval for blue 2.3.8 and complete step 5’s
+cleanup first. Clone the verified green 2.3.9 authoring instance into a <strong>new</strong>
+2.3.10 instance targeting <code>prod-blue</code>, with <code>createSnapshot=false</code>. This is an
+explicit cross-env-tag clone; keep the intended production <code>Environment</code> and
+review copied environment-dependent values, files, authorization, and pipeline
+bindings. Do not switch the old 2.3.8 instance’s version. Its retired row
+remains in history alongside the new active 2.3.10 row in <code>prod-blue</code>, but
+only green 2.3.9 and blue 2.3.10 count as available. Activate blue’s approved
+new snapshot and repeat the checks/canary; green remains the rollback target.
+If that exact target version already exists retired, restore/reconcile it
+using the retry procedure instead of creating another row.</li>
+</ol>
+<p>Different <code>serviceId</code> values can also separate cohorts, but require equivalent
+authorization, discovery, and routing review. Reusing a cohort/version already
+in history follows the retry/restoration procedure below.</p>
+<h2 id="rollback-procedure"><a class="header" href="#rollback-procedure">Rollback procedure</a></h2>
+<ol>
+<li>
+<p>Select the retained previous instance, approved snapshot, binary/image, and
+pipeline revision from the release record.</p>
+</li>
+<li>
+<p>Coordinate traffic and process shutdown/startup so each binary receives
+compatible configuration. Retain the release reservation; hold incompatible
+processes’ reloads and automatic restarts. Prepare the previous release’s
+configuration directory using the DCL checks above.</p>
+</li>
+<li>
+<p>Use the loading mode recorded and qualified for the previous release:</p>
+<ul>
+<li><strong>Current-snapshot mode:</strong> activate the saved previous snapshot for the
+old runtime identity, then redeploy the old artifact using its saved
+pipeline and inputs. Keep activation fixed until all startup downloads
+finish. With separate cohorts, blue may already have the correct snapshot;
+verify it and switch traffic only after confirming blue is healthy.</li>
+<li><strong>Local-export mode:</strong> have the pipeline install the previously approved
+values, certs, and files using the old release’s tested local-only bootstrap.
+Ensure <code>light-config-server-uri</code> is absent from every property/environment
+source. Use this mode only when its pre-upgrade qualification is recorded;
+otherwise follow the <a href="#rollback-availability">availability dependency</a>.</li>
+</ul>
+<p>Consume the saved snapshot/export. Regenerating from current authoring tables
+creates different inputs, and <code>/configs?snapshotId=...</code> is ignored today.</p>
+</li>
+<li>
+<p>Complete the DCL fetch/file checks for remote mode, or verify installed bundle
+checksums for local mode. Record the actual runtime version, readiness, API
+traffic, and the configuration evidence/limitations. Do not claim that
+unmodified Java DCL reported a snapshot ID or digest.</p>
+</li>
+<li>
+<p>Retain the failed candidate for diagnosis or soft-retire it when safe. If the
+two-instance policy requires restoring an older release, retire the failed
+candidate first and use the supported lifecycle restoration procedure.
+Obtain approval of the verified rollback outcome, end the change freeze,
+and release the reservation only after the deployment group is stable.</p>
+</li>
+</ol>
+<p>Redeploy the retained old instance rather than changing the candidate’s version.
+Resume onboarding there after rollback; create new snapshots for new edits and
+preserve the original rollback snapshot. Reconcile APIs added only to the newer
+instance and review shared catalog/inheritance changes.</p>
+<h2 id="retry-a-failed-product-version-upgrade"><a class="header" href="#retry-a-failed-product-version-upgrade">Retry a failed product-version upgrade</a></h2>
+<p>After a failed 2.3.9 upgrade is retired, its row still reserves
+<code>(host_id, service_id, env_tag, product_version_id)</code>. Clone checks include retired
+rows. A fresh clone of 2.3.8 into that same 2.3.9 identity will be rejected, even
+with a new instance UUID.</p>
+<ol>
+<li>First finish or repair the original clone/deployment attempt, including any
+<code>FAILED_DLQ</code> projection, and establish a stable running release. A command
+retry and a new release attempt are different operations.</li>
+<li>Acquire the same release reservation and apply the two-instance retention
+rule. For example, retire a restored 2.3.7 rollback instance before restoring
+2.3.9, keeping verified 2.3.8 available throughout.</li>
+<li>Restore the existing 2.3.9 instance and required cascaded children through
+the lifecycle workflow. Confirm projection completion and inspect the
+restored graph, files, and deployment bindings; restoration is not a re-clone.</li>
+<li>Reconcile the restored candidate with the latest approved 2.3.8 baseline,
+including APIs onboarded since the first attempt. Review a three-way diff
+where possible: original source baseline, current source, and failed
+candidate. Use normal editing commands to apply the selected changes and
+the 2.3.9 migration again. Clone does not provide a merge-into-existing-target
+operation. If the original baseline is unavailable, perform a full comparison
+and configuration review before proceeding.</li>
+<li>Create a new non-current snapshot and a new attempt-specific release record
+referencing the same candidate instance ID. Preserve the first attempt’s
+snapshot/evidence. Repeat validation, deployment, and observation; do not
+reuse approval from the failed attempt.</li>
+</ol>
+<p>Do not hard-delete the retired row or silently replace it with a new clone to
+bypass uniqueness. That would complicate retained snapshots, events, references,
+and recovery rather than provide a safe retry.</p>
+<h2 id="safe-retirement-and-recovery"><a class="header" href="#safe-retirement-and-recovery">Safe retirement and recovery</a></h2>
+<p>Use Portal lifecycle commands/events for soft retirement; owned graph rows are
+cascaded, snapshots/history retained, and the instance hidden from normal lists.
+First clear selected current snapshots and confirm there are no running
+deployments or required rollback obligations. Operators enforce these gates;
+soft retirement alone leaves selected snapshots servable. See the
+<a href="#implementation-status-1">implementation table</a>.</p>
+<p>Preserve shared product versions, pipelines, artifacts, and access needed by
+other instances or the recovery plan. Qualify restoration of the instance,
+cascaded children, and deployment infrastructure before relying on archives.
+Retired rows still reserve their version identity: use the
+<a href="#retry-a-failed-product-version-upgrade">restore/retry procedure</a>.</p>
+<h2 id="fleet-operation"><a class="header" href="#fleet-operation">Fleet operation</a></h2>
+<h3 id="sidecar-version-overlap"><a class="header" href="#sidecar-version-overlap">Sidecar version overlap</a></h3>
+<p>A Kubernetes Deployment normally uses <code>RollingUpdate</code>, so old and new Pods can
+overlap under the same Config Server identity. <code>Recreate</code> stops the old revision
+before creating the new revision during a Deployment upgrade; it does not give
+the same guarantee for manual Pod deletions or other controllers. See the
+<a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy">Kubernetes Deployment strategy contract</a>.</p>
+<p>Choose and record one policy for each API’s sidecar deployment group:</p>
+<ul>
+<li><strong>Compatible rolling update:</strong> qualify the served values, certs, and files
+for both old and new binaries, including old-Pod restarts/reloads and rollback
+while any new Pods remain. Use that approved common configuration throughout
+the overlap; do not rely on old Pods retaining a cache. Keep activation fixed
+through each complete DCL download sequence.</li>
+<li><strong>Incompatible versions:</strong> use a qualified <code>Recreate</code> rollout or a maintenance
+restart, accepting the API/application Pod outage. The pipeline must ensure
+old consumers are stopped, activate the target snapshot, then permit new
+startup. <code>Recreate</code> alone does not schedule the external snapshot activation:
+use a tested startup gate or an explicit scale-down/wait/activate/start
+sequence. Hold autoscaler/GitOps reconciliation and other deployment/reload
+triggers during that sequence. Coordinate every workload sharing the identity,
+not just one Deployment, and use the same ordering for rollback.</li>
+</ul>
+<p>If neither policy is acceptable, stop and design isolated identities or a
+qualified pinned/local-export deployment before rolling out. Per-Pod blue/green
+env tags are not the default fleet strategy. Batch by independent deployment
+groups; batching does not solve incompatible overlap within a group.</p>
+<h3 id="batch-coordination"><a class="header" href="#batch-coordination">Batch coordination</a></h3>
+<p>For sidecar fleets, automate the reviewed workflow around existing commands:
+select eligible instances, reserve one upgrade per deployment group, clone in
+bounded batches, validate, deploy in cohorts, and record each result. Preserve the
+request identity across retries and distinguish accepted commands from fully
+projected and runtime-verified outcomes.</p>
+<p>Apply the shared deployment-group retention rule after its own transition
+checks; a successful fleet subset must not cause retirement for a failed or unfinished
+instance. The current UI is not a fleet upgrade orchestrator, and a batch
+implementation is additional work.</p>
+<p>Related reading: <a href="#instance-clone">Instance Clone design</a>,
+<a href="#configuration-snapshot-design">Configuration Snapshots</a>,
+<a href="#config-server-2">Config Server operations</a>, and
+<a href="#policy-driven-cascade-delete">Policy-Driven Cascade Delete</a>.
+For source evidence and proposed code work, see
+<a href="#product-upgrade-runtime-contract">Product Upgrade Runtime Contract</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="docker-compose-deployments"><a class="header" href="#docker-compose-deployments">Docker Compose Deployments</a></h1>
 <p>Light Portal has four maintained Compose distributions. They share the same

@@ -1,0 +1,764 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Product Upgrade and Rollback - Light Portal Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-e96d0476.css">
+        <link rel="stylesheet" href="../css/chrome-d279d366.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex-a0d93ac4.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc-a66f94db.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Light Portal Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="product-upgrade-and-rollback"><a class="header" href="#product-upgrade-and-rollback">Product Upgrade and Rollback</a></h1>
+<p>For sidecars and centralized gateways, clone a version-specific instance when
+scheduling an upgrade. Retain the previous instance, configuration, and pipeline
+for rollback and continued editing. Publishing a product release alone changes
+no deployments; upgrade fleets in batches.</p>
+<p>This is an operator-controlled policy. The
+<a href="../design/product-upgrade-runtime-contract.html">runtime contract</a> records current
+limitations, including Java DCL snapshot consistency, provenance, and compatibility.</p>
+<h2 id="emergency-rollback-checklist"><a class="header" href="#emergency-rollback-checklist">Emergency rollback checklist</a></h2>
+<p>Use the prequalified rollback mode. For a healthy old blue/green cohort, verify
+it and switch traffic without restarting it or changing its files. A remote-only
+rollback needing a restart depends on Config Server availability; see
+<a href="#rollback-availability">rollback availability</a>.</p>
+<ol>
+<li><strong>Record:</strong> retrieve the <a href="#release-record-location-and-template">previous release record</a>,
+artifact, snapshot/bundle, pipeline inputs, and migration recovery constraints.</li>
+<li><strong>Reservation:</strong> take control of the <a href="#release-controls">existing release reservation</a>
+with its owner; prevent competing deployments and configuration changes.</li>
+<li><strong>Hold:</strong> block new traffic to unhealthy workloads and hold incompatible
+reloads/restarts. For a same-identity restart, stop the incompatible cohort
+before changing its snapshot. See <a href="#rollback-procedure">rollback coordination</a>.</li>
+<li><strong>Directory, for this pipeline-controlled start:</strong> <a href="#java-dcl-startup-and-configuration-evidence">remote mode</a>
+needs a pre-created writable directory without <code>values.yml</code>; local mode needs
+the recorded export. Preserve bootstrap material and exclude candidate files.</li>
+<li><strong>Activate or install:</strong> <a href="#rollback-procedure">activate the saved snapshot or install the qualified
+local bundle</a>, then start the old artifact with its old pipeline.</li>
+<li><strong>Startup checks:</strong> reject fallback and any download/write failure, verify the
+file inventory and runtime health, and keep the <a href="#java-dcl-startup-and-configuration-evidence">DCL logger at INFO</a>.</li>
+<li><strong>Traffic:</strong> admit traffic only to verified old-version workloads; for
+<a href="#centralized-gateway-bluegreen-example">blue/green</a>, switch to the healthy old pool.</li>
+<li><strong>Evidence:</strong> record results and verification limits, obtain <a href="#release-controls">rollback approval</a>,
+then end the freeze/reservation. Defer retirement until the group is stable.</li>
+</ol>
+<h2 id="configuration-identity-decision"><a class="header" href="#configuration-identity-decision">Configuration identity decision</a></h2>
+<p>Keep the Config Server lookup identity:</p>
+<pre><code class="language-text">host + serviceId + envTag
+</code></pre>
+<p>Activate the approved snapshot for that identity; <code>configPhase</code> selects its
+phase. Keep <code>product_version_id</code> in the instance and its unique index to retain
+version-specific authoring state. Instance UI flags do not select the served
+snapshot or identify the running binary.</p>
+<p>Qualify binary/configuration compatibility before activation: the Portal server
+ignores legacy <code>productVersion</code> parameters, and Java DCL has no active version
+guard. See the <a href="../design/product-upgrade-runtime-contract.html#decision-selection-and-compatibility-are-different">identity and compatibility decision</a>.</p>
+<h2 id="preserve-the-complete-deployable-release"><a class="header" href="#preserve-the-complete-deployable-release">Preserve the complete deployable release</a></h2>
+<p>Record the instance/product version, runtime identity, snapshot, deployment
+binding, pipeline, artifact, inputs, and verification evidence using the template
+below. Pin pipeline source/scripts/templates and binary/image checksums: pipeline
+IDs and moving image tags alone cannot reproduce a release. Preserve access to
+the required credentials through secret-manager references.</p>
+<p>Retain both the editable instance and deployment recipe. Snapshot activation
+selects configuration; redeployment installs the old binary. Shared settings,
+external-state migrations, and editable graphs require their own recovery plan.</p>
+<h3 id="release-record-location-and-template"><a class="header" href="#release-record-location-and-template">Release record location and template</a></h3>
+<p>The owning service/platform team designates a deployment configuration repository
+and publishes its URL/on-call owner in the service catalog or change register.
+Store records at <code>release-records/&lt;host-id&gt;/&lt;deployment-group&gt;/&lt;release-id&gt;.yml</code>,
+using a stable, path-safe group name. Link commit permalinks from the change
+ticket, pipeline run, and snapshot description. Retain input revisions and
+attempt history, accessible to on-call staff even when Portal is unavailable.</p>
+<p>This template is an operational convention, not an automatic Portal export.
+Use one record per deployment binding, with fleet records linking members.
+Keep secrets and configuration bundles in restricted artifact storage.</p>
+<pre><code class="language-yaml">releaseId: "gateway-2.3.9-attempt-1"
+recordRepository: "&lt;canonical team deployment configuration repository URL&gt;"
+recordOwner: "&lt;owning service/platform team and on-call contact&gt;"
+deploymentGroup: "production-gateway"
+runtimeIdentity:
+  hostId: "&lt;host UUID&gt;"
+  host: "&lt;host name&gt;"
+  serviceId: "light-gateway"
+  envTag: "prod"
+instanceId: "&lt;instance UUID&gt;"
+productVersionId: "&lt;product-version UUID&gt;"
+productVersion: "2.3.9"
+deploymentInstanceId: "&lt;deployment binding UUID&gt;"
+artifact: "&lt;immutable image digest or binary URI plus checksum&gt;"
+pipeline:
+  id: "&lt;pipeline UUID&gt;"
+  sourceRevision: "&lt;immutable pipeline/scripts/templates revision&gt;"
+  inputsRef: "&lt;restricted input artifact URI plus checksum&gt;"
+  credentialRef: "&lt;secret-manager reference, never a credential&gt;"
+configuration:
+  mode: "current-snapshot" # or qualified local-export deployment
+  modeQualificationRef: "&lt;successful pre-upgrade test of this release/mode&gt;"
+  rollbackAvailabilityRef: "&lt;tested local-export contingency or approved Config Server dependency&gt;"
+  snapshotId: "&lt;approved snapshot UUID&gt;"
+  configPhase: "R"
+  responseDigest: null # capture the raw /configs response digest when served
+  bundleRef: "&lt;restricted values/certs/files artifact plus inventory/checksums&gt;"
+  authoringBaselineRef: "&lt;reviewed graph revision/export/diff reference&gt;"
+rollbackRecord: "&lt;previous release record commit permalink&gt;"
+coordination:
+  reservationRef: "&lt;exclusive pipeline lock/run or serialized change ticket&gt;"
+  changeFreeze: "clone through observation completion"
+  observation: "24h production, including a representative traffic cycle"
+  rollbackCriteriaRef: "&lt;approved health, traffic and compatibility thresholds&gt;"
+  operator: "&lt;deployment owner/on-call role&gt;"
+  approver: "&lt;service/release owner&gt;"
+evidence:
+  pipelineRun: null
+  runtimeVersionRef: null
+  fetchAndFileVerificationRef: null
+  runtimeReportedSnapshotId: null # unavailable in unmodified Java DCL
+  assurance: "pending; distinguish external evidence from runtime attestation"
+  completionApprovalRef: null
+  retirementApprovalRef: null
+</code></pre>
+<p>The response digest covers <code>/configs</code> YAML, not a complete certificate/file
+bundle. Keep separate export/file checksums; a non-current candidate’s exported
+output is not itself a <code>/configs</code> response. DCL reserializes values before
+writing <code>values.yml</code>, so its local file hash need not equal the response digest.</p>
+<h2 id="retain-at-most-two-available-instances"><a class="header" href="#retain-at-most-two-available-instances">Retain at most two available instances</a></h2>
+<p>Apply one limit per <strong>logical deployment group</strong>: at most two available Portal
+instances and one upgrade in progress across all its versions, runtime
+identities, and replicas. Record the group’s member identities in the release
+plan. Normally a group has one <code>(host_id, service_id, env_tag)</code>; blue/green adds
+two cohort identities to the same group, not two separate retention budgets.
+For sidecars, the group normally represents one API’s sidecar deployment and
+all its replicas, not each Pod and not the entire fleet. Keep:</p>
+<ol>
+<li>The currently deployed, verified instance.</li>
+<li>Either the previous working instance or the next upgrade candidate.</li>
+</ol>
+<p>The words <strong>current release</strong>, <strong>rollback release</strong>, <strong>candidate</strong>, and
+<strong>retired</strong> describe operational roles in this guide; they are not new database
+status values.</p>
+<p>A strict two-instance policy uses the following transitions:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Stage</th><th>Available instance</th><th>Available instance</th><th>Retired instance</th></tr>
+</thead>
+<tbody>
+<tr><td>2.3.8 is running and verified</td><td>2.3.8 current</td><td>2.3.7 rollback</td><td>Older releases</td></tr>
+<tr><td>Begin the 2.3.9 upgrade</td><td>2.3.8 current</td><td>2.3.9 candidate</td><td>2.3.7</td></tr>
+<tr><td>2.3.9 succeeds and passes the observation period</td><td>2.3.9 current</td><td>2.3.8 rollback</td><td>2.3.7</td></tr>
+<tr><td>2.3.9 fails</td><td>2.3.8 current</td><td>Optionally restore 2.3.7</td><td>Failed 2.3.9</td></tr>
+</tbody>
+</table>
+</div>
+<p>Before creating 2.3.9, retire 2.3.7 only after 2.3.8 is verified stable and the
+operator accepts that 2.3.7 will require restoration if needed again. Do not
+retire an older release just because a higher version exists. If retaining
+immediate access to both existing releases during preparation is required, the
+policy must explicitly allow a temporary third candidate.</p>
+<p>The limit bounds the normal UI working set, not database storage. Soft-deleted
+instances, events, snapshots, and deployment history still occupy storage and
+need a separate retention/recovery policy. Do not hard-delete old instances as
+routine cleanup: snapshot foreign keys include <code>ON DELETE CASCADE</code>.</p>
+<h2 id="release-controls"><a class="header" href="#release-controls">Release controls</a></h2>
+<p>Record these operator-managed controls before starting:</p>
+<ul>
+<li>Reserve the deployment group with an exclusive pipeline lock covering all
+cohorts and manual operations. Without a shared lock, designate a release
+manager to serialize runs in one change register. Record the owner/active run,
+investigate abandoned runs before takeover, and release the reservation only
+after completion or verified rollback. A ticket alone provides no lock.</li>
+<li>Freeze API onboarding and configuration changes from the source baseline
+through observation completion. This has an onboarding cost for shared
+gateways. Blue/green shortens cutover downtime; ending the freeze early also
+requires an approved dual-update policy. For that policy or an emergency
+exception, apply equivalent supported changes to both retained instances,
+requalify snapshots/rollback records, and restart observation. Complete both
+records before declaring onboarding complete. If the rollback version cannot
+support equivalent behavior, maintain the freeze or pause the upgrade.</li>
+<li>Use a default observation period of 24 hours in production, including a
+representative traffic cycle, and 30 minutes in staging. The service owner may
+approve a different period in the release record before rollout.</li>
+<li>Define readiness deadlines and error-rate/latency thresholds and intervals.
+Roll back on missed deadlines, failed required route/authentication/authorization
+checks, incompatible configuration, or sustained threshold breaches. Require
+fetch/file evidence for promotion. Use the qualified migration recovery plan
+when external-state changes make binary rollback unsafe.</li>
+<li>The deployment operator executes the change and may invoke the preapproved
+rollback criteria without waiting for another approval. The service/release
+owner approves completion and retirement after reviewing evidence. Record
+these approvals explicitly; passing a pipeline job is not approval.</li>
+</ul>
+<h2 id="upgrade-procedure"><a class="header" href="#upgrade-procedure">Upgrade procedure</a></h2>
+<h3 id="1-qualify-the-target-release"><a class="header" href="#1-qualify-the-target-release">1. Qualify the target release</a></h3>
+<p>Register the target product version, its configuration/property mappings,
+configuration profiles, schemas/defaults, and supported deployment pipelines.
+Record property additions, removals, renamed keys, changed types/defaults, and
+any deployment or external-state migration requirements.</p>
+<p>Check that the old pipeline and binary can still run. If the new release makes
+an irreversible external-state change, an old instance and snapshot alone are
+not sufficient recovery; qualify that release’s migration/recovery procedure.</p>
+<p>Record and test the previous release’s rollback loading mode now. Local-export
+mode is eligible only after that old artifact, pipeline, bootstrap, and complete
+exported bundle have passed a deployment test together. Do not first switch to
+local-export mode during an emergency because Config Server is unavailable.</p>
+<h4 id="rollback-availability"><a class="header" href="#rollback-availability">Rollback availability</a></h4>
+<p>If only remote mode was qualified and Config Server is unavailable, rollback
+requiring an old-binary restart is blocked. A healthy running blue/green cohort
+can still receive traffic; this protection ends if it also needs a restart.
+For critical centralized gateways, qualify a local-export contingency before
+the upgrade, or record Config Server availability as an explicitly accepted
+rollback dependency. Link the test or dependency approval in the release record.</p>
+<h3 id="2-prepare-the-source-and-retention-slot"><a class="header" href="#2-prepare-the-source-and-retention-slot">2. Prepare the source and retention slot</a></h3>
+<p>Identify the deployed instance, rollback snapshot, and pipeline inputs. Compare
+its editable graph with the deployed snapshot: cloning copies the projected
+authoring graph. Resolve or explicitly include pending changes before cloning.</p>
+<p>Acquire the release reservation and begin the change freeze. Reconcile any
+changes since the recorded baseline before cloning. Keep the freeze through
+observation unless the approved dual-update policy is in place, so the rollback
+instance does not lose newly onboarded APIs.</p>
+<p>If two instances are already available, apply the retention rule before creating
+another. Never retire the current release or a release with running workloads,
+an unfinished deployment, or a required immediate rollback role.</p>
+<h3 id="3-clone-the-version-specific-candidate"><a class="header" href="#3-clone-the-version-specific-candidate">3. Clone the version-specific candidate</a></h3>
+<p>Use <strong>Instance Admin → Clone</strong> and the <a href="../help/portal-view/pages/instance-clone.html">Clone an Instance</a>
+workflow. For a same-identity rollout, retain the production service ID and
+environment tag; for a separate-cohort rollout, select the approved cohort
+identity. Explicitly select the target product version. Select <code>Environment</code>
+independently from <code>Env Tag</code>; they are different inputs.</p>
+<p>Review APIs, apps, properties, and optional files/deployments (excluded by
+default). Verify credentials separately: OAuth clients/tokens, deployment runs,
+and runtime instances are outside clone scope. A same-identity clone may reuse
+valid Config Server authorization; separate cohort identities need credentials
+authorized for their host/service/env context.</p>
+<p><strong>Leave “Create current snapshot” unchecked (<code>createSnapshot=false</code>).</strong> Enabling
+it would replace the served snapshot for a shared identity before review/deploy.</p>
+<p>Plan and execute once, then wait for <code>PROJECTED</code>. Reuse the original request
+identity when checking a timed-out request. Treat <code>FAILED_DLQ</code> as a recovery
+case; do not blindly submit a fresh clone request.</p>
+<h3 id="4-review-configuration-and-select-the-target-pipeline"><a class="header" href="#4-review-configuration-and-select-the-target-pipeline">4. Review configuration and select the target pipeline</a></h3>
+<p>Validate the candidate against the target release:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Change</th><th>Required review</th></tr>
+</thead>
+<tbody>
+<tr><td>New optional property</td><td>Confirm its target default and whether an override is needed.</td></tr>
+<tr><td>New required property</td><td>Supply a valid value if no usable default exists.</td></tr>
+<tr><td>Changed default</td><td>Compare effective values and retained explicit overrides.</td></tr>
+<tr><td>Renamed property or changed type/meaning</td><td>Apply the release migration and validate the resulting value.</td></tr>
+<tr><td>Deprecated property</td><td>Retain it only while supported by the target release.</td></tr>
+<tr><td>Removed property</td><td>Omit it from the candidate output while preserving the older instance/history.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Preserve catalog properties used by older releases. Review mappings, profiles,
+approved extensions, inherited overrides, and required defaults in the actual
+generated output. Editor visibility alone cannot establish release support.
+If excluding an unsupported inherited value would affect other instances’
+shared settings, stop and resolve the generation gap. See
+<a href="../design/product-upgrade-runtime-contract.html#proposed-follow-up-work">applicability/defaults follow-ups</a>.</p>
+<p>Explicitly bind every candidate deployment to a pipeline supported by the target
+version/environment; cloned deployments retain their original pipeline IDs.</p>
+<h3 id="5-create-and-verify-a-candidate-snapshot"><a class="header" href="#5-create-and-verify-a-candidate-snapshot">5. Create and verify a candidate snapshot</a></h3>
+<p>After configuration/deployment projections catch up, create a snapshot with
+<code>current=false</code> and pass the graph-readiness/revision check.</p>
+<p>Use <a href="../design/portal-view/config-snapshot-output-comparison.html">snapshot output and comparison</a>
+to review the candidate against the retained rollback snapshot. Check both
+values and their sources, required configuration, selected files/certificates,
+API routes, and the deployment inputs. Record the candidate snapshot ID and
+checksums of the approved exports. Freeze its release inputs or repeat
+validation if they change.</p>
+<p>Check actual snapshot output where environment and product-version values
+compete; editor precedence currently differs. Preserve referenced catalog names
+and metadata through retention to keep output reproducible. See the
+<a href="../design/product-upgrade-runtime-contract.html#implementation-status">implementation limits</a>.</p>
+<h3 id="6-deploy-activate-and-observe"><a class="header" href="#6-deploy-activate-and-observe">6. Deploy, activate, and observe</a></h3>
+<p>Test the target artifact using the approved exported configuration, or use an
+isolated test deployment with its own authorized identity. Do not activate a
+candidate on the production identity merely to download it for a test.</p>
+<p><code>/configs</code> always selects current, ignoring <code>snapshotId</code>. Ancillary endpoint
+pinning alone does not enable a pinned deployment. See the
+<a href="../design/product-upgrade-runtime-contract.html#f5-define-explicit-values-snapshot-selection">snapshot-selection contract</a>.</p>
+<p>Choose a rollout procedure that respects this limitation:</p>
+<ul>
+<li>If old and new binaries can consume the same configuration during overlap,
+validate that compatibility and coordinate activation with deployment.</li>
+<li>If they require different configurations, use a maintenance window that
+drains/stops the old release before activation/startup, or use the
+<a href="#centralized-gateway-bluegreen-example">separate-cohort procedure</a>.
+Hold automatic restarts and all manual/controller-triggered configuration
+reloads on old processes during the transition. Snapshot activation affects
+subsequent reloads as well as new starts; it is not itself a reload broadcast.
+Transparent per-deployment snapshot selection under one identity requires
+code changes.</li>
+</ul>
+<p>Run the selected target pipeline with the approved artifact and inputs. Activate
+the candidate snapshot at the point required by the chosen rollout procedure,
+then follow the <a href="#java-dcl-startup-and-configuration-evidence">DCL startup checks</a>.
+Verify the running product version, readiness, and representative API traffic.
+A submitted job, successful clone, or UI flag alone does not establish success.</p>
+<p>Keep the previous instance available throughout the observation period. Mark
+the release transition complete only after runtime verification. Do not start
+the next upgrade for the deployment group while this transition is unresolved.</p>
+<h2 id="java-dcl-startup-and-configuration-evidence"><a class="header" href="#java-dcl-startup-and-configuration-evidence">Java DCL startup and configuration evidence</a></h2>
+<p>These gates apply to <strong>rollout/rollback starts and retries controlled by the
+release pipeline</strong>. The pipeline enforces the no-cache preparation and rejects
+fallback for those attempts; do not install a permanent init step that deletes
+<code>values.yml</code> on every boot. After release verification, steady-state liveness
+restarts, evictions, and scale-out follow the normal runtime fallback policy.
+Retain release-scoped storage; changing that ongoing policy belongs to F7.
+Custom loaders and Rust runtimes need their own qualified procedure.</p>
+<p>Keep <code>com.networknt.server.DefaultConfigLoader</code> at <strong>INFO or more restrictive</strong>,
+even when parent loggers use DEBUG. Use INFO for source verification; DEBUG/TRACE
+can expose values and base64 certificates/files. Restrict access to error logs,
+which can contain response bodies. See the
+<a href="../design/product-upgrade-runtime-contract.html#implementation-status">implementation table</a>
+for the code paths behind these gates.</p>
+<ol>
+<li><strong>Prepare the controlled start.</strong> In remote mode, pre-create a writable
+release directory with approved bootstrap templates/trust material and
+<strong>no <code>values.yml</code></strong>. For prequalified local-export mode, install the recorded
+complete bundle, including values, and disable remote loading. Qualify any
+bootstrap that requires seeded values before adopting the remote-mode gate.
+When reusing a volume, stop the process, archive it securely, and reconcile
+loader-owned files against the approved inventory. Preserve independent
+credentials/bootstrap files. Repeat preparation for a pipeline retry after
+partial startup; exclude the candidate’s values/files from an old release.</li>
+<li><strong>Hold activation and reloads.</strong> Keep the selected snapshot fixed across
+<code>/configs</code>, <code>/certs</code>, <code>/files</code>, and retries. Use a controlled restart for
+cert/file changes; DCL reload refreshes values only.</li>
+<li><strong>Reject failed remote starts.</strong> Require
+<code>Server startup config source: config server</code>, successful downloads, and
+successful writes. Any fallback/source-cache message, empty/unusable values,
+or download/write error fails the release attempt: stop/quarantine it and
+admit no traffic. The shared <code>Failed to load configs from config server with status</code>
+message also covers cert/file calls. A values-source success message alone
+is insufficient; verify all three downloads and the resulting inventory.</li>
+<li><strong>Verify and record.</strong> Check the running version, health, representative
+traffic, effective values, and complete file inventory. While activation is
+held, compare an authorized server fetch with local YAML semantically and
+verify file checksums. Correlate deployment/server-side request evidence where
+available. Java DCL provides no runtime-reported snapshot ID/digest: leave
+that manifest field unset and label the evidence external. If runtime
+attestation is required, hold the rollout pending instrumentation. See
+<a href="../design/product-upgrade-runtime-contract.html#limits-of-current-dcl-evidence">evidence limits</a>.</li>
+</ol>
+<h2 id="centralized-gateway-bluegreen-example"><a class="header" href="#centralized-gateway-bluegreen-example">Centralized gateway blue/green example</a></h2>
+<p>For incompatible releases, use two runtime identities behind one stable public
+gateway address. Both use the same tenant host and <code>serviceId=light-gateway</code>;
+blue uses <code>envTag=prod-blue</code>, green uses <code>envTag=prod-green</code>. The cohorts alternate:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Stage</th><th>Blue (<code>prod-blue</code>)</th><th>Green (<code>prod-green</code>)</th><th>Public traffic before canary</th></tr>
+</thead>
+<tbody>
+<tr><td>Prepare 2.3.9</td><td>2.3.8 current</td><td>2.3.9 candidate</td><td>Blue 100%</td></tr>
+<tr><td>2.3.9 passes observation</td><td>2.3.8 rollback</td><td>2.3.9 current</td><td>Green 100%</td></tr>
+<tr><td>Prepare 2.3.10</td><td>2.3.10 candidate; 2.3.8 retired first</td><td>2.3.9 current</td><td>Green 100%</td></tr>
+</tbody>
+</table>
+</div>
+<p>The strict two-instance limit leaves 2.3.9 without a warm rollback during
+2.3.10 preparation. Recovering retired 2.3.8 can require rebuilding its pools,
+routing, and credentials as well as restoring Portal state. Accept that recovery
+time explicitly, or approve a temporary third instance and retain its warm
+infrastructure through preparation.</p>
+<p>Both instances can select the production <code>Environment</code>; <code>Env Tag</code> is the
+separate snapshot/authorization identity, not that environment selector.</p>
+<ol>
+<li>Preserve the blue instance, approved snapshot, pipeline, and deployment.
+Clone green with the target product version and <code>prod-green</code>, with automatic
+current-snapshot creation disabled. Use the shared reservation and
+<a href="#retain-at-most-two-available-instances">deployment-group retention rule</a>.</li>
+<li>Bind green’s pipeline/bootstrap to <code>prod-green</code> and credentials authorized
+for that host/service/env context. Review env-tag-dependent discovery,
+controller registration, routing, and policies. Provision separate upstream
+pools so the traffic switch can distinguish blue and green replicas.</li>
+<li>Approve and activate green’s snapshot only on <code>prod-green</code>; leave blue’s
+current snapshot unchanged. Start green using its own config volume and run
+the startup checks. Route test/canary traffic through the load balancer, then
+increase its share against the recorded health/traffic criteria. Snapshot
+activation is not the traffic switch.</li>
+<li>During observation keep blue ready with its own pipeline/configuration.
+Roll back by directing traffic to healthy blue replicas, redeploying blue
+with the saved inputs if needed. Never point a blue binary at <code>prod-green</code>.</li>
+<li>After completion keep blue as the retained rollback release. At a later
+authorized retirement, remove it from routing/discovery, drain/stop its
+workloads, disable redeploy/reload triggers, and clear its current snapshot
+selection before soft retirement. Retire unused cohort credentials only
+when no retained recovery procedure or other deployment needs them. Do not
+rename the surviving instance’s identity to collapse the cohorts.</li>
+<li>For 2.3.10, obtain retirement approval for blue 2.3.8 and complete step 5’s
+cleanup first. Clone the verified green 2.3.9 authoring instance into a <strong>new</strong>
+2.3.10 instance targeting <code>prod-blue</code>, with <code>createSnapshot=false</code>. This is an
+explicit cross-env-tag clone; keep the intended production <code>Environment</code> and
+review copied environment-dependent values, files, authorization, and pipeline
+bindings. Do not switch the old 2.3.8 instance’s version. Its retired row
+remains in history alongside the new active 2.3.10 row in <code>prod-blue</code>, but
+only green 2.3.9 and blue 2.3.10 count as available. Activate blue’s approved
+new snapshot and repeat the checks/canary; green remains the rollback target.
+If that exact target version already exists retired, restore/reconcile it
+using the retry procedure instead of creating another row.</li>
+</ol>
+<p>Different <code>serviceId</code> values can also separate cohorts, but require equivalent
+authorization, discovery, and routing review. Reusing a cohort/version already
+in history follows the retry/restoration procedure below.</p>
+<h2 id="rollback-procedure"><a class="header" href="#rollback-procedure">Rollback procedure</a></h2>
+<ol>
+<li>
+<p>Select the retained previous instance, approved snapshot, binary/image, and
+pipeline revision from the release record.</p>
+</li>
+<li>
+<p>Coordinate traffic and process shutdown/startup so each binary receives
+compatible configuration. Retain the release reservation; hold incompatible
+processes’ reloads and automatic restarts. Prepare the previous release’s
+configuration directory using the DCL checks above.</p>
+</li>
+<li>
+<p>Use the loading mode recorded and qualified for the previous release:</p>
+<ul>
+<li><strong>Current-snapshot mode:</strong> activate the saved previous snapshot for the
+old runtime identity, then redeploy the old artifact using its saved
+pipeline and inputs. Keep activation fixed until all startup downloads
+finish. With separate cohorts, blue may already have the correct snapshot;
+verify it and switch traffic only after confirming blue is healthy.</li>
+<li><strong>Local-export mode:</strong> have the pipeline install the previously approved
+values, certs, and files using the old release’s tested local-only bootstrap.
+Ensure <code>light-config-server-uri</code> is absent from every property/environment
+source. Use this mode only when its pre-upgrade qualification is recorded;
+otherwise follow the <a href="#rollback-availability">availability dependency</a>.</li>
+</ul>
+<p>Consume the saved snapshot/export. Regenerating from current authoring tables
+creates different inputs, and <code>/configs?snapshotId=...</code> is ignored today.</p>
+</li>
+<li>
+<p>Complete the DCL fetch/file checks for remote mode, or verify installed bundle
+checksums for local mode. Record the actual runtime version, readiness, API
+traffic, and the configuration evidence/limitations. Do not claim that
+unmodified Java DCL reported a snapshot ID or digest.</p>
+</li>
+<li>
+<p>Retain the failed candidate for diagnosis or soft-retire it when safe. If the
+two-instance policy requires restoring an older release, retire the failed
+candidate first and use the supported lifecycle restoration procedure.
+Obtain approval of the verified rollback outcome, end the change freeze,
+and release the reservation only after the deployment group is stable.</p>
+</li>
+</ol>
+<p>Redeploy the retained old instance rather than changing the candidate’s version.
+Resume onboarding there after rollback; create new snapshots for new edits and
+preserve the original rollback snapshot. Reconcile APIs added only to the newer
+instance and review shared catalog/inheritance changes.</p>
+<h2 id="retry-a-failed-product-version-upgrade"><a class="header" href="#retry-a-failed-product-version-upgrade">Retry a failed product-version upgrade</a></h2>
+<p>After a failed 2.3.9 upgrade is retired, its row still reserves
+<code>(host_id, service_id, env_tag, product_version_id)</code>. Clone checks include retired
+rows. A fresh clone of 2.3.8 into that same 2.3.9 identity will be rejected, even
+with a new instance UUID.</p>
+<ol>
+<li>First finish or repair the original clone/deployment attempt, including any
+<code>FAILED_DLQ</code> projection, and establish a stable running release. A command
+retry and a new release attempt are different operations.</li>
+<li>Acquire the same release reservation and apply the two-instance retention
+rule. For example, retire a restored 2.3.7 rollback instance before restoring
+2.3.9, keeping verified 2.3.8 available throughout.</li>
+<li>Restore the existing 2.3.9 instance and required cascaded children through
+the lifecycle workflow. Confirm projection completion and inspect the
+restored graph, files, and deployment bindings; restoration is not a re-clone.</li>
+<li>Reconcile the restored candidate with the latest approved 2.3.8 baseline,
+including APIs onboarded since the first attempt. Review a three-way diff
+where possible: original source baseline, current source, and failed
+candidate. Use normal editing commands to apply the selected changes and
+the 2.3.9 migration again. Clone does not provide a merge-into-existing-target
+operation. If the original baseline is unavailable, perform a full comparison
+and configuration review before proceeding.</li>
+<li>Create a new non-current snapshot and a new attempt-specific release record
+referencing the same candidate instance ID. Preserve the first attempt’s
+snapshot/evidence. Repeat validation, deployment, and observation; do not
+reuse approval from the failed attempt.</li>
+</ol>
+<p>Do not hard-delete the retired row or silently replace it with a new clone to
+bypass uniqueness. That would complicate retained snapshots, events, references,
+and recovery rather than provide a safe retry.</p>
+<h2 id="safe-retirement-and-recovery"><a class="header" href="#safe-retirement-and-recovery">Safe retirement and recovery</a></h2>
+<p>Use Portal lifecycle commands/events for soft retirement; owned graph rows are
+cascaded, snapshots/history retained, and the instance hidden from normal lists.
+First clear selected current snapshots and confirm there are no running
+deployments or required rollback obligations. Operators enforce these gates;
+soft retirement alone leaves selected snapshots servable. See the
+<a href="../design/product-upgrade-runtime-contract.html#implementation-status">implementation table</a>.</p>
+<p>Preserve shared product versions, pipelines, artifacts, and access needed by
+other instances or the recovery plan. Qualify restoration of the instance,
+cascaded children, and deployment infrastructure before relying on archives.
+Retired rows still reserve their version identity: use the
+<a href="#retry-a-failed-product-version-upgrade">restore/retry procedure</a>.</p>
+<h2 id="fleet-operation"><a class="header" href="#fleet-operation">Fleet operation</a></h2>
+<h3 id="sidecar-version-overlap"><a class="header" href="#sidecar-version-overlap">Sidecar version overlap</a></h3>
+<p>A Kubernetes Deployment normally uses <code>RollingUpdate</code>, so old and new Pods can
+overlap under the same Config Server identity. <code>Recreate</code> stops the old revision
+before creating the new revision during a Deployment upgrade; it does not give
+the same guarantee for manual Pod deletions or other controllers. See the
+<a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy">Kubernetes Deployment strategy contract</a>.</p>
+<p>Choose and record one policy for each API’s sidecar deployment group:</p>
+<ul>
+<li><strong>Compatible rolling update:</strong> qualify the served values, certs, and files
+for both old and new binaries, including old-Pod restarts/reloads and rollback
+while any new Pods remain. Use that approved common configuration throughout
+the overlap; do not rely on old Pods retaining a cache. Keep activation fixed
+through each complete DCL download sequence.</li>
+<li><strong>Incompatible versions:</strong> use a qualified <code>Recreate</code> rollout or a maintenance
+restart, accepting the API/application Pod outage. The pipeline must ensure
+old consumers are stopped, activate the target snapshot, then permit new
+startup. <code>Recreate</code> alone does not schedule the external snapshot activation:
+use a tested startup gate or an explicit scale-down/wait/activate/start
+sequence. Hold autoscaler/GitOps reconciliation and other deployment/reload
+triggers during that sequence. Coordinate every workload sharing the identity,
+not just one Deployment, and use the same ordering for rollback.</li>
+</ul>
+<p>If neither policy is acceptable, stop and design isolated identities or a
+qualified pinned/local-export deployment before rolling out. Per-Pod blue/green
+env tags are not the default fleet strategy. Batch by independent deployment
+groups; batching does not solve incompatible overlap within a group.</p>
+<h3 id="batch-coordination"><a class="header" href="#batch-coordination">Batch coordination</a></h3>
+<p>For sidecar fleets, automate the reviewed workflow around existing commands:
+select eligible instances, reserve one upgrade per deployment group, clone in
+bounded batches, validate, deploy in cohorts, and record each result. Preserve the
+request identity across retries and distinguish accepted commands from fully
+projected and runtime-verified outcomes.</p>
+<p>Apply the shared deployment-group retention rule after its own transition
+checks; a successful fleet subset must not cause retirement for a failed or unfinished
+instance. The current UI is not a fleet upgrade orchestrator, and a batch
+implementation is additional work.</p>
+<p>Related reading: <a href="../design/instance-clone.html">Instance Clone design</a>,
+<a href="../design/config-snapshot.html">Configuration Snapshots</a>,
+<a href="./docker-compose/services/config-server.html">Config Server operations</a>, and
+<a href="../design/cascade-soft-delete.html">Policy-Driven Cascade Delete</a>.
+For source evidence and proposed code work, see
+<a href="../design/product-upgrade-runtime-contract.html">Product Upgrade Runtime Contract</a>.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../operations.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../operations/docker-compose.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../operations.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../operations/docker-compose.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-09f2665d.js"></script>
+
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-609e4cb8.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../mermaid-c05fc885.min.js"></script>
+        <script src="../mermaid-init-53b67c53.js"></script>
+
+
+
+    </div>
+    </body>
+</html>
