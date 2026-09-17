@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-3d9bfd45.js";
+            window.path_to_searchindex_js = "searchindex-42dd0673.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-04a1a46b.js"></script>
+        <script src="toc-11d57c9c.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -54017,6 +54017,10 @@ fallback Deployment works.</p>
 </ul>
 <p>See <a href="#websocket-router-configuration">WebSocket Router Configuration</a> for the
 properties loaded from <code>light-gateway/config/websocket-router.yml</code>.</p>
+<p>See <a href="#direct-registry-configuration">Direct Registry Configuration</a> for the
+<code>directUrls</code> service-to-host mapping loaded from
+<code>light-gateway/config/direct-registry.yml</code>, including the base path used for a
+path-based Kubernetes ingress.</p>
 <p>See <a href="#mcp-router-configuration">MCP Router Configuration</a> for the MCP endpoint,
 protocol profile, schema budget, resource limit, cache, and tool properties
 loaded from <code>light-gateway/config/mcp-router.yml</code>.</p>
@@ -55392,6 +55396,114 @@ catalog.</li>
 in a stateless transport header. Header names must be safe HTTP tokens, cannot
 be gateway-owned or sensitive, and may annotate only bounded string, boolean,
 or safe-range integer properties.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="direct-registry-configuration"><a class="header" href="#direct-registry-configuration">Direct Registry Configuration</a></h1>
+<p>The direct registry resolves a <code>serviceId</code> (and an optional environment tag) to
+one or more target hosts from a static configuration instead of a service
+registry. It resides in <code>direct-registry.yml</code> and is managed through the
+portal-view interface and config server with properties named
+<code>direct-registry.&lt;property&gt;</code>.</p>
+<p>It is supported by both the Java implementation in <code>light-4j</code> and the Rust
+implementation in <code>light-fabric</code>, and it is used for local development, for
+targets that are not registered in the controller, and as a fallback when the
+portal registry is unavailable. It is a transitional solution until service
+discovery from the controller covers every deployment.</p>
+<h2 id="overview-of-configuration-properties-1"><a class="header" href="#overview-of-configuration-properties-1">Overview of Configuration Properties</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Property</th><th style="text-align: left">Type</th><th style="text-align: left">Default</th><th style="text-align: left">Description</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><strong><a href="#direct-registry-directurls">directUrls</a></strong></td><td style="text-align: left">Object</td><td style="text-align: left"><code>{}</code></td><td style="text-align: left">Maps a service id, optionally with an environment tag, to one or more target urls.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="lookup-order"><a class="header" href="#lookup-order">Lookup Order</a></h2>
+<ol>
+<li>The gateway looks up <code>serviceId|envTag</code> when an environment tag is present.</li>
+<li>It falls back to the plain <code>serviceId</code> entry.</li>
+<li>When neither exists, discovery from the portal registry is used.</li>
+</ol>
+<p>In <code>light-fabric</code>, portal-registry discovery is attempted first, and
+direct-registry is the fallback when discovery is unavailable or returns no
+usable endpoint.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="direct-registry-directurls"><a class="header" href="#direct-registry-directurls">Direct Registry: directUrls</a></h1>
+<p><code>directUrls</code> maps a service id to the hosts that serve it, so that a request can
+be routed without service discovery.</p>
+<ul>
+<li><strong>Type:</strong> Map of service id to one or more urls</li>
+<li><strong>Default:</strong> <code>{}</code></li>
+</ul>
+<pre><code class="language-yaml">directUrls:
+  code: http://192.168.1.100:6881,http://192.168.1.101:6881
+  token: http://192.168.1.100:6882
+  com.networknt.test-1.0.0: http://localhost,https://localhost
+  command|0000: https://192.168.1.142:8440
+  command|0001: https://192.168.1.142:8441
+  command|0002: https://192.168.1.142:8442
+</code></pre>
+<p>The key is the service id. When the same service is deployed to several
+environments, append the environment tag to the service id with a vertical bar,
+as in <code>command|0000</code>. The value is a single url, or several urls separated by
+commas when the service has multiple instances to load balance between. Each url
+must use <code>http</code> or <code>https</code> and must contain a host.</p>
+<p>For config-server injection, the same map can be written as a JSON string or as
+a <code>key=value&amp;key=value</code> string:</p>
+<pre><code class="language-yaml">directUrls: {"code":"http://192.168.1.100:6881","command|0000":"https://192.168.1.142:8440"}
+</code></pre>
+<pre><code class="language-yaml">directUrls: code=http://192.168.1.100:6881&amp;command|0000=https://192.168.1.142:8440
+</code></pre>
+<h2 id="base-path-for-a-path-based-kubernetes-ingress"><a class="header" href="#base-path-for-a-path-based-kubernetes-ingress">Base Path for a Path-Based Kubernetes Ingress</a></h2>
+<p>When the target service runs in a Kubernetes cluster behind an ingress that
+routes on a path prefix, the namespace and service are part of the url and the
+ingress strips them before the request reaches the pod. Put that prefix in the
+url as its path:</p>
+<pre><code class="language-yaml">directUrls:
+  com.networknt.petstore-1.0.0: https://api.example.com/namespace1/service1
+  com.networknt.petstore-1.0.0|dev: https://api.example.com/namespace1/service1-dev
+</code></pre>
+<p>With the entry above, a request for <code>/v1/pets</code> is sent to
+<code>https://api.example.com/namespace1/service1/v1/pets</code>. The ingress uses
+<code>/namespace1/service1</code> to select the pod and removes it, so the pod receives the
+original <code>/v1/pets</code> request. A url without a path, such as
+<code>https://192.168.1.142:8440</code> for a VM deployment, is unaffected.</p>
+<p>Note the following when the base path is used:</p>
+<ul>
+<li>The ingress must be configured to strip the prefix. Examples are the nginx
+<code>rewrite-target</code> annotation and the <code>URLRewrite</code> filter with
+<code>ReplacePrefixMatch</code> in the Gateway API.</li>
+<li>The pod does not know its public path. Any absolute url a service returns,
+such as a <code>Location</code> redirect, a cookie <code>Path</code>, an OAuth redirect uri, or the
+<code>servers</code> entry of an OpenAPI specification, must be configured with the
+public base path by the service itself.</li>
+<li>The <code>Host</code> header and the TLS SNI are taken from the host of the url, not from
+the base path, so host-based ingress rules keep working.</li>
+<li>The base path applies only to entries in <code>directUrls</code>. Targets that come from
+portal-registry discovery are addressed by host and port.</li>
+</ul>
+<p>Where the base path is applied:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Runtime</th><th style="text-align: left">Component</th><th style="text-align: left">Behavior</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>light-fabric</code></td><td style="text-align: left">Router, proxy, WebSocket, A2A, MCP tools</td><td style="text-align: left">The path of the url is used as the upstream path prefix of every request.</td></tr>
+<tr><td style="text-align: left"><code>light-fabric</code></td><td style="text-align: left">OAuth token, JWK, and SPA auth lookups</td><td style="text-align: left">The configured uri is appended to the url, so the base path is kept.</td></tr>
+<tr><td style="text-align: left"><code>light-4j</code></td><td style="text-align: left"><code>Cluster.serviceToUrl</code> and <code>Cluster.services</code></td><td style="text-align: left">The url and uri returned include the base path.</td></tr>
+<tr><td style="text-align: left"><code>light-4j</code></td><td style="text-align: left"><code>Http2Client.callService</code>, <code>Http2ServiceRequest</code>, MCP tools</td><td style="text-align: left">The base path is prepended to the path of the request.</td></tr>
+<tr><td style="text-align: left"><code>light-4j</code></td><td style="text-align: left"><code>light-router</code> and <code>http-sidecar</code></td><td style="text-align: left">Undertow proxies to the host url, which includes the base path.</td></tr>
+</tbody>
+</table>
+</div>
+<p>In <code>light-4j</code> the base path is carried as a <code>basePath</code> url parameter so that it
+is not mixed up with the path of a discovery url, which holds the service id.
+The parameter is derived from the url and does not need to be configured.</p>
+<p>An alternative to a path-based ingress is a host-based one, such as
+<code>https://service1.namespace1.api.example.com</code>, which needs no prefix stripping
+and leaves the paths of the service untouched.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="portal-view-concepts"><a class="header" href="#portal-view-concepts">Portal View Concepts</a></h1>
 <p>This section contains reusable explanations for portal concepts referenced by
