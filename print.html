@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-a0d93ac4.js";
+            window.path_to_searchindex_js = "searchindex-3d9bfd45.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-a66f94db.js"></script>
+        <script src="toc-04a1a46b.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -27705,10 +27705,605 @@ cannot contain two user births for the same <code>user_id</code>, every active m
 has a version-one <code>UserHost</code> stream birth, and no child row may be published
 without a satisfiable declared dependency and conversion disposition.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="portal-service-consolidation-into-rust"><a class="header" href="#portal-service-consolidation-into-rust">Portal Service Consolidation Into Rust</a></h1>
+<h2 id="status-17"><a class="header" href="#status-17">Status</a></h2>
+<p>Proposed on 2026-09-16. Not yet implemented.</p>
+<h2 id="decision-4"><a class="header" href="#decision-4">Decision</a></h2>
+<p>Replace the Java <code>light-hybrid-4j</code> portal services with two Rust services built
+from a single repository:</p>
+<ul>
+<li><code>portal-command</code> replaces <code>hybrid-command</code> and every <code>*-command</code> repository.</li>
+<li><code>portal-query</code> replaces <code>hybrid-query</code>, every <code>*-query</code> repository, and the
+outbox projection consumer.</li>
+</ul>
+<p>Both services use a shared Rust port of <code>light-portal/db-provider</code>,
+<code>command-common</code>, and <code>common-util</code>.</p>
+<p>The migration is incremental. The external contract stays the same: the
+<code>/portal/command</code> and <code>/portal/query</code> endpoints, the hybrid
+<code>host/service/action/version</code> envelope, CloudEvent payloads, database schema,
+and error codes. Services move one domain at a time. The gateway routes each
+migrated service to Rust and everything else to Java. A parity harness is
+required before each domain cuts over.</p>
+<p>Reducing memory use is a side benefit, not a reason for this decision.</p>
+<h2 id="context-5"><a class="header" href="#context-5">Context</a></h2>
+<h3 id="current-layout"><a class="header" href="#current-layout">Current Layout</a></h3>
+<p>Each portal domain is split into two Maven repositories that build jars. When
+deploying, those jars are copied into the <code>hybrid-command</code> or <code>hybrid-query</code>
+service folder and loaded from the classpath. Handlers register with
+<code>@ServiceHandler(id="lightapi.net/&lt;service&gt;/&lt;action&gt;/&lt;version&gt;")</code> and validate
+input against each repository’s <code>spec.yaml</code>.</p>
+<p>Measured on 2026-09-16 (main source only, tests excluded):</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Component</th><th>Repositories</th><th>Java lines</th><th>Service handlers</th></tr>
+</thead>
+<tbody>
+<tr><td><code>*-command</code></td><td>29</td><td>~30k</td><td>464</td></tr>
+<tr><td><code>*-query</code></td><td>29</td><td>~27k</td><td>454</td></tr>
+<tr><td><code>hybrid-command</code>, <code>hybrid-query</code></td><td>2</td><td>&lt;1k</td><td>n/a</td></tr>
+<tr><td><code>light-portal/db-provider</code></td><td>1</td><td>~108k</td><td>n/a</td></tr>
+<tr><td><code>light-portal/common-util</code></td><td>1</td><td>~7k</td><td>n/a</td></tr>
+<tr><td><code>light-portal/command-common</code></td><td>1</td><td>~1k</td><td>n/a</td></tr>
+<tr><td><strong>Total</strong></td><td><strong>~60</strong></td><td><strong>~173k</strong></td><td><strong>918</strong></td></tr>
+</tbody>
+</table>
+</div>
+<p><code>db-provider</code> also has ~29k lines of tests. The largest domains by handler
+count are <code>genai</code>, <code>config</code>, <code>user</code>, <code>workflow</code>, <code>oauth</code>, and <code>instance</code>.
+Several repositories (<code>blog</code>, <code>news</code>, <code>page</code>, <code>form</code>, <code>template</code>, <code>document</code>,
+<code>error</code>) are placeholders with fewer than 100 lines.</p>
+<p>For comparison, <code>light-fabric</code> is one Cargo workspace with ~323k lines of Rust.
+It already contains <code>light-gateway</code>, <code>light-workflow</code>, <code>light-knowledge</code>,
+<code>config-loader</code>, <code>portal-registry</code>, and several <code>sqlx</code> Postgres stores.</p>
+<h3 id="request-and-event-flow-today"><a class="header" href="#request-and-event-flow-today">Request And Event Flow Today</a></h3>
+<pre><code class="language-text">Portal UI
+   |
+   | POST /portal/command  {host, service, action, version, data}
+   v
+light-gateway (Rust)  -- parses the hybrid envelope (is_portal_hybrid_path)
+   |
+   v
+hybrid-command (Java)
+   | AbstractCommandHandler: trusted scope, owner checks, idempotency,
+   | aggregate version, CloudEvent build
+   | PortalDbProvider: event_store_t + outbox_message_t in one transaction
+   v
+PostgreSQL
+   |
+   | LISTEN event_channel / gapless c_offset polling
+   v
+hybrid-query (Java) DbEventConsumerStartupHook
+   | projection writers in db-provider
+   v
+projection tables  &lt;-- read by hybrid-query handlers via /portal/query
+</code></pre>
+<p><code>hybrid-command</code> also calls <code>hybrid-query</code> through <code>HybridQueryClient</code> for some
+flows, such as event replay.</p>
+<h3 id="problems"><a class="header" href="#problems">Problems</a></h3>
+<ol>
+<li><strong>Two languages.</strong> Contracts shared by both runtimes (CloudEvent shapes,
+config loading, token handling, error codes, entity scope rules) are
+implemented twice and can drift apart. Every security patch and dependency
+update must be done in both toolchains.</li>
+<li><strong>Too many repositories.</strong> A single feature usually touches <code>db-provider</code>,
+a <code>*-command</code> repository, a <code>*-query</code> repository, and sometimes
+<code>light-portal-event</code>. These must be released in dependency order. Portal code
+is now written mostly by AI agents, and agents work best when they can see
+the whole change, run every affected test, and make one atomic commit. Many
+repositories prevent all three.</li>
+<li><strong>Memory.</strong> <code>hybrid-command</code> and <code>hybrid-query</code> together use about 500 MB,
+roughly ten times a comparable Rust service. This is real but not decisive.</li>
+</ol>
+<h2 id="options-considered-1"><a class="header" href="#options-considered-1">Options Considered</a></h2>
+<h3 id="a-keep-java-and-hybrid-as-is"><a class="header" href="#a-keep-java-and-hybrid-as-is">A. Keep Java And Hybrid As-Is</a></h3>
+<ul>
+<li>Pros: already tested in production; no migration risk; jars can be deployed
+independently.</li>
+<li>Cons: the two-language cost never goes away and grows with each shared
+contract; the multi-repository workflow stays; any AI-driven change keeps
+spanning repositories.</li>
+</ul>
+<h3 id="b-merge-java-repositories-into-one-maven-monorepo"><a class="header" href="#b-merge-java-repositories-into-one-maven-monorepo">B. Merge Java Repositories Into One Maven Monorepo</a></h3>
+<p>Keep <code>light-hybrid-4j</code>, but move every <code>*-command</code>, <code>*-query</code>, and
+<code>light-portal</code> module into one multi-module repository.</p>
+<ul>
+<li>Pros: fixes problem 2 in days with almost no behavior risk; the build and
+deployment stay the same.</li>
+<li>Cons: does not fix problem 1 or 3; the Java side keeps growing in parallel
+with Rust.</li>
+</ul>
+<h3 id="c-rewrite-in-rust-with-two-services-chosen"><a class="header" href="#c-rewrite-in-rust-with-two-services-chosen">C. Rewrite In Rust With Two Services (Chosen)</a></h3>
+<ul>
+<li>Pros: one language and toolchain; shares crates with <code>light-fabric</code>
+(<code>config-loader</code>, <code>portal-registry</code>, security, stores); one atomic commit per
+feature; the compiler and <code>sqlx</code> query checks catch many AI mistakes before
+runtime; lower memory and faster startup.</li>
+<li>Cons: behavior drift is the main risk, not code volume; loses runtime jar
+drop-in (services are compiled in and optionally gated by Cargo features);
+a large workspace compiles slowly; both runtimes must be operated during the
+migration.</li>
+</ul>
+<p>Option B is an optional first step for C. See <a href="#phase-0-optional-java-monorepo">Phase 0</a>.</p>
+<h2 id="target-architecture-2"><a class="header" href="#target-architecture-2">Target Architecture</a></h2>
+<h3 id="repository-placement"><a class="header" href="#repository-placement">Repository Placement</a></h3>
+<p>Recommended: add the portal to <code>light-fabric</code>.</p>
+<pre><code class="language-text">light-fabric/
+  apps/
+    portal-command/        # HTTP server, handler registry, startup
+    portal-query/          # HTTP server, handler registry, outbox consumer
+  crates/
+    portal-hybrid/         # envelope, handler trait, registry, schema validation
+    portal-command-core/   # port of AbstractCommandHandler and command-common
+    portal-db/             # port of PortalDbProvider (split by persistence area)
+    portal-projection/     # outbox consumer and projection writers
+    portal-domain-&lt;name&gt;/  # per-domain command and query handlers + spec.yaml
+</code></pre>
+<p>Reasons: the gateway, config loader, registry client, and existing Postgres
+stores already live in <code>light-fabric</code>, and a single workspace gives agents the
+whole contract surface in one place.</p>
+<p>Alternative: a separate <code>portal-service</code> Cargo workspace that depends on
+published <code>light-fabric</code> crates. Choose this only if the portal needs a release
+cadence separate from the gateway and agents. It brings back cross-repository
+changes whenever a shared crate changes.</p>
+<h3 id="handler-model"><a class="header" href="#handler-model">Handler Model</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[async_trait]
+pub trait HybridHandler: Send + Sync {
+    /// "lightapi.net/&lt;service&gt;/&lt;action&gt;/&lt;version&gt;"
+    fn id(&amp;self) -&gt; &amp;'static str;
+    async fn handle(&amp;self, ctx: &amp;RequestContext, data: JsonValue)
+        -&gt; Result&lt;JsonValue, PortalStatus&gt;;
+}
+<span class="boring">}</span></code></pre>
+<ul>
+<li>Handlers register in a static registry. Each domain crate exports a
+<code>register(&amp;mut Registry)</code> function, and the apps call it for every enabled
+domain.</li>
+<li>Each domain crate keeps its <code>spec.yaml</code> unchanged. Validation runs before the
+handler, as in <code>light-hybrid-4j</code>.</li>
+<li><code>RequestContext</code> carries the authenticated claims, the trusted host, and the
+idempotency key. Trusted-scope and owner checks come from
+<code>portal-command-core</code>, not from each handler.</li>
+<li>Errors keep the existing <code>ERRxxxxx</code> codes and status message templates from
+<code>app-status.yml</code>.</li>
+</ul>
+<h3 id="database-layer"><a class="header" href="#database-layer">Database Layer</a></h3>
+<ul>
+<li>Use <code>sqlx</code> with Postgres, matching the rest of <code>light-fabric</code>.</li>
+<li>Split <code>PortalDbProviderImpl</code> (~240k characters) and the large
+<code>*PersistenceImpl</code> classes by persistence area. Each area becomes a module
+inside <code>portal-db</code>, or its own crate if compile time requires it.</li>
+<li>Command writes keep one transaction covering the aggregate version check,
+<code>event_store_t</code>, and <code>outbox_message_t</code>. The optimistic concurrency semantics
+described in existing designs stay exactly the same.</li>
+<li>CloudEvent serialization must produce the same JSON as Java, field for field,
+including aggregate type and ID derivation. <code>getCloudEventAggregateId</code> rules
+for Knowledge types must be kept.</li>
+</ul>
+<h3 id="projection-consumer"><a class="header" href="#projection-consumer">Projection Consumer</a></h3>
+<p>The outbox consumer reads with gapless <code>c_offset</code> ordering, so Java and Rust
+consumers cannot share it event type by event type. It moves as <strong>one unit</strong>:</p>
+<ol>
+<li>Port every projection writer while Java remains the live consumer.</li>
+<li>Verify offline by replaying the full event stream through the Rust consumer
+into a scratch database and diffing every projection table against the
+Java-built database.</li>
+<li>Cut over by stopping the Java consumer at offset N and starting the Rust
+consumer from N+1.</li>
+</ol>
+<p>Until that cutover, Rust query handlers read projections written by Java. This
+works because the schema is shared.</p>
+<h3 id="gateway-routing"><a class="header" href="#gateway-routing">Gateway Routing</a></h3>
+<p><code>light-gateway</code> already parses the hybrid envelope for <code>/portal/query</code> and
+<code>/portal/command</code>. Add a per-service upstream table:</p>
+<pre><code class="language-yaml">portalHybridRouting:
+  command:
+    default: hybrid-command
+    services:
+      tag: portal-command
+      category: portal-command
+  query:
+    default: hybrid-query
+    services:
+      tag: portal-query
+</code></pre>
+<p>Routing is by <code>service</code> only; a domain moves all of its actions at once. The
+table is removed when the migration finishes.</p>
+<h2 id="migration-plan-3"><a class="header" href="#migration-plan-3">Migration Plan</a></h2>
+<h3 id="phase-0-optional-java-monorepo"><a class="header" href="#phase-0-optional-java-monorepo">Phase 0: Optional Java Monorepo</a></h3>
+<p>See <a href="#portal-java-monorepo">Portal Java Monorepo</a> for the detailed plan.</p>
+<p>If Phases 2 and 3 are expected to take more than about two months, merge the
+Java repositories into one Maven multi-module repository first (Option B). This
+fixes the multi-repository pain for the length of the migration and gives the
+parity harness one Java build to run against.</p>
+<h3 id="phase-1-foundation"><a class="header" href="#phase-1-foundation">Phase 1: Foundation</a></h3>
+<ul>
+<li><code>portal-hybrid</code>, <code>portal-command-core</code>, handler registry, schema validation,
+status codes, config loading, JWT and trusted-scope context.</li>
+<li>The core parts of <code>portal-db</code>: event append, outbox, idempotency ledger,
+entity creation scope contract.</li>
+<li>Gateway per-service routing.</li>
+<li>Parity harness (below).</li>
+<li>Exit criteria: one trivial domain (such as <code>tag</code>) passes parity and is routed
+to Rust in a development environment.</li>
+</ul>
+<h3 id="phase-2-command-and-query-domains"><a class="header" href="#phase-2-command-and-query-domains">Phase 2: Command And Query Domains</a></h3>
+<p>Migrate domains from small and low-risk to large and security-sensitive:</p>
+<ol>
+<li><code>tag</code>, <code>category</code>, <code>schema</code>, <code>schedule</code>, <code>ref</code>, <code>position</code>, <code>role</code>, <code>group</code>,
+<code>attribute</code>, <code>rule</code>, <code>product</code></li>
+<li><code>host</code>, <code>deployment</code>, <code>maproot</code>, <code>service</code>, <code>instance</code></li>
+<li><code>workflow</code>, <code>config</code>, <code>genai</code></li>
+<li><code>oauth</code>, <code>user</code></li>
+</ol>
+<p>The placeholder domains (<code>blog</code>, <code>news</code>, <code>page</code>, <code>form</code>, <code>template</code>,
+<code>document</code>, <code>error</code>) are planned features. Create their domain crates when
+their features are built, in Rust if the migration has started by then.</p>
+<p>For each domain:</p>
+<ol>
+<li>Port the command handlers, query handlers, and <code>db-provider</code> persistence
+methods together.</li>
+<li>Pass the parity harness.</li>
+<li>Route the domain to Rust in development, then test, then production.</li>
+<li>Delete the Java repositories for that domain once production has run on
+Rust for one release cycle.</li>
+</ol>
+<h3 id="phase-3-projection-consumer-cutover"><a class="header" href="#phase-3-projection-consumer-cutover">Phase 3: Projection Consumer Cutover</a></h3>
+<p>Follow the <a href="#projection-consumer">Projection Consumer</a> procedure after every
+projection writer is ported. This can run in parallel with Phase 2 group 3 or 4.</p>
+<h3 id="phase-4-retirement"><a class="header" href="#phase-4-retirement">Phase 4: Retirement</a></h3>
+<p>Remove <code>hybrid-command</code>, <code>hybrid-query</code>, <code>light-portal</code>, the per-service
+gateway routing table, and the Java build from CI and deployment manifests.</p>
+<h2 id="parity-harness"><a class="header" href="#parity-harness">Parity Harness</a></h2>
+<p>The parity harness is the safety mechanism that makes an AI-written port
+acceptable. A domain may not cut over without passing it.</p>
+<ul>
+<li><strong>Recorded scenarios.</strong> Request sequences per domain covering success, every
+validation failure, owner and admin-override paths, cross-host denial,
+idempotent retry, and version conflict. Seed them from the existing
+<code>db-provider</code> tests and <code>light-portal-test</code>.</li>
+<li><strong>Dual execution.</strong> Run each scenario against Java and Rust, each on a fresh
+database built from the same snapshot bootstrap.</li>
+<li><strong>Comparison.</strong> Compare HTTP status and normalized response body; appended
+<code>event_store_t</code> and <code>outbox_message_t</code> rows (ignoring generated IDs and
+timestamps); and the resulting projection rows.</li>
+<li><strong>Stream replay.</strong> For the projection consumer, replay a production-shaped
+event stream and diff all projection tables.</li>
+<li>Differences fail CI. An intentional difference must be written down in the
+scenario with a reason.</li>
+</ul>
+<h2 id="risks"><a class="header" href="#risks">Risks</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Risk</th><th>Mitigation</th></tr>
+</thead>
+<tbody>
+<tr><td>Behavior drift in authorization, scope, or error codes</td><td>Parity harness; migrate <code>oauth</code> and <code>user</code> last</td></tr>
+<tr><td>CloudEvent payload mismatch breaks replay or snapshots</td><td>Byte-level event comparison in the harness; snapshot bootstrap round-trip test</td></tr>
+<tr><td>Split-brain projection writes</td><td>Consumer moves as one unit at a recorded offset</td></tr>
+<tr><td>Slow compile times in <code>light-fabric</code></td><td>Per-domain crates; Cargo features to build only selected domains during development</td></tr>
+<tr><td>Long period operating both runtimes</td><td>Phase 0 monorepo; strict domain ordering; delete Java code per domain promptly</td></tr>
+<tr><td>Loss of independent jar deployment</td><td>Accepted; jars are already deployed together in practice</td></tr>
+<tr><td>External users depend on the Java jars on Maven Central</td><td>Announce an end-of-life date per domain; publish a final Java release; see Open Questions</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="open-questions-4"><a class="header" href="#open-questions-4">Open Questions</a></h2>
+<ol>
+<li>Confirm repository placement: <code>light-fabric</code> (recommended) or a separate
+<code>portal-service</code> workspace.</li>
+<li>Decide whether Phase 0 is worth doing, based on the expected migration time.</li>
+<li>Decide whether <code>portal-command</code> and <code>portal-query</code> should also be able to run
+as one combined binary for small deployments.</li>
+<li>Some users depend on the Java portal jars on Maven Central. Decide how long
+the Java artifacts receive fixes after their domain moves to Rust, and how
+those users are told.</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="portal-java-monorepo"><a class="header" href="#portal-java-monorepo">Portal Java Monorepo</a></h1>
+<h2 id="status-18"><a class="header" href="#status-18">Status</a></h2>
+<p>Proposed on 2026-09-16. Not yet implemented.</p>
+<p>This is the optional Phase 0 of
+<a href="#portal-service-consolidation-into-rust">Portal Service Consolidation Into Rust</a>.
+It is also useful on its own if the Rust migration is delayed.</p>
+<h2 id="decision-5"><a class="header" href="#decision-5">Decision</a></h2>
+<p>Move every portal <code>*-command</code> and <code>*-query</code> repository, plus <code>hybrid-command</code>
+and <code>hybrid-query</code>, into the existing <code>light-portal</code> repository as Maven
+modules. Keep full git history.</p>
+<p>Nothing changes at runtime:</p>
+<ul>
+<li>Each service module still builds its own small jar with the same
+<code>artifactId</code>, for example <code>user-command-&lt;version&gt;.jar</code>.</li>
+<li><code>hybrid-command</code> and <code>hybrid-query</code> still build shaded server jars and Docker
+images, and still load service jars from <code>/service/*</code>.</li>
+<li>Handler IDs, <code>spec.yaml</code>, config, events, and the database are unchanged.</li>
+</ul>
+<p>What changes is how the code is stored, built, versioned, and released.</p>
+<h2 id="context-6"><a class="header" href="#context-6">Context</a></h2>
+<h3 id="current-state-4"><a class="header" href="#current-state-4">Current State</a></h3>
+<p>Measured on 2026-09-16:</p>
+<ul>
+<li>29 <code>*-command</code> and 29 <code>*-query</code> repositories, plus <code>hybrid-command</code>,
+<code>hybrid-query</code>, and <code>light-portal</code> (<code>common-util</code>, <code>command-common</code>,
+<code>db-provider</code>). All are at version <code>2.3.8-SNAPSHOT</code>.</li>
+<li>No service module depends on another service module. Each depends only on
+light-4j and the three <code>light-portal</code> libraries.</li>
+<li>Each service <code>pom.xml</code> is about 420 to 440 lines, almost all duplicated:
+repositories, properties, plugin versions, javadoc, and source setup.</li>
+<li>Every service build creates a javadoc jar during <code>package</code>. For
+<code>user-command</code> this jar is about 4.3 MB, while the real jar is about 100 KB.</li>
+<li><code>light-portal/db-provider</code> and <code>command-common</code> are <strong>shaded into</strong>
+<code>hybrid-command.jar</code> and <code>hybrid-query.jar</code>. A change to them requires new
+hybrid images, not just new service jars.</li>
+<li>Builds and releases are driven by per-repository scripts in
+<code>devops/workspace</code>:
+<ul>
+<li><code>copy-service-local.sh</code>, <code>copy-service-dev.sh</code>, <code>copy-service-test.sh</code>:
+use <code>mgitstatus</code> to find changed repositories, run <code>mvn clean install</code> in
+each, then copy <code>target/&lt;name&gt;-*.jar</code> into <code>hybrid-*/service</code>.</li>
+<li><code>publish.sh</code>: runs <code>mvn clean install deploy -DperformRelease</code> in about 60
+directories, one after another.</li>
+<li><code>update-asset.sh</code>, <code>daily-release.sh</code>, <code>release-docker-images.sh</code>:
+reference individual repository directories.</li>
+<li><code>reindex-gitnexus.sh</code>, <code>create-gitnexus-groups.sh</code>: index per repository.</li>
+</ul>
+</li>
+<li>Eight repositories (<code>light-portal</code>, <code>config-command</code>, <code>config-query</code>,
+<code>deployment-command</code>, <code>instance-command</code>, <code>instance-query</code>, <code>oauth-command</code>,
+<code>oauth-query</code>) have a GitHub <code>sync</code> branch workflow: a customer pushes updates
+to <code>sync</code>, and <code>sync-auto-pr.yml</code> opens a PR to <code>master</code>. <code>oauth-query</code> also
+has <code>master-to-sync.yml</code>.</li>
+</ul>
+<h3 id="problems-this-solves"><a class="header" href="#problems-this-solves">Problems This Solves</a></h3>
+<ol>
+<li><strong>Atomic changes.</strong> A feature touching <code>db-provider</code>, a command handler, and
+a query handler becomes one commit and one PR instead of three to five.</li>
+<li><strong>No install ordering or stale SNAPSHOTs.</strong> Today <code>light-portal</code> must be
+<code>mvn install</code>ed before its dependents, or they build against an old
+SNAPSHOT from <code>~/.m2</code> or Central. Inside one reactor build, Maven resolves
+module dependencies from source.</li>
+<li><strong>AI agents see the whole contract.</strong> One checkout, one <code>CLAUDE.md</code>, one
+GitNexus index, and one test command cover the persistence method, the
+handler, and its <code>spec.yaml</code>.</li>
+<li><strong>Less build configuration.</strong> About 25k lines of duplicated POM move into
+one parent. A light-4j or Jackson upgrade becomes a one-line change.</li>
+<li><strong>Faster daily builds.</strong> Javadoc and source jars move into the release
+profile, and the reactor builds modules in parallel (<code>-T 1C</code>).</li>
+<li><strong>Simpler scripts.</strong> Change detection per repository and the long
+<code>publish.sh</code> are replaced by reactor commands.</li>
+</ol>
+<h3 id="problems-this-does-not-solve"><a class="header" href="#problems-this-does-not-solve">Problems This Does Not Solve</a></h3>
+<ul>
+<li>Two languages: Java and Rust are still maintained side by side.</li>
+<li>Memory use of the JVM services.</li>
+<li>The separate <code>light-portal-event</code> data repository (events, not code). It is
+out of scope.</li>
+</ul>
+<h2 id="target-layout"><a class="header" href="#target-layout">Target Layout</a></h2>
+<pre><code class="language-text">light-portal/
+  pom.xml                     # aggregator + parent (packaging pom)
+  CLAUDE.md, AGENTS.md        # merged agent guidance
+  common-util/                # unchanged location
+  command-common/             # unchanged location
+  db-provider/                # unchanged location
+  command/
+    pom.xml                   # command parent: shared deps (rpc-router, email, ...)
+    attribute-command/
+    category-command/
+    ...
+    workflow-command/
+  query/
+    pom.xml                   # query parent
+    attribute-query/
+    ...
+    workflow-query/
+  hybrid/
+    hybrid-command/           # shaded server jar + docker/
+    hybrid-query/
+  dist/
+    pom.xml                   # collects service jars for deployment (see below)
+  .github/workflows/
+</code></pre>
+<p>The three library modules stay where they are so <code>light-portal</code> history and
+paths do not change.</p>
+<h3 id="pom-structure"><a class="header" href="#pom-structure">POM Structure</a></h3>
+<ul>
+<li><strong>Root <code>pom.xml</code></strong> (<code>net.lightapi:light-portal</code>, packaging <code>pom</code>):
+<ul>
+<li><code>&lt;version&gt;${revision}&lt;/version&gt;</code> with <code>revision=2.3.8-SNAPSHOT</code>, using
+<code>flatten-maven-plugin</code> so published POMs have concrete versions.</li>
+<li>All shared <code>properties</code>, <code>repositories</code>, <code>distributionManagement</code>,
+<code>dependencyManagement</code> (light-4j, Jackson BOM, CloudEvents, JUnit), and
+<code>pluginManagement</code>.</li>
+<li><code>release</code> profile (activated by <code>-DperformRelease</code>): sources, javadoc,
+and gpg. Javadoc is <strong>not</strong> built by default.</li>
+</ul>
+</li>
+<li><strong><code>command/pom.xml</code> and <code>query/pom.xml</code></strong>: dependencies every handler module
+in that group uses, so each service POM lists only what is special to it.</li>
+<li><strong>Service <code>pom.xml</code></strong>: parent reference, <code>artifactId</code>, <code>name</code>, <code>description</code>,
+and any extra dependencies. Target size: about 20 to 40 lines.</li>
+<li><strong><code>hybrid-command</code> and <code>hybrid-query</code></strong>: keep the shade setup. Their Docker
+build context stays the module directory.</li>
+</ul>
+<h3 id="deployment-output-small-jars-remain"><a class="header" href="#deployment-output-small-jars-remain">Deployment Output: Small Jars Remain</a></h3>
+<p>Each service module still produces <code>target/&lt;artifactId&gt;-&lt;version&gt;.jar</code>, and
+<code>mvn deploy</code> still publishes each one to Maven Central under its current
+coordinates, because external users depend on them.
+Deployment continues to copy thin jars into <code>hybrid-*/service</code>.</p>
+<p>To remove the <code>find</code> logic in the copy scripts, the <code>dist</code> module uses
+<code>maven-dependency-plugin:copy-dependencies</code> (or an assembly) to collect them:</p>
+<pre><code class="language-text">dist/target/service/hybrid-command/*.jar   # every *-command jar
+dist/target/service/hybrid-query/*.jar     # every *-query jar
+dist/target/hybrid-command.zip             # same format install.sh downloads
+dist/target/hybrid-query.zip
+</code></pre>
+<p>Scripts copy these directories as they are. <code>light-portal-install/install.sh</code>
+keeps downloading <code>hybrid-command.zip</code> and <code>hybrid-query.zip</code> unchanged.</p>
+<p>Independent jar deployment still works: rebuild one module with
+<code>mvn -pl command/user-command -am package</code> and copy its jar. The only
+limitation is the same as today: changes to <code>db-provider</code> or <code>command-common</code>
+also need new hybrid images, because those libraries are shaded.</p>
+<h3 id="everyday-commands"><a class="header" href="#everyday-commands">Everyday Commands</a></h3>
+<pre><code class="language-bash"># Full build with tests
+mvn -T 1C clean install
+
+# One service and what it depends on
+mvn -pl command/user-command -am install
+
+# Everything affected by a db-provider change
+mvn -pl db-provider -amd install
+
+# Release
+mvn -T 1C clean deploy -DperformRelease
+</code></pre>
+<h2 id="implementation-plan-4"><a class="header" href="#implementation-plan-4">Implementation Plan</a></h2>
+<h3 id="step-1-freeze-and-prepare-half-a-day"><a class="header" href="#step-1-freeze-and-prepare-half-a-day">Step 1: Freeze And Prepare (Half A Day)</a></h3>
+<ol>
+<li>Announce a short freeze on all portal Java repositories.</li>
+<li>Merge or close open branches. Known examples: <code>config-command</code> has
+<code>issue29</code> and <code>issue32</code>.</li>
+<li><strong>Confirm the <code>sync</code> branches are still clean.</strong> As of 2026-09-16, the
+customer’s contributions are fully merged. Recheck just before Step 2 that
+no <code>sync</code> branch in the eight repositories is ahead of <code>master</code>.</li>
+<li>Record each repository’s <code>master</code> HEAD SHA in the migration PR description.</li>
+</ol>
+<h3 id="step-2-import-with-history-scripted-about-an-hour"><a class="header" href="#step-2-import-with-history-scripted-about-an-hour">Step 2: Import With History (Scripted, About An Hour)</a></h3>
+<p>For each repository, with <code>git filter-repo</code> in a temporary clone:</p>
+<pre><code class="language-bash">git clone git@github.com:lightapi/user-command.git /tmp/import/user-command
+cd /tmp/import/user-command
+git filter-repo --to-subdirectory-filter command/user-command \
+                --tag-rename '':'user-command-'
+cd ~/workspace/light-portal
+git remote add import-user-command /tmp/import/user-command
+git fetch import-user-command --tags
+git merge --allow-unrelated-histories --no-edit import-user-command/master
+git remote remove import-user-command
+</code></pre>
+<ul>
+<li>Use <code>command/&lt;name&gt;</code> for command repos, <code>query/&lt;name&gt;</code> for query repos, and
+<code>hybrid/&lt;name&gt;</code> for the two hybrid repos.</li>
+<li>The tag rename prevents tag clashes between repositories.</li>
+<li><code>git log --follow</code> and <code>git blame</code> keep working in the new paths.</li>
+<li>Remove the imported <code>target/</code>, <code>log/</code>, <code>mvnw*</code>, and <code>.pre-commit-config.yaml</code>
+copies. Keep one Maven wrapper and one pre-commit config at the root.</li>
+</ul>
+<p>Do this on a branch (<code>monorepo</code>) so the step can be rerun from scratch.</p>
+<h3 id="step-3-parent-pom-and-module-poms-half-a-day-to-a-day"><a class="header" href="#step-3-parent-pom-and-module-poms-half-a-day-to-a-day">Step 3: Parent POM And Module POMs (Half A Day To A Day)</a></h3>
+<ol>
+<li>Move shared configuration into the root <code>pom.xml</code>, then add <code>command/pom.xml</code>
+and <code>query/pom.xml</code>.</li>
+<li>Rewrite each service POM down to its parent, identity, and extra
+dependencies. This is mechanical and can be scripted or done by an agent.</li>
+<li>Check that the effective POM of each module has the same dependency tree as
+before: compare <code>mvn dependency:tree</code> output before and after for every
+module.</li>
+<li>Move javadoc and sources into the <code>release</code> profile.</li>
+<li>Add <code>flatten-maven-plugin</code> and check that one published POM has a concrete
+version.</li>
+</ol>
+<h3 id="step-4-build-parity-half-a-day"><a class="header" href="#step-4-build-parity-half-a-day">Step 4: Build Parity (Half A Day)</a></h3>
+<ol>
+<li><code>mvn -T 1C clean install</code> passes, including all tests.</li>
+<li>For each service, the class list in the new jar matches the old jar
+(<code>unzip -l</code> diff, ignoring <code>META-INF</code> timestamps).</li>
+<li><code>hybrid-command.jar</code> and <code>hybrid-query.jar</code> contain the same classes as
+before.</li>
+<li><code>dist</code> produces <code>hybrid-command.zip</code> and <code>hybrid-query.zip</code> with the same
+jar file names as the current release assets.</li>
+<li>Start <code>light-portal-install</code> locally with the new assets and run the
+existing <code>light-portal-test</code> regression suite.</li>
+</ol>
+<h3 id="step-5-tooling-and-ci-half-a-day"><a class="header" href="#step-5-tooling-and-ci-half-a-day">Step 5: Tooling And CI (Half A Day)</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Item</th><th>Change</th></tr>
+</thead>
+<tbody>
+<tr><td><code>copy-service-local.sh</code>, <code>-dev.sh</code>, <code>-test.sh</code></td><td>Build <code>light-portal</code> once; copy from <code>dist/target/service/*</code></td></tr>
+<tr><td><code>publish.sh</code></td><td>One <code>mvn clean deploy -DperformRelease</code></td></tr>
+<tr><td><code>update-asset.sh</code></td><td>Point <code>GENAI_COMMAND_DIR</code>/<code>GENAI_QUERY_DIR</code> at the modules, or build via <code>-pl</code></td></tr>
+<tr><td><code>daily-release.sh</code>, <code>release-docker-images.sh</code></td><td>Build hybrid images from <code>hybrid/hybrid-*</code></td></tr>
+<tr><td><code>reindex-gitnexus.sh</code>, <code>create-gitnexus-groups.sh</code></td><td>Remove per-repository entries; index <code>light-portal</code> once</td></tr>
+<tr><td><code>.github/workflows</code></td><td>One <code>sync-auto-pr.yml</code> and <code>master-to-sync.yml</code> on <code>light-portal</code> for the customer’s single <code>sync</code> branch</td></tr>
+<tr><td>CI build</td><td><code>mvn -T 1C verify</code> on PR</td></tr>
+<tr><td>Dependabot or Renovate</td><td>One configuration at the root</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="step-6-agent-guidance-a-few-hours"><a class="header" href="#step-6-agent-guidance-a-few-hours">Step 6: Agent Guidance (A Few Hours)</a></h3>
+<ul>
+<li>Merge the roughly 60 <code>CLAUDE.md</code>/<code>AGENTS.md</code> files into one root file. Keep
+a short module-level file only where a module has real special rules
+(for example <code>genai</code>, <code>config</code>, <code>oauth</code>, <code>workflow</code>).</li>
+<li>Document the layout, the build commands above, and the rule that changes to
+shared libraries need hybrid image rebuilds.</li>
+<li>Update the GitNexus group definitions.</li>
+</ul>
+<h3 id="step-7-cutover-half-a-day"><a class="header" href="#step-7-cutover-half-a-day">Step 7: Cutover (Half A Day)</a></h3>
+<ol>
+<li>Merge the <code>monorepo</code> branch into <code>light-portal</code> <code>master</code>.</li>
+<li>In each old repository: add a final commit whose README points to the new
+path, then archive the repository on GitHub (read-only; history and links
+keep working).</li>
+<li>Transfer open GitHub issues to <code>light-portal</code>, or close them with a link.</li>
+<li>Remove the old directories from <code>~/workspace</code> after confirming nothing
+references them (<code>grep -r</code> across <code>devops</code>, <code>light-portal-install</code>, and
+<code>light-portal-doc</code>).</li>
+<li>Publish one release from the monorepo to Maven Central and deploy to dev,
+then test. Check that a project outside the monorepo can resolve one
+published service jar and its parent POMs.</li>
+<li>Tell the <code>sync</code> customer that <code>light-portal</code> is ready and the old
+repositories are archived.</li>
+</ol>
+<p><strong>Total effort:</strong> about 3 to 4 working days, mostly mechanical, with most of
+the time in Steps 3 to 5 checks.</p>
+<h2 id="rollback-1"><a class="header" href="#rollback-1">Rollback</a></h2>
+<p>Until Step 7, the old repositories are untouched and remain the source of truth.
+Rolling back means deleting the <code>monorepo</code> branch.</p>
+<p>After Step 7, unarchive the old repositories. Changes made in the monorepo in
+the meantime can be exported back with <code>git filter-repo --subdirectory-filter</code>.
+This should not be needed if Step 4 passes.</p>
+<h2 id="risks-1"><a class="header" href="#risks-1">Risks</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Risk</th><th>Mitigation</th></tr>
+</thead>
+<tbody>
+<tr><td>Customer <code>sync</code> flow breaks or loses in-flight changes</td><td>Branches are clean and the customer has agreed to move; recheck before Step 2 and tell them when cutover is done</td></tr>
+<tr><td>Dependency tree changes silently when POMs are deduplicated</td><td>Compare <code>dependency:tree</code> per module; compare jar contents</td></tr>
+<tr><td>Full build becomes slow</td><td><code>-T 1C</code>, javadoc only on release, <code>-pl ... -am</code> for targeted builds</td></tr>
+<tr><td>External users of Central artifacts see a change</td><td>Coordinates and jar contents stay the same; check flattened POMs have no <code>${revision}</code> and that the published parent POM resolves; test one external build against the first monorepo release</td></tr>
+<tr><td>Scripts still point at old directories</td><td><code>grep</code> sweep in Step 7; archive old repositories so stale scripts fail loudly</td></tr>
+<tr><td>Tag name clashes</td><td><code>--tag-rename</code> prefix during import</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="resolved-decisions-3"><a class="header" href="#resolved-decisions-3">Resolved Decisions</a></h2>
+<p>Decided on 2026-09-16:</p>
+<ol>
+<li><strong>Customer <code>sync</code> flow.</strong> The customer’s contributions are merged and clean.
+After cutover, they move to one <code>sync</code> branch on <code>light-portal</code>. Step 7
+includes telling them the cutover is done.</li>
+<li><strong>Maven Central publishing continues.</strong> Some users still depend on the
+published jars. Every library and service module keeps its current
+<code>groupId</code>/<code>artifactId</code> and is published on each release. The root, <code>command</code>,
+and <code>query</code> parent POMs are published too, because published module POMs
+refer to them.</li>
+<li><strong>Placeholder modules stay.</strong> <code>blog</code>, <code>news</code>, <code>page</code>, <code>form</code>, <code>template</code>,
+<code>document</code>, and <code>error</code> move into the monorepo like every other module. They
+hold features planned for when there is capacity.</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-gateway-1"><a class="header" href="#light-gateway-1">Light Gateway</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="local-model-provider-transport-for-llm-gateway"><a class="header" href="#local-model-provider-transport-for-llm-gateway">Local Model Provider Transport For LLM Gateway</a></h1>
-<h2 id="status-17"><a class="header" href="#status-17">Status</a></h2>
+<h2 id="status-19"><a class="header" href="#status-19">Status</a></h2>
 <p>Proposed design for implementation and qualification.</p>
 <p>This design extends the completed OpenAI-compatible LLM gateway and the
 Embedding Space Contract. It does not change the public <code>/v1</code> client contract.</p>
@@ -28901,7 +29496,7 @@ and the gateway verifies producer authenticity and endpoint binding.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-workflow-tool-access-approval"><a class="header" href="#light-workflow-tool-access-approval">Light Workflow Tool Access Approval</a></h1>
-<h2 id="status-18"><a class="header" href="#status-18">Status</a></h2>
+<h2 id="status-20"><a class="header" href="#status-20">Status</a></h2>
 <p>Proposed.</p>
 <p>The design reuses the Portal Workflow application, <code>ask</code> tasks, role-based
 worklists, and the existing workflow Tool grant events. It changes the
@@ -29580,7 +30175,7 @@ the workflow.</li>
 <li>Claim Org switches the selected host owner’s current host during creation after the master OAuth host login boundary is implemented.</li>
 <li>The UI tells the host owner to log out and log in again after Claim Org switches the current host.</li>
 </ul>
-<h2 id="resolved-decisions-3"><a class="header" href="#resolved-decisions-3">Resolved Decisions</a></h2>
+<h2 id="resolved-decisions-4"><a class="header" href="#resolved-decisions-4">Resolved Decisions</a></h2>
 <ol>
 <li>Claim Org creates the selected host owner’s user-host membership and switches that owner to the new host during the same command transaction.</li>
 <li><code>org-admin</code> and <code>host-admin</code> should remain separate roles. A user who needs both capabilities should receive both roles explicitly.</li>
@@ -29642,7 +30237,7 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 </tbody>
 </table>
 </div>
-<h2 id="decision-4"><a class="header" href="#decision-4">Decision</a></h2>
+<h2 id="decision-6"><a class="header" href="#decision-6">Decision</a></h2>
 <p>Separate OAuth configuration host from tenant host in the OAuth runtime tables.</p>
 <p>Keep <code>host_id</code> in <code>auth_session_t</code>, <code>auth_code_t</code>, and <code>auth_refresh_token_t</code> as the tenant/current host. Add <code>auth_host_id</code> to those tables to point to the master OAuth host that owns the provider-client mapping.</p>
 <p>The provider-client foreign key should move from <code>host_id</code> to <code>auth_host_id</code>:</p>
@@ -29965,7 +30560,7 @@ auth_host_id = master OAuth host
 <li>Refresh token lookup uses <code>auth_refresh_token_t(refresh_token)</code> and still rejects mismatched client/provider/auth host.</li>
 <li>Provider and provider-key lookup is scoped by the configured master OAuth host.</li>
 </ul>
-<h2 id="resolved-decisions-4"><a class="header" href="#resolved-decisions-4">Resolved Decisions</a></h2>
+<h2 id="resolved-decisions-5"><a class="header" href="#resolved-decisions-5">Resolved Decisions</a></h2>
 <ol>
 <li><code>auth_session_audit_t</code> must add <code>auth_host_id</code> in the first migration.</li>
 <li>Provider and provider-key lookup must require the configured master OAuth host ID.</li>
@@ -29984,7 +30579,7 @@ support is not required for the initial hardening pass. This design focuses on
 hardening the current <code>schema-query</code>, <code>schema-command</code>, and <code>schema_t</code>
 implementation so it can safely validate configuration property values and
 support future schema reuse across portal features.</p>
-<h2 id="current-state-4"><a class="header" href="#current-state-4">Current State</a></h2>
+<h2 id="current-state-5"><a class="header" href="#current-state-5">Current State</a></h2>
 <p>The portal already has the core pieces of a schema registry:</p>
 <ul>
 <li><code>schema_t</code> stores schema metadata and the schema body.</li>
@@ -31639,7 +32234,7 @@ without exposing email addresses to each other. The sender should only need a
 recipient user id or a display-safe user label. The backend can resolve email
 internally when it needs to send an external notification, but email must not be
 part of the user-facing message contract.</p>
-<h2 id="current-state-5"><a class="header" href="#current-state-5">Current State</a></h2>
+<h2 id="current-state-6"><a class="header" href="#current-state-6">Current State</a></h2>
 <p>The current codebase already has a partial private-message skeleton:</p>
 <ul>
 <li><code>user-command</code> exposes <code>lightapi.net/user/sendMessage/0.1.0</code>.</li>
@@ -31935,7 +32530,7 @@ confusing recipient identity with the current user.</li>
 </ul>
 <p>The first UI can be an inbox plus conversation thread. Real-time typing,
 presence, attachments, and rich-text editing are later enhancements.</p>
-<h2 id="migration-plan-3"><a class="header" href="#migration-plan-3">Migration Plan</a></h2>
+<h2 id="migration-plan-4"><a class="header" href="#migration-plan-4">Migration Plan</a></h2>
 <h3 id="phase-0-stop-the-broken-behavior"><a class="header" href="#phase-0-stop-the-broken-behavior">Phase 0: Stop the Broken Behavior</a></h3>
 <ul>
 <li>Make <code>GetPrivateMessage</code> return valid JSON even before the new model is
@@ -31990,7 +32585,7 @@ retention and keeps visible, partially deleted, and recently deleted messages.</
 <li>Reply pre-populates recipient context without email.</li>
 <li>Empty and error states do not produce JSON parse failures.</li>
 </ul>
-<h2 id="open-questions-4"><a class="header" href="#open-questions-4">Open Questions</a></h2>
+<h2 id="open-questions-5"><a class="header" href="#open-questions-5">Open Questions</a></h2>
 <ul>
 <li>Should users be able to send messages to themselves as private notes?</li>
 <li>Should profile pages expose a “Message” action only for users in the same
@@ -34377,11 +34972,11 @@ cargo test microservice_registration_uses_jwt_env_when_request_omits_env_tag
 mvn -q -Dtest=ControllerWebSocketIntegrationTest#rejectsMicroserviceJwtWhenHostClaimIsMissing+rejectsMicroserviceJwtWhenHostClaimDiffersFromControllerHostId+rejectsMicroserviceJwtWhenSidIsMissing+rejectsMicroserviceJwtWhenSidDiffersFromServiceId+rejectsMicroserviceJwtWhenEnvClaimIsMissingAndEnvTagIsRequested+rejectsMicroserviceJwtWhenEnvClaimDiffersFromEnvTag+registersMicroserviceWhenEnvTagAndEnvClaimAreOmitted test
 mvn -q -Dtest=ServiceIdAuthorizationUtilTest test
 </code></pre>
-<h2 id="open-questions-5"><a class="header" href="#open-questions-5">Open Questions</a></h2>
+<h2 id="open-questions-6"><a class="header" href="#open-questions-6">Open Questions</a></h2>
 <p>No open questions for SID, host, and environment binding in this phase.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="instance-clone"><a class="header" href="#instance-clone">Instance Clone</a></h1>
-<h2 id="context-5"><a class="header" href="#context-5">Context</a></h2>
+<h2 id="context-7"><a class="header" href="#context-7">Context</a></h2>
 <p>One portal database can serve several runtime environments. For example, the
 <code>portal-bff</code> service can have separate instances for these environment tags:</p>
 <div class="table-wrapper">
@@ -34431,7 +35026,7 @@ authorization grants.</li>
 <li>Perform a cross-host or cross-database promotion.</li>
 <li>Split one logical clone across independently committed event batches.</li>
 </ul>
-<h2 id="current-state-6"><a class="header" href="#current-state-6">Current State</a></h2>
+<h2 id="current-state-7"><a class="header" href="#current-state-7">Current State</a></h2>
 <p><code>instance-command</code> already declares <code>cloneInstance</code>. Its handler currently
 emits <code>InstanceClonedEvent</code> with a bare <code>targetInstanceId</code> aggregate subject.
 Normal Instance aggregates use <code>hostId|instanceId</code>, so the placeholder event is
@@ -34819,7 +35414,7 @@ plan contains only properties whose parents remain selected.</p>
 <p>The immediate response is <code>ACCEPTED</code>, not completed. It contains the clone
 request ID, target instance ID, transaction ID, terminal event ID, event counts,
 and status URL/action.</p>
-<h3 id="status-19"><a class="header" href="#status-19">Status</a></h3>
+<h3 id="status-21"><a class="header" href="#status-21">Status</a></h3>
 <p><code>getInstanceCloneStatus</code> accepts <code>hostId</code> and <code>cloneRequestId</code> in a POST query
 and returns one of:</p>
 <ul>
@@ -35168,7 +35763,7 @@ tokens, and secrets from the ledger, notifications, metrics, and status API;</li
 <p>Structured clone logs contain only host, request ID, source and target IDs,
 caller, graph revision, event counts, byte counts, duration, transaction ID,
 status, and safe error code.</p>
-<h2 id="implementation-plan-4"><a class="header" href="#implementation-plan-4">Implementation Plan</a></h2>
+<h2 id="implementation-plan-5"><a class="header" href="#implementation-plan-5">Implementation Plan</a></h2>
 <ol>
 <li>Add <code>instance_graph_revision_t</code>, shared graph-lock/revision handling, and the
 logical-instance-identity lock to the relevant instance and child mutation
@@ -35308,7 +35903,7 @@ retries return a retryable conflict with no committed clone state.</li>
 <li>Filter both sources by the requested config phase.</li>
 <li>Return one filename-to-base64-content map.</li>
 </ol>
-<h2 id="decision-5"><a class="header" href="#decision-5">Decision</a></h2>
+<h2 id="decision-7"><a class="header" href="#decision-7">Decision</a></h2>
 <p>Add <code>config_phase</code> to both runtime and snapshot instance file tables:</p>
 <ul>
 <li><code>instance_file_t.config_phase</code></li>
@@ -35675,7 +36270,7 @@ light-portal/releases/
 <li>Keep Docker Compose as the only container runtime dependency; use <code>curl</code> for R2 downloads, not AWS CLI.</li>
 <li>Use fixed archive names for the current R2 object set until the release pipeline publishes a richer manifest automatically.</li>
 </ul>
-<h2 id="decision-6"><a class="header" href="#decision-6">Decision</a></h2>
+<h2 id="decision-8"><a class="header" href="#decision-8">Decision</a></h2>
 <p>Create <code>light-portal-install</code> as the public local install repo with Docker Compose as the only container runtime dependency. Use the Rust <code>all-in-lt</code> service topology, including <code>light-agent</code> and the demo APIs, but package it as checked-in runtime config plus R2-downloaded service jars, SPA assets, <code>events.json</code>, and <code>docker-images.env</code>. Keep the local OAuth authorization code flow through <code>login-view</code> and use existing long-lived local demo tokens for the first version. Publish static install artifacts to Cloudflare R2 behind a custom domain, download the fixed asset archives with <code>curl</code>, and extract them with <code>unzip</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="timestamp"><a class="header" href="#timestamp">Timestamp</a></h1>
@@ -35997,7 +36592,7 @@ public class UuidUtil {
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="entity-creation-uniqueness"><a class="header" href="#entity-creation-uniqueness">Entity Creation Uniqueness</a></h1>
-<h2 id="status-20"><a class="header" href="#status-20">Status</a></h2>
+<h2 id="status-22"><a class="header" href="#status-22">Status</a></h2>
 <p>Implemented through Phase 5 for Role/Rule stream births and Category/Tag semantic
 identity, client retries, lifecycle alignment, verified historical materialization,
 snapshot/import guards, and policy-aware retry-ledger cleanup. Later aggregate
@@ -37055,7 +37650,7 @@ identity registry keeps the surrogate ID stable and the domain contract explicit
 <p>Descriptions, timestamps, ordering, and defaults may differ while the request still
 describes the same entity. Conversely, identical payloads can be valid for an
 <code>ALLOW_MULTIPLE</code> entity. Identity fields must be declared by the domain.</p>
-<h2 id="implementation-plan-5"><a class="header" href="#implementation-plan-5">Implementation Plan</a></h2>
+<h2 id="implementation-plan-6"><a class="header" href="#implementation-plan-6">Implementation Plan</a></h2>
 <h3 id="phase-0-freeze-the-inventory-and-move-coarse-authorization-to-gateway"><a class="header" href="#phase-0-freeze-the-inventory-and-move-coarse-authorization-to-gateway">Phase 0: Freeze The Inventory And Move Coarse Authorization To Gateway</a></h3>
 <p><strong>Deployment gate.</strong> Identity enforcement must not ship until every participating
 portal command has fail-closed gateway authorization and global and host scope are
@@ -41949,7 +42544,7 @@ mappings.</li>
 <code>config_property_t</code>.</li>
 <li>Add a portal-view diagnostics link from the config update page.</li>
 </ul>
-<h2 id="open-questions-6"><a class="header" href="#open-questions-6">Open Questions</a></h2>
+<h2 id="open-questions-7"><a class="header" href="#open-questions-7">Open Questions</a></h2>
 <ul>
 <li>Should <code>ProductVersionCreatedEvent</code> optionally carry a <code>configProfileRef</code>,
 or should profile linking remain a separate release step?</li>
@@ -42265,7 +42860,7 @@ Recheck them when the contract changes.</p>
 </div>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="release-workflow"><a class="header" href="#release-workflow">Release Workflow</a></h1>
-<h2 id="status-21"><a class="header" href="#status-21">Status</a></h2>
+<h2 id="status-23"><a class="header" href="#status-23">Status</a></h2>
 <p>Proposed design.</p>
 <p>Light Portal should use <code>light-workflow</code> as the durable release orchestrator
 for Java and Rust releases. The workflow should coordinate repository checkout,
@@ -42324,7 +42919,7 @@ should be portable manifests, not customer import output.</li>
 <li>Do not remove <code>light-bot</code> until Java release parity has been demonstrated
 through several successful workflow-managed releases.</li>
 </ul>
-<h2 id="current-state-7"><a class="header" href="#current-state-7">Current State</a></h2>
+<h2 id="current-state-8"><a class="header" href="#current-state-8">Current State</a></h2>
 <p><code>light-bot</code> is the practical Java release automation path today. It contains
 working release knowledge and should remain available as a fallback during the
 migration.</p>
@@ -43008,7 +43603,7 @@ delete is an <code>UPDATE ... SET active = FALSE</code>, not a physical <code>DE
 <p>This design keeps database-level cascading, but replaces column-shape inference
 with an explicit relationship policy. The trigger remains generic: table names
 and actions live in data, not in PL/pgSQL branches.</p>
-<h2 id="decision-7"><a class="header" href="#decision-7">Decision</a></h2>
+<h2 id="decision-9"><a class="header" href="#decision-9">Decision</a></h2>
 <p>Every relationship traversed from a soft-deleted parent has one declared
 action:</p>
 <div class="table-wrapper">
@@ -44583,7 +45178,7 @@ Java-compatible unversioned arrays for migration compatibility.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="event-replay"><a class="header" href="#event-replay">Event Replay</a></h1>
-<h2 id="status-22"><a class="header" href="#status-22">Status</a></h2>
+<h2 id="status-24"><a class="header" href="#status-24">Status</a></h2>
 <p>This document defines the revised target design for event replay during the
 early development stage of light-portal. The implementation still contains
 legacy-backfill, staged-rollout, feature-gate, mandatory-encryption, and
@@ -46052,7 +46647,7 @@ containing the reviewed config digest.</p>
 <p>Record <code>VERIFIED</code> only after dashboards, APIs, offsets, audit, and alerts are
 reviewed. Stage <code>ROLLBACK</code> refuses to proceed while requests, barriers, pauses,
 or deferred work remain.</p>
-<h2 id="rollback-1"><a class="header" href="#rollback-1">Rollback</a></h2>
+<h2 id="rollback-2"><a class="header" href="#rollback-2">Rollback</a></h2>
 <ol>
 <li>Stop new execute requests and set <code>executionEnabled: false</code>.</li>
 <li>Run the <code>ROLLBACK</code> preflight. If blocked, retain the current processor and give
@@ -46293,7 +46888,7 @@ so the clear secret cannot be recovered later.</p>
 one-time response, close the page, or forget to copy the secret into their
 deployment system. Once that happens, the portal needs a way to issue a new
 secret without weakening the storage model.</p>
-<h2 id="current-state-8"><a class="header" href="#current-state-8">Current State</a></h2>
+<h2 id="current-state-9"><a class="header" href="#current-state-9">Current State</a></h2>
 <p>The current create flow in <code>oauth-command</code> generates both values in
 <code>CreateClient</code>:</p>
 <ul>
@@ -46342,7 +46937,7 @@ continuity.</li>
 <li>Enables a focused UI flow with explicit warning, confirmation, copy action,
 and audit trail.</li>
 </ul>
-<h2 id="decision-8"><a class="header" href="#decision-8">Decision</a></h2>
+<h2 id="decision-10"><a class="header" href="#decision-10">Decision</a></h2>
 <p>Add a dedicated “Regenerate Secret” action on the Auth Client page.</p>
 <p>Do not reuse delete/recreate as the normal path. Do not add a recoverable
 encrypted-secret store. The portal should continue treating client secrets as
@@ -47646,7 +48241,7 @@ later.</li>
 <li>Rollback is a redeploy of a previous Light Portal deployment snapshot, not a
 native Kubernetes rollout undo.</li>
 </ul>
-<h2 id="open-questions-7"><a class="header" href="#open-questions-7">Open Questions</a></h2>
+<h2 id="open-questions-8"><a class="header" href="#open-questions-8">Open Questions</a></h2>
 <ul>
 <li>Which object storage providers should enterprise artifact mode support first?</li>
 <li>What retention policies should be available for encrypted rendered manifest
@@ -47667,7 +48262,7 @@ deployment intent and history, while the deployer owns safe cluster-local
 execution.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="release-signing-key-management-and-rotation"><a class="header" href="#release-signing-key-management-and-rotation">Release Signing Key Management and Rotation</a></h1>
-<h2 id="status-23"><a class="header" href="#status-23">Status</a></h2>
+<h2 id="status-25"><a class="header" href="#status-25">Status</a></h2>
 <p>Normative design. Implementation is partial.</p>
 <p><code>portal-config-dev</code> currently verifies the signed environment bundle before
 extracting its editable <code>events.json</code>. The other deployment repositories do
@@ -47892,7 +48487,7 @@ trust set for forensic use.</li>
 <p>Availability does not override revocation. A consumer with only a revoked key
 must stop with an actionable error instead of accepting an unsigned artifact
 or downloading a replacement trust anchor from the artifact CDN.</p>
-<h2 id="rollback-2"><a class="header" href="#rollback-2">Rollback</a></h2>
+<h2 id="rollback-3"><a class="header" href="#rollback-3">Rollback</a></h2>
 <p>During normal overlap, rollback means selecting the last qualified artifact
 signed by either still-trusted key. It does not mean changing a manifest’s
 <code>keyId</code>, replacing the signature file, or re-enrolling an old removed key
@@ -48021,7 +48616,7 @@ top-level release manifest.</li>
 <p>This evidence contains no private-key material.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="enterprise-ai-assisted-bootstrap-and-eks-deployment"><a class="header" href="#enterprise-ai-assisted-bootstrap-and-eks-deployment">Enterprise AI-Assisted Bootstrap and EKS Deployment</a></h1>
-<h2 id="status-24"><a class="header" href="#status-24">Status</a></h2>
+<h2 id="status-26"><a class="header" href="#status-26">Status</a></h2>
 <p>Proposed customer deployment and qualification design.</p>
 <h2 id="executive-decision-1"><a class="header" href="#executive-decision-1">Executive Decision</a></h2>
 <p>Create a dedicated Linux VM that continuously proves a complete Light Portal
@@ -49267,7 +49862,7 @@ URL:</p>
 <p>If the customer wants <code>allowedAudience</code> to be the AgentCore runtime or an API
 identifier instead of <code>urn:com.networknt</code>, make <code>jwtAudience</code> environment
 specific and align it with the AgentCore authorizer configuration.</p>
-<h2 id="implementation-plan-6"><a class="header" href="#implementation-plan-6">Implementation Plan</a></h2>
+<h2 id="implementation-plan-7"><a class="header" href="#implementation-plan-7">Implementation Plan</a></h2>
 <h3 id="phase-1-discovery-metadata"><a class="header" href="#phase-1-discovery-metadata">Phase 1: Discovery Metadata</a></h3>
 <ul>
 <li>Rust: add <code>publicIssuerBaseUrl</code>, <code>oidcDiscoveryEnabled</code>, and
@@ -55794,7 +56389,7 @@ with its owner; prevent competing deployments and configuration changes.</li>
 <li><strong>Hold:</strong> block new traffic to unhealthy workloads and hold incompatible
 reloads/restarts. For a same-identity restart, stop the incompatible cohort
 before changing its snapshot. See <a href="#rollback-procedure">rollback coordination</a>.</li>
-<li><strong>Directory, for this pipeline-controlled start:</strong> <a href="#java-dcl-startup-and-configuration-evidence">remote mode</a>
+<li><strong>Directory, for this pipeline-controlled start:</strong> <a href="#configuration-loading-modes">remote mode</a>
 needs a pre-created writable directory without <code>values.yml</code>; local mode needs
 the recorded export. Preserve bootstrap material and exclude candidate files.</li>
 <li><strong>Activate or install:</strong> <a href="#rollback-procedure">activate the saved snapshot or install the qualified
@@ -55806,6 +56401,27 @@ file inventory and runtime health, and keep the <a href="#java-dcl-startup-and-c
 <li><strong>Evidence:</strong> record results and verification limits, obtain <a href="#release-controls">rollback approval</a>,
 then end the freeze/reservation. Defer retirement until the group is stable.</li>
 </ol>
+<h2 id="configuration-loading-modes"><a class="header" href="#configuration-loading-modes">Configuration loading modes</a></h2>
+<p>A Java DCL runtime loads its configuration at startup in one of two modes. The
+release record names the mode qualified for each release.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Mode</th><th>How configuration arrives</th><th>Startup dependency</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Remote mode</strong> (normal)</td><td><code>light-config-server-uri</code> is set. <code>DefaultConfigLoader</code> calls Config Server <code>/configs</code>, <code>/certs</code>, and <code>/files</code> for <code>host + serviceId + envTag</code>, receives the <strong>current</strong> snapshot for that identity, and writes <code>values.yml</code>, certificates, and files into the config directory.</td><td>Config Server must be available.</td></tr>
+<tr><td><strong>Local-export mode</strong> (contingency)</td><td><code>light-config-server-uri</code> is absent from every property/environment source. The pipeline installs a previously exported, approved bundle (<code>values.yml</code>, certificates, files) into the config directory, and the runtime starts from those local files.</td><td>None on Config Server; the bundle must be retained and checksummed.</td></tr>
+</tbody>
+</table>
+</div>
+<p>In remote mode, a pipeline-controlled start must use a writable directory with
+<strong>no <code>values.yml</code></strong>. Otherwise a failed download can fall back to an existing
+file, possibly the candidate’s, and the start still looks successful. See
+<a href="#java-dcl-startup-and-configuration-evidence">startup checks</a>.</p>
+<p>Local-export mode is a rollback contingency, not a replacement for remote mode.
+Qualify it before the upgrade when a restart-based rollback must survive a Config
+Server outage; see <a href="#rollback-availability">rollback availability</a>.</p>
 <h2 id="configuration-identity-decision"><a class="header" href="#configuration-identity-decision">Configuration identity decision</a></h2>
 <p>Keep the Config Server lookup identity:</p>
 <pre><code class="language-text">host + serviceId + envTag
@@ -56027,6 +56643,12 @@ version/environment; cloned deployments retain their original pipeline IDs.</p>
 <h3 id="5-create-and-verify-a-candidate-snapshot"><a class="header" href="#5-create-and-verify-a-candidate-snapshot">5. Create and verify a candidate snapshot</a></h3>
 <p>After configuration/deployment projections catch up, create a snapshot with
 <code>current=false</code> and pass the graph-readiness/revision check.</p>
+<p>Iterating on the candidate does not create instances. Edit the same cloned
+candidate and create another non-current snapshot for each review or test round:
+twelve configuration fixes produce one candidate instance and twelve snapshots.
+Delete unneeded candidate snapshots with the snapshot delete command, but keep
+every snapshot that was deployed, approved, or referenced by a release record,
+and keep the rollback snapshot.</p>
 <p>Use <a href="#config-snapshot-output-and-comparison">snapshot output and comparison</a>
 to review the candidate against the retained rollback snapshot. Check both
 values and their sources, required configuration, selected files/certificates,
@@ -56109,6 +56731,18 @@ attestation is required, hold the rollout pending instrumentation. See
 <a href="#limits-of-current-dcl-evidence">evidence limits</a>.</li>
 </ol>
 <h2 id="centralized-gateway-bluegreen-example"><a class="header" href="#centralized-gateway-bluegreen-example">Centralized gateway blue/green example</a></h2>
+<p>Config Server selects configuration only by <code>host + serviceId + envTag</code>, and
+<code>/configs</code> always serves that identity’s current snapshot. Two deployments that
+share an identity therefore always receive the same configuration:</p>
+<ul>
+<li><strong>Compatible releases:</strong> if old and new binaries can consume the same
+configuration, separate identities are unnecessary. A rolling update or an
+existing blue/green traffic switch under one identity works as is.</li>
+<li><strong>Incompatible releases:</strong> if the new release needs different configuration,
+activating its snapshot on a shared identity also changes what the old cohort
+receives on its next restart, eviction, or reload, so the rollback target no
+longer has its old configuration. Give each cohort its own identity.</li>
+</ul>
 <p>For incompatible releases, use two runtime identities behind one stable public
 gateway address. Both use the same tenant host and <code>serviceId=light-gateway</code>;
 blue uses <code>envTag=prod-blue</code>, green uses <code>envTag=prod-green</code>. The cohorts alternate:</p>
@@ -56166,6 +56800,26 @@ new snapshot and repeat the checks/canary; green remains the rollback target.
 If that exact target version already exists retired, restore/reconcile it
 using the retry procedure instead of creating another row.</li>
 </ol>
+<h3 id="kubernetes-service-selector-variant"><a class="header" href="#kubernetes-service-selector-variant">Kubernetes Service-selector variant</a></h3>
+<p>On Kubernetes, perform blue/green at the Service level, the same way it is done
+for other workloads. The “load balancer” and “upstream pools” above map to:</p>
+<ul>
+<li>Two Deployments, for example <code>light-gateway-blue</code> and <code>light-gateway-green</code>,
+each labeled with its color (<code>color: blue</code> / <code>color: green</code>).</li>
+<li>One stable Service whose <code>selector</code> chooses the live color. The cutover, canary
+completion, and rollback are all a change to that selector.</li>
+</ul>
+<p>For incompatible releases, the only Portal-specific addition is that each
+Deployment carries its own configuration identity: set <code>envTag</code> to <code>prod-blue</code>
+or <code>prod-green</code> in that Deployment’s bootstrap/environment, bind it to its own
+Portal instance and snapshot, and give it credentials authorized for that env
+tag, as well as its own config volume. If both Deployments share one env tag, a
+selector switch still moves traffic correctly, but snapshot activation changes
+what the old color loads on any Pod restart or reload. For compatible releases,
+Service-level blue/green with a single env tag needs none of this.</p>
+<p>A weighted canary needs a mechanism beyond a plain selector switch, such as a
+gateway or service-mesh traffic split, or a temporary Service selecting both
+colors by a shared label.</p>
 <p>Different <code>serviceId</code> values can also separate cohorts, but require equivalent
 authorization, discovery, and routing review. Reusing a cohort/version already
 in history follows the retry/restoration procedure below.</p>
@@ -56217,6 +56871,12 @@ Resume onboarding there after rollback; create new snapshots for new edits and
 preserve the original rollback snapshot. Reconcile APIs added only to the newer
 instance and review shared catalog/inheritance changes.</p>
 <h2 id="retry-a-failed-product-version-upgrade"><a class="header" href="#retry-a-failed-product-version-upgrade">Retry a failed product-version upgrade</a></h2>
+<p>This section covers a release attempt that was declared failed, rolled back, and
+retired. Fixing configuration during an unfinished attempt is not a retry: edit
+the same candidate and create another snapshot, as described in
+<a href="#5-create-and-verify-a-candidate-snapshot">step 5</a>. Each retry reuses the same
+instance row, so repeated attempts add snapshots and release records, not
+instances.</p>
 <p>After a failed 2.3.9 upgrade is retired, its row still reserves
 <code>(host_id, service_id, env_tag, product_version_id)</code>. Clone checks include retired
 rows. A fresh clone of 2.3.8 into that same 2.3.9 identity will be rejected, even
@@ -56244,8 +56904,11 @@ snapshot/evidence. Repeat validation, deployment, and observation; do not
 reuse approval from the failed attempt.</li>
 </ol>
 <p>Do not hard-delete the retired row or silently replace it with a new clone to
-bypass uniqueness. That would complicate retained snapshots, events, references,
-and recovery rather than provide a safe retry.</p>
+bypass uniqueness. Portal is event-sourced: a direct database delete bypasses the
+event store, leaving projections and events inconsistent, and snapshot foreign
+keys cascade the delete to that attempt’s snapshots. Clean up with lifecycle
+commands instead: soft retirement/restoration for instances and the snapshot
+delete command for unneeded candidate snapshots.</p>
 <h2 id="safe-retirement-and-recovery"><a class="header" href="#safe-retirement-and-recovery">Safe retirement and recovery</a></h2>
 <p>Use Portal lifecycle commands/events for soft retirement; owned graph rows are
 cascaded, snapshots/history retained, and the instance hidden from normal lists.
