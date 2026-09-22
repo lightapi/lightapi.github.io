@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-d06ae730.js";
+            window.path_to_searchindex_js = "searchindex-4cff9d5e.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-11d57c9c.js"></script>
+        <script src="toc-bab7c7c0.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -7075,10 +7075,256 @@ is reachable:</p>
 curl -k -v https://light-oauth:6881/oauth2/&lt;providerId&gt;/keys
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="cli-device-authorization-grant"><a class="header" href="#cli-device-authorization-grant">CLI Device Authorization Grant</a></h1>
+<p>Status: implemented as of 2026-09-21 in <code>light-oauth</code>, the Light CLI, <code>portal-view</code>,
+<code>portal-db</code>, and the local deployment repository. This design document is pending commit.
+Revised the same day: the first design tied a login to the CLI’s client certificate on a separate
+mutual-TLS listener. That cannot work when <code>light-oauth</code> is reached only through <code>light-gateway</code>,
+which ends TLS, so it was replaced by the standard grant described here.</p>
+<h2 id="problem-6"><a class="header" href="#problem-6">Problem</a></h2>
+<p>The Light CLI calls <code>light-gateway</code> with the signed-in user’s access token. It does not present an
+application secret or certificate: an open-source downloadable client cannot keep either one. The
+user token lives about ten minutes. Portal’s
+browser login keeps it fresh with cookies and a refresh token, which a command-line program
+cannot use, and the CLI may run on a VM with no browser. Pasting a token every ten minutes is not
+workable.</p>
+<h2 id="decision"><a class="header" href="#decision">Decision</a></h2>
+<p>Use the <strong>OAuth 2.0 Device Authorization Grant (RFC 8628)</strong> in <code>light-oauth</code>, with a client that needs no secret,
+on the one port <code>light-oauth</code> already serves, behind the Gateway. It is ordinary OAuth: nothing
+in it depends on how the request reached <code>light-oauth</code>.</p>
+<ul>
+<li><code>/login</code> in the CLI asks for a code and prints it. The user opens <code>portal-view</code>’s <code>/device</code>
+page on any device, signs in to Portal as usual (password, social, or Entra SSO with whatever
+MFA it enforces), checks what is being approved and approves it.</li>
+<li>The CLI receives an access token and a refresh token, and refreshes on use.</li>
+<li>A login lasts one day, or 90 days if the user ticks “remember me”. <strong>Both lengths are
+<code>light-oauth</code> server settings</strong>; the server enforces them, and refreshing does not extend them.</li>
+</ul>
+<h2 id="the-standard-parts"><a class="header" href="#the-standard-parts">The standard parts</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Step</th><th>Endpoint</th><th>Standard</th></tr>
+</thead>
+<tbody>
+<tr><td>Ask for a code</td><td><code>POST /oauth2/{providerId}/device_authorization</code> (<code>client_id</code>, optional <code>scope</code>)</td><td>RFC 8628 §3.1</td></tr>
+<tr><td>Wait for approval</td><td><code>POST /oauth2/{providerId}/token</code>, <code>grant_type=urn:ietf:params:oauth:grant-type:device_code</code></td><td>RFC 8628 §3.4</td></tr>
+<tr><td>Keep the login alive</td><td>the same token endpoint, <code>grant_type=refresh_token</code>: the existing handler</td><td>RFC 6749 §6</td></tr>
+<tr><td>Sign out</td><td><code>POST /oauth2/{providerId}/revoke</code> (<code>token</code>, <code>client_id</code>)</td><td>RFC 7009</td></tr>
+</tbody>
+</table>
+</div>
+<p>Two endpoints exist only for the approval page, which is <code>portal-view</code>’s and not <code>light-oauth</code>’s,
+and both take the signed-in user’s access token as a bearer:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Purpose</th><th>Endpoint</th></tr>
+</thead>
+<tbody>
+<tr><td>Show what a code is asking for</td><td><code>GET /oauth2/{providerId}/device/lookup?user_code=</code></td></tr>
+<tr><td>Approve or deny</td><td><code>POST /oauth2/{providerId}/device/approve</code> (<code>user_code</code>, <code>action=approve|deny</code>, <code>remember</code>)</td></tr>
+</tbody>
+</table>
+</div>
+<pre class="mermaid">sequenceDiagram
+    participant CLI as light /login
+    participant GW as light-gateway
+    participant OA as light-oauth
+    participant PV as portal-view (user's browser)
+    CLI-&gt;&gt;GW: POST device_authorization (client_id)
+    GW-&gt;&gt;OA: route policy (production may add address rate limits)
+    OA--&gt;&gt;CLI: device_code, user_code, verification_uri
+    CLI-&gt;&gt;CLI: print "open .../device, code BCDF-GHJK"
+    PV-&gt;&gt;GW: GET device/lookup?user_code (session cookie)
+    GW-&gt;&gt;OA: bearer = the user's access token
+    OA--&gt;&gt;PV: client, requested-from address, lifetimes
+    PV-&gt;&gt;GW: POST device/approve (remember?)
+    GW-&gt;&gt;OA: bearer = the user's access token
+    OA-&gt;&gt;OA: create session with expires_ts, mark APPROVED
+    loop every interval
+        CLI-&gt;&gt;GW: POST token (device_code)
+        GW-&gt;&gt;OA: token request
+        OA--&gt;&gt;CLI: authorization_pending / slow_down ... then tokens
+    end
+    CLI-&gt;&gt;GW: later: POST token (refresh_token)
+</pre>
+
+<p><strong>The client uses no secret.</strong> A device client is an ordinary Portal client with <code>client_profile = cli</code>
+and a <code>client_type</code> of <code>public</code> or <code>trusted</code> (<code>confidential</code> and <code>external</code> are refused), set on
+Portal’s client page (the profile dropdown has a <code>cli</code> entry). The Light CLI’s own client, the one its
+application token was issued from, is <code>trusted</code>: making it a device client only needs its profile set
+to <code>cli</code>, and it keeps its secret and every grant that needs it. Without a secret, a device client may
+use only the <code>device_code</code> and <code>refresh_token</code> grants; every other grant, and any request that
+carries a secret, takes the ordinary path, which requires and checks one, so a wrong secret is refused
+rather than ignored. Only users of the client’s own host may inspect, approve, or deny a sign-in for it. When a client
+is refused, the response is a plain <code>invalid_client</code>, and the log says whether it does not exist for
+this provider or has the wrong type or profile.</p>
+<h2 id="codes"><a class="header" href="#codes">Codes</a></h2>
+<ul>
+<li>The <strong>device code</strong> is 256 random bits, given only to the CLI and stored only as its SHA-256.</li>
+<li>The <strong>user code</strong> is eight letters from <code>BCDFGHJKLMNPQRSTVWXZ</code> (no vowels, so it cannot spell a
+word, and no look-alikes), shown as <code>XXXX-XXXX</code> and matched case-insensitively with the hyphen
+ignored: about 34 bits. It is single-use and lives 15 minutes by default.</li>
+<li>Polling faster than the interval gets <code>slow_down</code> and lengthens the interval by five seconds.</li>
+<li>A code is redeemed exactly once: the redeeming <code>UPDATE</code> matches only an <code>APPROVED</code> row, so of
+several racing polls one wins.</li>
+</ul>
+<h2 id="lifetime"><a class="header" href="#lifetime">Lifetime</a></h2>
+<p><code>light-oauth</code>’s <code>values.yml</code> (<code>device_verification_uri</code> is required; the other keys are optional):</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Default</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>device_session_seconds</code></td><td>86400</td><td>login length</td></tr>
+<tr><td><code>device_remember_seconds</code></td><td>7776000</td><td>login length with “remember me”</td></tr>
+<tr><td><code>device_code_seconds</code></td><td>900</td><td>how long an unapproved code lives</td></tr>
+<tr><td><code>device_interval_seconds</code></td><td>5</td><td>minimum polling interval</td></tr>
+<tr><td><code>device_max_pending</code></td><td>10000</td><td>cap on unapproved codes</td></tr>
+<tr><td><code>device_verification_uri</code></td><td>required</td><td>the absolute URL of <code>portal-view</code>’s <code>/device</code> page</td></tr>
+</tbody>
+</table>
+</div>
+<p>A missing or bad value stops startup rather than returning an OAuth-server URL that does not host
+the approval page. The session is created at approval with
+<code>expires_ts = now + lifetime</code>; the refresh authority already refuses a refresh once <code>expires_ts</code>
+has passed, so the login ends then with <code>invalid_grant</code> and the CLI tells the user to sign in
+again. The access token stays at 600 seconds. Every role the user has goes into the tokens: there
+is no per-role limit.</p>
+<p>Note the existing gap this avoids: browser sessions have no server-side expiry (<code>expires_ts</code> is
+never set by the authorization-code path).</p>
+<h2 id="security"><a class="header" href="#security">Security</a></h2>
+<p>The Gateway does the abuse control, which is the reason <code>light-oauth</code> sits behind it.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Threat</th><th>Control</th></tr>
+</thead>
+<tbody>
+<tr><td>Guessing a user code</td><td>34 bits, 15 minutes, single use; the lookup and decision calls need a signed-in user; production may add Gateway rate limits by address when exposure requires them</td></tr>
+<tr><td>Stealing a device code</td><td>256 bits, hashed at rest, single use, 15 minutes</td></tr>
+<tr><td>A stolen refresh token</td><td>Rotation with a short duplicate-retry grace; <strong>replaying an old token revokes the whole login</strong> (<code>REFRESH_TOKEN_REPLAY</code>); the login ends on schedule; <code>light auth logout</code> revokes it; locking the user cuts it off at the next refresh; the access token lives 10 minutes. It is not sender-constrained: a stolen <code>~/.light/&lt;env&gt;/user-session.json</code> works until then, as with <code>gh</code> or <code>az</code>. DPoP (RFC 9449) is the proxy-friendly way to bind it if that is ever wanted</td></tr>
+<tr><td>Approving as someone else, or on a stale token</td><td>The bearer is verified against the provider’s keys, issuer and audience, must be a <strong>user</strong> token (an app token is refused), and the user’s <em>current</em> authority is reloaded, so a locked user cannot approve</td></tr>
+<tr><td>A token for one client used for another</td><td>The refresh handler checks client, provider and host on every refresh; revoke checks the client too</td></tr>
+<tr><td>Table growth from an unauthenticated endpoint</td><td><code>device_max_pending</code> and a purge of rows expired for a day (every 15 minutes); production may additionally enable Gateway rate limits</td></tr>
+<tr><td>Remote phishing (RFC 8628 §5.4): an attacker starts a sign-in and talks a victim into approving it</td><td>The page shows the application, the requesting address and time, the scope and what “remember me” means; it warns; and Approve stays disabled until the person confirms they started this and the code matches. This is the residual risk of the standard flow, accepted: see the decision above.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Where the request address comes from: <code>X-Forwarded-For</code>, first valid entry, as the rest of
+<code>light-oauth</code> does. That is only trustworthy if the Gateway <strong>overwrites</strong> it and <code>light-oauth</code>
+is not reachable except through the Gateway. The local base stack no longer publishes port 6881;
+the optional workflow-broker development profile exposes it on loopback only. The address shown on
+the approval page still depends on the Gateway replacing the forwarded header.</p>
+<h2 id="what-the-gateway-must-do"><a class="header" href="#what-the-gateway-must-do">What the Gateway must do</a></h2>
+<p><code>light-oauth</code> needs nothing special. The <code>all-in-lt</code> resolved <code>handler.yml</code> already publishes the
+five routes below. Other environments need the equivalent Gateway configuration:</p>
+<ol>
+<li><strong>Routes</strong> to <code>light-oauth</code>, under the prefix the Gateway already uses for it,
+<code>/oauth2/{hostId}/...</code> (the segment is passed through unchanged; <code>light-oauth</code> reads it as the
+provider id, as it does for <code>code</code>, <code>keys</code> and <code>token</code>). <code>token</code> already exists. Add
+<code>POST /oauth2/{hostId}/device_authorization</code> and <code>POST /oauth2/{hostId}/revoke</code> (from the CLI, no
+user token, like <code>token</code>), and <code>GET /oauth2/{hostId}/device/lookup</code> and
+<code>POST /oauth2/{hostId}/device/approve</code> (from <code>portal-view</code>, with the session turned into a
+bearer by the stateless handler and its CSRF check).</li>
+<li>The CLI routes must <strong>not</strong> demand a user token or a CSRF cookie; the two approval routes must.</li>
+<li>The Gateway must overwrite <code>X-Forwarded-For</code>. Address rate limits are a production deployment
+control to enable when the environment’s exposure requires them; they are not configured locally.</li>
+<li><code>light-oauth</code> must not be published on the host in a real deployment.</li>
+</ol>
+<p>The Gateway’s <code>interactiveUserOnly</code> workflow-action policy is separate. It applies to <code>/mcp</code> and
+allows an interactive caller that has a user token but no <code>x-scope-token</code>; it does not authenticate
+or authorize these OAuth endpoints and must not be added to their route definitions.</p>
+<h2 id="decision-no-enrolled-install-gate-a-warning-instead"><a class="header" href="#decision-no-enrolled-install-gate-a-warning-instead">Decision: no enrolled-install gate, a warning instead</a></h2>
+<p>Without a gate, anyone who can reach the Gateway can request a code for the well-known public
+client and try to phish a user with it (RFC 8628 §5.4; device-code phishing is widely abused).
+An earlier version of this document proposed limiting <code>device_authorization</code> to CLIs holding a
+certificate from <code>light-identity-issuer</code>. That was rejected on 2026-09-21: the Light CLI is open
+source and downloadable anywhere, and the credential that enrols an install (the app token in the
+download) is as public as the client. A certificate is only as strong as the way it was obtained,
+so it would prove that <em>some</em> program enrolled, not that it is the real CLI. It is friction, not a
+defence, and it costs a certificate authority, a bootstrap secret and Gateway trust configuration.</p>
+<p>The control is therefore the approval page: it says plainly that the user should approve only if
+they are connecting from the Light CLI right now, shows the requesting address and time, the
+application, the scope and what “remember me” means, and keeps Approve disabled until the person
+confirms. <code>device_max_pending</code> always bounds the endpoint; production can add Gateway rate limits. If a
+real gate is ever wanted it needs an attestation that an open client cannot forge (for example a
+platform-signed build), not a certificate.</p>
+<h2 id="data-model"><a class="header" href="#data-model">Data model</a></h2>
+<p><code>portal-db</code> <code>patch_20260921_device_authorization.sql</code> (one patch, safe to apply again) creates one
+table. It also upgrades a database that has the earlier, certificate-bound draft of this feature,
+which is retired in place. <code>ddl.sql</code> includes the table for fresh installs.</p>
+<p><code>auth_device_authorization_t</code>: <code>device_code_sha256</code> (primary key), <code>user_code</code> (unique among
+<code>PENDING</code>), <code>auth_host_id</code>, <code>provider_id</code>, <code>client_id</code> (foreign key to <code>auth_client_t</code>, cascade
+policy <code>HARD_DELETE</code>), <code>requested_ip</code>, <code>scope</code>, <code>status</code> (<code>PENDING</code>, <code>APPROVED</code>, <code>DENIED</code>,
+<code>REDEEMED</code>), <code>user_id</code>, <code>host_id</code>, <code>remember</code>, <code>session_id</code>, <code>created_at</code>, <code>expires_at</code>,
+<code>approved_at</code>, <code>last_polled_at</code>, <code>poll_interval_seconds</code>.</p>
+<p>At startup, <code>light-oauth</code> checks that both <code>auth_device_authorization_t</code> and
+<code>auth_workflow_broker_t</code> exist. They support separate features. The workflow-broker table is needed
+because the same issuer also implements workflow-bound OAuth grants for unattended workflow
+continuation, and the normal authorization-code path queries it to determine whether a client is a
+broker. The device grant does not use the workflow broker. Both migrations are Portal-owned, so the
+issuer validates them and fails before becoming healthy rather than creating tables itself.</p>
+<p>The retired draft had <code>auth_device_client_t</code> (registration is now the Portal client record),
+<code>auth_device_session_t</code> (the install binding) and certificate columns on this table; the patch
+removes them.</p>
+<p>The device client is created and updated through Portal’s client UI and event flow, then linked to
+the provider. It is deliberately not inserted as bootstrap SQL. The <code>cli</code> profile option is part of
+the Portal client form; there is no separate device-client registration table or seed.</p>
+<h2 id="light-cli"><a class="header" href="#light-cli">Light CLI</a></h2>
+<p><code>/login</code>, <code>/whoami</code> and <code>/logout</code> inside the persistent <code>light</code> session, and refresh on use for every Gateway call. See
+<code>light-fabric/docs/src/design/light-cli.md</code>. The CLI is configured with <code>cli.oauthUri</code> (the
+Gateway, <code>https://localhost</code> locally), <code>cli.oauthProviderId</code> and <code>cli.oauthClientId</code>.</p>
+<h2 id="portal-view-3"><a class="header" href="#portal-view-3">portal-view</a></h2>
+<p><code>/device</code> (redirects to <code>/app/device</code>, keeping the code) in <code>src/pages/oauth/DeviceApproval.tsx</code>.
+It needs no configuration of its own. Which provider the request is for comes from the link the CLI
+printed: <code>light-oauth</code> adds <code>?provider=</code> (the provider it served the request under) to
+<code>verification_uri</code> and <code>verification_uri_complete</code>, so a CLI downloaded from another instance, which
+names that instance’s provider in its own settings, reaches the right one. The page accepts only a
+plain identifier there, since it becomes a path segment of the API call. A page opened without the
+link asks the person to open it. If nobody is signed in it offers to sign in and remembers the
+request (code and provider) for 15 minutes, since sign-in returns to the dashboard.</p>
+<h2 id="alternatives-considered-1"><a class="header" href="#alternatives-considered-1">Alternatives considered</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Alternative</th><th>Why not</th></tr>
+</thead>
+<tbody>
+<tr><td>Paste a cookie or token</td><td>Ten minutes of life; unusable in a VM</td></tr>
+<tr><td>A separate mutual-TLS listener tying a login to the install certificate (the first design)</td><td>The Gateway ends TLS, so <code>light-oauth</code> never sees the certificate. Making the Gateway forward a verified identity to a pinned listener is possible but breaks the platform’s rule that forwarded certificate headers are never trusted, adds a second port, and buys only refresh-token binding, which rotation with replay detection already approximates</td></tr>
+<tr><td>A password page on <code>light-oauth</code></td><td>A second place to type a password, with no SSO or MFA, and a password oracle for anyone who can mint codes</td></tr>
+<tr><td>Loopback redirect</td><td>Needs a browser on the CLI’s machine</td></tr>
+<tr><td>Sliding sessions</td><td>Deferred; a fixed end is simpler and was asked for</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="implementation-status"><a class="header" href="#implementation-status">Implementation status</a></h2>
+<p>Built and tested (<code>portal-service/apps/light-oauth/src/device.rs</code>, its <code>tests.rs</code>; the CLI’s
+<code>auth.rs</code>, <code>oauth.rs</code>, <code>session.rs</code>; <code>portal-view</code>’s <code>DeviceApproval</code>):</p>
+<ul>
+<li><code>cargo test -p light-oauth</code> passes 33 tests; 25 database-backed qualification tests remain
+ignored in the ordinary run. Database qualification uses <code>oauth_a1_qualification</code> with
+<code>-- --include-ignored --test-threads=1</code>.</li>
+<li>The security checks were mutation-tested: each of the public-client rules, the grant
+restriction, the secret rule, the host check, the expiry checks, the redeeming <code>UPDATE</code>’s
+guard, the pending cap, the purge age, the lifetime and remember-me settings, the token-use
+check, the bearer requirement on lookup, the recorded address and each route was broken in
+turn and a test failed. One overlap remains by design: <code>revoke</code> checks the token’s client both
+in code and in its <code>UPDATE</code>.</li>
+<li>Holding a transaction connection while asking the pool for another can stall under load; redemption
+and approval were changed to avoid it and a test runs six sign-ins on a pool of three.</li>
+</ul>
+<p>The local Gateway routes are configured. Address rate limits remain a production deployment
+decision. Approval and denial both require an explicit action and a user from the client’s host;
+both outcomes are audited.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-controller"><a class="header" href="#light-controller">Light Controller</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-controller-ipv6-support"><a class="header" href="#light-controller-ipv6-support">Light Controller IPv6 Support</a></h1>
-<h2 id="problem-6"><a class="header" href="#problem-6">Problem</a></h2>
+<h2 id="problem-7"><a class="header" href="#problem-7">Problem</a></h2>
 <p>The Rust <code>controller-rs</code> service is the control-plane endpoint for runtime
 registration, discovery, MCP admin traffic, and portal event streams. In
 dual-stack deployments, clients can resolve the controller hostname to either
@@ -7378,7 +7624,7 @@ reload alone is not an immediate revocation mechanism for an existing tunnel.</p
 manifest, and baseline gate live under
 <code>implementation/light-controller/stabilization/s0</code>. They are contract inputs,
 not runtime dependencies shared between TypeScript and Rust.</p>
-<h2 id="problem-7"><a class="header" href="#problem-7">Problem</a></h2>
+<h2 id="problem-8"><a class="header" href="#problem-8">Problem</a></h2>
 <p>Rust services currently connect to <code>controller-rs</code> through
 <code>/ws/microservice</code>. The channel carries JSON-RPC messages for:</p>
 <ul>
@@ -7559,7 +7805,7 @@ page or an unrelated UI resource.</li>
 browser support provide value beyond raw QUIC or multiple WebSockets. The
 runtime implementation spike must compare those alternatives rather than
 treating WebTransport plus <code>rkyv</code> as one indivisible decision.</p>
-<h2 id="decision"><a class="header" href="#decision">Decision</a></h2>
+<h2 id="decision-1"><a class="header" href="#decision-1">Decision</a></h2>
 <p>Implement the layered profile model with these constraints:</p>
 <ol>
 <li>Keep <code>/ws/microservice</code> unchanged, enabled by default, and available throughout
@@ -9853,7 +10099,7 @@ the exact source commit, image digest, configuration/projection digest,
 database migration set, and live qualification run.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="agent-skill-and-api-endpoint-discovery"><a class="header" href="#agent-skill-and-api-endpoint-discovery">Agent Skill And API Endpoint Discovery</a></h1>
-<h2 id="problem-8"><a class="header" href="#problem-8">Problem</a></h2>
+<h2 id="problem-9"><a class="header" href="#problem-9">Problem</a></h2>
 <p>The GenAI chat flow has two separate concepts that are easy to confuse:</p>
 <ul>
 <li>The <code>light-gateway</code> MCP endpoint is the runtime server that lists and executes
@@ -10926,7 +11172,7 @@ portal operators a clean path to organize tools into skills, assign those
 skills to agents, and improve retrieval over time.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="agent-api-compose-and-multi-agent-workflow"><a class="header" href="#agent-api-compose-and-multi-agent-workflow">Agent API Compose And Multi-Agent Workflow</a></h1>
-<h2 id="problem-9"><a class="header" href="#problem-9">Problem</a></h2>
+<h2 id="problem-10"><a class="header" href="#problem-10">Problem</a></h2>
 <p><code>portal-config-loc</code> and <code>portal-config-dev</code> are being updated so local Docker
 Compose stacks can run <code>light-agent</code> beside the portal services, demo APIs, and
 gateway. The first implementation adds one <code>light-agent</code> directly to the main
@@ -11351,7 +11597,7 @@ agent.</p>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="agent-memory-event-refactor"><a class="header" href="#agent-memory-event-refactor">Agent Memory Event Refactor</a></h1>
-<h2 id="implementation-status"><a class="header" href="#implementation-status">Implementation Status</a></h2>
+<h2 id="implementation-status-1"><a class="header" href="#implementation-status-1">Implementation Status</a></h2>
 <p>The development implementation now exposes a bank-first Hindsight workspace at
 <code>/app/genai/MemoryBanks</code> and a bank detail workspace at
 <code>/app/genai/MemoryBanks/:bankId</code>. The old flat session, user, agent, and
@@ -11751,7 +11997,7 @@ platform can re-embed after model upgrades.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="tool-description-embedding-population"><a class="header" href="#tool-description-embedding-population">Tool Description Embedding Population</a></h1>
-<h2 id="problem-10"><a class="header" href="#problem-10">Problem</a></h2>
+<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
 <p>The GenAI Tool page lets users update <code>tool_t.description</code> through the
 <code>updateTool</code> form. Endpoint-backed tools are also projected into <code>tool_t</code> when
 <code>api_endpoint_t</code> is populated from OpenAPI, MCP <code>tools/list</code>, or LightAPI
@@ -12689,7 +12935,7 @@ workflow editor provides YAML editing, step preview, validation, and test runs
 for every workflow authoring use case in Portal.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="portal-catalog-scope"><a class="header" href="#portal-catalog-scope">Portal Catalog Scope</a></h1>
-<h2 id="problem-11"><a class="header" href="#problem-11">Problem</a></h2>
+<h2 id="problem-12"><a class="header" href="#problem-12">Problem</a></h2>
 <p>Light Portal supports multiple tenants through <code>host_id</code> and can also host
 multiple runtime environments in one portal instance. A common deployment shape
 is:</p>
@@ -14789,7 +15035,7 @@ clearest ownership model.</li>
 <p>Related designs: <a href="#llm-gateway-configuration-topology">LLM gateway topology</a>, <a href="#control-plane-policy-publication-through-config-server">policy publication through config-server</a>, <a href="#operational-storage-registration-and-development-postgresql-topology">database topology</a>, and <a href="#portable-signed-portal-view-artifact-and-runtime-configuration">portable Portal View configuration</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="llm-gateway-configuration-topology"><a class="header" href="#llm-gateway-configuration-topology">LLM Gateway Configuration Topology</a></h1>
-<h2 id="decision-1"><a class="header" href="#decision-1">Decision</a></h2>
+<h2 id="decision-2"><a class="header" href="#decision-2">Decision</a></h2>
 <p>Light Portal is the authoring control plane for LLM providers, deployments,
 aliases, pricing, and policy. The standard Portal configuration system is the
 only delivery channel to <code>light-gateway</code>.</p>
@@ -19036,7 +19282,7 @@ and (
 </code></pre>
 <p>This permits one global Knowledge Base to have independent bindings from many
 tenants without copying its sources, documents, chunks, or embeddings.</p>
-<h2 id="data-model"><a class="header" href="#data-model">Data Model</a></h2>
+<h2 id="data-model-1"><a class="header" href="#data-model-1">Data Model</a></h2>
 <h3 id="control-plane-tables"><a class="header" href="#control-plane-tables">Control-plane tables</a></h3>
 <p>These authoritative event-backed tables reside in the Config Server database.
 Use globally unique resource IDs and explicit nullable owner scope:</p>
@@ -21885,7 +22131,7 @@ Platform defaults or SLOs</li>
 <a href="#global-and-tenant-knowledge-bases-for-shared-agent-retrieval">Global And Tenant Knowledge Bases For Shared Agent Retrieval</a>
 into an executable migration plan. It does not replace the broader Knowledge
 Base design.</p>
-<h2 id="decision-2"><a class="header" href="#decision-2">Decision</a></h2>
+<h2 id="decision-3"><a class="header" href="#decision-3">Decision</a></h2>
 <p>Keep the browser-facing Knowledge Base administration contract in Light Portal,
 but make the <code>light-knowledge</code> runtime and its approved build/job execution
 identity the only application boundary allowed to query its operational tables.</p>
@@ -25504,7 +25750,7 @@ replay-worker execution path in <a href="#event-replay">Event Replay</a>.</p>
 <p>This design changes only the trigger and invocation path for an approved replay.
 The existing replay processor, durable state, approval, fencing, barriers,
 repairs, audit, and projection correctness rules remain in place.</p>
-<h2 id="decision-3"><a class="header" href="#decision-3">Decision</a></h2>
+<h2 id="decision-4"><a class="header" href="#decision-4">Decision</a></h2>
 <p>An authorized Portal user starts the exact replay request synchronously:</p>
 <pre><code class="language-text">Portal UI
    |
@@ -25899,7 +26145,7 @@ passes the parity gates in this document.</p>
 <p>Related designs are <a href="#rust-event-importer-design">Rust Event Importer</a>,
 <a href="#event-replay">Event Replay</a>, and
 <a href="#light-portal-install-1">Light Portal Install</a>.</p>
-<h2 id="problem-12"><a class="header" href="#problem-12">Problem</a></h2>
+<h2 id="problem-13"><a class="header" href="#problem-13">Problem</a></h2>
 <p>Database recreation currently imports <code>events.json</code> one event at a time. Each
 event opens and commits a PostgreSQL transaction. Guarded graph appends also
 commit and then poll projection convergence at 250 ms intervals before the next
@@ -26862,7 +27108,7 @@ exported row with no declared conversion disposition blocks publication.</li>
 mark a self-contained <code>standalone-host</code> bundle as non-composable and
 normalize exactly one membership as current.</li>
 </ol>
-<h2 id="problem-13"><a class="header" href="#problem-13">Problem</a></h2>
+<h2 id="problem-14"><a class="header" href="#problem-14">Problem</a></h2>
 <p>The current snapshot exporter selects active users through active
 <code>user_host_t</code> membership for one source host. It intentionally includes an
 active membership even when <code>current = FALSE</code>. This is correct for a user who
@@ -27708,7 +27954,7 @@ without a satisfiable declared dependency and conversion disposition.</p>
 <h1 id="portal-service-consolidation-into-rust"><a class="header" href="#portal-service-consolidation-into-rust">Portal Service Consolidation Into Rust</a></h1>
 <h2 id="status-17"><a class="header" href="#status-17">Status</a></h2>
 <p>Proposed on 2026-09-16. Not yet implemented.</p>
-<h2 id="decision-4"><a class="header" href="#decision-4">Decision</a></h2>
+<h2 id="decision-5"><a class="header" href="#decision-5">Decision</a></h2>
 <p>Replace the Java <code>light-hybrid-4j</code> portal services with two Rust services built
 from a single repository:</p>
 <ul>
@@ -28009,7 +28255,7 @@ those users are told.</li>
 <p>This is the optional Phase 0 of
 <a href="#portal-service-consolidation-into-rust">Portal Service Consolidation Into Rust</a>.
 It is also useful on its own if the Rust migration is delayed.</p>
-<h2 id="decision-5"><a class="header" href="#decision-5">Decision</a></h2>
+<h2 id="decision-6"><a class="header" href="#decision-6">Decision</a></h2>
 <p>Move every portal <code>*-command</code> and <code>*-query</code> repository, plus <code>hybrid-command</code>
 and <code>hybrid-query</code>, into the existing <code>light-portal</code> repository as Maven
 modules. Keep full git history.</p>
@@ -29308,7 +29554,7 @@ query, indexing, and standard traffic use qualified capacity isolation.</li>
 </ul>
 <p>These risks require host hardening, workload identity, least-privilege network
 policy, model-artifact provenance, and the existing KB embedding-stability gate.</p>
-<h2 id="alternatives-considered-1"><a class="header" href="#alternatives-considered-1">Alternatives Considered</a></h2>
+<h2 id="alternatives-considered-2"><a class="header" href="#alternatives-considered-2">Alternatives Considered</a></h2>
 <h3 id="allow-all-http-provider-urls"><a class="header" href="#allow-all-http-provider-urls">Allow All HTTP Provider URLs</a></h3>
 <p>Rejected. It exposes credentials and data and turns a provider configuration
 surface into unrestricted internal-network access.</p>
@@ -30035,7 +30281,7 @@ the workflow.</li>
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="claim-org-role-bootstrap"><a class="header" href="#claim-org-role-bootstrap">Claim Org Role Bootstrap</a></h1>
-<h2 id="problem-14"><a class="header" href="#problem-14">Problem</a></h2>
+<h2 id="problem-15"><a class="header" href="#problem-15">Problem</a></h2>
 <p>The Claim Org action lets a signed-in user create an organization and its default host from the profile menu. The <code>createOrg</code> form captures the organization owner, default subdomain, host description, and host owner. The backend create-org flow then creates the organization, the default host, and user-host membership rows in one transaction.</p>
 <p>That transaction is not sufficient for a usable tenant. A new host membership without role assignments can leave the owner unable to authorize after switching to the newly claimed host. The user profile/login query joins roles through <code>role_user_t</code> by the current <code>user_host_t.host_id</code>; if the current host has no active role rows for that user, role-dependent reads can return no user context.</p>
 <p>The Claim Org bootstrap must create the minimum administration roles and assignments for the default host at the same time as the organization and host.</p>
@@ -30186,7 +30432,7 @@ the workflow.</li>
 <p>The owner-transfer role policy also remains open. The system should decide whether owner changes imply role grants, role revokes, both, or neither before adding role side effects to <code>UpdateOrg</code> or <code>UpdateHost</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="master-oauth-host-tenant-login"><a class="header" href="#master-oauth-host-tenant-login">Master OAuth Host Tenant Login</a></h1>
-<h2 id="problem-15"><a class="header" href="#problem-15">Problem</a></h2>
+<h2 id="problem-16"><a class="header" href="#problem-16">Problem</a></h2>
 <p>In a deployed portal instance, <code>dev.lightapi.net</code> is the master host for the instance. Its host ID is:</p>
 <pre><code class="language-text">01964b05-552a-7c4b-9184-6857e7f3dc5f
 </code></pre>
@@ -30237,7 +30483,7 @@ REFERENCES auth_provider_client_t(host_id, client_id, provider_id)
 </tbody>
 </table>
 </div>
-<h2 id="decision-6"><a class="header" href="#decision-6">Decision</a></h2>
+<h2 id="decision-7"><a class="header" href="#decision-7">Decision</a></h2>
 <p>Separate OAuth configuration host from tenant host in the OAuth runtime tables.</p>
 <p>Keep <code>host_id</code> in <code>auth_session_t</code>, <code>auth_code_t</code>, and <code>auth_refresh_token_t</code> as the tenant/current host. Add <code>auth_host_id</code> to those tables to point to the master OAuth host that owns the provider-client mapping.</p>
 <p>The provider-client foreign key should move from <code>host_id</code> to <code>auth_host_id</code>:</p>
@@ -30250,7 +30496,7 @@ auth_code_t.host_id
 auth_refresh_token_t.host_id
 </code></pre>
 <p>This preserves the current meaning of <code>host_id</code> for tenant access while allowing all OAuth configuration to live on the master host.</p>
-<h2 id="data-model-1"><a class="header" href="#data-model-1">Data Model</a></h2>
+<h2 id="data-model-2"><a class="header" href="#data-model-2">Data Model</a></h2>
 <h3 id="auth_session_t"><a class="header" href="#auth_session_t"><code>auth_session_t</code></a></h3>
 <p>Add:</p>
 <pre><code class="language-sql">auth_host_id UUID NOT NULL
@@ -30634,7 +30880,7 @@ runtime validation in the first release.</li>
 basic scalar and raw JSON/YAML editing.</li>
 <li>Do not allow unpublished schemas to validate production config overrides.</li>
 </ul>
-<h2 id="data-model-2"><a class="header" href="#data-model-2">Data Model</a></h2>
+<h2 id="data-model-3"><a class="header" href="#data-model-3">Data Model</a></h2>
 <p>The existing <code>schema_t</code> table is a reasonable starting point. It already has:</p>
 <ul>
 <li><code>schema_id</code></li>
@@ -32228,7 +32474,7 @@ GROUP BY
 <p>This approach provides a seamless experience while maintaining compatibility with applications requiring roles for authorization or UI customization.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="private-messages"><a class="header" href="#private-messages">Private Messages</a></h1>
-<h2 id="problem-16"><a class="header" href="#problem-16">Problem</a></h2>
+<h2 id="problem-17"><a class="header" href="#problem-17">Problem</a></h2>
 <p>Portal users need a way to exchange private messages from the user profile
 without exposing email addresses to each other. The sender should only need a
 recipient user id or a display-safe user label. The backend can resolve email
@@ -32515,7 +32761,7 @@ is needed later.</li>
 messaging is later needed, the contract must model the recipient host
 explicitly and pass a product/security review.</li>
 </ul>
-<h2 id="portal-view-3"><a class="header" href="#portal-view-3">Portal View</a></h2>
+<h2 id="portal-view-4"><a class="header" href="#portal-view-4">Portal View</a></h2>
 <p>Use the current profile surfaces but make them data-driven:</p>
 <ul>
 <li><code>MailMenu</code> should poll unread count and show a small list of recent
@@ -34418,7 +34664,7 @@ public class ConfigRollbackService {
 <p>This approach provides a clean and relatively robust way to restore the specific override state from your snapshots using the DELETE/INSERT strategy. Remember to test thoroughly!</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="sid-and-host-verification"><a class="header" href="#sid-and-host-verification">SID and Host Verification</a></h1>
-<h2 id="problem-17"><a class="header" href="#problem-17">Problem</a></h2>
+<h2 id="problem-18"><a class="header" href="#problem-18">Problem</a></h2>
 <p>GitHub issue https://github.com/lightapi/portal-service/issues/39 reports that
 <code>config-server</code> accepted a valid JWT whose service identity did not match the
 requested service configuration.</p>
@@ -35893,7 +36139,7 @@ retries return a retryable conflict with no committed clone state.</li>
 <li>Non-standard instance files are copied into <code>snapshot_instance_file_t</code>.</li>
 </ul>
 <p>The <code>/config-server/files</code> endpoint must return both sets. It already filters standard files by <code>config_phase</code> through <code>config_snapshot_property_t.config_phase</code>, but <code>instance_file_t</code> and <code>snapshot_instance_file_t</code> do not currently carry <code>config_phase</code>. That makes it impossible to union the two sources while preserving runtime, deployment, and generator phase semantics.</p>
-<h2 id="problem-18"><a class="header" href="#problem-18">Problem</a></h2>
+<h2 id="problem-19"><a class="header" href="#problem-19">Problem</a></h2>
 <p>When a service starts through <code>DefaultConfigLoader</code>, it calls <code>/config-server/files</code> with <code>host</code>, <code>serviceId</code>, and <code>envTag</code>. The endpoint resolves the current snapshot and returns the files that should be written into <code>/config</code>.</p>
 <p>For the sidecar case, <code>openapi.yaml</code> exists in both <code>instance_file_t</code> and <code>snapshot_instance_file_t</code>, but it does not exist in <code>config_snapshot_property_t</code>. Since the current <code>/files</code> query reads only <code>config_snapshot_property_t</code>, the response does not include <code>openapi.yaml</code>, and the sidecar cannot write it to <code>/config</code>.</p>
 <p>The correct endpoint behavior is:</p>
@@ -35903,7 +36149,7 @@ retries return a retryable conflict with no committed clone state.</li>
 <li>Filter both sources by the requested config phase.</li>
 <li>Return one filename-to-base64-content map.</li>
 </ol>
-<h2 id="decision-7"><a class="header" href="#decision-7">Decision</a></h2>
+<h2 id="decision-8"><a class="header" href="#decision-8">Decision</a></h2>
 <p>Add <code>config_phase</code> to both runtime and snapshot instance file tables:</p>
 <ul>
 <li><code>instance_file_t.config_phase</code></li>
@@ -36270,7 +36516,7 @@ light-portal/releases/
 <li>Keep Docker Compose as the only container runtime dependency; use <code>curl</code> for R2 downloads, not AWS CLI.</li>
 <li>Use fixed archive names for the current R2 object set until the release pipeline publishes a richer manifest automatically.</li>
 </ul>
-<h2 id="decision-8"><a class="header" href="#decision-8">Decision</a></h2>
+<h2 id="decision-9"><a class="header" href="#decision-9">Decision</a></h2>
 <p>Create <code>light-portal-install</code> as the public local install repo with Docker Compose as the only container runtime dependency. Use the Rust <code>all-in-lt</code> service topology, including <code>light-agent</code> and the demo APIs, but package it as checked-in runtime config plus R2-downloaded service jars, SPA assets, <code>events.json</code>, and <code>docker-images.env</code>. Keep the local OAuth authorization code flow through <code>login-view</code> and use existing long-lived local demo tokens for the first version. Publish static install artifacts to Cloudflare R2 behind a custom domain, download the fixed asset archives with <code>curl</code>, and extract them with <code>unzip</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="timestamp"><a class="header" href="#timestamp">Timestamp</a></h1>
@@ -36622,7 +36868,7 @@ name are equal.</p>
 <code>entity_identity_t</code> reservation table. The identity reservation, event-store
 append, outbox write, nonce allocation, and idempotency record must commit in one
 PostgreSQL transaction.</p>
-<h2 id="problem-19"><a class="header" href="#problem-19">Problem</a></h2>
+<h2 id="problem-20"><a class="header" href="#problem-20">Problem</a></h2>
 <p>Issue 691 demonstrates the same-aggregate form of the defect:</p>
 <ol>
 <li>A role such as <code>abc-123</code> already exists at aggregate version 1.</li>
@@ -41828,7 +42074,7 @@ scale well if every Java or Rust release requires a hand-maintained set of
 mapping events across all portal instances. This design proposes a release
 mapping automation model that keeps the existing event-sourced write path and
 removes the need to manually recreate mapping files for every product release.</p>
-<h2 id="problem-20"><a class="header" href="#problem-20">Problem</a></h2>
+<h2 id="problem-21"><a class="header" href="#problem-21">Problem</a></h2>
 <p>Product versions are released often. Each new release can introduce a new
 <code>productVersionId</code>, and the config update page only knows which configs and
 properties are applicable when mappings exist for that exact product version.</p>
@@ -42621,7 +42867,7 @@ only one snapshot is current per runtime identity. Removing the instance’s
 version key would prevent retaining both release authoring graphs under that
 identity. Neither <code>instance_t.current</code> nor <code>instance_t.active</code> selects the
 runtime snapshot.</p>
-<h2 id="implementation-status-1"><a class="header" href="#implementation-status-1">Implementation status</a></h2>
+<h2 id="implementation-status-2"><a class="header" href="#implementation-status-2">Implementation status</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -42870,7 +43116,7 @@ artifact publishing, AI-assisted failure diagnosis, and human approval.</p>
 portal service process. Command execution belongs in a sandboxed release
 runner, with <code>light-workflow</code> owning state, task routing, retries, approvals,
 and audit history.</p>
-<h2 id="problem-21"><a class="header" href="#problem-21">Problem</a></h2>
+<h2 id="problem-22"><a class="header" href="#problem-22">Problem</a></h2>
 <p>Java releases currently depend on <code>light-bot</code>, while Rust releases are handled
 through separate command-line and repository-specific steps. This works, but it
 keeps release knowledge outside the same workflow model used by Light Portal
@@ -43603,7 +43849,7 @@ delete is an <code>UPDATE ... SET active = FALSE</code>, not a physical <code>DE
 <p>This design keeps database-level cascading, but replaces column-shape inference
 with an explicit relationship policy. The trigger remains generic: table names
 and actions live in data, not in PL/pgSQL branches.</p>
-<h2 id="decision-9"><a class="header" href="#decision-9">Decision</a></h2>
+<h2 id="decision-10"><a class="header" href="#decision-10">Decision</a></h2>
 <p>Every relationship traversed from a soft-deleted parent has one declared
 action:</p>
 <div class="table-wrapper">
@@ -46680,7 +46926,7 @@ audit, and break-glass evidence.</li>
 <li><strong>Deployment Trigger:</strong> Automatically created when a deployment occurs (to capture the state being deployed).</li>
 <li><strong>User Trigger:</strong> Manually created by a user via the UI (e.g., to save a milestone).</li>
 </ol>
-<h2 id="data-model-3"><a class="header" href="#data-model-3">Data Model</a></h2>
+<h2 id="data-model-4"><a class="header" href="#data-model-4">Data Model</a></h2>
 <h3 id="snapshot-header-config_snapshot_t"><a class="header" href="#snapshot-header-config_snapshot_t">Snapshot Header (<code>config_snapshot_t</code>)</a></h3>
 <p>Captures metadata about the snapshot.</p>
 <ul>
@@ -46879,7 +47125,7 @@ Location: https://portal.lightapi.net/authorization?code=auth_code_abc&amp;state
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="auth-client-secret-regeneration"><a class="header" href="#auth-client-secret-regeneration">Auth Client Secret Regeneration</a></h1>
-<h2 id="problem-22"><a class="header" href="#problem-22">Problem</a></h2>
+<h2 id="problem-23"><a class="header" href="#problem-23">Problem</a></h2>
 <p>An OAuth auth client receives a <code>client_id</code> and <code>client_secret</code> when it is
 created. The clear text <code>client_secret</code> is intentionally a one-time value. The
 database projection stores only a verifier value in <code>auth_client_t.client_secret</code>
@@ -46937,7 +47183,7 @@ continuity.</li>
 <li>Enables a focused UI flow with explicit warning, confirmation, copy action,
 and audit trail.</li>
 </ul>
-<h2 id="decision-10"><a class="header" href="#decision-10">Decision</a></h2>
+<h2 id="decision-11"><a class="header" href="#decision-11">Decision</a></h2>
 <p>Add a dedicated “Regenerate Secret” action on the Auth Client page.</p>
 <p>Do not reuse delete/recreate as the normal path. Do not add a recoverable
 encrypted-secret store. The portal should continue treating client secrets as
@@ -47720,7 +47966,7 @@ Kubernetes cluster from the Instance Admin page.</p>
 <p>The goal is to provide a production-like deployment path for small businesses
 and enterprise tenants without requiring Light Portal to have direct network
 access to every customer cluster.</p>
-<h2 id="problem-23"><a class="header" href="#problem-23">Problem</a></h2>
+<h2 id="problem-24"><a class="header" href="#problem-24">Problem</a></h2>
 <p>Each API or application repository can contain a <code>k8s/</code> folder with Kubernetes
 deployment templates. The templates contain variables in the following format:</p>
 <pre><code class="language-text">${key:defaultValue}
@@ -48272,7 +48518,7 @@ status table identifies those gaps explicitly.</p>
 <a href="#enterprise-ai-assisted-bootstrap-and-eks-deployment">Enterprise AI-Assisted Bootstrap and EKS Deployment</a>
 and the bundle signature contract in
 <a href="#composable-multi-host-snapshot-export-and-bootstrap">Composable Multi-Host Snapshot Export and Bootstrap</a>.</p>
-<h2 id="problem-24"><a class="header" href="#problem-24">Problem</a></h2>
+<h2 id="problem-25"><a class="header" href="#problem-25">Problem</a></h2>
 <p>Light Portal release artifacts are consumed through several paths:</p>
 <ul>
 <li><code>portal-config-loc</code> recreates disposable development databases;</li>
@@ -49538,7 +49784,7 @@ security and operations teams require.</p>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-oauth-and-oauth-kafka-agentcore-oidc-discovery"><a class="header" href="#light-oauth-and-oauth-kafka-agentcore-oidc-discovery">Light OAuth and OAuth Kafka AgentCore OIDC Discovery</a></h1>
-<h2 id="problem-25"><a class="header" href="#problem-25">Problem</a></h2>
+<h2 id="problem-26"><a class="header" href="#problem-26">Problem</a></h2>
 <p>Issue https://github.com/lightapi/portal-service/issues/44 asks whether
 <code>portal-service/apps/light-oauth</code> can support AWS AgentCore JWT inbound
 authorization.</p>
@@ -55893,7 +56139,7 @@ IMPORT_EVENTS=true \
 <p>It processes the MarketCodeCreatedEvent and calls dbProvider.createMarketCode with the event.</p>
 <h2 id="createmarketcode"><a class="header" href="#createmarketcode">createMarketCode</a></h2>
 <p>This method in dbProvider will put the event value into cacheManager cache named “auth_code”. Now, the code is ready to be query from the market-query.</p>
-<h2 id="portal-view-4"><a class="header" href="#portal-view-4">Portal View</a></h2>
+<h2 id="portal-view-5"><a class="header" href="#portal-view-5">Portal View</a></h2>
 <p>The <code>HostIdCodePostHandler</code> redirects the browser to Portal View with
 <code>GET /authorization?code=...&amp;state=...</code>. This is an OAuth callback and remains
 GET-only; it is not part of the session-mutation POST migration. Enabled
@@ -56308,7 +56554,7 @@ deletion.</p>
 <li><code>service-query</code></li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="portal-view-5"><a class="header" href="#portal-view-5">Portal View</a></h1>
+<h1 id="portal-view-6"><a class="header" href="#portal-view-6">Portal View</a></h1>
 <ul>
 <li><a href="#oauth-20-state-verification">OAuth 2.0 State Verification</a></li>
 </ul>
@@ -56772,7 +57018,7 @@ validation if they change.</p>
 <p>Check actual snapshot output where environment and product-version values
 compete; editor precedence currently differs. Preserve referenced catalog names
 and metadata through retention to keep output reproducible. See the
-<a href="#implementation-status-1">implementation limits</a>.</p>
+<a href="#implementation-status-2">implementation limits</a>.</p>
 <h3 id="6-deploy-activate-and-observe"><a class="header" href="#6-deploy-activate-and-observe">6. Deploy, activate, and observe</a></h3>
 <p>Test the target artifact using the approved exported configuration, or use an
 isolated test deployment with its own authorized identity. Do not activate a
@@ -56813,7 +57059,7 @@ Custom loaders and Rust runtimes need their own qualified procedure.</p>
 even when parent loggers use DEBUG. Use INFO for source verification; DEBUG/TRACE
 can expose values and base64 certificates/files. Restrict access to error logs,
 which can contain response bodies. See the
-<a href="#implementation-status-1">implementation table</a>
+<a href="#implementation-status-2">implementation table</a>
 for the code paths behind these gates.</p>
 <ol>
 <li><strong>Prepare the controlled start.</strong> In remote mode, pre-create a writable
@@ -57029,7 +57275,7 @@ cascaded, snapshots/history retained, and the instance hidden from normal lists.
 First clear selected current snapshots and confirm there are no running
 deployments or required rollback obligations. Operators enforce these gates;
 soft retirement alone leaves selected snapshots servable. See the
-<a href="#implementation-status-1">implementation table</a>.</p>
+<a href="#implementation-status-2">implementation table</a>.</p>
 <p>Preserve shared product versions, pipelines, artifacts, and access needed by
 other instances or the recovery plan. Qualify restoration of the instance,
 cascaded children, and deployment infrastructure before relying on archives.
