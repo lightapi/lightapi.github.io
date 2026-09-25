@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-842c9214.js";
+            window.path_to_searchindex_js = "searchindex-031681d3.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-bab7c7c0.js"></script>
+        <script src="toc-28cc4fe4.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -56728,6 +56728,158 @@ records implementation limits and proposed code follow-ups.</p>
 an environment and understand the configuration boundaries shared by all four
 distributions.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="faster-local-rust-image-builds"><a class="header" href="#faster-local-rust-image-builds">Faster Local Rust Image Builds</a></h1>
+<h2 id="status-27"><a class="header" href="#status-27">Status</a></h2>
+<p>Implemented on 2026-09-25 in <code>light-fabric</code> and <code>portal-service</code>. Build and
+selection behavior has not yet been runtime-qualified or timed.</p>
+<h2 id="goal-1"><a class="header" href="#goal-1">Goal</a></h2>
+<p>Shorten local image builds and releases for the Rust apps in <code>light-fabric</code> and
+<code>portal-service</code>. When requested, build only images affected by files currently
+changed in either working tree. “Changed” means staged, unstaged, and untracked
+files relative to that repository’s <code>HEAD</code>; no comparison ref is required.</p>
+<p>Keep the existing full-build and explicit single-app/service flows. The
+changed-app path is opt-in, reports its selected images before building, and
+can be combined with the existing local-only mode to avoid Docker Hub pushes.</p>
+<h2 id="previous-build-behavior"><a class="header" href="#previous-build-behavior">Previous Build Behavior</a></h2>
+<h3 id="light-fabric"><a class="header" href="#light-fabric"><code>light-fabric</code></a></h3>
+<p>The root <a href="../../light-fabric/build.sh"><code>build.sh</code></a> accepts <code>--app</code> for one
+app, <code>--local</code> to skip pushes, and
+<code>--no-cache</code>. By default it builds nine release apps. For each selected app,
+it runs a host <code>cargo build</code>, then runs <code>docker build</code>. The Dockerfile
+independently compiles the binary inside a Rust builder image; it does not
+consume the host build output. The Dockerfiles copy workspace source before
+running Cargo, so source edits invalidate the Docker compile layer.</p>
+<h3 id="portal-service-1"><a class="header" href="#portal-service-1"><code>portal-service</code></a></h3>
+<p>The root <a href="../../portal-service/build.sh"><code>build.sh</code></a> accepts <code>--service</code>,
+<code>--local</code>, and <code>--no-cache</code>. Its
+default is three images: <code>config-server</code>, <code>light-oauth</code>, and <code>portal-service</code>.
+It builds each image from one shared
+<a href="../../portal-service/docker/Dockerfile"><code>docker/Dockerfile</code></a>, which
+compiles that binary inside Docker. The Docker context is the workspace parent so the build
+can read both the <code>portal-service</code> and sibling <code>light-fabric</code> checkouts. The
+Dockerfile copies their app and crate trees before compiling.</p>
+<p>Neither script currently chooses apps from local Git changes. <code>--local</code>
+already provides the requested build-without-publishing switch in both repos.</p>
+<h2 id="proposed-interface"><a class="header" href="#proposed-interface">Proposed Interface</a></h2>
+<p>Add an opt-in <code>--changed</code> flag to both scripts:</p>
+<pre><code class="language-bash"># Preview the selected app set, build it, and keep images local.
+./build.sh 2.3.5-dev.20260909.2338 --changed --local
+
+# Build and publish only selected light-fabric images.
+./build.sh 2.3.5-dev.20260909.2338 --changed
+
+# portal-service uses the same selection and local-only conventions.
+./build.sh 2.3.5-dev.20260909.2338 --changed --local
+</code></pre>
+<p><code>--changed</code> applies to the selected app/service set. If combined with <code>--app</code>
+or <code>--service</code>, selection is the intersection: the named app is built only if
+it is affected. If no selected app is affected, exit successfully with a clear
+“no affected images” message and do not build or push anything. The full build
+remains the default when <code>--changed</code> is omitted.</p>
+<p>With <code>--changed</code> and publishing enabled, push only the affected version tags
+and update <code>latest</code> only for those same images. This intentionally produces a
+partial release set; omit <code>--changed</code> when a coordinated release requires all
+images at the requested version. Prefer <code>--changed --local</code> while reviewing
+which images were selected.</p>
+<h2 id="change-detection"><a class="header" href="#change-detection">Change Detection</a></h2>
+<p>Collect paths with NUL-delimited Git status output, including staged,
+unstaged, deleted, renamed, and untracked paths. Do this independently in
+<code>light-fabric</code> and <code>portal-service</code>; <code>portal-service</code> builds must also inspect
+uncommitted files in its sibling <code>light-fabric</code> dependency checkout. Do not
+include ignored build outputs such as <code>target/</code>.</p>
+<p>Map changed files to Cargo packages using workspace metadata and package
+manifest locations, then follow reverse dependency edges from each changed
+package to the selected binary packages. This captures changes in shared
+crates without rebuilding unrelated apps. A changed app directory, including
+its config copied into an image, affects that app’s image. A package that is a
+transitive dependency of multiple selected apps affects every dependent image.</p>
+<p>Use conservative all-app invalidation for workspace-level inputs that can
+change dependency resolution or compilation globally: root Cargo manifests and
+lockfiles, Rust toolchain or Cargo configuration, shared Docker build files,
+and build-selection logic. In <code>portal-service</code>, changes to the shared
+Dockerfile affect all three service images. Changes to either repo’s build
+script affect selection/build orchestration but need not by themselves mark
+application binaries as changed; the implementation should make this explicit
+and test it.</p>
+<p>The selector should print changed paths grouped by repository, the reason each
+image was selected, and the final image list. On Git or Cargo metadata errors,
+fail closed with a diagnostic rather than silently treating the tree as clean.</p>
+<h2 id="docker-build-improvements"><a class="header" href="#docker-build-improvements">Docker Build Improvements</a></h2>
+<h3 id="1-keep-cargo-outputs-between-image-builds"><a class="header" href="#1-keep-cargo-outputs-between-image-builds">1. Keep Cargo outputs between image builds</a></h3>
+<p>Enable Docker BuildKit and add cache mounts to every Rust builder stage for the
+Cargo registry, Git checkout cache, and <code>target</code> directory. Give each cache a
+stable ID scoped by repository, Rust toolchain, and compilation target. This
+allows Cargo to reuse downloaded crates and compiled dependencies when a
+changed source file causes the Docker <code>RUN cargo build</code> step to execute again.
+Because a mounted <code>target</code> directory is not part of the builder image layer,
+copy the just-built executable to an ordinary builder path such as <code>/out</code> in
+the same <code>RUN</code> step, then copy <code>/out</code> into the runtime image. Otherwise the
+final <code>COPY --from=builder</code> cannot see the binary stored in the cache mount.</p>
+<p>Docker’s <code>--no-cache</code> does not clear BuildKit cache mounts. Preserve a true
+cold-build diagnostic by giving <code>--no-cache</code> a fresh, invocation-specific
+cache ID (or by adding an explicit cache-disabling option); do not imply that
+<code>--no-cache</code> emptied persistent Cargo caches. Normal builds should reuse stable
+cache IDs.</p>
+<p>The cache is an optimization only. Builds must remain correct when the cache
+is empty, evicted, or shared between sequential image builds. Do not share a
+target cache across incompatible Rust versions or targets. Continue building
+images sequentially unless cache locking and resource use are measured first.</p>
+<h3 id="2-remove-duplicate-host-compilation-in-light-fabric"><a class="header" href="#2-remove-duplicate-host-compilation-in-light-fabric">2. Remove duplicate host compilation in <code>light-fabric</code></a></h3>
+<p>Remove the host <code>cargo build</code> from root <code>build.sh</code> once the image build remains
+the sole source of the packaged binary. The current Dockerfiles compile again
+inside their builder stages, so the host result does not save Docker work.
+Preserve each Dockerfile’s target-specific toolchain, especially the
+<code>x86_64-unknown-linux-musl</code> build for <code>light-agent</code>.</p>
+<h3 id="3-reduce-portal-service-build-context"><a class="header" href="#3-reduce-portal-service-build-context">3. Reduce <code>portal-service</code> build context</a></h3>
+<p>The current workspace-parent context can include unrelated sibling checkouts
+and generated files in context transfer. Add a filtered context for the two
+required repositories, or use BuildKit named contexts so the Docker build can
+read only the needed <code>portal-service</code> and <code>light-fabric</code> paths. Keep path
+dependencies and any Cargo development-dependency manifests needed for locked
+resolution; an incomplete filtered context must fail in qualification, not be
+hidden by an unlocked build.</p>
+<p>First measure context transfer and cache behavior. Defer splitting dependency
+manifest layers or pruning copied source trees until the simpler Cargo cache
+change is measured: workspace manifests and path dependencies make hand-built
+Docker layers easy to invalidate incorrectly.</p>
+<h2 id="implementation-notes"><a class="header" href="#implementation-notes">Implementation Notes</a></h2>
+<ul>
+<li>Both build scripts accept <code>--changed</code>, using staged, unstaged, and
+untracked Git changes and Cargo package dependency closure selection.</li>
+<li><code>portal-service</code> checks both working trees and uses BuildKit named contexts
+plus a Docker ignore file to limit source contexts to required repositories.</li>
+<li>Release Dockerfiles use BuildKit Cargo cache mounts. <code>light-fabric</code> no longer
+performs the unused host-side Cargo build.</li>
+<li>Files under a root <code>contracts/</code> directory belong to no Cargo package; they
+select the packages whose Rust sources reference that contract directory,
+or every image when no reader is found.</li>
+<li><code>light-fabric</code> offers only release images to the selector unless an
+optional image is named with <code>--app</code>.</li>
+<li><code>--no-cache</code> prunes its invocation-specific Cargo cache mounts on exit.</li>
+<li><code>portal-service</code> builds every selected image before pushing, supports
+<code>--skip-latest</code>, and labels images with both source revisions.</li>
+<li><code>light-fabric</code> CI runs the selector unit tests and the build orchestration
+harness.</li>
+<li>Run the selection scenarios and cold/warm build timing before treating the
+change as qualified or claiming a measured speedup.</li>
+</ul>
+<h2 id="acceptance-criteria-11"><a class="header" href="#acceptance-criteria-11">Acceptance Criteria</a></h2>
+<ul>
+<li>Existing full builds, explicit app/service selection, <code>--local</code>, and
+<code>--no-cache</code> keep their current meaning.</li>
+<li><code>--changed</code> includes staged, unstaged, and untracked source/config changes
+and sees changes in <code>portal-service</code>’s sibling <code>light-fabric</code> checkout.</li>
+<li>Shared dependency edits select all and only dependent images; global build
+inputs conservatively select all images.</li>
+<li>A clean tree selects no images and never pushes tags.</li>
+<li>A local-only build never calls <code>docker push</code>.</li>
+<li>BuildKit caches improve warm-build time without changing the resulting
+runtime image contents or relying on cache presence for correctness.</li>
+<li>The <code>portal-service</code> image build still resolves locked path dependencies from
+both repositories.</li>
+<li>Measurements report full build and changed-only build times separately.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="product-upgrade-and-rollback"><a class="header" href="#product-upgrade-and-rollback">Product Upgrade and Rollback</a></h1>
 <p>For sidecars and centralized gateways, clone a version-specific instance when
 scheduling an upgrade. Retain the previous instance, configuration, and pipeline
@@ -57706,7 +57858,7 @@ profile, but its configuration boundary remains the same.</p>
 <tr><td><a href="#controller">Controller</a></td><td>Runtime registration, control transport and execution coordination</td><td>Internal in current stacks</td></tr>
 <tr><td><a href="#config-server-2">Config Server</a></td><td>Host/service/environment-specific configuration snapshots</td><td><code>8435</code></td></tr>
 <tr><td><a href="#hybrid-command-and-query">Hybrid command and query</a></td><td>Java Portal command/query APIs and projections</td><td><code>8439</code>, <code>8440</code></td></tr>
-<tr><td><a href="#portal-service-1">Portal service</a></td><td>Rust Portal APIs and integration endpoints</td><td><code>2498</code></td></tr>
+<tr><td><a href="#portal-service-2">Portal service</a></td><td>Rust Portal APIs and integration endpoints</td><td><code>2498</code></td></tr>
 <tr><td><a href="#light-gateway-4">Light Gateway</a></td><td>Public Portal BFF, API routing, MCP and static UI</td><td><code>443</code></td></tr>
 <tr><td><a href="#llm-gateway">LLM Gateway</a></td><td>Dedicated OpenAI-compatible model routing profile</td><td><code>8444</code></td></tr>
 <tr><td><a href="#light-workflow-1">Light Workflow</a></td><td>Workflow execution and workflow-backed MCP tools</td><td><code>8436</code></td></tr>
@@ -57925,7 +58077,7 @@ database and Config Server environment.</p>
 the consumer/replay lifecycle; do not edit read-model rows to simulate command
 success.</p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="portal-service-1"><a class="header" href="#portal-service-1">Portal Service</a></h1>
+<h1 id="portal-service-2"><a class="header" href="#portal-service-2">Portal Service</a></h1>
 <p><code>portal-service</code> is the Rust Portal-facing service for APIs and platform
 integrations that do not reside in the Java hybrid hosts. The Compose stacks
 normally publish host port <code>2498</code>.</p>
