@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-031681d3.js";
+            window.path_to_searchindex_js = "searchindex-a5205a13.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-28cc4fe4.js"></script>
@@ -7077,7 +7077,8 @@ curl -k -v https://light-oauth:6881/oauth2/&lt;providerId&gt;/keys
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="cli-device-authorization-grant"><a class="header" href="#cli-device-authorization-grant">CLI Device Authorization Grant</a></h1>
 <p>Status: implemented as of 2026-09-21 in <code>light-oauth</code>, the Light CLI, <code>portal-view</code>,
-<code>portal-db</code>, and the local deployment repository. This design document is pending commit.
+<code>portal-db</code>, and the local deployment repository. The former Workflow broker
+profile mentioned in historical notes below has since been retired.
 Revised the same day: the first design tied a login to the CLI’s client certificate on a separate
 mutual-TLS listener. That cannot work when <code>light-oauth</code> is reached only through <code>light-gateway</code>,
 which ends TLS, so it was replaced by the standard grant described here.</p>
@@ -7216,7 +7217,7 @@ never set by the authorization-code path).</p>
 <p>Where the request address comes from: <code>X-Forwarded-For</code>, first valid entry, as the rest of
 <code>light-oauth</code> does. That is only trustworthy if the Gateway <strong>overwrites</strong> it and <code>light-oauth</code>
 is not reachable except through the Gateway. The local base stack no longer publishes port 6881;
-the optional workflow-broker development profile exposes it on loopback only. The address shown on
+the former optional workflow-broker development profile, which exposed it on loopback, was retired. The address shown on
 the approval page still depends on the Gateway replacing the forwarded header.</p>
 <h2 id="what-the-gateway-must-do"><a class="header" href="#what-the-gateway-must-do">What the Gateway must do</a></h2>
 <p><code>light-oauth</code> needs nothing special. The <code>all-in-lt</code> resolved <code>handler.yml</code> already publishes the
@@ -7261,12 +7262,9 @@ which is retired in place. <code>ddl.sql</code> includes the table for fresh ins
 policy <code>HARD_DELETE</code>), <code>requested_ip</code>, <code>scope</code>, <code>status</code> (<code>PENDING</code>, <code>APPROVED</code>, <code>DENIED</code>,
 <code>REDEEMED</code>), <code>user_id</code>, <code>host_id</code>, <code>remember</code>, <code>session_id</code>, <code>created_at</code>, <code>expires_at</code>,
 <code>approved_at</code>, <code>last_polled_at</code>, <code>poll_interval_seconds</code>.</p>
-<p>At startup, <code>light-oauth</code> checks that both <code>auth_device_authorization_t</code> and
-<code>auth_workflow_broker_t</code> exist. They support separate features. The workflow-broker table is needed
-because the same issuer also implements workflow-bound OAuth grants for unattended workflow
-continuation, and the normal authorization-code path queries it to determine whether a client is a
-broker. The device grant does not use the workflow broker. Both migrations are Portal-owned, so the
-issuer validates them and fails before becoming healthy rather than creating tables itself.</p>
+<p>At startup, <code>light-oauth</code> checks that <code>auth_device_authorization_t</code> exists.
+The former <code>auth_workflow_broker_t</code> table and its startup check were removed
+with the Workflow broker. The device grant does not depend on that retired table.</p>
 <p>The retired draft had <code>auth_device_client_t</code> (registration is now the Portal client record),
 <code>auth_device_session_t</code> (the install binding) and certificate columns on this table; the patch
 removes them.</p>
