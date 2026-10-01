@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-a5205a13.js";
+            window.path_to_searchindex_js = "searchindex-657d6cef.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-28cc4fe4.js"></script>
+        <script src="toc-a6e2a301.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -54252,6 +54252,8 @@ fallback Deployment works.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="configs"><a class="header" href="#configs">Configs</a></h1>
 <p>Use config help pages to understand runtime configuration properties managed through portal-view and the config server.</p>
+<p>See <a href="#router-configuration">Router Configuration</a> for all <code>router.yml</code> properties,
+Java/Rust behavior, streaming policies, and explained rewrite examples.</p>
 <p>Common config areas:</p>
 <ul>
 <li>access control</li>
@@ -54789,6 +54791,921 @@ remains.</p>
 <li><code>/*</code> matches any path for the configured method</li>
 </ul>
 <p>For sidecar API proxy routes, point the matching API methods to the API proxy chain.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-configuration"><a class="header" href="#router-configuration">Router Configuration</a></h1>
+<p><code>router.yml</code> configures the HTTP router used by Java light-4j gateways/sidecars and the Rust light-fabric gateway. It controls downstream protocol selection, request deadlines, streaming responses, connection policies, forwarding headers, explicit-URL host restrictions, request rewrites, and downstream timing metrics.</p>
+<p>In Java, <code>com.networknt.router.RouterHandler</code> is an <code>HttpHandler</code> wrapper around the final <code>ProxyHandler</code>. It can be installed through <code>handler.yml</code>, or through a <code>RouterHandlerProvider</code> in <code>service.yml</code>, as described by Portal’s <code>config_t.config_desc</code>. In Rust, the gateway’s router handler loads the shared <code>light-pingora</code> Router configuration and uses it when selecting and forwarding HTTP targets.</p>
+<p>The two runtimes share the configuration vocabulary and intended routing contract. <strong>They do not currently enforce every property in the same way.</strong> The reference below distinguishes implemented behavior from compatibility-only fields and documents concrete differences. <code>mcp-router.yml</code> and <code>websocket-router.yml</code> are separate configurations; this page is not a complete specification of MCP or WebSocket routing.</p>
+<h2 id="configure-it-in-portal-valuesyml-or-routeryml"><a class="header" href="#configure-it-in-portal-valuesyml-or-routeryml">Configure it in Portal, values.yml, or router.yml</a></h2>
+<p>In Portal, choose the <code>router</code> configuration and set the named property, for example <code>maxRequestTime</code>, to <code>5000</code>. The property descriptions stored in <code>config_property_t.property_desc</code> explain the purpose; the effective value depends on the configuration assembled for the target instance. Check the generated/resolved configuration and the runtime’s loaded configuration after applying a change.</p>
+<p>The source templates externalize values using the <code>router.</code> prefix:</p>
+<pre><code class="language-yaml"># Fragment of a router.yml template
+maxRequestTime: ${router.maxRequestTime:1000}
+urlRewriteRules: ${router.urlRewriteRules:}
+</code></pre>
+<p><code>${router.maxRequestTime:1000}</code> means use the externalized <code>router.maxRequestTime</code> value, or <code>1000</code> when absent. It is configuration-loader syntax, not an ordinary literal YAML integer. Rust’s shipped gateway template instead uses <code>0</code> for that timeout fallback.</p>
+<p>In a <code>values.yml</code> file, set the externalized keys:</p>
+<pre><code class="language-yaml">router.maxRequestTime: 5000
+router.pathPrefixMaxRequestTime:
+  /v1/address: 10000
+router.urlRewriteRules:
+  - '/v1/api/(.*) /api/$1'
+</code></pre>
+<p>This gives ordinary requests five seconds, address requests ten seconds, and rewrites <code>/v1/api/orders</code> to <code>/api/orders</code>. In a resolved <code>router.yml</code>, the same values use unprefixed keys:</p>
+<pre><code class="language-yaml">maxRequestTime: 5000
+pathPrefixMaxRequestTime:
+  /v1/address: 10000
+urlRewriteRules:
+  - '/v1/api/(.*) /api/$1'
+</code></pre>
+<p>Do not wrap these entries in a top-level <code>router:</code> object. Native YAML lists/maps are easiest to read; source examples also use JSON lists/maps and JSON text stored in quoted YAML scalars. A JSON editor expects valid JSON with double-quoted strings and doubled regex backslashes. Single-quoted YAML strings preserve regex backslashes literally. Keep integer settings numeric and quote string rewrite values such as <code>'1'</code>.</p>
+<p>An empty list (<code>[]</code>) disables configured list rules; an empty map (<code>{}</code>) removes map overrides. For <code>hostWhitelist</code>, an empty list specifically denies explicit-URL routing. Blank externalized placeholders in older Java templates denote no configured value; they are not examples of nonempty rule syntax.</p>
+<h2 id="all-routeryml-properties"><a class="header" href="#all-routeryml-properties">All router.yml properties</a></h2>
+<p>The defaults below come from current source templates/models and the local Portal configuration catalog. A property value explicitly generated by Portal overrides a runtime fallback. Java and Rust timeouts are nonnegative millisecond values for portable configuration; <code>0</code> has the documented disabled meaning for deadline/idle settings.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Property</th><th>Type</th><th>Default</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><a href="#router-http2enabled">http2Enabled</a></td><td>Boolean</td><td><code>true</code></td><td>Enable outbound HTTP/2 negotiation.</td></tr>
+<tr><td><a href="#router-httpsenabled">httpsEnabled</a></td><td>Boolean</td><td><code>true</code></td><td>Control TLS for Java discovery and HTTPS discovery filtering in Rust.</td></tr>
+<tr><td><a href="#router-maxrequesttime">maxRequestTime</a></td><td>Integer (ms)</td><td><code>Java: 1000; Rust: 0</code></td><td>Ordinary request deadline; 0 disables this deadline.</td></tr>
+<tr><td><a href="#router-pathprefixmaxrequesttime">pathPrefixMaxRequestTime</a></td><td>Map of integer (ms)</td><td><code>{}</code></td><td>Override the ordinary deadline by literal request-path prefix.</td></tr>
+<tr><td><a href="#router-streamresponsecontenttypes">streamResponseContentTypes</a></td><td>List of string</td><td><code>[text/event-stream]</code></td><td>Recognize streaming responses by Content-Type.</td></tr>
+<tr><td><a href="#router-streamrequestaccepttypes">streamRequestAcceptTypes</a></td><td>List of string</td><td><code>[text/event-stream]</code></td><td>Recognize expected streams by Accept.</td></tr>
+<tr><td><a href="#router-streampathprefixes">streamPathPrefixes</a></td><td>List of string</td><td><code>[]</code></td><td>Declare streaming request paths before response headers arrive.</td></tr>
+<tr><td><a href="#router-streammaxrequesttime">streamMaxRequestTime</a></td><td>Integer (ms)</td><td><code>0</code></td><td>Streaming exchange deadline; 0 disables it.</td></tr>
+<tr><td><a href="#router-streamidletimeout">streamIdleTimeout</a></td><td>Integer (ms)</td><td><code>0</code></td><td>Maximum silence between downstream streaming bytes; 0 disables it.</td></tr>
+<tr><td><a href="#router-streamresponseheaderoverwrite">streamResponseHeaderOverwrite</a></td><td>List of string</td><td><code>Six headers; see property page</code></td><td>Give downstream streaming headers precedence over existing response headers.</td></tr>
+<tr><td><a href="#router-connectionsperthread">connectionsPerThread</a></td><td>Integer</td><td><code>10</code></td><td>Java per-target, per-I/O-thread pool connection limit.</td></tr>
+<tr><td><a href="#router-maxqueuesize">maxQueueSize</a></td><td>Integer</td><td><code>0</code></td><td>Java pending connection-request queue limit.</td></tr>
+<tr><td><a href="#router-softmaxconnectionsperthread">softMaxConnectionsPerThread</a></td><td>Integer</td><td><code>5</code></td><td>Java soft connection-pool limit.</td></tr>
+<tr><td><a href="#router-rewritehostheader">rewriteHostHeader</a></td><td>Boolean</td><td><code>true</code></td><td>Set Host for the selected target and retain the original in X-Forwarded-Host.</td></tr>
+<tr><td><a href="#router-reusexforwarded">reuseXForwarded</a></td><td>Boolean</td><td><code>false</code></td><td>Reuse forwarding metadata from a trusted preceding proxy.</td></tr>
+<tr><td><a href="#router-maxconnectionretries">maxConnectionRetries</a></td><td>Integer</td><td><code>3</code></td><td>Java proxy connection retry limit.</td></tr>
+<tr><td><a href="#router-preresolvefqdn2ip">preResolveFQDN2IP</a></td><td>Boolean</td><td><code>false</code></td><td>Java discovery-time hostname-to-IP conversion.</td></tr>
+<tr><td><a href="#router-hostwhitelist">hostWhitelist</a></td><td>List of regex string</td><td><code>[]</code></td><td>Allow explicit service_url hosts; an empty list denies them.</td></tr>
+<tr><td><a href="#router-serviceidqueryparameter">serviceIdQueryParameter</a></td><td>Boolean</td><td><code>false</code></td><td>Allow query service_id to override header service_id.</td></tr>
+<tr><td><a href="#router-urlrewriterules">urlRewriteRules</a></td><td>List of string</td><td><code>[]</code></td><td>Rewrite the path with the first matching regex.</td></tr>
+<tr><td><a href="#router-methodrewriterules">methodRewriteRules</a></td><td>List of string</td><td><code>[]</code></td><td>Rewrite the method for an endpoint pattern.</td></tr>
+<tr><td><a href="#router-queryparamrewriterules">queryParamRewriteRules</a></td><td>Map of rule lists</td><td><code>{}</code></td><td>Rename existing query keys and conditionally replace values.</td></tr>
+<tr><td><a href="#router-headerrewriterules">headerRewriteRules</a></td><td>Map of rule lists</td><td><code>{}</code></td><td>Rename existing headers and conditionally replace values.</td></tr>
+<tr><td><a href="#router-metricsinjection">metricsInjection</a></td><td>Boolean</td><td><code>false</code></td><td>Request Java downstream-latency injection into the metrics handler.</td></tr>
+<tr><td><a href="#router-metricsname">metricsName</a></td><td>String</td><td><code>router-response</code></td><td>Name for injected Java downstream timing metrics.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Every property link above has an explanation, examples, and runtime qualifications. The following examples show how the settings fit together.</p>
+<h2 id="how-routing-and-rewriting-fit-together"><a class="header" href="#how-routing-and-rewriting-fit-together">How routing and rewriting fit together</a></h2>
+<ol>
+<li>Earlier handlers authenticate/authorize the request and can derive <code>service_id</code> from a path, endpoint, or other mapping.</li>
+<li>If <code>serviceIdQueryParameter</code> is enabled, a query <code>service_id</code> can override the service-ID header.</li>
+<li>An explicit <code>service_url</code> takes precedence over service-ID discovery and must pass <code>hostWhitelist</code>. Otherwise the router resolves the registered <code>service_id</code>, with <code>env_tag</code> when supplied. Rust can use Portal registry discovery and direct-registry fallback.</li>
+<li>The router selects timeout/streaming policy using the incoming path and request metadata.</li>
+<li>The proxy adapts the upstream method, headers, path, and query. A target base path can be prepended. The routing headers <code>service_id</code> and <code>service_url</code> are removed before forwarding.</li>
+<li>The backend response is transferred; a configured streaming Content-Type triggers streaming handling, header precedence, and optional idle limits.</li>
+</ol>
+<p>For example, <code>service_id: party.address-1.0.0</code> selects a registered service, whereas <code>service_url: https://api.example.com:8443/base</code> selects an explicit target. With the latter target, an incoming <code>/v1/address</code> is forwarded under <code>/base/v1/address</code>, subject to any URL rewrite. A rewrite changes the backend-facing path; it does not itself select a different service or rerun authentication/authorization already performed by preceding handlers.</p>
+<p>For service-to-URL mappings and Kubernetes ingress base paths, see <a href="#direct-registry-configuration">Direct Registry Configuration</a>. See <a href="#handler-config">Handler Configuration</a> for where a router is placed in the request chain.</p>
+<h3 id="choose-the-right-matching-language"><a class="header" href="#choose-the-right-matching-language">Choose the right matching language</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Property</th><th>Matching language</th><th>Example and meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>pathPrefixMaxRequestTime</code></td><td>Literal string prefix</td><td><code>/v1/pets/</code> matches <code>/v1/pets/123</code>; <code>{petId}</code> is not expanded.</td></tr>
+<tr><td><code>streamPathPrefixes</code></td><td>Literal string prefix</td><td><code>/events/</code> classifies <code>/events/orders</code> before response headers.</td></tr>
+<tr><td><code>urlRewriteRules</code></td><td>Whole-path regular expression</td><td><code>/listings/(.*)$</code> captures a suffix for <code>$1</code>.</td></tr>
+<tr><td><code>methodRewriteRules</code></td><td>Endpoint pattern</td><td><code>/v1/pets/{petId}</code> targets an identifier-bearing endpoint.</td></tr>
+<tr><td><code>queryParamRewriteRules</code>, <code>headerRewriteRules</code></td><td>Endpoint-pattern map, with runtime differences</td><td><code>/v1/pets/{petId}</code> chooses a list of field rewrite rules.</td></tr>
+<tr><td><code>hostWhitelist</code></td><td>Whole-hostname regular expression</td><td><code>api\.example\.com</code> allows the named host, independently of its port/path.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Use nonoverlapping endpoint/prefix rules for portable behavior. Java’s endpoint matcher and Rust’s endpoint matcher have different prefix/selection behavior, described on the relevant property pages.</p>
+<h2 id="complete-resolved-configuration-example"><a class="header" href="#complete-resolved-configuration-example">Complete resolved configuration example</a></h2>
+<p>This example includes <strong>all 25 properties</strong>. It chooses an explicit ordinary timeout to avoid default drift, declares an SSE path, leaves adaptation rules empty, and uses registered service routing by default.</p>
+<pre><code class="language-yaml">http2Enabled: true
+httpsEnabled: true
+maxRequestTime: 1000
+pathPrefixMaxRequestTime:
+  /v1/address: 5000
+  /v2/address: 10000
+  /v3/address: 30000
+streamResponseContentTypes:
+  - text/event-stream
+streamRequestAcceptTypes:
+  - text/event-stream
+streamPathPrefixes:
+  - /events/
+streamMaxRequestTime: 0
+streamIdleTimeout: 30000
+streamResponseHeaderOverwrite:
+  - Content-Type
+  - Cache-Control
+  - Connection
+  - Transfer-Encoding
+  - Content-Encoding
+  - Content-Length
+connectionsPerThread: 10
+maxQueueSize: 0
+softMaxConnectionsPerThread: 5
+rewriteHostHeader: true
+reuseXForwarded: false
+maxConnectionRetries: 3
+preResolveFQDN2IP: false
+hostWhitelist: []
+serviceIdQueryParameter: false
+urlRewriteRules: []
+methodRewriteRules: []
+queryParamRewriteRules: {}
+headerRewriteRules: {}
+metricsInjection: false
+metricsName: router-response
+</code></pre>
+<p>The settings mean:</p>
+<ul>
+<li><strong>Protocols:</strong> HTTP/2 is enabled for backend negotiation. Java uses HTTPS discovery; Rust permits HTTPS discovery and uses target protocols. Configure the incoming listener and TLS material separately.</li>
+<li><strong>Ordinary requests:</strong> unmatched paths have one second; address API versions have five, ten, and thirty seconds. Prefixes are evaluated against the incoming path.</li>
+<li><strong>Streams:</strong> <code>/events/orders</code> is declared streaming from the start. SSE is also recognized by Accept/Content-Type. A stream has no configured total deadline, but thirty seconds without upstream bytes closes a confirmed stream. The six header names protect downstream stream metadata from existing ordinary-response headers.</li>
+<li><strong>Java pools:</strong> ten connections per backend per I/O thread, soft threshold five, no connection-request queue, and three configured connection retries. These pool/retry values are accepted but not wired to equivalent controls in the current Rust gateway.</li>
+<li><strong>Forwarding:</strong> Host is rewritten for the backend; forwarding metadata is regenerated from the current connection rather than trusting existing values. Discovery hosts remain hostname-based in Java.</li>
+<li><strong>Routing/adaptation:</strong> arbitrary <code>service_url</code> routing is disabled by the empty whitelist, query service-ID override is disabled, and all rewrite collections are empty.</li>
+<li><strong>Metrics:</strong> the declared Java injection flag is off with the default name retained. See the metrics property pages for the current implementation qualification and Rust support.</li>
+</ul>
+<p>To allow an explicit host without opening routing to every hostname, replace the empty whitelist with:</p>
+<pre><code class="language-yaml">hostWhitelist:
+  - 'api\.example\.com'
+</code></pre>
+<p><code>service_url: https://api.example.com:8443/base</code> is then eligible; <code>service_url: https://evil.example.com/base</code> is denied. The pattern does not restrict port or scheme, and it does not validate the target’s certificate.</p>
+<h2 id="streaming-examples"><a class="header" href="#streaming-examples">Streaming examples</a></h2>
+<h3 id="sse-subscription-with-heartbeats"><a class="header" href="#sse-subscription-with-heartbeats">SSE subscription with heartbeats</a></h3>
+<pre><code class="language-yaml">maxRequestTime: 5000
+streamPathPrefixes:
+  - /events/
+streamMaxRequestTime: 0
+streamIdleTimeout: 30000
+</code></pre>
+<p>The declared <code>/events/</code> paths have no total router deadline. Once SSE response headers confirm streaming, a heartbeat every fifteen seconds keeps the thirty-second idle timer alive. Ordinary paths still have five seconds. Keep the default SSE request/response media-type lists and header-overwrite list unless the backend uses different types.</p>
+<h3 id="bounded-chat-or-ndjson-stream"><a class="header" href="#bounded-chat-or-ndjson-stream">Bounded chat or NDJSON stream</a></h3>
+<pre><code class="language-yaml">maxRequestTime: 10000
+streamResponseContentTypes:
+  - text/event-stream
+  - application/x-ndjson
+streamRequestAcceptTypes:
+  - text/event-stream
+  - application/x-ndjson
+streamPathPrefixes:
+  - /v1/chat/stream
+streamMaxRequestTime: 120000
+streamIdleTimeout: 15000
+</code></pre>
+<p>The chat path starts with a two-minute total budget. Once a recognized streaming response begins, fifteen seconds without bytes closes it. Other requests have a ten-second ordinary budget. A backend returning <code>application/x-ndjson</code> is recognized as streaming as well as one returning SSE. Accept-only classification and response-only deadline switching differ between the runtimes; declaring the actual stream path makes its pre-header intent explicit.</p>
+<p>Streaming passthrough does not convert a JSON API into SSE. Confirm that the backend emits incremental bytes, the response chain supports streaming, and any fronting proxy/load balancer permits the intended duration. Rust checks response-handler compatibility for streams; handlers that require complete-body transformations can conflict with passthrough.</p>
+<h2 id="rewrite-examples"><a class="header" href="#rewrite-examples">Rewrite examples</a></h2>
+<p>The individual pages preserve the source template, Java test-fixture, Rust combined-test, and existing-help examples, with explanations of their inputs and results:</p>
+<ul>
+<li><a href="#router-urlrewriterules">URL rules</a>: listings to a query-based HTML endpoint, deployment-prefix removal, WordPress-to-CMS file mapping, API-prefix changes, and a Rust combined rewrite under a target base path.</li>
+<li><a href="#router-methodrewriterules">Method rules</a>: POST-to-PUT/PATCH and GET-to-DELETE at address/pet endpoints, including the nested pet-address example and the limitations of the old POST-to-GET example.</li>
+<li><a href="#router-queryparamrewriterules">Query rules</a>: rename only, replace value only, both together, multiple rules per endpoint, endpoint placeholders, and YAML/JSON forms.</li>
+<li><a href="#router-headerrewriterules">Header rules</a>: the same field transformations, the legacy-token-to-Authorization example, and Java’s request/response copy behavior.</li>
+<li><a href="#router-pathprefixmaxrequesttime">Timeout overrides</a>: every address-version timeout, pet identifier correction, long-poll/upload examples, and native/JSON-text map forms.</li>
+<li><a href="#router-hostwhitelist">Host allowlist</a>: source subnet-like regex examples, their actual regex meaning, corrected escaped patterns, and allowed/denied hostname examples.</li>
+</ul>
+<h2 id="java-and-rust-compatibility-notes"><a class="header" href="#java-and-rust-compatibility-notes">Java and Rust compatibility notes</a></h2>
+<p>These findings are based on the source inspected on <strong>2026-10-01</strong>. Shared names and defaults do not establish runtime equivalence.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Area</th><th>Java light-4j</th><th>Rust light-fabric</th><th>Guidance</th></tr>
+</thead>
+<tbody>
+<tr><td>Ordinary default deadline</td><td><code>1000</code> ms</td><td><code>0</code> (disabled)</td><td>Set <code>maxRequestTime</code> explicitly.</td></tr>
+<tr><td>HTTP/2/TLS comments</td><td>Older descriptions mention incoming traffic; handler configures the outbound client</td><td>Outbound HTTP/2 negotiation; HTTPS-node filtering and per-target TLS</td><td>Configure listeners separately; verify the selected target protocol.</td></tr>
+<tr><td>Timeout-prefix overlap</td><td>First matching map entry</td><td>Longest nonempty prefix</td><td>Avoid overlaps. Braces are literal in both.</td></tr>
+<tr><td>Pool, queue, retry, DNS conversion fields</td><td>Used by Undertow/router pool</td><td>Accepted, but no gateway wiring for <code>connectionsPerThread</code>, <code>softMaxConnectionsPerThread</code>, <code>maxQueueSize</code>, <code>maxConnectionRetries</code>, or <code>preResolveFQDN2IP</code></td><td>Do not infer Rust limits from these values.</td></tr>
+<tr><td>Explicit URL allowlist</td><td>Empty list errors/denies routing</td><td>Empty list returns forbidden</td><td>Empty means deny explicit URLs, not allow all.</td></tr>
+<tr><td>Regex engine</td><td>Java regex</td><td>Rust regex</td><td>Use common regex syntax.</td></tr>
+<tr><td>Method rule overlap</td><td>Continues evaluation; utility matcher accepts leading endpoint segments</td><td>First complete-pattern match</td><td>Use distinct endpoint rules.</td></tr>
+<tr><td>Query/header endpoint-map selection</td><td>First utility match</td><td>Longest match, also literal-prefix matching</td><td>Avoid overlapping keys and check child paths.</td></tr>
+<tr><td>URL replacement introduces query</td><td>Can append another <code>?</code> for an existing query</td><td>Merges replacement and incoming query pairs</td><td>Avoid that combination in portable rules.</td></tr>
+<tr><td>Unmatched endpoint with nonempty query rule map</td><td>Current builder omits original query</td><td>Original pairs preserved</td><td>Check unrelated Java endpoints.</td></tr>
+<tr><td>Header rule list</td><td>Applied to request and response copy; unrelated headers can be omitted and <code>oldK</code> comparison is case-sensitive</td><td>Request only; unrelated headers retained</td><td>Verify all required headers in Java.</td></tr>
+<tr><td>Query routing-key removal</td><td>Removes parsed key, but no-rewrite branch can reuse original query string</td><td>Removes routing pair while rebuilding upstream URI</td><td>Check Java wire behavior.</td></tr>
+<tr><td>Accept-only expected stream</td><td>Uses streaming budget immediately</td><td>Keeps ordinary budget until response confirms streaming</td><td>Set an ordinary setup deadline and declare known streaming paths.</td></tr>
+<tr><td>Response-only stream</td><td>Cancels ordinary timer without installing a new positive streaming total timer</td><td>Switches to streaming budget measured from request start</td><td>See <code>streamMaxRequestTime</code>.</td></tr>
+<tr><td>Named downstream metric injection</td><td>Uses available Java metrics handler; current request path can look it up even with flag false</td><td>Flags/name accepted, not used for Java-style injection</td><td>Check the runtime’s actual metrics configuration.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The common examples describe intended results for unambiguous, single-valued inputs. Multivalue queries/headers, colliding destination keys, overlapping endpoints, protocol/TLS choices, and combinations of rewrites need verification on the target runtime. This documentation change does not change either router implementation.</p>
+<h2 id="troubleshooting-3"><a class="header" href="#troubleshooting-3">Troubleshooting</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Symptom</th><th>What to check</th></tr>
+</thead>
+<tbody>
+<tr><td>Explicit <code>service_url</code> fails</td><td>Whitelist is nonempty, regex matches the hostname as a whole, and URL is valid. Rust rejects user info, query, and fragments in a target URL.</td></tr>
+<tr><td>Wrong service selected</td><td>Query <code>service_id</code> override, explicit <code>service_url</code> precedence, earlier path/service mappings, and <code>env_tag</code>.</td></tr>
+<tr><td>Ordinary API times out</td><td>Explicit global value, literal prefix matches, backend duration, and independent connect/client/load-balancer timeouts.</td></tr>
+<tr><td>Stream closes too early</td><td>Correct response Content-Type, known streaming path, total/idle budgets, heartbeat gaps, handler-chain compatibility, and external proxy limits.</td></tr>
+<tr><td>Pet timeout override does not work</td><td>Use <code>/v1/pets/</code>; timeout-prefix matching does not interpret <code>{petId}</code>.</td></tr>
+<tr><td>Rewrite does not match</td><td>Distinguish literal prefix, endpoint placeholder, and whole-path regex syntax; check casing and escape characters.</td></tr>
+<tr><td>Query/header disappears in Java</td><td>Check nonmatching query-map behavior and <code>copyHeaders</code> with nonempty header rules, as described above.</td></tr>
+<tr><td>Pool or retry setting has no effect in Rust</td><td>Those fields are currently parsed compatibility settings, not wired Pingora controls.</td></tr>
+<tr><td>Metrics do not follow the flag/name</td><td>Confirm Java metrics-handler presence or Rust’s separate metrics implementation.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="sources-and-portal-catalog-evidence"><a class="header" href="#sources-and-portal-catalog-evidence">Sources and Portal catalog evidence</a></h2>
+<p>This reference reconciles the templates, implementation, tests, and the read-only local <code>configserver</code> catalog. The catalog contains one Router description and 19 Router property descriptions; it does not yet contain the six streaming properties present in current Java/Rust source. Its <code>maxRequestTime</code> default is <code>1000</code>. Descriptions are treated as authoring guidance; executable source takes precedence where an old description is inaccurate.</p>
+<p>Java sources reviewed at <code>light-4j</code> revision <code>ce59ecae5</code>:</p>
+<ul>
+<li><a href="https://github.com/networknt/light-4j/blob/ce59ecae5/router-config/src/main/resources/config/router.yml">router.yml template</a>, including JSON/YAML examples and all six streaming fields.</li>
+<li><a href="https://github.com/networknt/light-4j/blob/ce59ecae5/router-config/src/main/java/com/networknt/router/RouterConfig.java">RouterConfig</a>, property metadata and defaults.</li>
+<li><a href="https://github.com/networknt/light-4j/blob/ce59ecae5/egress-router/src/main/java/com/networknt/router/RouterHandler.java">RouterHandler</a>, outbound options, configuration reload, and metrics attachments.</li>
+<li><a href="https://github.com/networknt/light-4j/blob/ce59ecae5/egress-router/src/main/java/io/undertow/server/handlers/proxy/LoadBalancingRouterProxyClient.java">LoadBalancingRouterProxyClient</a>, discovery, explicit-URL restrictions, pool settings, and query service-ID override.</li>
+<li><a href="https://github.com/networknt/light-4j/blob/ce59ecae5/proxy-handler/src/main/java/com/networknt/handler/ProxyHandler.java">ProxyHandler</a>, rewrite order, header copying, exchange deadlines, and streaming transfer.</li>
+<li><a href="https://github.com/networknt/light-4j/blob/ce59ecae5/router-config/src/main/java/com/networknt/router/HostWhitelist.java">HostWhitelist</a>, full-host regex matching and empty-list rejection.</li>
+<li><a href="https://github.com/networknt/light-4j/blob/ce59ecae5/router-config/src/test/resources/config/values.yml">Java values.yml examples</a> and <a href="https://github.com/networknt/light-4j/blob/ce59ecae5/router-config/src/test/java/com/networknt/router/RouterConfigTest.java">RouterConfigTest</a>.</li>
+<li><a href="https://github.com/networknt/light-4j/blob/ce59ecae5/utility/src/main/java/com/networknt/utility/CollectionUtils.java">CollectionUtils</a> and <a href="https://github.com/networknt/light-4j/blob/ce59ecae5/utility/src/main/java/com/networknt/utility/StringUtils.java">StringUtils</a>, endpoint-map selection and path matching.</li>
+</ul>
+<p>Rust sources reviewed at <code>light-fabric</code> revision <code>a6b39d4</code>:</p>
+<ul>
+<li><a href="https://github.com/networknt/light-fabric/blob/a6b39d4/apps/light-gateway/config/router.yml">gateway router.yml</a>, externalized values and defaults.</li>
+<li><a href="https://github.com/networknt/light-fabric/blob/a6b39d4/frameworks/light-pingora/src/router.rs">light-pingora router.rs</a>, configuration model, target selection, rewrite logic, and tests.</li>
+<li><a href="https://github.com/networknt/light-fabric/blob/a6b39d4/frameworks/light-pingora/src/streaming.rs">streaming.rs</a>, media-type/prefix matching and streaming defaults.</li>
+<li><a href="https://github.com/networknt/light-fabric/blob/a6b39d4/apps/light-gateway/src/main.rs">gateway main.rs</a>, runtime application of router options, forwarding headers, deadlines, and stream confirmation.</li>
+</ul>
+<p>These are source and catalog findings, not a claim that the examples have all been exercised against a deployed Java and Rust gateway. Recheck implementation qualifications when upgrading either runtime.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-http2enabled"><a class="header" href="#router-http2enabled">Router: http2Enabled</a></h1>
+<p>Enable outbound HTTP/2 negotiation.</p>
+<p><strong>Type:</strong> Boolean. <strong>Default:</strong> <code>true</code>.</p>
+<h2 id="meaning"><a class="header" href="#meaning">Meaning</a></h2>
+<p>Controls the router’s <strong>outbound</strong> protocol configuration. It does not configure the gateway’s listening socket. The older template and Portal description refer to incoming HTTP/2, but <code>RouterHandler.buildProxy()</code> applies this option to the Java proxy client; Rust applies it to the upstream peer.</p>
+<pre><code class="language-yaml">http2Enabled: true
+</code></pre>
+<p>This enables HTTP/2 where the backend supports it. Rust configures HTTP/2 with HTTP/1 fallback. It is not a guarantee that every connection will use HTTP/2, and it does not enable TLS by itself.</p>
+<pre><code class="language-yaml">http2Enabled: false
+</code></pre>
+<p>Use this for an HTTP/1 backend. Configure the incoming listener separately and use <code>httpsEnabled</code> and the target URL scheme for the applicable TLS behavior.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-httpsenabled"><a class="header" href="#router-httpsenabled">Router: httpsEnabled</a></h1>
+<p>Control TLS for Java discovery and HTTPS discovery filtering in Rust.</p>
+<p><strong>Type:</strong> Boolean. <strong>Default:</strong> <code>true</code>.</p>
+<h2 id="meaning-1"><a class="header" href="#meaning-1">Meaning</a></h2>
+<p>Controls Java discovery’s TLS mode and Rust’s HTTPS discovery filtering. This is an outbound routing setting, not the gateway’s incoming TLS listener or certificate configuration.</p>
+<pre><code class="language-yaml">httpsEnabled: true
+</code></pre>
+<p>Java attaches its configured client SSL context and asks discovery for HTTPS services. Rust permits HTTPS discovery nodes, while each node’s advertised protocol determines whether its connection uses TLS. Rust can also retain HTTP discovery nodes with this setting enabled.</p>
+<pre><code class="language-yaml">httpsEnabled: false
+</code></pre>
+<p>Java asks discovery for HTTP services without attaching the normal router SSL context. Rust excludes HTTPS discovery nodes. In Rust, an explicit <code>service_url</code> or a direct-registry URL still uses its own <code>http://</code> or <code>https://</code> scheme; this flag does not convert an HTTPS URL to HTTP or forbid all explicit HTTPS targets.</p>
+<p>TLS trust, client certificates, and hostname verification belong to client/runtime TLS configuration. Use HTTPS targets with the appropriate TLS configuration for test and production traffic.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-maxrequesttime"><a class="header" href="#router-maxrequesttime">Router: maxRequestTime</a></h1>
+<p>Ordinary request deadline; 0 disables this deadline.</p>
+<p><strong>Type:</strong> Integer (ms). <strong>Default:</strong> <code>Java: 1000; Rust: 0</code>.</p>
+<h2 id="meaning-2"><a class="header" href="#meaning-2">Meaning</a></h2>
+<p>The ordinary proxy exchange deadline in <strong>milliseconds</strong>, including downstream work and response transfer. It is not only a TCP connection timeout or a per-byte idle timeout. A matching <code>pathPrefixMaxRequestTime</code> entry overrides it for an ordinary request; streaming policy has its own deadline.</p>
+<pre><code class="language-yaml">maxRequestTime: 1000
+</code></pre>
+<p>Ordinary requests have a one-second budget. For example, an API that needs two seconds will exceed this budget unless it has an override. Before response headers are committed, a deadline normally results in a gateway timeout; after streaming or response transfer has begun, the proxy may terminate the exchange rather than send a new HTTP status.</p>
+<pre><code class="language-yaml">maxRequestTime: 0
+</code></pre>
+<p>Disables this ordinary exchange deadline. Other client, listener, connection, load-balancer, and upstream timeouts can still apply.</p>
+<p><strong>Default difference:</strong> the Java template, Java annotation, and current Portal database default are <code>1000</code>. The Rust gateway template and <code>RouterConfig</code> fallback default are <code>0</code>. Set an explicit value when moving a configuration between runtimes.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-pathprefixmaxrequesttime"><a class="header" href="#router-pathprefixmaxrequesttime">Router: pathPrefixMaxRequestTime</a></h1>
+<p>Override the ordinary deadline by literal request-path prefix.</p>
+<p><strong>Type:</strong> Map of integer (ms). <strong>Default:</strong> <code>{}</code>.</p>
+<h2 id="meaning-3"><a class="header" href="#meaning-3">Meaning</a></h2>
+<p>A map from <strong>literal incoming request-path prefixes</strong> to ordinary request deadlines in milliseconds. Unmatched paths use <code>maxRequestTime</code>. Streaming requests use their streaming policy instead.</p>
+<pre><code class="language-yaml">maxRequestTime: 1000
+pathPrefixMaxRequestTime:
+  /v1/address: 5000
+  /v2/address: 10000
+  /v3/address: 30000
+  /v1/pets/: 5000
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Request</th><th>Ordinary deadline</th><th>Explanation</th></tr>
+</thead>
+<tbody>
+<tr><td><code>/v1/address</code> or <code>/v1/address/42</code></td><td>5 seconds</td><td>Starts with <code>/v1/address</code>.</td></tr>
+<tr><td><code>/v2/address</code></td><td>10 seconds</td><td>Matches the second prefix.</td></tr>
+<tr><td><code>/v3/address</code></td><td>30 seconds</td><td>Gives the third API a longer budget.</td></tr>
+<tr><td><code>/v1/pets/123</code></td><td>5 seconds</td><td>Uses a literal prefix covering pet identifiers.</td></tr>
+<tr><td><code>/v1/contact</code></td><td>1 second</td><td>No override; uses the global setting.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The source and Portal descriptions also contain this example:</p>
+<pre><code class="language-yaml">pathPrefixMaxRequestTime:
+  /v1/pets/{petId}: 5000
+</code></pre>
+<p>Here <code>{petId}</code> is <strong>literal text</strong>, not a path parameter. It will not match <code>/v1/pets/123</code>. Use <code>/v1/pets/</code> for the timeout override. Endpoint patterns in method/query/header rewrite rules have different matching semantics.</p>
+<p>The original JSON example is:</p>
+<pre><code class="language-json">{"/v1/address":5000,"/v2/address":10000,"/v3/address":30000,"/v1/pets/{petId}":5000}
+</code></pre>
+<p>It expresses the same map, including the literal-braces limitation. Replace the last key with <code>/v1/pets/</code> for identifier-bearing requests. In <code>values.yml</code>, use:</p>
+<pre><code class="language-yaml">router.pathPrefixMaxRequestTime: {"/v1/address":5000,"/v2/address":10000,"/v3/address":30000,"/v1/pets/":5000}
+</code></pre>
+<p>The Java test fixture also stores this map as JSON text:</p>
+<pre><code class="language-yaml">router.pathPrefixMaxRequestTime: '{"/v1/address":5000,"/v2/address":10000,"/v3/address":30000,"/v1/pets/":5000}'
+</code></pre>
+<p>Both represent a map rather than four separate properties. Prefer the native map when the editor supports it.</p>
+<p>Another example from the existing help is:</p>
+<pre><code class="language-yaml">pathPrefixMaxRequestTime:
+  /v1/long-polling: 5000
+  /v2/upload: 10000
+</code></pre>
+<p>This gives ordinary long-polling requests five seconds and uploads ten seconds. Actual event streams should use the streaming properties.</p>
+<p>Matching uses <code>startsWith</code>, so <code>/v1/address</code> also matches <code>/v1/addresses</code>. Use a trailing slash when you need a child-path boundary. Rust chooses the longest matching nonempty prefix. Java stops at the first matching map entry. Avoid overlapping prefixes for portable behavior. A value of <code>0</code> disables this deadline for matching ordinary requests.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-streamresponsecontenttypes"><a class="header" href="#router-streamresponsecontenttypes">Router: streamResponseContentTypes</a></h1>
+<p>Recognize streaming responses by Content-Type.</p>
+<p><strong>Type:</strong> List of string. <strong>Default:</strong> <code>[text/event-stream]</code>.</p>
+<h2 id="meaning-4"><a class="header" href="#meaning-4">Meaning</a></h2>
+<p>The response <code>Content-Type</code> values that identify a streaming passthrough response. Matching is case-insensitive, ignores media-type parameters, and compares configured media types rather than doing wildcard matching.</p>
+<pre><code class="language-yaml">streamResponseContentTypes:
+  - text/event-stream
+</code></pre>
+<p><code>Content-Type: text/event-stream; charset=utf-8</code> identifies an SSE stream. <code>Content-Type: application/json</code> does not. The proxy transfers response bytes incrementally and applies streaming header/idle-timeout handling.</p>
+<pre><code class="language-yaml">streamResponseContentTypes:
+  - text/event-stream
+  - application/x-ndjson
+</code></pre>
+<p>This also recognizes newline-delimited JSON streams. Add a type only when the backend actually uses it for incremental responses; adding <code>application/json</code> would classify ordinary JSON responses as streams too.</p>
+<pre><code class="language-yaml">streamResponseContentTypes: []
+</code></pre>
+<p>Disables response-media-type recognition. It does not remove request classification through <code>Accept</code> or path prefixes. See <code>streamMaxRequestTime</code> for what happens when a stream is discovered only after response headers arrive.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-streamrequestaccepttypes"><a class="header" href="#router-streamrequestaccepttypes">Router: streamRequestAcceptTypes</a></h1>
+<p>Recognize expected streams by Accept.</p>
+<p><strong>Type:</strong> List of string. <strong>Default:</strong> <code>[text/event-stream]</code>.</p>
+<h2 id="meaning-5"><a class="header" href="#meaning-5">Meaning</a></h2>
+<p>The request <code>Accept</code> media types that indicate an expected streaming response before downstream response headers arrive. Matching is case-insensitive, splits comma-separated values, and ignores parameters. It is a classification check, not full HTTP content negotiation: <code>q</code> weights are not used, so even a matching media type with <code>q=0</code> is recognized.</p>
+<pre><code class="language-yaml">streamRequestAcceptTypes:
+  - text/event-stream
+</code></pre>
+<p>A request with <code>Accept: application/json, text/event-stream; charset=utf-8</code> is recognized as expecting a stream. <code>Accept: */*</code> is not a match for this list.</p>
+<pre><code class="language-yaml">streamRequestAcceptTypes: []
+streamPathPrefixes:
+  - /events/
+</code></pre>
+<p>Disables client-controlled Accept classification and declares <code>/events/</code> through operator-controlled path matching instead.</p>
+<p><strong>Runtime difference:</strong> Java uses <code>streamMaxRequestTime</code> as soon as Accept matches. Rust retains the ordinary request deadline for an Accept-only match until the backend confirms a configured streaming <code>Content-Type</code>; if it returns ordinary content, Rust clears the Accept-only classification. Configure an appropriate ordinary setup budget as well as a streaming budget.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-streampathprefixes"><a class="header" href="#router-streampathprefixes">Router: streamPathPrefixes</a></h1>
+<p>Declare streaming request paths before response headers arrive.</p>
+<p><strong>Type:</strong> List of string. <strong>Default:</strong> <code>[]</code>.</p>
+<h2 id="meaning-6"><a class="header" href="#meaning-6">Meaning</a></h2>
+<p>Literal incoming request-path prefixes that declare an expected stream before downstream headers arrive. This is useful when a client cannot set <code>Accept</code>, or when the backend takes time to send its first response headers.</p>
+<pre><code class="language-yaml">streamPathPrefixes:
+  - /events/
+  - /v1/chat/stream
+</code></pre>
+<p><code>/events/orders</code> and <code>/v1/chat/stream</code> use the streaming request deadline from the start. <code>/v1/chat/completions</code> does not match. Both runtimes check these prefixes without regex or <code>{parameter}</code> expansion.</p>
+<p>The second prefix also matches <code>/v1/chat/streaming</code> because matching is a string-prefix test. Choose prefixes deliberately. A path declaration takes precedence over Accept classification in Rust.</p>
+<pre><code class="language-yaml">streamPathPrefixes: []
+</code></pre>
+<p>No paths are declared streaming; the proxy can still classify by <code>Accept</code> or downstream <code>Content-Type</code>. A path match does not force the backend to emit SSE or change its Content-Type.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-streammaxrequesttime"><a class="header" href="#router-streammaxrequesttime">Router: streamMaxRequestTime</a></h1>
+<p>Streaming exchange deadline; 0 disables it.</p>
+<p><strong>Type:</strong> Integer (ms). <strong>Default:</strong> <code>0</code>.</p>
+<h2 id="meaning-7"><a class="header" href="#meaning-7">Meaning</a></h2>
+<p>The streaming exchange deadline in milliseconds. This limits total stream duration rather than the gap between messages. Use <code>streamIdleTimeout</code> for a silent backend.</p>
+<pre><code class="language-yaml">streamMaxRequestTime: 0
+</code></pre>
+<p>Disables the router’s streaming exchange deadline. This is useful for long-lived SSE subscriptions; other infrastructure timeouts can still close the connection.</p>
+<pre><code class="language-yaml">streamMaxRequestTime: 300000
+streamIdleTimeout: 30000
+</code></pre>
+<p>A stream has a five-minute total budget and a thirty-second silence budget. Heartbeats can keep the idle timer alive, but do not extend the five-minute total deadline.</p>
+<p><strong>Classification matters:</strong> both runtimes select this deadline immediately for <code>streamPathPrefixes</code>. Java also selects it immediately for a matching Accept header. Rust retains the ordinary deadline for an Accept-only request until the response Content-Type confirms streaming, then switches to this budget measured from request start.</p>
+<p><strong>Response-only difference:</strong> Java cancels the ordinary exchange timer if it discovers a streaming Content-Type on a request that was not already classified streaming; it does not install a new positive streaming deadline in that branch. Rust installs the configured streaming deadline on confirmation. To get a deliberate pre-header budget in both runtimes, declare the streaming path and set an explicit value. A request can still expire on its ordinary deadline before response-only recognition occurs.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-streamidletimeout"><a class="header" href="#router-streamidletimeout">Router: streamIdleTimeout</a></h1>
+<p>Maximum silence between downstream streaming bytes; 0 disables it.</p>
+<p><strong>Type:</strong> Integer (ms). <strong>Default:</strong> <code>0</code>.</p>
+<h2 id="meaning-8"><a class="header" href="#meaning-8">Meaning</a></h2>
+<p>Maximum silence between downstream streaming bytes, in milliseconds, once a streaming response is confirmed. This is an upstream stream-read timeout, not an overall request duration, and does not govern ordinary buffered responses.</p>
+<pre><code class="language-yaml">streamIdleTimeout: 0
+</code></pre>
+<p>Disables the router’s streaming idle timer.</p>
+<pre><code class="language-yaml">streamIdleTimeout: 30000
+</code></pre>
+<p>If no downstream streaming bytes arrive for thirty seconds, the proxy closes the stalled stream. An SSE heartbeat every fifteen seconds should keep this timer alive. The measurement concerns arriving bytes, not complete SSE events or application-level messages.</p>
+<p>Choose a value longer than the backend’s expected heartbeat interval plus network delay. A quiet but healthy subscription can otherwise be disconnected. Once response headers have been sent, timeout handling usually closes the stream rather than replacing it with a new <code>504</code> response.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-streamresponseheaderoverwrite"><a class="header" href="#router-streamresponseheaderoverwrite">Router: streamResponseHeaderOverwrite</a></h1>
+<p>Give downstream streaming headers precedence over existing response headers.</p>
+<p><strong>Type:</strong> List of string. <strong>Default:</strong> <code>Six headers; see property page</code>.</p>
+<h2 id="meaning-9"><a class="header" href="#meaning-9">Meaning</a></h2>
+<p>Names of response headers whose existing gateway values should give way to the actual downstream streaming response. This prevents a header already set by another handler from masking the stream’s Content-Type, cache policy, or framing.</p>
+<pre><code class="language-yaml">streamResponseHeaderOverwrite:
+  - Content-Type
+  - Cache-Control
+  - Connection
+  - Transfer-Encoding
+  - Content-Encoding
+  - Content-Length
+</code></pre>
+<p>This is the complete default list:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Header</th><th>Reason for including it</th></tr>
+</thead>
+<tbody>
+<tr><td><code>Content-Type</code></td><td>Preserve the backend’s streaming media type, such as <code>text/event-stream</code>.</td></tr>
+<tr><td><code>Cache-Control</code></td><td>Preserve the backend’s stream-specific caching policy.</td></tr>
+<tr><td><code>Connection</code></td><td>Avoid retaining a conflicting connection policy; protocol handling still applies.</td></tr>
+<tr><td><code>Transfer-Encoding</code></td><td>Avoid retaining incompatible transfer framing.</td></tr>
+<tr><td><code>Content-Encoding</code></td><td>Prevent stale encoding metadata from describing the wrong body.</td></tr>
+<tr><td><code>Content-Length</code></td><td>Avoid an ordinary response length being applied to an open-ended stream.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The list contains <strong>header names</strong>, not <code>name: value</code> assignments. It neither invents <code>Cache-Control: no-cache</code> nor requests gzip. In Java, these existing outbound headers are removed before downstream headers are copied, and Content-Length is removed from a confirmed stream. Rust captures the backend’s values for these names and restores them after response handlers, with separate protocol/framing handling.</p>
+<pre><code class="language-yaml">streamResponseHeaderOverwrite: []
+</code></pre>
+<p>Disables the configured overwrite list. Other mandatory framing cleanup still applies. This is usually unsuitable when another response handler sets ordinary-content headers. If customizing the list, retain the default entries unless you have checked the complete response chain.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-connectionsperthread"><a class="header" href="#router-connectionsperthread">Router: connectionsPerThread</a></h1>
+<p>Java per-target, per-I/O-thread pool connection limit.</p>
+<p><strong>Type:</strong> Integer. <strong>Default:</strong> <code>10</code>.</p>
+<h2 id="meaning-10"><a class="header" href="#meaning-10">Meaning</a></h2>
+<p>In Java, the hard maximum number of pooled connections to a backend host <strong>per I/O thread</strong>. It also supplies that host pool’s maximum cached connections. This is not a gateway-wide connection count or a direct limit on HTTP/2 concurrent streams.</p>
+<pre><code class="language-yaml">connectionsPerThread: 10
+softMaxConnectionsPerThread: 5
+maxQueueSize: 0
+</code></pre>
+<p>Each Java I/O thread’s pool for a target can grow to ten connections, with a soft threshold of five and no pending-connection queue. With four I/O threads and one target, ten per thread represents up to roughly forty pooled connections for that target, rather than ten for the entire gateway. Multiple backend hosts have their own pools.</p>
+<p>Choose the limit with backend capacity and worker count in mind; increasing it does not make a slow backend faster.</p>
+<p><strong>Rust support:</strong> <code>RouterConfig</code> accepts and reports this property, but the current gateway does not connect it to Pingora pool sizing. It must not be used as evidence that Pingora enforces this hard limit.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-maxqueuesize"><a class="header" href="#router-maxqueuesize">Router: maxQueueSize</a></h1>
+<p>Java pending connection-request queue limit.</p>
+<p><strong>Type:</strong> Integer. <strong>Default:</strong> <code>0</code>.</p>
+<h2 id="meaning-11"><a class="header" href="#meaning-11">Meaning</a></h2>
+<p>In Java, the maximum pending connection requests held when a backend connection pool cannot immediately supply a connection.</p>
+<pre><code class="language-yaml">maxQueueSize: 0
+</code></pre>
+<p>Disables this pool’s pending-request queue. It does not disable retry/alternate-host handling or guarantee that every busy request fails immediately. If the proxy cannot acquire a connection through its allowed attempts, the request can fail with service unavailable.</p>
+<p>The template and Portal description say that <code>0</code> means “there is queued requests”. Read this as <strong>no queued requests</strong>; zero is the queue limit.</p>
+<pre><code class="language-yaml">maxQueueSize: 20
+</code></pre>
+<p>Allows up to twenty waiting connection requests in the Java pool. This can absorb a short burst but adds memory use and waiting time. The ordinary request deadline still limits how long a queued request can wait. Tune only after checking backend capacity and connection failures; a large queue can worsen latency under sustained overload.</p>
+<p><strong>Rust support:</strong> accepted as a compatibility property, but the current gateway does not wire it to a Pingora pending-request queue.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-softmaxconnectionsperthread"><a class="header" href="#router-softmaxconnectionsperthread">Router: softMaxConnectionsPerThread</a></h1>
+<p>Java soft connection-pool limit.</p>
+<p><strong>Type:</strong> Integer. <strong>Default:</strong> <code>5</code>.</p>
+<h2 id="meaning-12"><a class="header" href="#meaning-12">Meaning</a></h2>
+<p>In Java, the soft connection limit supplied to Undertow’s backend connection-pool manager. It helps the pool manage connection growth and retention below the hard <code>connectionsPerThread</code> limit. It is not itself a guaranteed request-concurrency or queue threshold.</p>
+<pre><code class="language-yaml">connectionsPerThread: 10
+softMaxConnectionsPerThread: 5
+</code></pre>
+<p>The pool has a soft limit of five and a hard limit of ten connections per backend host per I/O thread. Keep the soft limit no larger than the hard limit. Queuing is controlled separately by <code>maxQueueSize</code>.</p>
+<p><strong>Rust support:</strong> accepted by the configuration model, but not wired to a Pingora soft pool limit in the current gateway.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-rewritehostheader"><a class="header" href="#router-rewritehostheader">Router: rewriteHostHeader</a></h1>
+<p>Set Host for the selected target and retain the original in X-Forwarded-Host.</p>
+<p><strong>Type:</strong> Boolean. <strong>Default:</strong> <code>true</code>.</p>
+<h2 id="meaning-13"><a class="header" href="#meaning-13">Meaning</a></h2>
+<p>Controls the HTTP <code>Host</code> sent to the selected backend. With rewriting enabled, the original incoming host is recorded in <code>X-Forwarded-Host</code>.</p>
+<pre><code class="language-yaml">rewriteHostHeader: true
+</code></pre>
+<p>For an incoming request with <code>Host: gateway.example.com</code> routed to <code>https://api.example.com:8443</code>, Rust sends <code>Host: api.example.com:8443</code> and <code>X-Forwarded-Host: gateway.example.com</code>. Java constructs the rewritten Host from the connected peer’s host and port, which can be an IP address after resolution. Virtual-host backends should be checked against that difference.</p>
+<pre><code class="language-yaml">rewriteHostHeader: false
+</code></pre>
+<p>Preserves the incoming Host, such as <code>gateway.example.com</code>. Use this only when the target expects that virtual host. This setting controls an HTTP header; it does not independently change TLS SNI, certificate verification, or the destination selected by discovery.</p>
+<p><code>reuseXForwarded</code> does not prevent <code>rewriteHostHeader: true</code> from setting <code>X-Forwarded-Host</code> to the original Host.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-reusexforwarded"><a class="header" href="#router-reusexforwarded">Router: reuseXForwarded</a></h1>
+<p>Reuse forwarding metadata from a trusted preceding proxy.</p>
+<p><strong>Type:</strong> Boolean. <strong>Default:</strong> <code>false</code>.</p>
+<h2 id="meaning-14"><a class="header" href="#meaning-14">Meaning</a></h2>
+<p>Controls reuse of forwarding metadata supplied by an earlier proxy. It does not simply append to every <code>X-Forwarded-*</code> header.</p>
+<pre><code class="language-yaml">reuseXForwarded: false
+</code></pre>
+<p>Builds forwarding metadata from the connection reaching this gateway. For example, if the peer is <code>10.0.0.5</code> and it supplied <code>X-Forwarded-For: 198.51.100.20</code>, the downstream sees <code>X-Forwarded-For: 10.0.0.5</code> rather than trusting that supplied client address.</p>
+<pre><code class="language-yaml">reuseXForwarded: true
+</code></pre>
+<p>With the same peer and incoming header, the forwarded chain becomes <code>198.51.100.20,10.0.0.5</code>. Existing <code>X-Forwarded-Proto</code> and <code>X-Forwarded-Port</code> can be retained rather than regenerated. This is useful behind a trusted TLS-terminating proxy when the external scheme is HTTPS but the proxy-to-gateway connection is HTTP.</p>
+<p>Enable reuse only when the preceding proxy supplies trusted metadata. The router does not authenticate arbitrary forwarding headers. <code>X-Forwarded-Host</code> is also affected independently by <code>rewriteHostHeader</code>, so it is not covered by a blanket preservation guarantee.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-maxconnectionretries"><a class="header" href="#router-maxconnectionretries">Router: maxConnectionRetries</a></h1>
+<p>Java proxy connection retry limit.</p>
+<p><strong>Type:</strong> Integer. <strong>Default:</strong> <code>3</code>.</p>
+<h2 id="meaning-15"><a class="header" href="#meaning-15">Meaning</a></h2>
+<p>In Java, the configured proxy retry limit when acquiring a backend connection. The proxy can try alternate hosts, and the target can supply its own retry count; the effective limit uses the larger value. The initial attempt is separate from retries.</p>
+<pre><code class="language-yaml">maxConnectionRetries: 3
+</code></pre>
+<p>Allows up to three configured retries after the initial connection attempt, subject to the target’s policy and the request deadline. For example, a failed connection to one discovered address can be followed by an attempt against another address.</p>
+<pre><code class="language-yaml">maxConnectionRetries: 0
+</code></pre>
+<p>Disables the router-configured retries; target-specific behavior can still affect the effective limit. This setting is not a policy to replay every backend <code>500</code> response, and it should not be treated as permission to replay an already transmitted non-idempotent request. The proxy’s send/error and idempotency handling also apply.</p>
+<p><strong>Rust support:</strong> the property is accepted, but the current gateway does not feed it into Pingora’s retry policy. Changing it does not establish a Rust retry count.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-preresolvefqdn2ip"><a class="header" href="#router-preresolvefqdn2ip">Router: preResolveFQDN2IP</a></h1>
+<p>Java discovery-time hostname-to-IP conversion.</p>
+<p><strong>Type:</strong> Boolean. <strong>Default:</strong> <code>false</code>.</p>
+<h2 id="meaning-16"><a class="header" href="#meaning-16">Meaning</a></h2>
+<p>In Java, optionally converts a discovered backend URI’s fully qualified domain name to an IP before storing its host in the router pool.</p>
+<pre><code class="language-yaml">preResolveFQDN2IP: false
+</code></pre>
+<p>Retains <code>https://api.example.com:8443</code> as a hostname-based target. Normal client/resolver behavior determines resolution; this does not mean DNS is necessarily queried for every request.</p>
+<pre><code class="language-yaml">preResolveFQDN2IP: true
+</code></pre>
+<p>If discovery returns that URI and the hostname resolves to <code>192.0.2.10</code>, the Java router stores a URI using <code>192.0.2.10</code>. The conversion occurs when discovery hosts are added, which can happen on the first request, rather than being guaranteed at process startup. The inspected <code>service_url</code> branch does not use this discovery conversion.</p>
+<p>The template recommends this only for selected downstream load-balancer cases. It can affect DNS rotation, Host headers, TLS SNI, and hostname verification, so verify those behaviors before using it for an HTTPS virtual host.</p>
+<p><strong>Rust support:</strong> the legacy spelling <code>preResolveFQDN2IP</code> is accepted, but the current gateway has no corresponding conversion wired to this property. Ordinary Pingora address resolution still occurs independently.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-hostwhitelist"><a class="header" href="#router-hostwhitelist">Router: hostWhitelist</a></h1>
+<p>Allow explicit service_url hosts; an empty list denies them.</p>
+<p><strong>Type:</strong> List of regex string. <strong>Default:</strong> <code>[]</code>.</p>
+<h2 id="meaning-17"><a class="header" href="#meaning-17">Meaning</a></h2>
+<p>An allowlist of regular expressions matched against the <strong>hostname</strong> in an explicit <code>service_url</code>. Matching covers the whole hostname, without the scheme, port, or path. This is the control for caller-supplied URLs; it is not a global allowlist applied to every discovery/direct-registry target.</p>
+<pre><code class="language-yaml">hostWhitelist: []
+</code></pre>
+<p>An empty list <strong>denies explicit <code>service_url</code> routing</strong>. Java throws a configuration/routing error; Rust returns a forbidden rejection. Ordinary registered <code>service_id</code> routing can still work. Do not interpret this as “allow every host” or assume identical error status handling in the two runtimes.</p>
+<pre><code class="language-yaml">hostWhitelist:
+  - 'api\.example\.com'
+  - 'api\d+\.example\.com'
+  - '192\.168\.0\.[0-9]{1,3}'
+  - '10\.1\.2\.[0-9]{1,3}'
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Target URL</th><th>Result</th><th>Reason</th></tr>
+</thead>
+<tbody>
+<tr><td><code>https://api.example.com:8443/v1</code></td><td>Allowed</td><td>First pattern matches the hostname.</td></tr>
+<tr><td><code>https://api1.example.com/v1</code></td><td>Allowed</td><td><code>\d+</code> matches one or more digits.</td></tr>
+<tr><td><code>http://192.168.0.25:8080/v1</code></td><td>Allowed</td><td>Matches the private-address pattern.</td></tr>
+<tr><td><code>http://10.1.2.8:8080/v1</code></td><td>Allowed</td><td>Matches the second private subnet pattern.</td></tr>
+<tr><td><code>https://evil.example.com/v1</code></td><td>Denied</td><td>No pattern matches.</td></tr>
+<tr><td><code>https://xapi1.example.com.evil/v1</code></td><td>Denied</td><td>A substring match is insufficient.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The expressions above limit hostname text, not protocol or port. The numeric patterns are illustrative and do not validate all IPv4 octet ranges. Single-quoted YAML keeps backslashes literal.</p>
+<p>The Java source test fixture contains this historical example:</p>
+<pre><code class="language-yaml">router.hostWhitelist:
+  - 192.168.0.*
+  - 10.1.2.*
+</code></pre>
+<p>These are regexes, <strong>not shell wildcards or CIDR subnets</strong>. <code>.</code> means any character; <code>0.*</code> means a literal zero followed by arbitrary characters. They can therefore match hostnames outside the intended subnet. Prefer the escaped expressions above. The historical JSON representation is:</p>
+<pre><code class="language-yaml">router.hostWhitelist: '["192.168.0.*","10.1.2.*"]'
+</code></pre>
+<p>It has exactly the same permissive regex meaning. A more precise JSON representation is:</p>
+<pre><code class="language-json">["192\\.168\\.0\\.[0-9]{1,3}","10\\.1\\.2\\.[0-9]{1,3}"]
+</code></pre>
+<p>Use regex constructs supported by both Java and Rust; Rust regex does not support Java look-around or backreferences. Allowing a hostname is not the same as restricting every IP it can resolve to.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-serviceidqueryparameter"><a class="header" href="#router-serviceidqueryparameter">Router: serviceIdQueryParameter</a></h1>
+<p>Allow query service_id to override header service_id.</p>
+<p><strong>Type:</strong> Boolean. <strong>Default:</strong> <code>false</code>.</p>
+<h2 id="meaning-18"><a class="header" href="#meaning-18">Meaning</a></h2>
+<p>Enables legacy clients to select a registered service using the <strong><code>service_id</code></strong> query key. The property is named <code>serviceIdQueryParameter</code>, but the query parameter itself uses an underscore.</p>
+<pre><code class="language-yaml">serviceIdQueryParameter: false
+</code></pre>
+<p>The router does not use the query key as a routing override. It obtains routing headers such as <code>service_id</code> from the client or preceding path/service handlers. It does not automatically strip a query key simply because its name is <code>service_id</code> when this option is disabled.</p>
+<pre><code class="language-yaml">serviceIdQueryParameter: true
+</code></pre>
+<p>For this request:</p>
+<pre><code class="language-http">GET /v1/address?service_id=party.address-2.0.0&amp;country=CA HTTP/1.1
+Host: gateway.example.com
+service_id: party.address-1.0.0
+</code></pre>
+<p>The query value selects <code>party.address-2.0.0</code>, overriding the header’s <code>party.address-1.0.0</code>. The intended downstream request keeps <code>country=CA</code> and removes the routing query key. Rust explicitly removes it when constructing the upstream URI. Java removes it from the parsed query map, but its no-query-rewrite branch copies the original query string; verify stripping on that Java path rather than relying on it as a confidentiality guarantee.</p>
+<p>An explicit <code>service_url</code> still takes precedence over service-ID discovery. <code>env_tag</code> can select the environment for service-ID routing. Routing headers <code>service_id</code> and <code>service_url</code> are removed from the upstream request by the proxy.</p>
+<p>Use this only for clients that cannot manipulate headers. It lets the client override a service ID assigned by earlier handlers; authorize the request and its routing choice through the appropriate handler chain.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-urlrewriterules"><a class="header" href="#router-urlrewriterules">Router: urlRewriteRules</a></h1>
+<p>Rewrite the path with the first matching regex.</p>
+<p><strong>Type:</strong> List of string. <strong>Default:</strong> <code>[]</code>.</p>
+<h2 id="meaning-19"><a class="header" href="#meaning-19">Meaning</a></h2>
+<p>A list of strings with the form <code>regex replacement</code>, separated by a space. The regex matches the incoming path; it does not choose the target host. Both runtimes use a <strong>whole-path match</strong>, apply the first matching rule, and leave unmatched paths unchanged. <code>$1</code>, <code>$2</code>, and so on refer to captured groups.</p>
+<h2 id="source-examples"><a class="header" href="#source-examples">Source examples</a></h2>
+<pre><code class="language-yaml">urlRewriteRules:
+  - '/listings/(.*)$ /listing.html?listing=$1'
+  - '/ph/uat/de-asia-ekyc-service/v1 /uat-de-asia-ekyc-service/v1'
+  - '(/tutorial/.*)/wordpress/(\w+)\.?.*$ $1/cms/$2.php'
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Incoming path</th><th>Rewritten result</th><th>Explanation</th></tr>
+</thead>
+<tbody>
+<tr><td><code>/listings/123</code></td><td><code>/listing.html?listing=123</code></td><td><code>(.*)</code> captures <code>123</code>; <code>$1</code> places it in a query parameter.</td></tr>
+<tr><td><code>/ph/uat/de-asia-ekyc-service/v1</code></td><td><code>/uat-de-asia-ekyc-service/v1</code></td><td>Removes the exact <code>/ph/uat</code> deployment prefix and replaces it with <code>/uat</code>.</td></tr>
+<tr><td><code>/tutorial/linux/wordpress/file1</code></td><td><code>/tutorial/linux/cms/file1.php</code></td><td><code>$1</code> is <code>/tutorial/linux</code>; <code>$2</code> is <code>file1</code>; the rule changes the directory and adds <code>.php</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The second rule matches that exact path, not every child path. To rewrite children, capture and reinsert the suffix explicitly. In the third rule <code>\w+</code> captures word characters; the later expression consumes optional punctuation and remaining suffix text. Keep it narrow if backend filenames can contain other characters.</p>
+<p>Equivalent source JSON list:</p>
+<pre><code class="language-json">["/listings/(.*)$ /listing.html?listing=$1","/ph/uat/de-asia-ekyc-service/v1 /uat-de-asia-ekyc-service/v1","(/tutorial/.*)/wordpress/(\\w+)\\.?.*$ $1/cms/$2.php"]
+</code></pre>
+<p>JSON requires doubled backslashes. In <code>values.yml</code>, assign this list to <code>router.urlRewriteRules</code>. In resolved <code>router.yml</code>, use <code>urlRewriteRules</code> as shown above. The Java tests also support JSON text in a quoted scalar; native lists are easier to review.</p>
+<h2 id="additional-examples"><a class="header" href="#additional-examples">Additional examples</a></h2>
+<pre><code class="language-yaml">urlRewriteRules:
+  - '/v1/api/(.*) /api/$1'
+  - '/old-path /new-path'
+</code></pre>
+<p><code>/v1/api/orders/42</code> becomes <code>/api/orders/42</code>; <code>/old-path</code> becomes <code>/new-path</code>. <code>/old-path/42</code> does not match the second whole-path rule.</p>
+<p>Rust’s combined rewrite test uses:</p>
+<pre><code class="language-yaml">urlRewriteRules:
+  - '/v1/listings/(.*)$ /listing.html?listing=$1'
+methodRewriteRules:
+  - '/v1/listings/{id} POST PUT'
+queryParamRewriteRules:
+  /v1/listings/{id}:
+    - oldK: old
+      newK: new
+</code></pre>
+<p>With target <code>https://api.example.com/base</code> and an enabled routing-query override, <code>POST /v1/listings/123?service_id=svc&amp;old=value</code> becomes <code>PUT /base/listing.html?listing=123&amp;new=value</code>. This demonstrates path captures, method rewriting, target base-path prepending, query-key renaming, and routing-query removal. It is a <strong>Rust test outcome</strong>, not a Java combined-query guarantee.</p>
+<p><strong>Compatibility:</strong> Java and Rust use different regex engines. Keep portable rules to their common syntax; Java look-around and regex backreferences are unsupported in Rust. Java’s current URI builder can append a second <code>?</code> when a replacement introduces a query and the original request also contains one; Rust merges the replacement and original query pairs. For portable use, avoid combining query-generating URL replacements with existing query strings until that Java behavior is verified/fixed.</p>
+<p>The source suggests the <a href="https://www.freeformatter.com/java-regex-tester.html">Java regex tester</a>. It helps check Java matching, but cannot establish Rust compatibility. Rewrites do not change the body, Content-Type, or authorization decisions already made by earlier handlers.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-methodrewriterules"><a class="header" href="#router-methodrewriterules">Router: methodRewriteRules</a></h1>
+<p>Rewrite the method for an endpoint pattern.</p>
+<p><strong>Type:</strong> List of string. <strong>Default:</strong> <code>[]</code>.</p>
+<h2 id="meaning-20"><a class="header" href="#meaning-20">Meaning</a></h2>
+<p>A list of <code>endpoint-pattern source-method target-method</code> strings. Endpoint patterns can contain a single-segment placeholder such as <code>{petId}</code>; this is not regex syntax or the literal-prefix timeout syntax.</p>
+<pre><code class="language-yaml">methodRewriteRules:
+  - '/v2/address POST PUT'
+  - '/v1/address POST PATCH'
+  - '/v1/address GET DELETE'
+  - '/v1/pets/{petId} GET DELETE'
+  - '/v1/pets/{petId}/address GET DELETE'
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Client request</th><th>Downstream method</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>POST /v2/address</code></td><td><code>PUT</code></td><td>Legacy POST performs the backend’s replacement/update operation.</td></tr>
+<tr><td><code>POST /v1/address</code></td><td><code>PATCH</code></td><td>Legacy POST performs a partial update.</td></tr>
+<tr><td><code>GET /v1/address</code></td><td><code>DELETE</code></td><td>Legacy GET invokes a bodyless delete operation.</td></tr>
+<tr><td><code>GET /v1/pets/123</code></td><td><code>DELETE</code></td><td><code>{petId}</code> matches identifier <code>123</code>.</td></tr>
+<tr><td><code>GET /v1/pets/123/address</code></td><td><code>DELETE</code></td><td>The longer pattern targets the pet’s address resource.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Equivalent JSON from the source fixture, with the additional nested-address example:</p>
+<pre><code class="language-json">["/v2/address POST PUT","/v1/address POST PATCH","/v1/address GET DELETE","/v1/pets/{petId} GET DELETE","/v1/pets/{petId}/address GET DELETE"]
+</code></pre>
+<p>Use uppercase method names and keep endpoint patterns unambiguous. Rust applies the first matching rule and matches the complete endpoint shape. Java continues evaluating rules and its utility matcher can match a longer path by its leading segments; short incoming paths can also expose its unchecked segment indexing. Do not rely on identical behavior for overlapping endpoint patterns or chained rewrites.</p>
+<h2 id="body-and-security-implications"><a class="header" href="#body-and-security-implications">Body and security implications</a></h2>
+<p>The rule changes the method, not the payload. The source specifically cautions against changing a method with a body into one without a body, or vice versa. POST-to-PUT/PATCH examples preserve the update body. GET-to-DELETE assumes the backend delete requires no body.</p>
+<p>The earlier help contained:</p>
+<pre><code class="language-yaml">methodRewriteRules:
+  - '/v1/graphql POST GET'
+</code></pre>
+<p>This illustrates the syntax but is unsuitable for a typical body-carrying GraphQL POST: the router does not convert its JSON payload into GET query parameters. Use a body-compatible adaptation instead.</p>
+<p>GET-to-DELETE makes a conventionally safe method perform a destructive action downstream. Limit it to an explicitly authorized legacy endpoint and review caching, prefetching, and CSRF behavior. Authentication, authorization, and API validation handlers preceding the router see the incoming method, not the rewritten one.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-queryparamrewriterules"><a class="header" href="#router-queryparamrewriterules">Router: queryParamRewriteRules</a></h1>
+<p>Rename existing query keys and conditionally replace values.</p>
+<p><strong>Type:</strong> Map of rule lists. <strong>Default:</strong> <code>{}</code>.</p>
+<h2 id="meaning-21"><a class="header" href="#meaning-21">Meaning</a></h2>
+<p>A map from endpoint patterns to lists of rules that modify <strong>existing</strong> query parameters. Rules do not create a missing parameter, and there is no documented add/delete operation in this rule format.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>oldK</code></td><td>Existing query key to find; required for a useful rule.</td></tr>
+<tr><td><code>newK</code></td><td>Optional replacement key; omitted means keep the original key.</td></tr>
+<tr><td><code>oldV</code></td><td>Optional exact value to replace, used together with <code>newV</code>.</td></tr>
+<tr><td><code>newV</code></td><td>Replacement value, applied only when <code>oldV</code> is also present and matches.</td></tr>
+</tbody>
+</table>
+</div>
+<p>A key rename occurs even when <code>oldV</code> does not match. <code>newV</code> alone does <strong>not</strong> unconditionally set a value. Values are literal strings, not regexes; <code>oldK: oldV</code> in the database’s abbreviated example means the field <code>oldK</code> has the string value <code>oldV</code>, not an arbitrary parameter/value pair.</p>
+<h2 id="complete-java-fixture-example"><a class="header" href="#complete-java-fixture-example">Complete Java fixture example</a></h2>
+<pre><code class="language-yaml">queryParamRewriteRules:
+  /v1/address:
+    - oldK: business-query
+      newK: request-query
+      oldV: value1
+      newV: value2
+    - oldK: module
+      newK: mod
+    - oldK: app-id
+      oldV: esb
+      newV: emb
+  /v2/address:
+    - oldK: key1
+      oldV: old
+      newV: new
+  /v3/address:
+    - oldK: path
+      newK: route
+  /v1/pets/{petId}:
+    - oldK: path
+      newK: route
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Incoming request</th><th>Result</th><th>Explanation</th></tr>
+</thead>
+<tbody>
+<tr><td><code>/v1/address?business-query=value1&amp;module=billing&amp;app-id=esb</code></td><td><code>/v1/address?request-query=value2&amp;mod=billing&amp;app-id=emb</code></td><td>Renames and replaces the first pair, renames <code>module</code> preserving its value, and replaces <code>app-id</code>’s value preserving its key.</td></tr>
+<tr><td><code>/v1/address?business-query=other</code></td><td><code>/v1/address?request-query=other</code></td><td>The key is renamed; the value does not equal <code>value1</code>.</td></tr>
+<tr><td><code>/v2/address?key1=old</code></td><td><code>/v2/address?key1=new</code></td><td>Value-only replacement.</td></tr>
+<tr><td><code>/v2/address?key1=other</code></td><td>Unchanged pair</td><td><code>oldV</code> does not match.</td></tr>
+<tr><td><code>/v3/address?path=main</code></td><td><code>/v3/address?route=main</code></td><td>Key-only rename.</td></tr>
+<tr><td><code>/v1/pets/123?path=main</code></td><td><code>/v1/pets/123?route=main</code></td><td>Endpoint placeholder matches identifier <code>123</code>.</td></tr>
+<tr><td><code>/v2/address?country=CA</code></td><td>Same pair</td><td>No <code>key1</code> exists to rewrite.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The displayed pair order is explanatory; query serialization/order and percent encoding can differ without changing the meaning.</p>
+<p>Equivalent JSON:</p>
+<pre><code class="language-json">{"/v1/address":[{"oldK":"business-query","newK":"request-query","oldV":"value1","newV":"value2"},{"oldK":"module","newK":"mod"},{"oldK":"app-id","oldV":"esb","newV":"emb"}],"/v2/address":[{"oldK":"key1","oldV":"old","newV":"new"}],"/v3/address":[{"oldK":"path","newK":"route"}],"/v1/pets/{petId}":[{"oldK":"path","newK":"route"}]}
+</code></pre>
+<p>In <code>values.yml</code>, put this map under <code>router.queryParamRewriteRules</code>. The source template’s abbreviated YAML omits some colons after endpoint keys; the complete example above supplies them.</p>
+<p>The template/database also show two rules under one pet endpoint:</p>
+<pre><code class="language-yaml">queryParamRewriteRules:
+  /v1/pets/{petId}:
+    - oldK: oldV
+      newK: newV
+    - oldK: oldV2
+      newK: newV2
+</code></pre>
+<p><code>/v1/pets/123?oldV=a&amp;oldV2=b</code> becomes the same path with <code>newV=a&amp;newV2=b</code>. The strings <code>oldV</code> and <code>newV</code> here are parameter <strong>names</strong>, because they are values of <code>oldK</code> and <code>newK</code>; no query-value replacement fields are supplied.</p>
+<p>Another help example:</p>
+<pre><code class="language-yaml">queryParamRewriteRules:
+  /v1/search:
+    - oldK: q
+      newK: query
+    - oldK: version
+      oldV: '1'
+      newV: '2'
+</code></pre>
+<p><code>/v1/search?q=router&amp;version=1</code> becomes <code>/v1/search?query=router&amp;version=2</code>. Quote numeric-looking values so they remain strings.</p>
+<h2 id="matching-and-portability"><a class="header" href="#matching-and-portability">Matching and portability</a></h2>
+<p>Both implementations accept endpoint placeholders. Rust selects the longest matching rule-map key and also accepts literal prefix matches. Java selects the first endpoint match using its path-segment matcher. Avoid overlapping keys for portable behavior.</p>
+<p>Rust preserves query pairs when no endpoint rule matches. Java’s current query builder, when the configured map is nonempty but no endpoint matches, does not append the original query. Test unrelated endpoints before enabling a global Java rewrite map.</p>
+<p>Repeated values and destination-key collisions also differ: Java replaces matching repeated values with one new value and can overwrite an existing destination key; Rust rewrites each pair and preserves duplicate pairs. Prefer unique source/destination keys and single values when the same configuration must behave identically.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-headerrewriterules"><a class="header" href="#router-headerrewriterules">Router: headerRewriteRules</a></h1>
+<p>Rename existing headers and conditionally replace values.</p>
+<p><strong>Type:</strong> Map of rule lists. <strong>Default:</strong> <code>{}</code>.</p>
+<h2 id="meaning-22"><a class="header" href="#meaning-22">Meaning</a></h2>
+<p>A map from endpoint patterns to lists of rules for <strong>existing</strong> HTTP headers. The fields have the same structure as query rules:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>oldK</code></td><td>Existing header name to look up.</td></tr>
+<tr><td><code>newK</code></td><td>Optional replacement header name.</td></tr>
+<tr><td><code>oldV</code></td><td>Optional exact header value to match.</td></tr>
+<tr><td><code>newV</code></td><td>Replacement value; requires a matching <code>oldV</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<p>A name change does not require a value match. Supplying <code>newV</code> without <code>oldV</code> does not set the value unconditionally. The rules do not supply a general add/delete-header language; use the appropriate header handler for those operations.</p>
+<h2 id="complete-fixture-example"><a class="header" href="#complete-fixture-example">Complete fixture example</a></h2>
+<pre><code class="language-yaml">headerRewriteRules:
+  /v1/address:
+    - oldK: business-query
+      newK: request-query
+      oldV: value1
+      newV: value2
+    - oldK: module
+      newK: mod
+    - oldK: app-id
+      oldV: esb
+      newV: emb
+  /v2/address:
+    - oldK: key1
+      oldV: old
+      newV: new
+  /v3/address:
+    - oldK: path
+      newK: route
+  /v1/pets/{petId}:
+    - oldK: path
+      newK: route
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Endpoint and incoming header</th><th>Result</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>/v1/address</code>, <code>business-query: value1</code></td><td><code>request-query: value2</code></td><td>Rename and conditional value replacement.</td></tr>
+<tr><td><code>/v1/address</code>, <code>business-query: other</code></td><td><code>request-query: other</code></td><td>Rename still applies; value does not match.</td></tr>
+<tr><td><code>/v1/address</code>, <code>module: billing</code></td><td><code>mod: billing</code></td><td>Rename only.</td></tr>
+<tr><td><code>/v1/address</code>, <code>app-id: esb</code></td><td><code>app-id: emb</code></td><td>Replace value only.</td></tr>
+<tr><td><code>/v2/address</code>, <code>key1: old</code></td><td><code>key1: new</code></td><td>Replace value on the second endpoint.</td></tr>
+<tr><td><code>/v3/address</code>, <code>path: main</code></td><td><code>route: main</code></td><td>Rename on the third endpoint.</td></tr>
+<tr><td><code>/v1/pets/123</code>, <code>path: main</code></td><td><code>route: main</code></td><td>Placeholder selects the pet endpoint.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Equivalent JSON:</p>
+<pre><code class="language-json">{"/v1/address":[{"oldK":"business-query","newK":"request-query","oldV":"value1","newV":"value2"},{"oldK":"module","newK":"mod"},{"oldK":"app-id","oldV":"esb","newV":"emb"}],"/v2/address":[{"oldK":"key1","oldV":"old","newV":"new"}],"/v3/address":[{"oldK":"path","newK":"route"}],"/v1/pets/{petId}":[{"oldK":"path","newK":"route"}]}
+</code></pre>
+<p>Put the map under <code>router.headerRewriteRules</code> in <code>values.yml</code>.</p>
+<p>The abbreviated template/database example is also valid when written as a complete map:</p>
+<pre><code class="language-yaml">headerRewriteRules:
+  /v1/address:
+    - oldK: oldV
+      newK: newV
+  /v1/pets/{petId}:
+    - oldK: oldV
+      newK: newV
+    - oldK: oldV2
+      newK: newV2
+</code></pre>
+<p>This renames headers named <code>oldV</code> and <code>oldV2</code> to <code>newV</code> and <code>newV2</code>, preserving their values. Those strings are header names, not values being replaced.</p>
+<p>The previous help contains a legacy-auth adaptation:</p>
+<pre><code class="language-yaml">headerRewriteRules:
+  /v1/api:
+    - oldK: X-Legacy-Token
+      newK: Authorization
+</code></pre>
+<p>An existing <code>X-Legacy-Token: Bearer example-token</code> becomes <code>Authorization: Bearer example-token</code>; the rule does not add <code>Bearer </code> to a raw token. This runs at proxy forwarding time and does not authenticate the caller or change the credentials seen by earlier security handlers.</p>
+<h2 id="runtime-differences-to-check"><a class="header" href="#runtime-differences-to-check">Runtime differences to check</a></h2>
+<p>Rust applies these rules to the upstream request, preserves unrelated headers, and uses HTTP header-name lookup. Its current rewrite path reads a single header value; do not assume multivalue preservation.</p>
+<p>Java uses the same <code>copyHeaders</code> helper for both upstream request headers and downstream response headers. With a nonempty endpoint rule list, the current helper only copies headers whose names equal an <code>oldK</code>; unrelated headers can be omitted. Its <code>oldK</code> comparison is a case-sensitive string comparison even though HTTP names are normally case-insensitive. Check actual header spelling and every required header, including authentication and stream Content-Type, before enabling this map in Java.</p>
+<p>Endpoint-map selection also differs: Rust uses the longest match (including literal prefix matches), whereas Java takes the first utility-matcher result. These are concrete implementation differences; a shared rule format alone does not ensure identical request/response behavior.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-metricsinjection"><a class="header" href="#router-metricsinjection">Router: metricsInjection</a></h1>
+<p>Request Java downstream-latency injection into the metrics handler.</p>
+<p><strong>Type:</strong> Boolean. <strong>Default:</strong> <code>false</code>.</p>
+<h2 id="meaning-23"><a class="header" href="#meaning-23">Meaning</a></h2>
+<p>The Java configuration describes injection of the downstream API’s elapsed response time into the metrics handler in the request/response chain. That timing includes downstream work and network latency, helping distinguish proxy overhead from backend time. It does not itself install a metrics handler, select an exporter, or enable a Prometheus endpoint.</p>
+<pre><code class="language-yaml">metricsInjection: false
+</code></pre>
+<p>This is the declared default. The configuration description intends to disable the extra downstream metric injection.</p>
+<pre><code class="language-yaml">metricsInjection: true
+metricsName: router-response
+</code></pre>
+<p>Requests the extra Java downstream timing under <code>router-response</code>. An appropriate metrics handler must be available. Compare it with the gateway’s overall request timing to investigate where latency is spent; they measure different intervals.</p>
+<p><strong>Java implementation qualification:</strong> current <code>RouterHandler.handleRequest()</code> looks up an available metrics handler even when the flag is false and attaches timing metadata if one is found. Therefore the flag is not a reliable hard off-switch in that source revision.</p>
+<p><strong>Rust support:</strong> the configuration accepts the flag, but the current gateway does not use it to control its metrics recorder or reproduce Java’s named downstream injection. Rust request/stream metrics have their own runtime paths.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="router-metricsname"><a class="header" href="#router-metricsname">Router: metricsName</a></h1>
+<p>Name for injected Java downstream timing metrics.</p>
+<p><strong>Type:</strong> String. <strong>Default:</strong> <code>router-response</code>.</p>
+<h2 id="meaning-24"><a class="header" href="#meaning-24">Meaning</a></h2>
+<p>The name passed to Java’s metrics handler for injected downstream timing. It groups the router’s downstream measurement separately from overall request timing.</p>
+<pre><code class="language-yaml">metricsName: router-response
+</code></pre>
+<p>Uses the default category/name for the downstream API response time, including network latency.</p>
+<pre><code class="language-yaml">metricsInjection: true
+metricsName: partner-api-response
+</code></pre>
+<p>Requests a recognizable category for a gateway or sidecar forwarding to partner APIs. The property is one router-wide name, not a per-service map; it does not automatically create a service-labelled metrics hierarchy or rename every exported metric.</p>
+<p>See <code>metricsInjection</code> for the required Java metrics handler and the current flag qualification. Rust accepts this property for compatibility, but the current gateway does not use it to name its request or stream metrics.</p>
+<p>See <a href="#router-configuration">Router configuration</a> for Portal/<code>values.yml</code> syntax, runtime compatibility, and source references.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="websocket-router-configuration"><a class="header" href="#websocket-router-configuration">WebSocket Router Configuration</a></h1>
 <p>The WebSocket router selects an upstream service for an HTTP/1.1 WebSocket
@@ -59228,7 +60145,7 @@ Pricing exactly as above.</p>
 <li><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/inference-chat-completions-mantle.html">Amazon Bedrock Chat Completions</a></li>
 <li><a href="#local-model-provider-transport-for-llm-gateway">Local Model Provider Transport</a></li>
 </ul>
-<h2 id="troubleshooting-3"><a class="header" href="#troubleshooting-3">Troubleshooting</a></h2>
+<h2 id="troubleshooting-4"><a class="header" href="#troubleshooting-4">Troubleshooting</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -59744,7 +60661,7 @@ development <code>light-portal-install</code> deployment, run the corresponding
 <pre><code class="language-bash">cd /home/steve/workspace/light-portal-test
 make workflow-mcp
 </code></pre>
-<h2 id="troubleshooting-4"><a class="header" href="#troubleshooting-4">Troubleshooting</a></h2>
+<h2 id="troubleshooting-5"><a class="header" href="#troubleshooting-5">Troubleshooting</a></h2>
 <h3 id="the-workflow-create-event-goes-to-the-dlq"><a class="header" href="#the-workflow-create-event-goes-to-the-dlq">The workflow Create event goes to the DLQ</a></h3>
 <p>Check for an older projection-only row with the same host, namespace, name,
 and version. Do not edit the new event payload. Remove or quarantine the
@@ -60139,7 +61056,7 @@ token from this tutorial:</p>
 <pre><code class="language-bash">cd /home/steve/workspace/light-portal-test
 make workflow-mcp
 </code></pre>
-<h2 id="troubleshooting-5"><a class="header" href="#troubleshooting-5">Troubleshooting</a></h2>
+<h2 id="troubleshooting-6"><a class="header" href="#troubleshooting-6">Troubleshooting</a></h2>
 <h3 id="the-create-event-goes-to-the-dlq"><a class="header" href="#the-create-event-goes-to-the-dlq">The Create event goes to the DLQ</a></h3>
 <p>Check for an older active resource with the same workflow identity or tool
 name. Also confirm the tool event references the active workflow ID and exact
@@ -61993,7 +62910,7 @@ over time.</p>
 trusting the whole workspace is current:</p>
 <pre><code class="language-bash">codebase-memory-mcp cli index_status --project &lt;name-from-list_projects&gt;
 </code></pre>
-<h2 id="troubleshooting-6"><a class="header" href="#troubleshooting-6">Troubleshooting</a></h2>
+<h2 id="troubleshooting-7"><a class="header" href="#troubleshooting-7">Troubleshooting</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
