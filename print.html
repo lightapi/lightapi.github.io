@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-aefdf92e.js";
+            window.path_to_searchindex_js = "searchindex-4ae2f076.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-67433324.js"></script>
+        <script src="toc-52d8b92b.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -28546,8 +28546,330 @@ hold features planned for when there is capacity.</li>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-gateway-1"><a class="header" href="#light-gateway-1">Light Gateway</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="local-model-provider-transport-for-llm-gateway"><a class="header" href="#local-model-provider-transport-for-llm-gateway">Local Model Provider Transport For LLM Gateway</a></h1>
+<h1 id="outbound-tls-trust-for-public-and-enterprise-apis"><a class="header" href="#outbound-tls-trust-for-public-and-enterprise-apis">Outbound TLS trust for public and enterprise APIs</a></h1>
 <h2 id="status-19"><a class="header" href="#status-19">Status</a></h2>
+<p>Proposed production design, revised after review. Configuration examples below
+describe proposed capabilities unless explicitly marked current. This document
+does not authorize implementation, deployment, or a change to Workflow token
+semantics. Production implementation, deployment, and Workflow G03 remain
+separately gated.</p>
+<h2 id="problem-and-recommendation"><a class="header" href="#problem-and-recommendation">Problem and recommendation</a></h2>
+<p>Light Gateway must connect to public HTTPS APIs and enterprise services signed
+by private certificate authorities. A private CA file must not accidentally
+exclude public roots, and adding public roots must not silently widen an existing
+private-only trust policy.</p>
+<p>Introduce explicit outbound trust modes: platform roots, configured roots only,
+and platform roots plus configured roots. Implement them by runtime composition
+in the existing patched <code>pingora-core</code> connector. Preserve current behavior when
+the new mode is absent. Every connection made under an explicit mode verifies
+both the certificate chain and the destination hostname or IP SAN.</p>
+<p>Operators should trust approved CA roots, rather than collecting each API’s
+server certificate. A public API whose certificate chains to an installed public
+root normally needs no API-specific certificate configuration. A private API
+requires its organization’s approved CA. A self-signed server needs explicitly
+approved trust material or, preferably, a certificate issued by that private CA.</p>
+<h2 id="current-implementation-and-observed-failure"><a class="header" href="#current-implementation-and-observed-failure">Current implementation and observed failure</a></h2>
+<p>The inspected <code>light-fabric</code> source connects the client CA configuration to
+Pingora’s global outbound <code>ServerConf.ca_file</code>:</p>
+<ul>
+<li><code>frameworks/light-pingora/src/lib.rs</code>, <code>upstream_ca_file</code>: selects
+<code>client.tls.caCertPath</code>, then <code>client.caCertPath</code>, then
+<code>bootstrap.bootstrapCaCertPath</code>; validates the PEM bundle and returns its path.</li>
+<li><code>PingoraRuntime::run</code>: assigns that path to <code>server_conf.ca_file</code> once, at
+startup.</li>
+<li><code>Cargo.toml</code> replaces <code>pingora-core</code> with the local <code>patches/pingora-core</code>.
+In <code>patches/pingora-core/src/connectors/tls/rustls/mod.rs</code> the connector starts
+with an empty root store and loads either the configured CA file or platform
+roots. These sources are alternatives, not an additive union.</li>
+<li>Platform roots come from <code>pingora-rustls::load_platform_certs_incl_env_into_store</code>,
+which uses <code>rustls-native-certs</code> and honors <code>SSL_CERT_FILE</code> / <code>SSL_CERT_DIR</code>.</li>
+<li><code>apps/light-gateway/src/main.rs</code> sets <code>peer.options.verify_hostname = false</code>
+for every upstream when <code>client.tls.verifyHostname</code> is false. The connector
+then selects <code>VerificationMode::SkipHostname</code>: the chain is checked, the name
+is not. An empty SNI selects <code>VerificationMode::SkipAll</code>.</li>
+<li><code>apps/light-gateway/docker/Dockerfile</code> installs the OS <code>ca-certificates</code> package.</li>
+</ul>
+<p>The main Compose file sets <code>CLIENT_CACERTPATH: /config/ca.pem</code> and
+<code>CLIENT_VERIFYHOSTNAME: "false"</code> for <code>light-gateway</code>; <code>workflow-mcp-test-gateway</code>
+and <code>llm-gateway</code> have the same pair. The inspected running Gateway’s outbound
+GitHub connection failed with <code>UnknownIssuer</code>, SNI <code>api.github.com</code>, and returned
+HTTP 502. Selecting the private CA file prevented the connector from loading
+public roots.</p>
+<p>Incoming listener certificates, upstream server trust, and mTLS client identity
+are separate concerns. Trusting Gateway’s local CA in curl fixes curl-to-Gateway
+verification; it does not fix Gateway-to-upstream verification. Disabling curl
+verification does not change the Gateway’s outbound trust store either.</p>
+<h2 id="why-hostname-verification-is-mandatory"><a class="header" href="#why-hostname-verification-is-mandatory">Why hostname verification is mandatory</a></h2>
+<p>Today, internal routes with hostname verification disabled accept any certificate
+issued by the private CA. Adding public roots to the same global store without
+enabling hostname verification would make those routes accept any publicly
+issued certificate, including one an attacker obtains for a domain they own.
+Verifying only selected destinations does not prevent that: the store is shared,
+and a certificate may chain through different anchors on different connections.</p>
+<p>Therefore no explicit mode may run with hostname verification disabled, on any
+connection. Separate trust domains need separate stores, which this design
+provides only through separate Gateway instances (see 4b below). Per-destination
+trust stores with their own verification policies are a possible future feature,
+not part of v1.</p>
+<h2 id="rejected-alternative-deployment-managed-combined-pem-bundle"><a class="header" href="#rejected-alternative-deployment-managed-combined-pem-bundle">Rejected alternative: deployment-managed combined PEM bundle</a></h2>
+<p>Current capabilities allow generating a PEM file containing the runtime’s public
+roots plus approved private CAs and pointing <code>client.tls.caCertPath</code> at it. This
+needs no code, but the deployment must reproduce the image’s public bundle,
+regenerate it whenever the CA package, image, or enterprise policy changes, and
+recreate Gateway. A copied bundle freezes old trust, including removed roots.
+<code>/etc/ssl/certs/ca-certificates.crt</code> is a Debian-family convention, not a portable
+contract, and a bundle built on a workstation can differ from the image’s store.</p>
+<p>It remains an acceptable temporary local workaround, subject to the same
+hostname-verification requirement. It is not the recommended production design.</p>
+<h2 id="design-runtime-trust-modes-in-the-patched-connector"><a class="header" href="#design-runtime-trust-modes-in-the-patched-connector">Design: runtime trust modes in the patched connector</a></h2>
+<h3 id="configuration-2"><a class="header" href="#configuration-2">Configuration</a></h3>
+<pre><code class="language-yaml">tls:
+  verifyHostname: true
+  trustMode: platform-plus-configured
+  caCertPath: /config/enterprise-ca.pem
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Mode</th><th>Sources</th><th>Intended use</th></tr>
+</thead>
+<tbody>
+<tr><td>absent (legacy)</td><td>Current selection, unchanged</td><td>Existing deployments</td></tr>
+<tr><td><code>platform</code></td><td>Platform roots only</td><td>Public APIs, or enterprise roots already installed in the runtime store</td></tr>
+<tr><td><code>configured-only</code></td><td>Approved PEM bundle only</td><td>Restricted private trust domains</td></tr>
+<tr><td><code>platform-plus-configured</code></td><td>Platform roots plus approved PEM bundle</td><td>Public and private enterprise APIs from one Gateway</td></tr>
+</tbody>
+</table>
+</div>
+<p>Reuse <code>caCertPath</code> as the configured bundle reference through the established
+client configuration mapping and flat-property compatibility. The production
+property catalog and Portal snapshot compiler must recognize <code>trustMode</code>; unknown
+values are rejected, not ignored.</p>
+<h3 id="source-selection"><a class="header" href="#source-selection">Source selection</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Mode</th><th>Required source selection</th></tr>
+</thead>
+<tbody>
+<tr><td>Absent</td><td>Preserve current selection and precedence exactly, including bootstrap fallback</td></tr>
+<tr><td><code>platform</code></td><td>Ignore configured and bootstrap CA sources; require nonempty platform roots</td></tr>
+<tr><td><code>configured-only</code></td><td>Require an explicitly configured, nonempty, valid bundle; no bootstrap fallback, no platform roots</td></tr>
+<tr><td><code>platform-plus-configured</code></td><td>Require both a configured nonempty valid bundle and nonempty platform roots; no bootstrap fallback</td></tr>
+</tbody>
+</table>
+</div>
+<p>Missing files, malformed certificates, an empty required store, or platform
+loader errors fail startup with a clear diagnostic. Any explicitly supplied
+source that is missing, unreadable, or contains an invalid certificate fails
+startup even when another source supplies usable roots; partial loading must
+never silently reduce the intended trust set. Never fall back to a reduced or
+broader trust set. Deduplicate certificates by DER fingerprint.</p>
+<h3 id="integration-point"><a class="header" href="#integration-point">Integration point</a></h3>
+<p>Carry the mode from <code>upstream_ca_file</code>’s replacement into the connector through
+<code>ServerConf</code> or the connector options, and replace the either/or root-store
+construction in <code>patches/pingora-core/src/connectors/tls/rustls/mod.rs</code>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>match trust_mode {
+    Legacy =&gt; { /* existing if/else, unchanged */ }
+    Platform =&gt; load_platform_certs_incl_env_into_store(&amp;mut ca_certs)?,
+    ConfiguredOnly =&gt; load_ca_file_into_store(path, &amp;mut ca_certs)?,
+    PlatformPlusConfigured =&gt; {
+        load_platform_certs_incl_env_into_store(&amp;mut ca_certs)?;
+        load_ca_file_into_store(path, &amp;mut ca_certs)?;
+    }
+}
+<span class="boring">}</span></code></pre>
+<p>Keep the change inside the existing patch; no upstream Pingora API is required.
+Implementation still needs configuration propagation, validation, diagnostics,
+and the tests below.</p>
+<h3 id="verification-identity"><a class="header" href="#verification-identity">Verification identity</a></h3>
+<p>In every explicit mode:</p>
+<ul>
+<li>Effective hostname verification must be true after configuration mapping and
+environment overrides. An effective <code>verifyHostname: false</code>, including the
+current <code>CLIENT_VERIFYHOSTNAME: "false"</code> Compose override, fails startup; it is
+never silently overridden.</li>
+<li>Every TLS peer must carry a valid verification identity. An empty identity is
+rejected instead of selecting <code>SkipAll</code>. DNS destinations verify DNS SANs; IP
+destinations verify IP SANs. The router derives the identity from the URL host,
+so an IP destination has a non-empty identity; the absence of a DNS SNI
+extension for an IP destination is not itself a failure.</li>
+</ul>
+<p>Legacy mode keeps its current verification behavior.</p>
+<h3 id="ssl_cert_file-and-ssl_cert_dir"><a class="header" href="#ssl_cert_file-and-ssl_cert_dir"><code>SSL_CERT_FILE</code> and <code>SSL_CERT_DIR</code></a></h3>
+<p>Platform loading honors these variables, as <code>rustls-native-certs</code> does. In
+<code>platform</code> and <code>platform-plus-configured</code> modes they may replace the native store
+as the platform source; this is documented operator behavior, not an error.
+<code>configured-only</code> never invokes the platform loader, so they have no effect there.
+Startup diagnostics state whether platform roots came from the native store or
+from an override variable, naming the variable but not printing its value.
+An override is an explicitly supplied source: if it is missing, empty, or
+contains an invalid certificate, startup fails, even when the other variable or
+the configured bundle supplies usable roots. If the platform loader reports
+per-certificate or per-file errors alongside successfully loaded roots, treat
+those errors as failures rather than accepting the partial result. Other TLS
+clients keep their own policies.</p>
+<h3 id="startup-only-loading-and-diagnostics"><a class="header" href="#startup-only-loading-and-diagnostics">Startup-only loading and diagnostics</a></h3>
+<p>For Linux v1, automatic platform discovery uses <code>openssl-probe</code> to select the
+system bundle and OpenSSL hash directory. Load every selected source through the
+strict loader, rather than delegating loading to rustls-native-certs 0.7’s
+permissive helper. An absent optional discovery candidate is not required to
+exist. Once selected, an unreadable, empty or invalid source fails even when
+another source has valid roots. Explicit FILE/DIR overrides replace discovery;
+configured-only does not discover or load platform sources. Legacy loading is
+preserved separately. Linux container qualification remains the supported v1
+scope; no native Windows/macOS qualification is implied.</p>
+<p>Supported explicit bundles contain ordinary <code>CERTIFICATE</code> PEM blocks, with
+comments or descriptive text permitted outside those blocks. Every block must
+parse and contain valid certificate DER; malformed, truncated or invalid blocks
+fail the entire source even alongside valid certificates. Empty/comment-only
+bundles fail. Unsupported PEM blocks, including private keys, fail rather than
+being skipped. <code>TRUSTED CERTIFICATE</code> blocks are rejected with a diagnostic:
+their trust/rejection attributes are not supported by v1 and must not be discarded
+by relabeling the block. Use an approved ordinary certificate bundle whose trust
+semantics have been reviewed.</p>
+<p>The restart-required guard also applies when mode is absent: legacy CA/hostname
+changes require restart. Rotating a CA file at the same path can block
+token/client/sidecar reload aliases. A failed preflight prevents other selected
+modules in Reload All from applying. Rejection leaves the existing connector
+active; it does not restore changed files on disk. Restore the approved files
+or restart with the separately approved candidate.</p>
+<p>v1 loads and validates trust once, at startup. Adopting changed platform or
+private roots requires a controlled restart; an already-built connector does not
+reload roots when files change. At startup, log the mode, selected source
+categories, the platform-source origin, certificate counts per source after
+deduplication, and an effective trust digest over the mode and sorted DER
+fingerprints. Diagnostics contain no tokens, private keys, or headers.</p>
+<h3 id="minimal-restart-required-reload-guard"><a class="header" href="#minimal-restart-required-reload-guard">Minimal restart-required reload guard</a></h3>
+<p>Existing client configuration reload could otherwise report success while the
+connector keeps its startup store. On reload, compare the candidate’s mode,
+configured CA reference and current file content, and hostname verification
+policy with the startup values. If any differ, reject the reload with an explicit
+<code>restart required</code> result and leave the prior configuration active, without
+partially applying related client TLS settings. An invalid candidate returns a
+validation error instead. Reloads with unchanged trust proceed normally.</p>
+<p>Richer reporting, such as separate requested and active digests, and hot reload
+of the connector and its pools are deferred. Do not claim hot reload until the
+connector and every affected pool rebuild safely.</p>
+<h3 id="scope-and-security-boundaries"><a class="header" href="#scope-and-security-boundaries">Scope and security boundaries</a></h3>
+<p>v1 covers ordinary Gateway router/proxy upstream TLS. Config-server bootstrap,
+controller connections, token exchange, MCP outbound clients, and model-provider
+clients use separate TLS builders; their policies are unchanged and should be
+inventoried before any later adoption of a shared resolver.</p>
+<p>A CA trust store authenticates server certificates; it does not authorize network
+destinations. Preserve SNI derived from the destination, approved schemes and
+ports, route restrictions, ACLs, and fixed credential destinations. An approved
+enterprise interception CA may authenticate intercepted public hosts; adding one
+is an explicit operator trust decision. In combined mode, a configured private CA
+can authenticate any hostname for which it issues a matching certificate.</p>
+<h3 id="platform-support"><a class="header" href="#platform-support">Platform support</a></h3>
+<p>v1 qualifies the Linux Gateway container image only and verifies that the
+container uses its own store rather than the host’s. Native Windows and macOS
+deployments are unqualified. Distroless or minimal images require deliberate
+root-store provisioning.</p>
+<h2 id="implementation-and-acceptance-gates"><a class="header" href="#implementation-and-acceptance-gates">Implementation and acceptance gates</a></h2>
+<ol>
+<li>Implement the trust modes, source selection, verification-identity rules,
+startup diagnostics, and reload guard in the existing patch and runtime
+configuration. Add the catalog and Portal snapshot mappings.</li>
+<li>Qualify against isolated TLS servers signed by two independent CAs, one
+standing in for platform roots and one for an enterprise CA, with no public
+API dependency:
+<ul>
+<li>each mode’s inclusion and exclusion, and legacy behavior unchanged;</li>
+<li>wrong DNS SAN and wrong IP SAN rejected even when the issuer is trusted;</li>
+<li>untrusted issuer rejected; empty identity rejected;</li>
+<li>startup failure for missing, malformed, or empty required sources;</li>
+<li>effective <code>verifyHostname: false</code> rejected, including YAML true overridden
+by environment false, the reverse case, and effective true accepted;</li>
+<li><code>SSL_CERT_FILE</code> and <code>SSL_CERT_DIR</code> precedence, plus missing, empty, and
+invalid override sources, including an invalid source alongside another
+source that supplies usable roots;</li>
+<li>the reload guard returns <code>restart required</code> for a changed mode, CA reference,
+or CA file content at an unchanged path, and new connections keep the
+startup store until restart.</li>
+</ul>
+</li>
+<li>Exercise the real connector, not only the root-store helper. Cover both the
+ordinary configuration path and the modified-configuration branch where
+<code>SkipHostname</code> / <code>SkipAll</code> are selected, since behavior there is not assumed
+identical.</li>
+<li>Qualify the Linux container image.</li>
+</ol>
+<h2 id="deployment-and-migration"><a class="header" href="#deployment-and-migration">Deployment and migration</a></h2>
+<p>Enabling an explicit mode is an owner-controlled deployment step, separate from
+implementation.</p>
+<h3 id="san-inventory"><a class="header" href="#san-inventory">SAN inventory</a></h3>
+<p>For each affected Gateway instance, inventory internal TLS upstreams: the DNS
+names or IP addresses Gateway actually uses, and each certificate’s SANs. Record
+which certificates would fail hostname or IP SAN verification. The result selects
+4a or 4b.</p>
+<h3 id="4a--combined-trust-on-the-existing-gateway"><a class="header" href="#4a--combined-trust-on-the-existing-gateway">4a — Combined trust on the existing Gateway</a></h3>
+<p>Use when the inventory shows a manageable number of certificates to reissue.</p>
+<ol>
+<li>Reissue certificates whose SANs do not cover their actual destination names;
+IP destinations need IP SANs. Preserve the local CA those services need.</li>
+<li>Set hostname verification true in managed client configuration and remove
+conflicting overrides, including <code>CLIENT_VERIFYHOSTNAME</code>. Inspect the final
+effective setting, not only YAML.</li>
+<li>Set <code>trustMode: platform-plus-configured</code> with the enterprise bundle.</li>
+<li>Create the normal Portal snapshot and restart. Capture the startup trust
+digest and effective verification setting, then check public and internal
+upstream TLS. On failure, restore the prior approved configuration through the
+normal lifecycle; never disable verification to recover.</li>
+</ol>
+<h3 id="4b--optional-separate-platform-only-gateway"><a class="header" href="#4b--optional-separate-platform-only-gateway">4b — Optional separate platform-only Gateway</a></h3>
+<p>Use when internal certificate migration cannot complete before external access
+is needed. This is a deployment choice, not an additional v1 implementation
+requirement.</p>
+<ul>
+<li>The external instance uses the new <code>platform</code> mode with hostname verification
+true. <code>platform</code> mode is required because the legacy path falls back to
+<code>bootstrap.bootstrapCaCertPath</code> even without <code>CLIENT_CACERTPATH</code>, which would
+again exclude public roots.</li>
+<li>Add it as a service in the main Compose file, not an overlay, with its own
+Portal configuration: handler chain, ACL rules, header mutation, router, and
+outbound credential reference.</li>
+<li>Before selecting it as a Workflow target, verify Workflow’s existing
+Gateway-origin and credential-forwarding rules. Exchanged LONG tokens are only
+sent to the single configured Gateway origin
+(<code>apps/light-workflow/src/executor.rs</code>, <code>long_http_target_allowed</code>, using
+<code>bound_mcp</code> <code>gateway_url</code>), so a second origin would reject those calls. Either
+keep Workflow’s target on the existing Gateway origin, for example by routing
+the external path from the existing Gateway to the platform-only instance, or
+bring any change to the allowed origin to separate review.</li>
+<li>A second Gateway implies no authorization change. It enforces the same user
+and application authentication and endpoint ACLs, and credential forwarding
+rules stay as they are.</li>
+<li>When the existing Gateway forwards to the external instance, only the external
+instance injects the outbound API credential. The first hop must preserve the
+user and application credentials the external instance needs for its own
+authentication and ACL checks. Do not apply the G02 header mutation, which
+removes caller credentials and inserts the PAT, on the first hop.</li>
+<li>Qualify the Gateway-to-Gateway hop separately: TLS identity verification of the
+external instance, forwarding of user and application credentials, ACL denial
+at the external instance, and fixed routing that callers cannot override.
+Keeping Workflow on its approved origin does not by itself prove this hop is
+configured correctly.</li>
+</ul>
+<p>The existing Gateway stays in legacy mode until its own migration under 4a.</p>
+<h3 id="live-qualification"><a class="header" href="#live-qualification">Live qualification</a></h3>
+<p>After the selected deployment, the owner performs the G02 live read
+qualification for public API access and confirms an internal TLS upstream and
+config-server/bootstrap connectivity remain healthy. Do not enable global
+combined trust while any route on that instance remains hostname-unverified.</p>
+<h2 id="related-design"><a class="header" href="#related-design">Related design</a></h2>
+<ul>
+<li><a href="#local-model-provider-transport-for-llm-gateway">Local Model Provider Transport For LLM Gateway</a></li>
+<li><a href="#light-gateway-1">Light Gateway</a></li>
+</ul>
+<p>These transports may have distinct policy and lifecycle requirements; this
+document does not supersede their destination or private-network controls.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="local-model-provider-transport-for-llm-gateway"><a class="header" href="#local-model-provider-transport-for-llm-gateway">Local Model Provider Transport For LLM Gateway</a></h1>
+<h2 id="status-20"><a class="header" href="#status-20">Status</a></h2>
 <p>Proposed design for implementation and qualification.</p>
 <p>This design extends the completed OpenAI-compatible LLM gateway and the
 Embedding Space Contract. It does not change the public <code>/v1</code> client contract.</p>
@@ -29740,7 +30062,7 @@ and the gateway verifies producer authenticity and endpoint binding.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-workflow-tool-access-approval"><a class="header" href="#light-workflow-tool-access-approval">Light Workflow Tool Access Approval</a></h1>
-<h2 id="status-20"><a class="header" href="#status-20">Status</a></h2>
+<h2 id="status-21"><a class="header" href="#status-21">Status</a></h2>
 <p>Proposed.</p>
 <p>The design reuses the Portal Workflow application, <code>ask</code> tasks, role-based
 worklists, and the existing workflow Tool grant events. It changes the
@@ -35658,7 +35980,7 @@ plan contains only properties whose parents remain selected.</p>
 <p>The immediate response is <code>ACCEPTED</code>, not completed. It contains the clone
 request ID, target instance ID, transaction ID, terminal event ID, event counts,
 and status URL/action.</p>
-<h3 id="status-21"><a class="header" href="#status-21">Status</a></h3>
+<h3 id="status-22"><a class="header" href="#status-22">Status</a></h3>
 <p><code>getInstanceCloneStatus</code> accepts <code>hostId</code> and <code>cloneRequestId</code> in a POST query
 and returns one of:</p>
 <ul>
@@ -36836,7 +37158,7 @@ public class UuidUtil {
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="entity-creation-uniqueness"><a class="header" href="#entity-creation-uniqueness">Entity Creation Uniqueness</a></h1>
-<h2 id="status-22"><a class="header" href="#status-22">Status</a></h2>
+<h2 id="status-23"><a class="header" href="#status-23">Status</a></h2>
 <p>Implemented through Phase 5 for Role/Rule stream births and Category/Tag semantic
 identity, client retries, lifecycle alignment, verified historical materialization,
 snapshot/import guards, and policy-aware retry-ledger cleanup. Later aggregate
@@ -43104,7 +43426,7 @@ Recheck them when the contract changes.</p>
 </div>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="release-workflow"><a class="header" href="#release-workflow">Release Workflow</a></h1>
-<h2 id="status-23"><a class="header" href="#status-23">Status</a></h2>
+<h2 id="status-24"><a class="header" href="#status-24">Status</a></h2>
 <p>Proposed design.</p>
 <p>Light Portal should use <code>light-workflow</code> as the durable release orchestrator
 for Java and Rust releases. The workflow should coordinate repository checkout,
@@ -44509,7 +44831,7 @@ SELECT start_offset, end_offset FROM upd;
 <li><strong>No Blocking</strong>: The consumer never gets stuck on a single bad event.</li>
 <li><strong>Debuggability</strong>: The DLQ table preserves the full context (payload, exception, transaction_id) for manual investigation and replay.</li>
 </ul>
-<h2 id="configuration-2"><a class="header" href="#configuration-2">Configuration</a></h2>
+<h2 id="configuration-3"><a class="header" href="#configuration-3">Configuration</a></h2>
 <p>The consumer is configured via <code>db-event-consumer.yml</code> and runs in a Java 21 <strong>Virtual Thread</strong>. This ensures that the frequent <code>Thread.sleep</code> (during retries) and the blocking <code>pgConn.getNotifications()</code> (waiting for wake-ups) do not tie up native system threads, making the consumer extremely lightweight.</p>
 <pre><code class="language-yaml"># Postgres pub/sub event processor configuration
 # Consumer group id and it is default to user-query-group. Please only change it if you
@@ -44724,7 +45046,7 @@ if (transactionId == null) {
 <li>Framework exceptions during polling</li>
 <li>Fatal errors in fallback processing (after DLQ attempt)</li>
 </ul>
-<h2 id="configuration-3"><a class="header" href="#configuration-3">Configuration</a></h2>
+<h2 id="configuration-4"><a class="header" href="#configuration-4">Configuration</a></h2>
 <p>Consumer configuration in <code>kafka-consumer.yml</code>:</p>
 <pre><code class="language-yaml"># Kafka consumer properties
 topic: portal-event
@@ -44909,7 +45231,7 @@ checked-in dependency graph generated from portal DDL. Database mode uses
 PostgreSQL metadata and is useful for parity checks and dependency-graph
 refresh validation.</li>
 </ul>
-<h3 id="configuration-4"><a class="header" href="#configuration-4">Configuration</a></h3>
+<h3 id="configuration-5"><a class="header" href="#configuration-5">Configuration</a></h3>
 <p>Use environment-first configuration:</p>
 <pre><code class="language-bash">DATABASE_URL=postgres://postgres:secret@localhost:5432/configserver importer import -f events.json
 </code></pre>
@@ -45422,7 +45744,7 @@ Java-compatible unversioned arrays for migration compatibility.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="event-replay"><a class="header" href="#event-replay">Event Replay</a></h1>
-<h2 id="status-24"><a class="header" href="#status-24">Status</a></h2>
+<h2 id="status-25"><a class="header" href="#status-25">Status</a></h2>
 <p>This document defines the revised target design for event replay during the
 early development stage of light-portal. The implementation still contains
 legacy-backfill, staged-rollout, feature-gate, mandatory-encryption, and
@@ -48506,7 +48828,7 @@ deployment intent and history, while the deployer owns safe cluster-local
 execution.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="release-signing-key-management-and-rotation"><a class="header" href="#release-signing-key-management-and-rotation">Release Signing Key Management and Rotation</a></h1>
-<h2 id="status-25"><a class="header" href="#status-25">Status</a></h2>
+<h2 id="status-26"><a class="header" href="#status-26">Status</a></h2>
 <p>Normative design. Implementation is partial.</p>
 <p><code>portal-config-dev</code> currently verifies the signed environment bundle before
 extracting its editable <code>events.json</code>. The other deployment repositories do
@@ -48860,7 +49182,7 @@ top-level release manifest.</li>
 <p>This evidence contains no private-key material.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="enterprise-ai-assisted-bootstrap-and-eks-deployment"><a class="header" href="#enterprise-ai-assisted-bootstrap-and-eks-deployment">Enterprise AI-Assisted Bootstrap and EKS Deployment</a></h1>
-<h2 id="status-26"><a class="header" href="#status-26">Status</a></h2>
+<h2 id="status-27"><a class="header" href="#status-27">Status</a></h2>
 <p>Proposed customer deployment and qualification design.</p>
 <h2 id="executive-decision-1"><a class="header" href="#executive-decision-1">Executive Decision</a></h2>
 <p>Create a dedicated Linux VM that continuously proves a complete Light Portal
@@ -49996,7 +50318,7 @@ return <code>404</code> to avoid publishing metadata for the wrong tenant or pro
 many discovery consumers expect it, even if <code>light-oauth</code> does not issue ID
 tokens yet. The design should document this as discovery compatibility metadata,
 not as a promise that ID-token grant flows are complete.</p>
-<h3 id="configuration-5"><a class="header" href="#configuration-5">Configuration</a></h3>
+<h3 id="configuration-6"><a class="header" href="#configuration-6">Configuration</a></h3>
 <p>Add explicit public URL configuration:</p>
 <pre><code class="language-yaml">oidcDiscoveryEnabled: ${oidc_discovery_enabled:true}
 publicIssuerBaseUrl: ${public_issuer_base_url}
@@ -57569,7 +57891,7 @@ const defaultUrl =
 <li>The user is immediately signed out of the application.</li>
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="configuration-6"><a class="header" href="#configuration-6">Configuration</a></h1>
+<h1 id="configuration-7"><a class="header" href="#configuration-7">Configuration</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="light-gateway-3"><a class="header" href="#light-gateway-3">light-gateway</a></h1>
 <h2 id="client-credentials-token"><a class="header" href="#client-credentials-token">Client Credentials Token</a></h2>
@@ -57644,7 +57966,7 @@ an environment and understand the configuration boundaries shared by all four
 distributions.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="faster-local-rust-image-builds"><a class="header" href="#faster-local-rust-image-builds">Faster Local Rust Image Builds</a></h1>
-<h2 id="status-27"><a class="header" href="#status-27">Status</a></h2>
+<h2 id="status-28"><a class="header" href="#status-28">Status</a></h2>
 <p>Implemented on 2026-09-25 in <code>light-fabric</code> and <code>portal-service</code>. Build and
 selection behavior has not yet been runtime-qualified or timed.</p>
 <h2 id="goal-1"><a class="header" href="#goal-1">Goal</a></h2>
@@ -58855,7 +59177,7 @@ database deletion are separate actions in the deployment wrappers.</p>
 <p><code>light-oauth</code> issues and validates OAuth/OIDC tokens and exposes the JWKS used by
 other services. The Compose deployments normally publish HTTPS on host port
 <code>6881</code>.</p>
-<h2 id="configuration-7"><a class="header" href="#configuration-7">Configuration</a></h2>
+<h2 id="configuration-8"><a class="header" href="#configuration-8">Configuration</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -58996,7 +59318,7 @@ success.</p>
 <p><code>portal-service</code> is the Rust Portal-facing service for APIs and platform
 integrations that do not reside in the Java hybrid hosts. The Compose stacks
 normally publish host port <code>2498</code>.</p>
-<h2 id="configuration-8"><a class="header" href="#configuration-8">Configuration</a></h2>
+<h2 id="configuration-9"><a class="header" href="#configuration-9">Configuration</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -59298,7 +59620,7 @@ workflow/MCP examples and daily regression tests.</p>
 </tbody>
 </table>
 </div>
-<h2 id="configuration-9"><a class="header" href="#configuration-9">Configuration</a></h2>
+<h2 id="configuration-10"><a class="header" href="#configuration-10">Configuration</a></h2>
 <p>Each service has a service-specific configuration-directory variable, an
 optional external configuration directory, <code>LIGHT_PORTAL_AUTHORIZATION</code>,
 <code>RUST_LOG</code>, and a service-specific ANSI logging switch. They depend on Config
