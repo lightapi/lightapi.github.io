@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-4ae2f076.js";
+            window.path_to_searchindex_js = "../searchindex-d8aa06fa.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-52d8b92b.js"></script>
@@ -236,10 +236,19 @@ Compose, a source repository, a container image, or a public object store.</li>
 <tbody>
 <tr><td>Environment event bundle</td><td><code>events.zip</code> and <code>bundle-manifest.sig</code></td><td>Ed25519</td><td><code>release-keys/&lt;keyId&gt;.pem</code></td><td>Daily-release signing runner</td></tr>
 <tr><td>Database bootstrap archive</td><td>Release <code>manifest.json</code>, <code>manifest.sig</code>, and <code>portal-bootstrap.dump</code></td><td>Algorithm declared by the bootstrap release contract</td><td><code>bootstrap/release-public.pem</code> or a future key-ID directory</td><td>Bootstrap-archive release runner</td></tr>
+<tr><td>Portal View archive</td><td><code>portal-view-&lt;version&gt;.zip</code>, external <code>release-manifest.json</code> and <code>release-manifest.sig</code></td><td>Ed25519</td><td><code>portal-view-release-keys/&lt;keyId&gt;.pem</code></td><td>Portal View release-signing runner</td></tr>
 <tr><td>Future top-level release manifest</td><td>CDN archive digests and OCI image digests</td><td>To be selected by the release-manifest design</td><td>Dedicated release-manifest trust directory</td><td>Release orchestration service</td></tr>
 </tbody>
 </table>
 </div>
+<p>The <code>portal-view-archive</code> trust domain uses key IDs such as
+<code>portal-view-release-2026-01</code>. Its detached signature covers the external
+manifest, which binds the archive digest and complete member digests/cache
+classes. See <a href="portal-view/portable-signed-runtime-configuration.html">Portable Signed Portal View Artifact and Runtime Configuration</a>.
+All four deployment consumers verify Portal View releases on their feature
+branches; production keys are not yet provisioned and no deployment is
+qualified. Each must enroll these keys independently of event-bundle and
+database-bootstrap keys through the approved delivery channel.</p>
 <p>Keys from different trust domains must not be reused merely for convenience.
 If a deliberate migration uses one cryptographic key in two domains, both
 registries and release records must still name the domains independently so a
